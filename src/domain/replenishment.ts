@@ -7,7 +7,7 @@ import { audit } from "@/lib/core/audit";
 import { addDays, dayRange, diffDays, today } from "@/lib/dates";
 import { formatMoney, lineTotal, QTY } from "@/lib/money";
 import { availableMap } from "./stock";
-import { CONFIRMED, PENDING, computeReplenishment, type ReplenishmentResult } from "./purchase-calc";
+import { CONFIRMED, PENDING, abcClasses, computeReplenishment, type ReplenishmentResult } from "./purchase-calc";
 import { createOrder, remainingQty } from "./purchases";
 import { preferredSupplierProduct, supplierLabel } from "./suppliers";
 
@@ -29,6 +29,9 @@ export interface ReplenishmentParams {
   categoryId?: string | null;
   deductDrafts?: boolean;
   refDate?: string;
+  /** simulação (visão 12): prazo e custo estimados informados pelo usuário */
+  leadOverride?: number | null;
+  costOverride?: number | null;
 }
 
 export interface OpenOrderLine {
@@ -82,6 +85,11 @@ export interface ReplenishmentRow extends ReplenishmentResult {
   nextArrival: string | null;
   shortageBeforeArrival: boolean;
   suggestedCost: number;
+  /** classe ABC por receita no período de histórico (null = sem receita) */
+  abc: "A" | "B" | "C" | null;
+  /** situação para o selo: risco antes da entrega, a repor, completar dados (sem fornecedor/custo), coberto */
+  situation: "risk" | "reorder" | "incomplete" | "ok";
+  horizonEnd: string;
   supplierOptions: Array<{ supplierId: string; name: string; lastCost: number | null; leadTimeDays: number | null; minQty: number | null; multiple: number | null; preferred: boolean; supplierCode: string | null }>;
 }
 
@@ -131,12 +139,18 @@ export async function computeBranchReplenishment(store: Store, companyId: string
   const { start: end } = dayRange(ref, ref);
   const saleItems = await listAll(store, "sale_items", { filters: [["eq", "companyId", companyId], ["eq", "branchId", p.branchId], ["gte", "completedAt", start], ["lt", "completedAt", end]] });
   const sold = new Map<string, number>();
+  const revenue = new Map<string, number>();
   const saleIds = new Set<string>();
   for (const si of saleItems) saleIds.add(si.saleId);
   const cancelled = new Set<string>();
   const saleIdList = [...saleIds];
   for (const s of await inChunks(saleIdList, (c) => listAll(store, "sales", { filters: [["eq", "id", c]] }))) if (s.status !== "completed") cancelled.add(s.id);
-  for (const si of saleItems) if (!cancelled.has(si.saleId)) sold.set(si.skuId, (sold.get(si.skuId) ?? 0) + si.qty);
+  for (const si of saleItems) {
+    if (cancelled.has(si.saleId)) continue;
+    sold.set(si.skuId, (sold.get(si.skuId) ?? 0) + si.qty);
+    revenue.set(si.skuId, (revenue.get(si.skuId) ?? 0) + (si.total ?? 0));
+  }
+  const abc = abcClasses(revenue, Number(await getSetting(store, companyId, p.branchId, "abc.limitA", 8000)), Number(await getSetting(store, companyId, p.branchId, "abc.limitB", 9500)));
   const returned = new Map<string, number>();
   for (const ri of await listAll(store, "return_items", { filters: [["eq", "companyId", companyId], ["eq", "branchId", p.branchId], ["gte", "completedAt", start], ["lt", "completedAt", end]] })) returned.set(ri.skuId, (returned.get(ri.skuId) ?? 0) + ri.qty);
 
@@ -171,8 +185,8 @@ export async function computeBranchReplenishment(store: Store, companyId: string
     else sp = await preferredSupplierProduct(store, sku.id, candidates);
     if (p.supplierId && !sp) continue;
     const supplier = sp ? suppliers.get(sp.supplierId) : null;
-    const leadTimeDays = sp?.leadTimeDays ?? supplier?.leadTimeDays ?? 0;
-    const leadTimeSource = sp?.leadTimeDays != null ? "produto × fornecedor" : supplier?.leadTimeDays != null ? "cadastro do fornecedor" : "não informado (0)";
+    const leadTimeDays = p.leadOverride ?? sp?.leadTimeDays ?? supplier?.leadTimeDays ?? 0;
+    const leadTimeSource = p.leadOverride != null ? "simulação (informado)" : sp?.leadTimeDays != null ? "produto × fornecedor" : supplier?.leadTimeDays != null ? "cadastro do fornecedor" : "não informado (0)";
     const horizonEnd = addDays(ref, leadTimeDays + coverageDays);
     const lines = linesBySku.get(sku.id) ?? [];
     const confirmedLines = lines.filter((l) => l.kind === "confirmed" && l.expectedDate && l.expectedDate <= horizonEnd);
@@ -193,15 +207,19 @@ export async function computeBranchReplenishment(store: Store, companyId: string
     const arrivals = confirmedLines.map((l) => l.expectedDate!).sort();
     const nextArrival = arrivals[0] ?? null;
     const reference = nextArrival ?? addDays(ref, leadTimeDays);
-    const unitCost = sp?.lastCost ?? sku.costAcquisition ?? 0;
+    const unitCost = p.costOverride ?? sp?.lastCost ?? sku.costAcquisition ?? 0;
+    const shortage = stockoutDate != null && stockoutDate < reference;
     rows.push({
       ...r,
       skuId: sku.id, productId: sku.productId, sku: sku.sku, name: sku.name ?? sku.sku, unitCode: sku.unitCode ?? "UN", categoryId: products.get(sku.productId)?.categoryId ?? null,
       physical: a.physical, reserved: a.reserved, available: a.available, minQty: pr.min, targetQty: pr.max, safetyQty: pr.safety, netConsumption, soldQty, returnedQty, hasHistory, historyDays, coverageDays,
       leadTimeDays, leadTimeSource, confirmedInHorizon, confirmedOutside: outsideLines.reduce((x, l) => x + l.remaining, 0), draftQty, confirmedLines, outsideLines, draftLines,
       supplierId: sp?.supplierId ?? null, supplierName: supplier ? supplierLabel(supplier) : null, supplierCode: sp?.supplierCode ?? null, unitCost, supplierMinQty, multiple,
-      belowMin: pr.min > 0 && a.available <= pr.min, daysOfCover, stockoutDate, nextArrival, shortageBeforeArrival: stockoutDate != null && stockoutDate < reference,
+      belowMin: pr.min > 0 && a.available <= pr.min, daysOfCover, stockoutDate, nextArrival, shortageBeforeArrival: shortage,
       suggestedCost: lineTotal(unitCost, r.suggested),
+      abc: abc.get(sku.id) ?? null,
+      situation: !sp || !unitCost ? (r.suggested > 0 || r.grossNeed > 0 ? "incomplete" : "ok") : shortage && (r.grossNeed > 0 || outsideLines.length > 0) ? "risk" : r.suggested > 0 ? "reorder" : "ok",
+      horizonEnd,
       supplierOptions: candidates.map((c) => ({ supplierId: c.supplierId, name: supplierLabel(suppliers.get(c.supplierId)), lastCost: c.lastCost ?? null, leadTimeDays: c.leadTimeDays ?? suppliers.get(c.supplierId)?.leadTimeDays ?? null, minQty: c.minQty ?? null, multiple: c.multiple ?? null, preferred: Boolean(c.preferred), supplierCode: c.supplierCode ?? null })),
     });
   }
