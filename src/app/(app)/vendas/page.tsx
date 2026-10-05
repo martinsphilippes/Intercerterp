@@ -19,6 +19,8 @@ import { querySales, salesPeriod, salesTotals, type SaleRow } from "./queries";
 
 export const metadata = { title: "Histórico de vendas" };
 
+const MODEL: Record<string, string> = { nfce: "NFC-e", nfe: "NF-e", nfse: "NFS-e" };
+
 const PERIODS = (t: string) => [
   { key: "hoje", label: "Hoje", de: t, ate: t },
   { key: "ontem", label: "Ontem", de: addDays(t, -1), ate: addDays(t, -1) },
@@ -54,7 +56,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "completedAt", label: "Data e hora", sortable: true, cell: (r) => <span className="tabular">{formatDate(r.completedAt)}<span className="block text-xs text-slate-500">{formatDateTime(r.completedAt).split(" ")[1]}</span></span> },
     { key: "branchName", label: "Filial", hidden: Boolean(s.ctx.branchId), cell: (r) => r.branchName },
     { key: "customerName", label: "Cliente", sortable: true, cell: (r) => <span>{r.customerId ? <Link className="hover:underline" href={`/clientes/${r.customerId}`}>{r.customerName}</Link> : r.customerName}<span className="block text-xs text-slate-500">{r.customerDoc ? formatDoc(r.customerDoc) : "Não identificado"}</span></span> },
-    { key: "fiscal", label: "Documento", cell: (r) => <span>{r.fiscalNumber ? `${r.fiscalModel?.toUpperCase()} ${String(r.fiscalNumber).padStart(9, "0")}` : r.fiscalStatus === "not_required" ? "—" : `${(r.fiscalModel ?? "nfce").toUpperCase()} ${r.fiscalStatus === "authorized" ? "" : "pendente"}`}<span className="block"><StatusBadge kind="fiscal" status={r.fiscalStatus} />{r.fiscalSimulated && <SimBadge />}</span></span> },
+    { key: "fiscal", label: "Documento", cell: (r) => <span className="whitespace-nowrap">{r.fiscalNumber ? `${MODEL[r.fiscalModel ?? "nfce"] ?? r.fiscalModel} ${String(r.fiscalNumber).padStart(9, "0")}` : r.fiscalStatus === "not_required" ? "Sem documento" : `${MODEL[r.fiscalModel ?? "nfce"]} ${r.fiscalStatus === "authorized" ? "" : "sem número"}`}<span className="flex flex-wrap gap-1">{r.fiscalSeries && r.fiscalStatus === "authorized" ? <span className="text-xs text-slate-500">Série {r.fiscalSeries}</span> : null}<StatusBadge kind="fiscal" status={r.fiscalStatus} />{r.fiscalSimulated && <SimBadge />}</span></span> },
     { key: "paymentMethods", label: "Pagamento", cell: (r) => <span className="text-slate-700">{r.paymentMethods || "—"}<span className="block"><StatusBadge kind="payment" status={r.paymentStatus} /></span></span> },
     { key: "operatorName", label: "Operador", hidden: true, cell: (r) => r.operatorName },
     { key: "sellerName", label: "Vendedor", hidden: true, cell: (r) => r.sellerName ?? "—" },

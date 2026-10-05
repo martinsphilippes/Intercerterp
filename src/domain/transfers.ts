@@ -210,11 +210,11 @@ export async function transferItemsFromMovements(ctx: Ctx, t: Doc): Promise<Tran
     const lost = Math.max(0, -sum("loss"));
     return {
       ...i,
-      shippedQty: -sum("transfer_out"),
+      shippedQty: Math.max(0, -sum("transfer_out")),
       unitCost: out?.unitCost ?? i.unitCost ?? 0,
       receivedQty: sum("transfer_in"),
       damagedQty: sum("damage_in"),
-      returnedQty: sum("transfer_return") - lost,
+      returnedQty: Math.max(0, sum("transfer_return") - lost),
       lostQty: lost,
     };
   });
@@ -367,7 +367,7 @@ export async function setTransferDocument(ctx: Ctx, id: string, ref: string | nu
   const value = ref?.trim() || null;
   if (value) assert(value.length <= 200, "Referência muito longa.");
   const u = await ctx.store.update("transfers", id, { documentRef: value });
-  await audit(ctx, { module: "stock", action: "transfer.document", entityType: "transfer", entityId: id, summary: value ? `NF-e de transferência vinculada: ${value}` : "Vínculo de NF-e removido" });
+  await audit(ctx, { module: "stock", action: "transfer.document", entityType: "transfer", entityId: id, summary: value ? `Transferência ${transferCode(t.number)}: documento de referência ${value}` : `Transferência ${transferCode(t.number)}: documento de referência removido`, before: { documentRef: t.documentRef ?? null }, after: { documentRef: value } });
   return u;
 }
 

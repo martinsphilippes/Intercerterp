@@ -106,7 +106,7 @@ export function ReturnForm(props: {
               <header className="border-b border-line px-4 py-3"><h2 className="text-sm font-semibold">1. Produtos disponíveis para troca ou devolução</h2></header>
               <div className="overflow-x-auto">
                 <table className="table-base w-full text-sm">
-                  <thead><tr><th className="w-8" /><th>Produto</th><th className="text-right">Qtd.</th><th>Motivo</th><th>Condição</th><th className="text-right">Valor</th></tr></thead>
+                  <thead><tr><th className="w-8" /><th>Produto</th><th className="text-right">Qtd.</th><th>Motivo</th><th title="Revenda: volta ao estoque disponível; Avaria: depósito de avarias">Condição</th><th className="text-right">Valor</th></tr></thead>
                   <tbody>
                     {lines.map((l) => {
                       const i = l.item;
@@ -115,24 +115,24 @@ export function ReturnForm(props: {
                       return (
                         <tr key={i.id} className={disabled ? "opacity-50" : undefined}>
                           <td><input type="checkbox" className="size-4 accent-brand-700" aria-label={`Selecionar ${i.description}`} disabled={disabled} checked={s.on} onChange={(e) => setSel({ ...sel, [i.id]: { ...s, on: e.target.checked } })} /></td>
-                          <td>
+                          <td className="min-w-[220px]">
                             {i.description}
-                            <span className="block font-mono text-xs text-slate-500">{i.sku} • comprado {formatQty(i.qty, i.unitCode)} • restante devolvível {formatQty(i.returnable)}</span>
+                            <span className="block text-xs text-slate-500"><span className="font-mono">{i.sku}</span> • comprado {formatQty(i.qty, i.unitCode)} • devolvível {formatQty(i.returnable)}</span>
                           </td>
                           <td className="text-right">
                             <input aria-label={`Quantidade de ${i.description}`} inputMode="decimal" disabled={disabled || !s.on} value={s.qty} onChange={(e) => setSel({ ...sel, [i.id]: { ...s, qty: e.target.value } })} className={cn("focus-ring h-8 w-20 rounded border px-2 text-right tabular", l.over ? "border-red-500" : "border-line")} />
                             {l.over && <span className="block text-xs text-red-700">máx. {formatQty(i.returnable)}</span>}
                           </td>
                           <td>
-                            <select aria-label={`Motivo de ${i.description}`} disabled={disabled || !s.on} value={s.reason} onChange={(e) => setSel({ ...sel, [i.id]: { ...s, reason: e.target.value } })} className={cn("focus-ring h-8 rounded border bg-white px-1 text-sm", s.on && !s.reason ? "border-amber-500" : "border-line")}>
+                            <select aria-label={`Motivo de ${i.description}`} disabled={disabled || !s.on} value={s.reason} onChange={(e) => setSel({ ...sel, [i.id]: { ...s, reason: e.target.value } })} className={cn("focus-ring h-8 w-40 rounded border bg-white px-1 text-sm", s.on && !s.reason ? "border-amber-500" : "border-line")}>
                               <option value="">Motivo…</option>
                               {REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
                             </select>
                           </td>
                           <td>
                             <select aria-label={`Condição de ${i.description}`} disabled={disabled || !s.on || i.service} value={s.condition} onChange={(e) => setSel({ ...sel, [i.id]: { ...s, condition: e.target.value as any } })} className="focus-ring h-8 rounded border border-line bg-white px-1 text-sm">
-                              <option value="resellable">Revenda (estoque disponível)</option>
-                              <option value="damaged">Avaria (depósito de avarias)</option>
+                              <option value="resellable">Revenda</option>
+                              <option value="damaged">Avaria</option>
                             </select>
                           </td>
                           <td className="tabular text-right">

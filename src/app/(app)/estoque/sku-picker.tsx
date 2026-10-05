@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { inputClass } from "@/components/ui/form";
 import { cn } from "@/components/ui/cn";
@@ -29,6 +29,7 @@ export function SkuPicker({ value, onChange, warehouseId, placeholder = "Produto
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(0);
   const seq = useRef(0);
+  const listId = useId();
   useEffect(() => {
     if (q.trim().length < 2) {
       setHits([]);
@@ -76,6 +77,7 @@ export function SkuPicker({ value, onChange, warehouseId, placeholder = "Produto
         aria-label="Pesquisar produto"
         role="combobox"
         aria-expanded={open}
+        aria-controls={listId}
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => hits.length && setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -93,7 +95,7 @@ export function SkuPicker({ value, onChange, warehouseId, placeholder = "Produto
         }}
       />
       {open && (q.trim().length >= 2) && (
-        <ul role="listbox" className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-line bg-white py-1 text-sm shadow-lg">
+        <ul id={listId} role="listbox" className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-line bg-white py-1 text-sm shadow-lg">
           {loading && hits.length === 0 && <li className="px-3 py-2 text-slate-500">Pesquisando…</li>}
           {!loading && hits.length === 0 && <li className="px-3 py-2 text-slate-500">Nenhum produto encontrado.</li>}
           {hits.map((h, i) => (

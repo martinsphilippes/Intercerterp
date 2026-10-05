@@ -195,8 +195,8 @@ export async function sessionSummary(ctx: Ctx, sessionId: string): Promise<Sessi
   const sum = (type: string) => movements.filter((m) => m.type === type).reduce((a, m) => a + m.amount, 0);
   const opening = sum("opening");
   const supply = sum("supply");
-  const withdrawal = -sum("withdrawal");
-  const refunds = -sum("refund");
+  const withdrawal = 0 - sum("withdrawal");
+  const refunds = 0 - sum("refund");
   const cashSales = sum("sale"); // valor aplicado à venda (já líquido do troco)
   const change = payments.reduce((a, p) => a + (p.change ?? 0), 0);
   const adjust = sum("closing_adjust");

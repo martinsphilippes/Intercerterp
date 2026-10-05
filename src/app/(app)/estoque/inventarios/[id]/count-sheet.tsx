@@ -177,7 +177,7 @@ export function CountSheet({ inventoryId, items, editable, canClose }: { invento
                     </td>
                   )}
                   <td className={cn("tabular text-right font-semibold", (i.difference ?? 0) < 0 ? "text-red-700" : (i.difference ?? 0) > 0 ? "text-emerald-700" : "text-slate-400")}>{i.difference == null ? "—" : `${i.difference > 0 ? "+" : i.difference < 0 ? "−" : ""}${fmt(Math.abs(i.difference))}`}</td>
-                  <td className={cn("tabular text-right", (i.differenceValue ?? 0) < 0 ? "text-red-700" : (i.differenceValue ?? 0) > 0 ? "text-emerald-700" : "text-slate-400")}>{i.differenceValue == null ? "—" : formatMoney(i.differenceValue)}</td>
+                  <td className={cn("tabular whitespace-nowrap text-right", (i.differenceValue ?? 0) < 0 ? "text-red-700" : (i.differenceValue ?? 0) > 0 ? "text-emerald-700" : "text-slate-400")}>{i.differenceValue == null ? "—" : formatMoney(i.differenceValue)}</td>
                   <td>
                     {st === "ok" ? <Badge tone="good"><CheckCircle2 className="size-3" /> Conferido</Badge> : st === "diff" ? <Badge tone="bad"><AlertTriangle className="size-3" /> Divergência</Badge> : <Badge><Clock className="size-3" /> Não contado</Badge>}
                     {i.countedByName && <span className="mt-0.5 block text-[11px] text-slate-500">{i.countedByName}</span>}

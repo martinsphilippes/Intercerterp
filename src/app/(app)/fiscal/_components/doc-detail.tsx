@@ -170,7 +170,7 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
           <>
             <Stat label="Consumidor" value={<span className="text-base">{doc.recipientName ?? "Não identificado"}</span>} hint={doc.recipientDoc ? formatDoc(doc.recipientDoc) : undefined} />
             <Stat label="Operador • caixa" value={<span className="text-base">{operator?.name ?? "—"}</span>} hint={terminal ? `${terminal.code} — ${terminal.name}` : undefined} />
-            <Stat label="Produtos" value={<span className="text-base">{items.length} itens • {formatQty(units)} un.</span>} />
+            <Stat label="Produtos" value={<span className="text-base">{items.length} {items.length === 1 ? "item" : "itens"} • {formatQty(units)} un.</span>} />
             <Stat label="Valor total" value={formatMoney(doc.total)} />
             <Stat label="Tributos estimados" value={formatMoney(t.approxTax ?? 0)} hint="Lei 12.741/2012 (percentual parametrizado)" />
             <Stat label="Forma de pagamento" value={<span className="text-base">{payLabel}</span>} />
@@ -189,7 +189,7 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
             <Stat label="Destinatário" value={<span className="text-base">{doc.recipientName ?? "—"}</span>} hint={doc.recipientDoc ? formatDoc(doc.recipientDoc) : undefined} />
             <Stat label="Natureza da operação" value={<span className="text-base">{doc.nature}</span>} hint={`${OP_LABEL[doc.operationType] ?? doc.operationType} · ${PURPOSE_LABEL[doc.purpose] ?? doc.purpose}`} />
             <Stat label="Valor total" value={formatMoney(doc.total)} hint={`ICMS ${formatMoney(t.icms ?? 0)}`} />
-            <Stat label="Produtos" value={<span className="text-base">{items.length} itens • {formatQty(units)} un.</span>} />
+            <Stat label="Produtos" value={<span className="text-base">{items.length} {items.length === 1 ? "item" : "itens"} • {formatQty(units)} un.</span>} />
             <Stat label="Transportadora" value={<span className="text-base">{doc.transport?.carrierName ?? (String(doc.transport?.mode ?? "9") === "9" ? "Sem frete" : "Não informada")}</span>} hint={FREIGHT_MODE_LABEL[String(doc.transport?.mode ?? "9")]} />
             <Stat label="Tributos estimados" value={formatMoney(t.approxTax ?? 0)} hint="Lei 12.741/2012 (percentual parametrizado)" />
           </>
@@ -341,15 +341,15 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">QR Code disponível após a autorização.</p>
+                <p className="text-sm text-slate-500">{doc.status === "authorized" ? "O provedor não retornou URL de QR Code para este documento." : "QR Code disponível após a autorização."}</p>
               )}
             </Card>
           )}
           <Card title="Efeitos e cobrança">
             <DefinitionList
               items={[
-                { label: "Estoque", value: doc.effects?.stock ? (doc.effects.appliedAt ? `${doc.effects.movements ?? 0} movimento(s) aplicados em ${formatDateTime(doc.effects.appliedAt)}${doc.effects.reversedAt ? ` · revertidos em ${formatDateTime(doc.effects.reversedAt)}` : ""}` : "Será movimentado na autorização") : doc.originType === "sale" ? "Movimentado pela venda" : doc.originType === "transfer" ? "Movimentado pela transferência" : doc.originType === "return" ? "Movimentado pela devolução" : "Sem efeito (somente documento)" },
-                { label: "Financeiro", value: title ? <Link className="text-brand-700 hover:underline" href={`/financeiro/${title.kind === "payable" ? "pagar" : "receber"}/${title.id}`}>Título nº {title.number} — {formatMoney(title.total)} ({title.status})</Link> : doc.effects?.financial ? "Título gerado na autorização" : sale ? "Recebimentos registrados na venda" : "Sem título vinculado" },
+                { label: "Estoque", value: model === "nfse" ? "Não se aplica (serviço)" : doc.effects?.stock ? (doc.effects.appliedAt ? `${doc.effects.movements ?? 0} movimento(s) aplicados em ${formatDateTime(doc.effects.appliedAt)}${doc.effects.reversedAt ? ` · revertidos em ${formatDateTime(doc.effects.reversedAt)}` : ""}` : "Será movimentado na autorização") : doc.originType === "sale" ? "Movimentado pela venda" : doc.originType === "transfer" ? "Movimentado pela transferência" : doc.originType === "return" ? "Movimentado pela devolução" : "Sem efeito (somente documento)" },
+                { label: "Financeiro", value: title ? <span><Link className="text-brand-700 hover:underline" href={`/financeiro/${title.kind === "payable" ? "pagar" : "receber"}/${title.id}`}>Título nº {title.number} — {formatMoney(title.total)}</Link> <StatusBadge kind="title" status={title.status} /></span> : doc.effects?.financial ? "Título gerado na autorização" : sale ? "Recebimentos registrados na venda" : "Sem título vinculado" },
                 doc.effects?.note && { label: "Observação", value: doc.effects.note },
               ]}
             />

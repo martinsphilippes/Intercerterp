@@ -88,6 +88,13 @@ export function credentialMessage(cfg: Doc | null) {
   return `Credencial do provedor ausente: defina a variável de ambiente ${cfg.tokenRef || "FOCUSNFE_TOKEN"} no servidor.`;
 }
 
+/** Situação MEDIDA da conexão: sem teste registrado é sempre "configurada sem teste" (nunca presumida). */
+export function measuredStatus(cfg: Doc | null): string {
+  if (!cfg) return "not_configured";
+  if (!cfg.lastTestAt) return "configured_untested";
+  return cfg.connectionStatus ?? "configured_untested";
+}
+
 export function providerFor(store: Store, cfg: Doc | null) {
   return fiscalProviderFrom(cfg, store);
 }

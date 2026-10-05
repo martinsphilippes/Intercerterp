@@ -7,7 +7,7 @@ import { Notice } from "@/components/ui/empty";
 import { recordPrintPageAction } from "../../actions";
 
 /** Abre o diálogo de impressão do navegador e registra apenas que a página de teste foi aberta. */
-export function PrintTest({ id, width, children }: { id: string; width: number; children: React.ReactNode }) {
+export function PrintTest({ id, width, cols, children }: { id: string; width: number; cols: number; children: React.ReactNode }) {
   const done = useRef(false);
   const [recorded, setRecorded] = useState<string | null>(null);
   useEffect(() => {
@@ -32,7 +32,7 @@ export function PrintTest({ id, width, children }: { id: string; width: number; 
           Confira o cupom na impressora: largura correta ({width} mm), acentuação, alinhamento à direita dos valores, código de barras e corte. Se sair em branco ou cortado, ajuste o papel no diálogo de impressão (margens “Nenhuma”, sem cabeçalho/rodapé, escala 100%).
         </Notice>
       </div>
-      <div className="receipt mx-auto bg-white p-2 font-mono text-[11px] leading-snug text-black shadow-sm ring-1 ring-line" style={{ width: `${width}mm` }}>
+      <div className="receipt mx-auto overflow-hidden bg-white p-2 font-mono leading-snug text-black shadow-sm ring-1 ring-line" style={{ width: `${width}mm`, fontSize: `calc((${width}mm - 16px) / ${cols} / 0.61)` }}>
         {children}
       </div>
     </div>

@@ -107,9 +107,9 @@ export function TransferForm({
                                   <span className="min-w-0"><span className="block truncate">{l.name}</span><span className="block font-mono text-xs text-slate-500">SKU {l.sku}</span></span>
                                 </span>
                               </td>
-                              <td className={cn("tabular text-right", l.minQty && l.available < l.minQty ? "text-amber-700" : "")}>{fmt(l.available)} {l.unitCode}</td>
+                              <td className={cn("tabular text-right", l.minQty && l.available <= l.minQty ? "text-amber-700" : "")}>{fmt(l.available)} {l.unitCode}</td>
                               <td><QtyInput ariaLabel={`Quantidade de ${l.sku}`} value={l.qty} min={0} onChange={(v) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: v } : x)))} /></td>
-                              <td className={cn("tabular text-right font-semibold", after < 0 ? "text-red-700" : l.minQty && after < l.minQty ? "text-amber-700" : "")}>{fmt(after)}</td>
+                              <td className={cn("tabular text-right font-semibold", after < 0 ? "text-red-700" : l.minQty && after <= l.minQty ? "text-amber-700" : "")}>{fmt(after)}</td>
                               <td>
                                 <button type="button" aria-label={`Remover ${l.sku}`} className="rounded p-1 hover:bg-slate-100" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
                                   <X className="size-4" />

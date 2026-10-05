@@ -3,7 +3,7 @@ import { detId } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import type { Ctx } from "@/lib/core/ctx";
 import { diagnose, INTEGRATION_CATALOG, integrationJobs, secretStatus, STATUS_LABEL, type IntegrationKind } from "@/domain/integrations";
-import { getFiscalConfig } from "@/domain/fiscal/service";
+import { getFiscalConfig, measuredStatus } from "@/domain/fiscal/service";
 
 export const KIND_META: Record<IntegrationKind, { abbr: string; category: string }> = {
   pix: { abbr: "PX", category: "Pagamentos" },
@@ -56,7 +56,7 @@ export async function integrationOverview(ctx: Ctx, kind: IntegrationKind): Prom
     const provider = cfg?.provider ?? null;
     const prov = cat.providers.find((p) => p.id === provider);
     const secrets = secretStatus(kind, provider, provider === "focusnfe" ? { token: cfg?.tokenRef === "" ? "" : (cfg?.tokenRef ?? "FOCUSNFE_TOKEN") } : {});
-    const status = !cfg ? "not_configured" : (cfg.connectionStatus ?? "configured_untested");
+    const status = measuredStatus(cfg);
     const enabled = !cfg ? false : kind === "fiscal_nfe" ? cfg.nfeEnabled !== false || cfg.nfceEnabled !== false : cfg.nfseEnabled !== false;
     return {
       kind, label: cat.label, description: cat.description, category: meta.category, abbr: meta.abbr,

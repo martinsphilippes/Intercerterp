@@ -450,3 +450,58 @@ describe("Certificado A1", () => {
     expect(() => parsePfx(der, "errada")).toThrow(/Senha/);
   });
 });
+
+describe("Demonstração fiscal (seed/modules/fiscal) — idempotente", () => {
+  it("cria NF-e pendente/rejeitada/autorizada com CC-e, NFS-e autorizada e obrigações; repetir não duplica", async () => {
+    const st = freshStore();
+    const { seedDemo } = await import("@/domain/seed");
+    await seedDemo(st, { historyDays: 2 });
+    const get = (ref: string) => st.get("fiscal_documents", detId("fiscaldoc", ref));
+    expect((await get("nfe-demo-fiscal-pendente"))?.status).toBe("pending");
+    expect((await get("nfe-demo-fiscal-rejeitada"))?.status).toBe("rejected");
+    const auth = (await get("nfe-demo-fiscal-autorizada"))!;
+    expect(auth.status).toBe("authorized");
+    expect(auth.correctionCount).toBe(1);
+    expect((await get("nfse-demo-fiscal-nfse-1"))?.status).toBe("authorized");
+    const obl = await listAll(st, "fiscal_obligations");
+    expect(obl.some((o) => o.kind === "pgdas_d" && o.status === "done" && o.proofFileId)).toBe(true);
+    expect(obl.some((o) => o.kind === "xml_contabilidade")).toBe(true);
+    const counts = [(await listAll(st, "fiscal_documents")).length, obl.length, (await listAll(st, "titles")).length];
+    await seedDemo(st, { historyDays: 2 });
+    expect([(await listAll(st, "fiscal_documents")).length, (await listAll(st, "fiscal_obligations")).length, (await listAll(st, "titles")).length]).toEqual(counts);
+  }, 60000);
+});
+
+describe("Rotinas fiscais", () => {
+  it("envio mensal agendado registra falha real sem canal e não marca o período como enviado", async () => {
+    const st = freshStore();
+    const r2 = await seedBase(st);
+    const ctx = await r2.ctxFor("admin", "matriz");
+    const { saveAccountingSchedule, runScheduledAccountingExport, getAccountingSchedule } = await import("@/domain/fiscal/export");
+    const { saveIntegration } = await import("@/domain/integrations");
+    await saveIntegration(ctx, { kind: "accounting", branchId: null, provider: "export_package", config: { accountantEmail: "contab@example.com" } });
+    await saveAccountingSchedule(ctx, { enabled: true, day: 3 });
+    expect((await runScheduledAccountingExport(ctx, "2026-10-02")).skipped).toBe("before_day");
+    const r = await runScheduledAccountingExport(ctx, "2026-10-05");
+    expect(r.delivered).toBe(false);
+    expect(r.message).toMatch(/NÃO enviado/);
+    const sch = await getAccountingSchedule(ctx);
+    expect(sch.lastPeriod ?? null).toBeNull();
+    const logs = await listAll(st, "integration_logs", { filters: [["eq", "kind", "accounting"]] });
+    expect(logs.some((l) => l.action === "scheduled_package" && l.status === "failure")).toBe(true);
+    const files = await listAll(st, "files", { filters: [["eq", "kind", "accounting_package"]] });
+    expect(files.length).toBe(1);
+  });
+
+  it("avisos de vencimento/atraso de obrigações são deduplicados por ocorrência", async () => {
+    const st = freshStore();
+    const r2 = await seedBase(st);
+    const ctx = await r2.ctxFor("admin", "matriz");
+    const { generateObligations, notifyDeadlines } = await import("@/domain/fiscal/obligations");
+    await generateObligations(ctx, "2026-10-05");
+    const a = await notifyDeadlines(ctx, "2026-10-05");
+    const b = await notifyDeadlines(ctx, "2026-10-05");
+    expect(a.sent).toBeGreaterThan(0);
+    expect(b.sent).toBe(0);
+  });
+});

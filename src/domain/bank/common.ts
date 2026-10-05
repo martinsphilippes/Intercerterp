@@ -147,11 +147,11 @@ export function dateFlexible(raw: string, order: "dmy" | "ymd" | "mdy" = "dmy"):
   if (iso) return validDate(+iso[1], +iso[2], +iso[3]);
   const m = s.match(/^(\d{1,4})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (!m) return /^\d{8}$/.test(s) ? (order === "ymd" ? dateYYYYMMDD(s) : dateDDMMAAAA(s)) : null;
-  let [a, b, c] = [m[1], m[2], m[3]];
-  if (order === "ymd" || a.length === 4) return validDate(+a, +b, +(c.length === 2 ? c : c));
-  const year = c.length === 2 ? 2000 + Number(c) : Number(c);
-  if (order === "mdy") [a, b] = [b, a];
-  return validDate(year, Number(b), Number(a));
+  const [p1, p2, p3] = [m[1], m[2], m[3]];
+  if (order === "ymd" || p1.length === 4) return validDate(+p1, +p2, +p3);
+  const year = p3.length === 2 ? 2000 + Number(p3) : Number(p3);
+  const [day, month] = order === "mdy" ? [p2, p1] : [p1, p2];
+  return validDate(year, Number(month), Number(day));
 }
 
 /** Decodifica o arquivo: UTF-8 válido, senão Latin-1/Windows-1252 (comum em bancos brasileiros). */

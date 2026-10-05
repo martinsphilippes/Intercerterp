@@ -16,7 +16,7 @@ import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatDoc } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
-import { getFiscalConfig, PRESENCE_LABEL } from "@/domain/fiscal/service";
+import { getFiscalConfig, measuredStatus, PRESENCE_LABEL } from "@/domain/fiscal/service";
 import { certificateDaysLeft, CRT_LABEL, issuerChecklist, numberingStatus, REGIME_LABEL, taxGroupUsage } from "@/domain/fiscal/config";
 import { deleteTaxGroupAction, saveConfigAction, saveIssuerAction, saveTaxGroupAction, setNumberAction, testConnectionAction, uploadCertificateAction } from "../actions";
 
@@ -68,7 +68,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <Stat label="Ambiente de emissão" value={envLabel} hint={cfg?.provider === "focusnfe" ? "Focus NFe" : cfg?.provider === "simulated" ? "Documentos sem validade fiscal" : "Defina o provedor"} href="/fiscal/configuracoes?tab=conexao" tone={cfg?.provider === "simulated" ? "warn" : "default"} />
         <Stat label="Certificado digital" value={!cfg?.certificate ? "Não carregado" : days! < 0 ? "A1 vencido" : "A1 válido"} hint={cfg?.certificate ? `Expira em ${formatDate(cfg.certificate.validTo)} (${days} dia(s))` : "Necessário no provedor para assinatura"} href="/fiscal/configuracoes?tab=certificado" tone={!cfg?.certificate ? "warn" : days! < 0 ? "bad" : days! <= 30 ? "warn" : "good"} />
         <Stat label="Documentos ativos" value={`${enabledDocs.length} de 3`} hint={enabledDocs.join(", ") || "Nenhum habilitado"} href="/fiscal/configuracoes?tab=documentos" />
-        <Stat label="Última verificação" value={cfg?.lastTestAt ? formatDateTime(cfg.lastTestAt) : "Nunca"} hint={cfg?.lastTestResult ?? "Execute o teste de conexão"} href="/fiscal/configuracoes?tab=conexao" tone={["operational", "simulated"].includes(cfg?.connectionStatus) ? "good" : cfg?.connectionStatus === "error" ? "bad" : "warn"} />
+        <Stat label="Última verificação" value={cfg?.lastTestAt ? formatDateTime(cfg.lastTestAt) : "Nunca"} hint={cfg?.lastTestAt ? (cfg.lastTestResult ?? "—") : "Sem teste registrado — execute o teste de conexão"} href="/fiscal/configuracoes?tab=conexao" tone={["operational", "simulated"].includes(measuredStatus(cfg)) ? "good" : measuredStatus(cfg) === "error" ? "bad" : "warn"} />
       </div>
       <LinkTabs basePath="/fiscal/configuracoes" active={tab} tabs={TABS} />
       {!canEdit && <div className="mb-4"><Notice tone="info">Somente leitura: alterar exige a permissão “Configurar fiscal e certificados”.</Notice></div>}
@@ -201,7 +201,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
               </ActionForm>
             </Card>
           )}
-          <Card title="Grupos tributários (com vigência)" actions={canEdit && <Link href="/fiscal/configuracoes?tab=tributacao&grupo=novo" className={buttonClass("secondary", "sm")}>Novo grupo</Link>} bodyClass="p-0">
+          <Card title="Grupos tributários (com vigência)" description="Mesma tabela de Produtos → Cadastros auxiliares → Grupos tributários; aqui com vigência e tributos aproximados." actions={<><Link href="/produtos/cadastros?tab=grupos" className={buttonClass("ghost", "sm")}>Ver em Produtos</Link>{canEdit && <Link href="/fiscal/configuracoes?tab=tributacao&grupo=novo" className={buttonClass("secondary", "sm")}>Novo grupo</Link>}</>} bodyClass="p-0">
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
                 <thead><tr><th>Grupo</th><th>CST/CSOSN</th><th>CFOP int./inter./dev.</th><th>ICMS</th><th>PIS/COFINS</th><th>Trib. aprox.</th><th>Vigência</th><th>Situação</th><th>Uso</th><th /></tr></thead>
@@ -259,7 +259,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
             <DefinitionList
               cols={1}
               items={[
-                { label: "Situação", value: <StatusBadge kind="integration" status={cfg?.connectionStatus ?? "not_configured"} /> },
+                { label: "Situação", value: <StatusBadge kind="integration" status={measuredStatus(cfg)} /> },
                 { label: "Último teste", value: cfg?.lastTestAt ? formatDateTime(cfg.lastTestAt) : "Nunca" },
                 { label: "Resultado", value: cfg?.lastTestResult ?? "—" },
               ]}

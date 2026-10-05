@@ -271,7 +271,8 @@ export class SimulatedFiscalProvider implements FiscalProvider {
     if (down) return down;
     const err = this.validate(model, payload);
     if (err) {
-      const r: SimState = { model, status: "rejected", statusCode: "999", message: err };
+      const code = err.match(/^(?:Rejeição|E)\s?(\d+)/)?.[1] ?? "999";
+      const r: SimState = { model, status: "rejected", statusCode: code, message: err };
       await this.save(ref, r);
       return r;
     }

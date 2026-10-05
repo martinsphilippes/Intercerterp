@@ -55,10 +55,17 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
     await refs.seeder.put("supplier_products", `acessorios-${k}`, { ...base, supplierId: acess.id, skuId: refs.skus[k].id, supplierCode: `AA-${k.split("-")[0].toUpperCase()}`, supplierDescription: refs.skus[k].name.toUpperCase(), conversionFactor: 1000, lastCost: cost, leadTimeDays: 5, minQty: 1000, multiple: 1000, preferred: false });
   }
 
+  // categorias dos fornecedores da base (somente se ainda não definidas)
+  for (const [k, cat] of [["textil", "Mercadorias"], ["calcados", "Mercadorias"], ["papel", "Mercadorias"], ["eletro", "Tecnologia"]] as const) {
+    const sup = await store.get("suppliers", refs.suppliers[k].id);
+    if (sup && !sup.category) await store.update("suppliers", sup.id, { category: cat });
+  }
+  if (!acess.category) await store.update("suppliers", acess.id, { category: "Mercadorias" });
+
   // 3) Cotação com 3 fornecedores (frete, mínimo e validade; uma vencida)
   const q = await createQuotation(admin, {
     title: "Acessórios — reposição para a campanha de fim de ano",
-    items: [{ skuId: refs.skus["bone-u"].id, qty: 120000 }, { skuId: refs.skus["cinto-u"].id, qty: 80000 }, { skuId: refs.skus["meia-u"].id, qty: 150000 }],
+    items: [{ skuId: refs.skus["bone-u"].id, qty: 120000, neededBy: addDays(today(), 20) }, { skuId: refs.skus["cinto-u"].id, qty: 80000, neededBy: addDays(today(), 20) }, { skuId: refs.skus["meia-u"].id, qty: 150000, neededBy: addDays(today(), 12) }],
     supplierIds: [refs.suppliers.textil.id, refs.suppliers.calcados.id, acess.id],
     responseDue: addDays(today(), 3),
     notes: "Cotação de demonstração: compare frete e pedido mínimo, não só o preço unitário.",
@@ -95,6 +102,9 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
     freight: 15000,
     paymentTermId: refs.terms["30-60-90"].id,
     notes: "Reforço de eletrônicos para a Black Friday.",
+    purpose: "Reforço de eletrônicos — Black Friday",
+    costCenterId: refs.costCenters["loja-matriz"].id,
+    paymentMethodId: refs.methods.boleto.id,
     idemKey: "demo-po-eletro",
   });
   await ensureApproved(big.id);
@@ -106,6 +116,7 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
     expectedDate: addDays(today(), 3),
     items: [{ skuId: refs.skus["caderno-u"].id, qty: 100000, unitCost: 990 }, { skuId: refs.skus["caneta-u"].id, qty: 30000, unitCost: 2100 }],
     paymentTermId: refs.terms.avista.id,
+    purpose: "Reposição de papelaria (volta às aulas)",
     idemKey: "demo-po-papel",
   });
   let p = await ensureApproved(paper.id);
@@ -119,6 +130,9 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
     items: [{ skuId: refs.skus["camiseta-m-preta"].id, qty: 24000, unitCost: 1890 }, { skuId: refs.skus["camiseta-g-preta"].id, qty: 16000, unitCost: 1890 }, { skuId: refs.skus["bone-u"].id, qty: 20000, unitCost: 1500 }],
     freight: 6000,
     paymentTermId: refs.terms["30-60"].id,
+    purpose: "Reposição de camisetas e bonés",
+    costCenterId: refs.costCenters["loja-matriz"].id,
+    paymentMethodId: refs.methods.boleto.id,
     idemKey: "demo-po-textil",
   });
   let t = await ensureApproved(textil.id);

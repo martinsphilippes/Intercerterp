@@ -10,6 +10,7 @@ import { Button, LinkButton, buttonClass } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
 import { refreshFiscalAction, sendReceiptAction } from "./actions";
+import { MODEL_NAME } from "./labels";
 
 const FISCAL_TEXT: Record<string, string> = {
   not_required: "Venda sem documento fiscal.",
@@ -38,7 +39,6 @@ export interface FiscalDocInfo {
   xmlFileId?: string | null;
 }
 
-export const MODEL_NAME: Record<string, string> = { nfce: "NFC-e", nfe: "NF-e", nfse: "NFS-e" };
 const fmtKey = (k: string) => k.replace(/(\d{4})(?=\d)/g, "$1 ");
 
 /** Situação fiscal separada da situação comercial; consulta real ao provedor (nunca sucesso antecipado). */

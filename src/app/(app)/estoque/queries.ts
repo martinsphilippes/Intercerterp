@@ -82,8 +82,8 @@ export async function queryBalances(ctx: Ctx, p: P) {
         branchName: m.branch.get(b.branchId)?.name ?? "—",
         available,
         value: roundDiv((b.physical ?? 0) * (b.avgCost ?? 0), QTY),
-        belowMin: Boolean(b.minQty && available < b.minQty),
-        belowSafety: Boolean(b.safetyQty && available < b.safetyQty),
+        belowMin: Boolean(b.minQty && available <= b.minQty),
+        belowSafety: Boolean(b.safetyQty && available <= b.safetyQty),
       };
     })
     .filter((r) => (cats ? r.categoryId && cats.has(r.categoryId) : true))

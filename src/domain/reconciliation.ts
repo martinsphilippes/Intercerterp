@@ -82,6 +82,8 @@ export interface ImportPreview {
   newCount: number;
   duplicateCount: number;
   warnings: string[];
+  /** motivo que impede a importação (o servidor recusa pelo mesmo critério) */
+  blockReason: string | null;
   rows: Array<ParsedTx & { duplicate: boolean }>;
 }
 
@@ -94,7 +96,9 @@ export async function previewBankImport(ctx: Ctx, input: ImportInput): Promise<I
   const keys = transactionKeys(acc.id, result.transactions);
   const dup = await existingIds(ctx.store, "bank_transactions", keys.map(txId));
   const rows = result.transactions.map((t, i) => ({ ...t, duplicate: dup.has(txId(keys[i])) }));
+  const warnings = accountWarnings(acc, result);
   return {
+    blockReason: result.fatal ?? (result.kind === "collection_return" && warnings.length && normalizeBankCode(acc.bankCode) ? warnings[0] : null),
     result: { ...result, transactions: [] },
     csv,
     formatLabel: FORMAT_LABEL[result.format],
@@ -102,7 +106,7 @@ export async function previewBankImport(ctx: Ctx, input: ImportInput): Promise<I
     alreadyImported: imp && imp.status === "completed" ? { id: imp.id, createdAt: imp.createdAt, fileName: imp.fileName } : null,
     newCount: rows.filter((r) => !r.duplicate).length,
     duplicateCount: rows.filter((r) => r.duplicate).length,
-    warnings: accountWarnings(acc, result),
+    warnings,
     rows,
   };
 }

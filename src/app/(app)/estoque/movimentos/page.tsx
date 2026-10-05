@@ -52,26 +52,26 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
 
   const columns: Column<MovementRow>[] = [
     { key: "occurredAt", label: "Data", sortable: true, fixed: true, cell: (r) => <span className="whitespace-nowrap">{formatDateTime(r.occurredAt)}</span> },
-    { key: "productName", label: "Produto / SKU", sortable: true, cell: (r) => <span className="block min-w-56"><Link className="text-brand-700 hover:underline" href={`/produtos/${r.productId}?tab=estoque`}>{r.productName}</Link><span className="block font-mono text-xs text-slate-500">{r.skuCode}</span></span> },
+    { key: "productName", label: "Produto / SKU", sortable: true, cell: (r) => <span className="block min-w-44"><Link className="text-brand-700 hover:underline" href={`/produtos/${r.productId}?tab=estoque`}>{r.productName}</Link><span className="block font-mono text-xs text-slate-500">{r.skuCode}</span></span> },
     { key: "type", label: "Tipo", sortable: true, cell: (r) => <Badge tone={TYPE_TONE[r.type] ?? "neutral"}>{r.typeLabel}</Badge> },
     {
       key: "originLabel",
       label: "Motivo / documento",
       cell: (r) => (
-        <span className="block max-w-xs">
+        <span className="block max-w-[16rem]">
           <span className="block text-sm">{r.originHref ? <Link className="text-brand-700 hover:underline" href={r.originHref}>{r.originLabel}</Link> : r.originLabel}</span>
-          <span className="block truncate text-xs text-slate-500" title={[r.reason, r.notes].filter(Boolean).join(" — ")}>{r.reason ?? "—"}</span>
+          <span className="block truncate text-xs text-slate-500" title={[r.reason, r.notes].filter(Boolean).join(" — ")}>{[r.reason, r.notes].filter(Boolean).join(" — ") || "—"}</span>
           {(r.documentRef || r.lot) && <span className="block text-xs text-slate-500">{[r.documentRef && `Doc. ${r.documentRef}`, r.lot && `Lote ${r.lot}${r.lotExpiry ? ` (val. ${formatDate(r.lotExpiry)})` : ""}`].filter(Boolean).join(" · ")}</span>}
         </span>
       ),
     },
     { key: "warehouseName", label: "Filial · depósito", sortable: true, hidden: Boolean(scope) && !p.f.deposito, cell: (r) => <span className="block whitespace-nowrap text-xs">{r.branchName}<span className="block text-slate-500">{r.warehouseName}</span></span> },
-    { key: "userName", label: "Usuário", sortable: true, cell: (r) => <span className="text-xs">{r.userName}</span> },
+    { key: "userName", label: "Usuário", sortable: true, cell: (r) => <span className="block max-w-28 text-xs">{r.userName}</span> },
     { key: "qty", label: "Quantidade", align: "right", sortable: true, cell: (r) => <span className={`whitespace-nowrap font-semibold ${r.qty > 0 ? "text-emerald-700" : "text-red-700"}`}>{r.qty > 0 ? "+" : "−"} {formatQty(Math.abs(r.qty))} <span className="text-xs font-normal text-slate-400">{r.unitCode}</span></span> },
     { key: "balanceBefore", label: "Saldo anterior", align: "right", hidden: true, cell: (r) => formatQty(r.balanceBefore) },
     { key: "balanceAfter", label: "Saldo após", align: "right", cell: (r) => formatQty(r.balanceAfter) },
     { key: "unitCost", label: "Custo unit.", align: "right", hidden: true, cell: (r) => formatMoney(r.unitCost) },
-    { key: "totalCost", label: "Custo total", align: "right", sortable: true, cell: (r) => formatMoney(r.totalCost) },
+    { key: "totalCost", label: "Custo total", align: "right", sortable: true, hidden: true, cell: (r) => formatMoney(r.totalCost) },
     { key: "avgCostAfter", label: "Custo médio após", align: "right", hidden: true, cell: (r) => formatMoney(r.avgCostAfter) },
   ];
   const sum = (k: "inQty" | "outQty" | "inValue" | "outValue") => all.reduce((a, r) => a + (r[k] ?? 0), 0);

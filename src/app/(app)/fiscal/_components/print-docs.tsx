@@ -193,7 +193,7 @@ export async function Danfce({ doc, company, branch, sale, payments, operator, t
         <tbody>
           {items.map((i) => (
             <tr key={i.seq} className="align-top">
-              <td>{i.seq}</td>
+              <td className="pr-1">{i.seq}</td>
               <td>{i.description}<div className="text-[9px]">{i.code} · {formatMoney(i.unitPrice)}/{i.unit}</div></td>
               <td className="text-right">{formatQty(i.qty)}</td>
               <td className="text-right">{formatMoney(i.total)}</td>

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, CheckCheck, EyeOff, HandCoins, Link2, Link2Off, ListChecks, Plus, RotateCcw, Unlink, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Drawer, Dialog } from "@/components/ui/dialog";
 import { Field, FormGrid, Input, Select, Textarea } from "@/components/ui/form";
 import { MoneyInput } from "@/components/ui/money-input";
@@ -211,7 +210,7 @@ export function Workspace({
                       list={sugEntries}
                       footer={
                         <>
-                          <span className="text-sky-700">Sugestão {Math.min(100, Math.round((r.suggestion.score / 105) * 100))}% — {r.suggestion.reasons.join(", ")}</span>
+                          <span className="text-sky-700">Sugestão {Math.min(100, Math.round((r.suggestion.score / 85) * 100))}% — {r.suggestion.reasons.join(", ")}</span>
                           {r.suggestion.difference !== 0 && <span className="ml-2 font-medium text-red-700">Diferença identificada: {brl(r.suggestion.difference)}</span>}
                         </>
                       }

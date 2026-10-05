@@ -106,4 +106,24 @@ describe("caixa", () => {
     await expect(reopenSession(manager, s.id, "x")).rejects.toThrow(/outra sessão/);
     expect(other.status).toBe("open");
   });
+
+  it("sangria acima da política exige autorização de outro usuário (gerente); conferências finais obrigatórias", async () => {
+    const { setSetting } = await import("@/lib/core/settings");
+    await setSetting(store, refs.company.id, null, "cash.withdrawalApprovalAbove", 5000);
+    const s = await openSession(cashier, { terminalId, openingFund: 20000 });
+    await finalizeSale(cashier, { idemKey: "p-1", terminalId, items: [{ skuId: refs.skus["meia-u"].id, qty: 1000 }], payments: [{ methodId: refs.methods.pix.id, amount: 2990, reference: "E2E-1" }] });
+    await addCashMovement(cashier, { sessionId: s.id, type: "withdrawal", amount: 5000, reason: "cofre", idemKey: "w-ok" });
+    await expect(addCashMovement(cashier, { sessionId: s.id, type: "withdrawal", amount: 6000, reason: "cofre", idemKey: "w-big" })).rejects.toThrow(/autorização adicional/);
+    await expect(addCashMovement(cashier, { sessionId: s.id, type: "withdrawal", amount: 6000, reason: "cofre", idemKey: "w-big", approval: { login: "caixa", password: "Intercert@2026" } })).rejects.toThrow(/permissão|outro usuário/);
+    const ok = await addCashMovement(cashier, { sessionId: s.id, type: "withdrawal", amount: 6000, reason: "cofre", idemKey: "w-big", responsibleId: refs.users.finance.id, approval: { login: "gerente", password: "Intercert@2026" } });
+    expect(ok.approvedBy).toBe(refs.users.manager.id);
+    expect(ok.recipient).toBe(refs.users.finance.name);
+    const { requiredChecklist } = await import("@/domain/cash");
+    const sum = await sessionSummary(cashier, s.id);
+    expect(requiredChecklist(sum).map((c) => c.key)).toEqual(["cashCounted", "pixReconciled", "cashDelivered"]);
+    await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: sum.expected.cash, pix: 2990 }, enforceChecklist: true, checklist: { cashCounted: true } })).rejects.toThrow(/Conferências finais pendentes/);
+    const closed = await closeSession(cashier, { sessionId: s.id, counted: { cash: sum.expected.cash, pix: 2990 }, enforceChecklist: true, checklist: { cashCounted: true, pixReconciled: true, cashDelivered: true }, blind: true });
+    expect(closed.differences).toEqual({});
+    expect((closed.history as any[]).at(-1).blind).toBe(true);
+  });
 });

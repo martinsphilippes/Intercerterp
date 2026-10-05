@@ -80,7 +80,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                       <td>{o.label}</td>
                       <td className="tabular text-right"><Link className="text-brand-700 hover:underline" href={`/produtos?category=${c.id}`}>{count((p) => p.categoryId === c.id)}</Link></td>
                       <td><StatusBadge kind="generic" status={c.status ?? "active"} /></td>
-                      <td className="whitespace-nowrap text-right">{canEdit && <AuxDialog kind="categoria" row={c} parents={catOpts} />}<RowActions collection="categories" id={c.id} active={c.status !== "inactive"} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a categoria" /></td>
+                      <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="categoria" row={c} parents={catOpts} />}<RowActions collection="categories" id={c.id} active={c.status !== "inactive"} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a categoria" /></div></td>
                     </tr>
                   );
                 })}
@@ -102,7 +102,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                       <td>{b.name}</td>
                       <td className="tabular text-right"><Link className="text-brand-700 hover:underline" href={`/produtos?brand=${b.id}`}>{used}</Link></td>
                       <td><StatusBadge kind="generic" status={b.status ?? "active"} /></td>
-                      <td className="whitespace-nowrap text-right">{canEdit && <AuxDialog kind="marca" row={b} />}<RowActions collection="brands" id={b.id} active={b.status !== "inactive"} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a marca" /></td>
+                      <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="marca" row={b} />}<RowActions collection="brands" id={b.id} active={b.status !== "inactive"} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a marca" /></div></td>
                     </tr>
                   );
                 })}
@@ -125,7 +125,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                     <td className="tabular text-right">{u.decimals ?? 0}</td>
                     <td className="tabular text-right">{used}</td>
                     <td><StatusBadge kind="generic" status={u.status ?? "active"} /></td>
-                    <td className="whitespace-nowrap text-right">{canEdit && <AuxDialog kind="unidade" row={u} />}<RowActions collection="units" id={u.id} active={u.status !== "inactive"} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a unidade" /></td>
+                    <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="unidade" row={u} />}<RowActions collection="units" id={u.id} active={u.status !== "inactive"} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a unidade" /></div></td>
                   </tr>
                 );
               })}
@@ -146,7 +146,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                     <td>{({ retail: "Varejo", wholesale: "Atacado / revenda", promo: "Promocional" } as Record<string, string>)[t.kind] ?? "Outra"}</td>
                     <td className="tabular text-right">{used}</td>
                     <td><StatusBadge kind="generic" status={t.active ? "active" : "inactive"} /></td>
-                    <td className="whitespace-nowrap text-right">{canEdit && <AuxDialog kind="tabela" row={t} />}{!t.isDefault && <RowActions collection="price_tables" id={t.id} active={t.active} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a tabela" />}</td>
+                    <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="tabela" row={t} />}{!t.isDefault && <RowActions collection="price_tables" id={t.id} active={t.active} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="a tabela" />}</div></td>
                   </tr>
                 );
               })}
@@ -174,7 +174,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                         <td className="text-xs">{g.validFrom || g.validTo ? `${formatDate(g.validFrom)} a ${formatDate(g.validTo)}` : "—"}</td>
                         <td className="tabular text-right">{used}</td>
                         <td><StatusBadge kind="generic" status={g.active === false ? "inactive" : "active"} /></td>
-                        <td className="whitespace-nowrap text-right">{canEdit && <AuxDialog kind="grupo" row={g} cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} />}<RowActions collection="tax_groups" id={g.id} active={g.active !== false} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="o grupo" /></td>
+                        <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="grupo" row={g} cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} />}<RowActions collection="tax_groups" id={g.id} active={g.active !== false} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="o grupo" /></div></td>
                       </tr>
                     );
                   })}

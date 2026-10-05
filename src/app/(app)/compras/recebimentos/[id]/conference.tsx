@@ -111,7 +111,7 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
           <FormSection
             title="Conferência dos produtos"
             description={`${formatQty(units)} unidades em ${active.length} item(ns) · ${checked} de ${active.length} conferido(s). Legenda: Confere · Divergência · Pendente.`}
-            actions={<SubmitButton pending={pending} variant="secondary" size="sm" name="intent" value="checkAll"><CheckCheck className="size-4" /> Marcar todos como conferidos</SubmitButton>}
+            actions={<span onClickCapture={() => setItems((a) => a.map((x) => (x.ignore ? x : { ...x, checked: true })))}><SubmitButton pending={pending} variant="secondary" size="sm" name="intent" value="checkAll"><CheckCheck className="size-4" /> Marcar todos como conferidos</SubmitButton></span>}
           >
             <div className="-mx-5 overflow-x-auto">
               <table className="table-base w-full text-sm">

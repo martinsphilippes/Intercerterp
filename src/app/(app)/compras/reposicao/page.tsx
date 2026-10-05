@@ -8,11 +8,11 @@ import { buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/form";
 import { cn } from "@/components/ui/cn";
 import { listAll } from "@/lib/db";
-import { sp, normalizeSearch, type SearchParams } from "@/lib/list";
+import { type SearchParams } from "@/lib/list";
 import { formatMoney } from "@/lib/money";
 import { formatDateTime, nowIso } from "@/lib/dates";
 import { lookups } from "@/lib/server/lookups";
-import { computeBranchReplenishment, replenishmentSettings } from "@/domain/replenishment";
+import { queryReplenishment } from "./queries";
 import { ReplenishmentTable } from "./replenishment-table";
 
 export const metadata = { title: "Planejamento de compras e reposição" };
@@ -20,27 +20,16 @@ export const metadata = { title: "Planejamento de compras e reposição" };
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const s = await requireSession("purchases");
   const params = await searchParams;
-  const branchId = sp(params, "branch") || s.ctx.branchId || s.branches[0]?.id || "";
-  const branch = s.branches.find((b) => b.id === branchId);
-  const cfg = await replenishmentSettings(s.ctx.store, s.ctx.companyId, branchId || null);
-  const coverageDays = Math.max(0, Number(sp(params, "cobertura")) || cfg.coverageDays);
-  const historyDays = Math.max(7, Number(sp(params, "historico")) || cfg.historyDays);
-  const supplier = sp(params, "supplier");
-  const category = sp(params, "category");
-  const show = sp(params, "exibir") || "reorder";
-  const q = sp(params, "q");
-  const skuParam = sp(params, "sku");
-  if (!branch) return <Notice tone="warn">Nenhuma filial acessível.</Notice>;
-  const all = await computeBranchReplenishment(s.ctx.store, s.ctx.companyId, { branchId, coverageDays, historyDays, supplierId: supplier || null, categoryId: category || null });
-  let rows = all;
-  if (show === "reorder") rows = rows.filter((r) => r.suggested > 0 || r.situation === "risk" || r.situation === "incomplete");
-  if (show === "risk") rows = rows.filter((r) => r.situation === "risk");
-  if (show === "incomplete") rows = rows.filter((r) => r.situation === "incomplete");
-  if (skuParam) {
-    const hit = all.find((r) => r.skuId === skuParam);
-    rows = [...(hit ? [hit] : []), ...rows.filter((r) => r.skuId !== skuParam)];
-  }
-  if (q) rows = rows.filter((r) => normalizeSearch(`${r.name} ${r.sku}`).includes(normalizeSearch(q)));
+  const res = await queryReplenishment(s.ctx, params, s.branches.map((b) => b.id));
+  const branch = s.branches.find((b) => b.id === res.branchId);
+  if (!branch || !res.branchId) return <Notice tone="warn">Nenhuma filial acessível.</Notice>;
+  const { all, rows, coverageDays, historyDays } = res;
+  const branchId = res.branchId;
+  const supplier = res.supplier ?? "";
+  const category = res.category ?? "";
+  const show = res.show ?? "reorder";
+  const q = res.q ?? "";
+  const skuParam = res.skuParam ?? "";
   const [suppliers, categories, drafts] = await Promise.all([
     lookups.suppliers(s.ctx),
     lookups.categories(s.ctx),
@@ -58,7 +47,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         title="Planejamento de compras e reposição"
         crumbs={[{ label: "Compras" }, { label: "Reposição" }]}
         description="Sugestões por filial a partir de estoque disponível, consumo, mínimos e entregas confirmadas. Revise quantidades, fornecedor e custo e crie rascunhos por fornecedor."
-        actions={<Link href={`/compras/pedidos?origin=replenishment&status=drafting`} className={buttonClass("secondary")}>Rascunhos <span className="ml-1 rounded-full bg-brand-700 px-2 text-xs text-white">{drafts.length}</span></Link>}
+        actions={
+          <>
+            <a href={`/api/export/replenishment?${new URLSearchParams(Object.entries({ branch: branchId, cobertura: String(coverageDays), historico: String(historyDays), supplier, category, exibir: show, q }).filter(([, v]) => v)).toString()}`} className={buttonClass("ghost")}>Exportar</a>
+            <Link href={`/compras/pedidos?origin=replenishment&status=drafting`} className={buttonClass("secondary")}>Rascunhos <span className="ml-1 rounded-full bg-brand-700 px-2 text-xs text-white">{drafts.length}</span></Link>
+          </>
+        }
       />
       <form method="get" action="/compras/reposicao" className="no-print mb-4 rounded-lg border border-line bg-white p-4">
         <div className="flex flex-wrap items-end gap-3">

@@ -73,7 +73,7 @@ export function ReceiveForm({ transferId, items }: { transferId: string; items: 
 export function ResolveForm({ transferId, pendingText }: { transferId: string; pendingText: string }) {
   const [mode, setMode] = useState("return");
   return (
-    <ActionForm action={resolveTransferAction} confirm={mode === "loss" ? "Baixar o pendente como perda? Gera retorno contábil e perda na origem." : "Devolver o pendente à origem?"} className="grid items-end gap-3 sm:grid-cols-[220px_1fr_auto]">
+    <ActionForm action={resolveTransferAction} confirm={mode === "loss" ? "Baixar o pendente como perda? Gera retorno contábil e perda na origem." : "Devolver o pendente à origem?"} className="grid items-end gap-3 md:grid-cols-[200px_minmax(0,1fr)_auto]">
       {({ pending }) => (
         <>
           <input type="hidden" name="id" value={transferId} />

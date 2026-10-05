@@ -314,4 +314,35 @@ describe("vendas (PDV)", () => {
       expect(previewSchedule(10001, term, "2026-01-31")).toEqual(buildSchedule(10001, term, "2026-01-31"));
     }
   });
+
+  it("desconto acima do limite exige autorização de supervisor com credencial válida", async () => {
+    const items = [{ skuId: refs.skus["calca-40"].id, qty: 1000 }];
+    // 20% de desconto: acima do limite do caixa (5%) e do máximo da tabela (15%)
+    const base = { idemKey: "disc-1", items, globalDiscount: 3198, payments: [{ methodId: refs.methods.dinheiro.id, amount: 15990 - 3198 }] };
+    await expect(sale(base)).rejects.toThrow(/limite|máximo/);
+    await expect(sale({ ...base, discountApproval: { login: "gerente", password: "senha-errada" } })).rejects.toThrow(/inválidos/);
+    // perfil sem a permissão de aprovar desconto
+    await expect(sale({ ...base, discountApproval: { login: "estoque", password: "Intercert@2026" } })).rejects.toThrow(/permissão/);
+    const s = await sale({ ...base, discountApproval: { login: "gerente", password: "Intercert@2026" } });
+    expect(s.discountApprovedBy).toBe(refs.users.manager.id);
+    expect(s.discountTotal).toBe(3198);
+    const denied = await listAll(store, "audit_logs", { filters: [["eq", "action", "supervisor.denied"]] });
+    expect(denied.length).toBe(2);
+  });
+
+  it("devolução com motivo por item e devolução em dinheiro exige caixa aberto", async () => {
+    const s = await sale({ idemKey: "rr-1", customerId: refs.customers.joao.id, items: [{ skuId: refs.skus["caneca-u"].id, qty: 2000 }, { skuId: refs.skus["bone-u"].id, qty: 1000 }], payments: [{ methodId: refs.methods.dinheiro.id, amount: 2 * 3490 + 4490 }] });
+    const lines = await returnableItems(store, s.id);
+    // sem motivo nenhum: recusado
+    await expect(processReturn(cashier, { saleId: s.id, idemKey: "rr-a", reason: "", compensation: "store_credit", items: [{ saleItemId: lines[0].id, qty: 1000, condition: "resellable" }] })).rejects.toThrow(/motivo/);
+    const r = await processReturn(cashier, { saleId: s.id, idemKey: "rr-b", reason: "", compensation: "store_credit", items: [{ saleItemId: lines[0].id, qty: 1000, condition: "resellable", reason: "Produto com defeito" }, { saleItemId: lines[1].id, qty: 1000, condition: "damaged", reason: "Avaria no transporte" }] });
+    expect(r.reason).toBe("Produto com defeito; Avaria no transporte");
+    const ri = await listAll(store, "return_items", { filters: [["eq", "returnId", r.id]] });
+    expect(ri.map((x) => x.reason).sort()).toEqual(["Avaria no transporte", "Produto com defeito"]);
+    // fecha o caixa: devolução em dinheiro passa a exigir caixa aberto
+    const { closeSession, sessionSummary: summ } = await import("@/domain/cash");
+    const sm = await summ(cashier, s.cashSessionId);
+    await closeSession(cashier, { sessionId: s.cashSessionId, counted: { cash: sm.expected.cash } });
+    await expect(processReturn(cashier, { saleId: s.id, idemKey: "rr-c", reason: "x", compensation: "refund", refundMethod: "cash", items: [{ saleItemId: lines[0].id, qty: 1000, condition: "resellable" }] })).rejects.toThrow(/abra o caixa/i);
+  });
 });

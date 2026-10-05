@@ -7,6 +7,7 @@ import { nextNumber } from "@/lib/core/numbering";
 import { searchable } from "@/lib/core/text";
 import { getSetting } from "@/lib/core/settings";
 import { sendEmail } from "@/lib/core/email";
+import { resolveOccurrence } from "@/lib/core/notify";
 import { addDays, nowIso, today } from "@/lib/dates";
 import { formatMoney, formatQty, lineTotal } from "@/lib/money";
 import { defaultWarehouse } from "./stock";
@@ -341,6 +342,9 @@ export async function setOrdersStatus(ctx: Ctx, orderIds: string[], to: OrderSta
     assertTransition(o.status, to);
     const u = await ctx.store.update("purchase_orders", id, { status: to, ...patch });
     updated.push(u);
+    // pendências de acompanhamento deixam de existir na origem
+    if (to === "sent" || to === "cancelled") await resolveOccurrence(ctx.store, `po_unsent:${id}`);
+    if (["received", "cancelled"].includes(to)) await resolveOccurrence(ctx.store, `po_late:${id}`);
     await audit(ctx, {
       module: "purchases",
       action: opts.action ?? `purchase_order.${to}`,

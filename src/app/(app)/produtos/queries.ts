@@ -81,7 +81,7 @@ export async function queryProducts(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
         const v = roundDiv((b.physical ?? 0) * (b.avgCost ?? 0), QTY);
         value += v;
         valueByBranch[b.branchId] = (valueByBranch[b.branchId] ?? 0) + v;
-        if (b.minQty && (b.physical ?? 0) - (b.reserved ?? 0) < b.minQty && !belowMinBranches.includes(b.branchId)) belowMinBranches.push(b.branchId);
+        if (b.minQty && (b.physical ?? 0) - (b.reserved ?? 0) <= b.minQty && !belowMinBranches.includes(b.branchId)) belowMinBranches.push(b.branchId);
       }
       const price = skuPrices.length ? Math.min(...skuPrices) : null;
       const priceMax = skuPrices.length ? Math.max(...skuPrices) : null;

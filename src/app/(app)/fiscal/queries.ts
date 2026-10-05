@@ -23,7 +23,8 @@ export async function queryDocuments(ctx: Ctx, model: FiscalModelKey, p: Pick<Li
   const { from, to } = listPeriod(p, model === "nfce" ? today() : undefined);
   const { start, end } = dayRange(from, to);
   const filters: any[] = [["eq", "companyId", ctx.companyId], ["eq", "model", model], ["gte", "issuedAt", start], ["lt", "issuedAt", end]];
-  const branch = ctx.branchId ?? p.f.branch ?? null;
+  // filial explícita no link (consulta) tem precedência; senão a filial do contexto (consolidado = todas)
+  const branch = p.f.branch || ctx.branchId || null;
   if (branch) filters.push(["eq", "branchId", branch]);
   if (p.f.status) filters.push(["eq", "status", p.f.status.split(",")]);
   if (p.f.op) filters.push(["eq", "operationType", p.f.op]);

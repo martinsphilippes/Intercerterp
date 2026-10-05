@@ -91,8 +91,8 @@ export function TemplatesEditor({ initial, kinds }: { initial: ObligationTemplat
               <tbody>
                 {rows.map((t, i) => (
                   <tr key={i}>
-                    <td><Input aria-label="Nome" value={t.name} onChange={(e) => set(i, { name: e.target.value })} /></td>
-                    <td><Select aria-label="Tipo" value={t.kind} options={kinds} onChange={(e) => set(i, { kind: e.target.value })} /></td>
+                    <td><Input aria-label="Nome" className="min-w-[200px]" value={t.name} onChange={(e) => set(i, { name: e.target.value })} /></td>
+                    <td><Select aria-label="Tipo" className="min-w-[180px]" value={t.kind} options={kinds} onChange={(e) => set(i, { kind: e.target.value })} /></td>
                     <td><Select aria-label="Recorrência" value={t.recurrence} options={[{ value: "monthly", label: "Mensal (mês seguinte à competência)" }, { value: "annual", label: "Anual (ano seguinte)" }]} onChange={(e) => set(i, { recurrence: e.target.value as ObligationTemplate["recurrence"], dueMonth: e.target.value === "annual" ? (t.dueMonth ?? 3) : undefined })} /></td>
                     <td>
                       <div className="flex items-center gap-1">

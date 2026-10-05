@@ -61,7 +61,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <Stat label="Físico" value={formatQty(sum("physical"))} hint="Soma das quantidades (unidades mistas)" />
         <Stat label="Reservado" value={formatQty(sum("reserved"))} hint="Transferências separadas e pré-vendas" href={link({ situacao: "reserved" })} />
         <Stat label="Em trânsito" value={formatQty(sum("inTransit"))} hint="Expedido, ainda não recebido" href={link({ situacao: "transit" })} tone={sum("inTransit") ? "warn" : "default"} />
-        <Stat label="Abaixo do mínimo" value={all.filter((r) => r.belowMin).length} hint="Disponível < mínimo" href={link({ situacao: "below_min" })} tone={all.some((r) => r.belowMin) ? "warn" : "default"} />
+        <Stat label="Abaixo do mínimo" value={all.filter((r) => r.belowMin).length} hint="Disponível ≤ mínimo (mínimo > 0)" href={link({ situacao: "below_min" })} tone={all.some((r) => r.belowMin) ? "warn" : "default"} />
       </div>
       <FilterBar
         basePath={base}

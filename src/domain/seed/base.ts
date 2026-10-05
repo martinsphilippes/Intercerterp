@@ -374,8 +374,8 @@ export async function seedBase(store: Store): Promise<DemoRefs> {
             {
               ...base, branchId: b.id, scopeKey: sk, provider: "simulated", environment: "homologacao", tokenRef: "FOCUSNFE_TOKEN", nfeEnabled: true, nfceEnabled: true, nfseEnabled: true,
               nfeSeries: 1, nfeNextNumber: 1, nfceSeries: 1, nfceNextNumber: 1, nfseSeries: "1", rpsNextNumber: 1, nfseStandard: "nacional", cscId: "000001", cscTokenRef: "NFCE_CSC",
-              contingency: false, defaultPresence: "1", defaultTaxGroupId: tgSimples.id, connectionStatus: "simulated", certificate: null,
-              lastTestResult: "Provedor de simulação — documentos sem validade fiscal.",
+              contingency: false, defaultPresence: "1", defaultTaxGroupId: tgSimples.id, connectionStatus: "configured_untested", certificate: null,
+              lastTestResult: null,
             },
             detId("fiscalcfg", sk),
           ),

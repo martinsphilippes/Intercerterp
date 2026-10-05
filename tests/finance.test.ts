@@ -351,3 +351,107 @@ describe("recebíveis de cartão e rotinas", () => {
     expect((await occ(`payable_due:${pi.id}`)).every((n) => n.occurrenceStatus === "resolved")).toBe(true);
   });
 });
+
+describe("demonstração do financeiro", () => {
+  it("carrega extrato OFX, retorno CNAB, título vencido e é repetível sem duplicar", async () => {
+    const store = freshStore();
+    const { seedDemo } = await import("@/domain/seed");
+    const r1: any = await seedDemo(store, { historyDays: 4 });
+    expect(r1.modules.finance.ofxImport).toBeTruthy();
+    const imports1 = await listAll(store, "bank_imports");
+    const txs1 = await listAll(store, "bank_transactions");
+    expect(imports1.length).toBe(2);
+    expect(txs1.filter((t) => t.kind === "statement").length).toBeGreaterThanOrEqual(3);
+    const tarifa = txs1.find((t) => t.description.includes("TARIFA"));
+    expect(tarifa?.status).toBe("pending");
+    expect(txs1.filter((t) => t.status === "reconciled").length).toBe(1);
+    const cnab = txs1.find((t) => t.kind === "collection");
+    expect(cnab?.installmentId).toBeTruthy();
+    const overdue = (await listAll(store, "titles", { filters: [["eq", "idemKey", "manual:demo-fin-overdue"]] }))[0];
+    expect(overdue.status).toBe("open");
+    await seedDemo(store, { historyDays: 4 });
+    expect((await listAll(store, "bank_imports")).length).toBe(imports1.length);
+    expect((await listAll(store, "bank_transactions")).length).toBe(txs1.length);
+  }, 120000);
+});
+
+/**
+ * Armazenamento com a semântica do Appwrite: dentro da transação as leituras NÃO enxergam as escritas
+ * pendentes (aplicadas só no commit, atômicas). Pega erros de sequência/cache que o banco em memória mascara.
+ */
+class IsolatedStore {
+  readonly backend = "memory" as const;
+  constructor(private base: any) {}
+  get(c: string, id: string) { return this.base.get(c, id); }
+  getOrThrow(c: string, id: string) { return this.base.getOrThrow(c, id); }
+  list(c: string, o?: any) { return this.base.list(c, o); }
+  create(c: string, d: any, id?: string) { return this.base.create(c, d, id); }
+  update(c: string, id: string, p: any) { return this.base.update(c, id, p); }
+  delete(c: string, id: string) { return this.base.delete(c, id); }
+  increment(c: string, id: string, f: string, by: number, b?: any) { return this.base.increment(c, id, f, by, b); }
+  async transaction<R>(fn: (tx: any) => Promise<R>): Promise<R> {
+    const ops: Array<(s: any) => Promise<unknown>> = [];
+    const now = new Date().toISOString();
+    const tx: any = {
+      backend: "memory",
+      get: (c: string, id: string) => this.base.get(c, id),
+      getOrThrow: (c: string, id: string) => this.base.getOrThrow(c, id),
+      list: (c: string, o?: any) => this.base.list(c, o),
+      create: async (c: string, d: any, id?: string) => {
+        const docId = id ?? Math.random().toString(16).slice(2);
+        ops.push((s) => s.create(c, d, docId));
+        return { id: docId, createdAt: now, updatedAt: now, ...d };
+      },
+      update: async (c: string, id: string, p: any) => {
+        ops.push((s) => s.update(c, id, p));
+        return { ...(await this.base.get(c, id)), ...p };
+      },
+      delete: async (c: string, id: string) => void ops.push((s) => s.delete(c, id)),
+      increment: async (c: string, id: string, f: string, by: number, b?: any) => {
+        ops.push((s) => s.increment(c, id, f, by, b));
+        const cur = await this.base.get(c, id);
+        return { ...cur, [f]: (cur?.[f] ?? 0) + by };
+      },
+    };
+    tx.transaction = (f: any) => f(tx);
+    const result = await fn(tx);
+    await this.base.transaction(async (t: any) => {
+      for (const op of ops) await op(t);
+    });
+    return result;
+  }
+}
+
+describe("semântica de transação do Appwrite (leituras isoladas)", () => {
+  it("baixa com tarifa, estorno, conciliação com diferença, renegociação e saldo inicial funcionam", async () => {
+    const iso = new IsolatedStore(ctx.store);
+    const c: Ctx = { ...ctx, store: iso as any };
+    const bank = refs.accounts.banco.id;
+    const before = (await ctx.store.getOrThrow("financial_accounts", bank)).balance;
+    const t = await createManualTitle(c, { kind: "receivable", partyType: "customer", partyId: refs.customers.joao.id, description: "Iso", issueDate: today(), competenceDate: today(), installments: [{ amount: 10000, dueDate: today() }, { amount: 5000, dueDate: addDays(today(), 30) }], idemKey: "iso" });
+    const [i1, i2] = await insts(t.id);
+    const s = await settleInstallment(c, { installmentId: i1.id, date: today(), principal: 10000, interest: 100, fee: 250, accountId: bank, idemKey: "iso-s" });
+    const acc = await ctx.store.getOrThrow("financial_accounts", bank);
+    expect(acc.balance).toBe(before + 10100 - 250);
+    const seqs = (await listAll(ctx.store, "account_entries", { filters: [["eq", "accountId", bank]], orderBy: [{ field: "seq", dir: "asc" }] })).map((e) => e.seq);
+    expect(seqs).toEqual(seqs.map((_, k) => k + 1));
+    await reverseSettlement(c, s.id, "teste");
+    expect((await ctx.store.getOrThrow("financial_accounts", bank)).balance).toBe(before);
+    const s2 = await settleInstallment(c, { installmentId: i1.id, date: today(), principal: 10000, accountId: bank, idemKey: "iso-s2" });
+    const imp = await importBankFile(c, { accountId: bank, fileName: "i.ofx", data: ofx([{ date: today(), amount: "99.10", fitid: "ISO1", memo: "DEP" }]) });
+    const tx = (await listAll(ctx.store, "bank_transactions", { filters: [["eq", "importId", imp.import.id]] }))[0];
+    const rec = await reconcile(c, { accountId: bank, bankTxIds: [tx.id], entryIds: [s2.accountEntryId], adjustment: { categoryId: refs.finCategories.tarifas.id }, idemKey: "iso-r" });
+    expect(rec.difference).toBe(-90);
+    await undoReconciliation(c, rec.id, "teste");
+    const { renegotiate } = await import("@/domain/finance");
+    const nt = await renegotiate(c, { titleId: t.id, installmentIds: [i2.id], charges: 300, discount: 0, installments: [{ amount: 2650, dueDate: addDays(today(), 30) }, { amount: 2650, dueDate: addDays(today(), 60) }], reason: "acordo", idemKey: "iso-n" });
+    expect((await ctx.store.getOrThrow("installments", i2.id)).status).toBe("renegotiated");
+    expect((await ctx.store.getOrThrow("titles", t.id)).status).toBe("paid");
+    expect((await insts(nt.id)).map((x) => x.amount)).toEqual([2650, 2650]);
+    await changeInitialBalance(c, bank, { initialBalance: refs.accounts.banco.initialBalance + 100, initialBalanceDate: refs.accounts.banco.initialBalanceDate, reason: "teste" });
+    const rb = await rebuildRunningBalances(ctx.store, bank);
+    expect(rb.divergence).toBe(0);
+    await transferBetweenAccounts(c, { fromAccountId: bank, toAccountId: refs.accounts.pix.id, amount: 1000, date: today(), description: "t", idemKey: "iso-t" });
+    expect((await rebuildRunningBalances(ctx.store, bank)).divergence).toBe(0);
+  });
+});

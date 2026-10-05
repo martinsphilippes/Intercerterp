@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/cn";
 import { qs, type SearchParams } from "@/lib/list";
 import { formatDateTime } from "@/lib/dates";
 import { queryAction, retransmitAction, testConnectionAction, transmitAction } from "../actions";
+import { measuredStatus } from "@/domain/fiscal/service";
 
 const ENV_LABEL: Record<string, string> = { homologacao: "Homologação", producao: "Produção" };
 
@@ -29,7 +30,7 @@ export function FiscalStatusBar({ cfg, model, extra, canTest }: { cfg: Doc | nul
       </span>
       {cfg.provider !== "simulated" && <Badge tone={cfg.environment === "producao" ? "brand" : "info"}>{ENV_LABEL[cfg.environment] ?? cfg.environment}</Badge>}
       <span className="flex items-center gap-1.5">
-        <span className="font-medium text-ink">Conexão (último teste):</span> <StatusBadge kind="integration" status={cfg.connectionStatus ?? "configured_untested"} />
+        <span className="font-medium text-ink">Conexão (último teste):</span> <StatusBadge kind="integration" status={measuredStatus(cfg)} />
         <span title={cfg.lastTestResult ?? ""}>{cfg.lastTestAt ? formatDateTime(cfg.lastTestAt) : "nunca testada"}</span>
       </span>
       {enabled === false && <Badge tone="warn">Emissão desabilitada</Badge>}

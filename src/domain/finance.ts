@@ -291,6 +291,8 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
     const sign = inst.kind === "receivable" ? 1 : -1;
     const total = input.principal - discount + interest + fine;
     const seq = inst.seq + 1;
+    // cache compartilhado: no Appwrite as leituras não enxergam escritas da própria transação (sequência da conta)
+    const cache = new Map<string, Doc>();
     const entry = await postEntry(ctx, t, {
       accountId: input.accountId,
       date: input.date,
@@ -307,7 +309,7 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
       originId: sid,
       idemKey: `settle:${input.idemKey}`,
       branchId: title.branchId,
-    });
+    }, cache);
     let feeEntryId: string | null = null;
     if (fee > 0) {
       const feeEntry = await postEntry(ctx, t, {
@@ -324,7 +326,7 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
         originId: sid,
         idemKey: `settle-fee:${input.idemKey}`,
         branchId: title.branchId,
-      });
+      }, cache);
       feeEntryId = feeEntry.id;
     }
     const settlement = await t.create(

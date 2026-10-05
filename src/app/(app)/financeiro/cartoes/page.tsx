@@ -50,9 +50,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   type Row = (typeof all)[number];
   const columns: Column<Row>[] = [
     { key: "expectedDate", label: "Previsão de liquidação", sortable: true, fixed: true, cell: (r) => <span className={r.status === "late" ? "font-medium text-red-700" : undefined}>{formatDate(r.expectedDate)}</span> },
-    { key: "saleNumber", label: "Venda", sortable: true, cell: (r) => (r.saleId ? <Link className="text-brand-700 hover:underline" href={`/vendas/${r.saleId}`}>nº {r.saleNumber ?? "—"}</Link> : "—") },
+    { key: "saleNumber", label: "Venda / título", sortable: true, cell: (r) => (<span className="whitespace-nowrap">{r.saleId ? <Link className="text-brand-700 hover:underline" href={`/vendas/${r.saleId}`}>Venda nº {r.saleNumber ?? "—"}</Link> : "—"}<Link className="block text-xs text-slate-500 hover:underline" href={`/financeiro/receber/${r.titleId}`}>ver título</Link></span>) },
     { key: "saleDate", label: "Data da venda", sortable: true, cell: (r) => formatDate(r.saleDate) },
-    { key: "method", label: "Meio", cell: (r) => <span>{r.method}{r.brand ? <span className="text-xs text-slate-500"> · {r.brand}</span> : null}</span> },
+    { key: "method", label: "Meio", cell: (r) => <span className="whitespace-nowrap">{r.method}{r.brand ? <span className="text-xs text-slate-500"> · {r.brand}</span> : null}</span> },
     { key: "nsu", label: "NSU", hidden: true, cell: (r) => r.nsu ?? "—" },
     { key: "installment", label: "Parcela", cell: (r) => r.installment },
     { key: "gross", label: "Venda bruta", align: "right", sortable: true, cell: (r) => formatMoney(r.gross) },
@@ -65,13 +65,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       label: "",
       cell: (r) =>
         r.openGross > 0 ? (
-          <div className="flex justify-end gap-1">
+          <div className="flex justify-end">
             <CardSettleDialog row={r} accounts={accounts} defaultAccount={(r.methodId && methodAcc.get(r.methodId)) || bankDefault} today={t0} disabled={!canSettle} disabledReason={block} />
-            <Link className="inline-flex h-8 items-center px-2 text-xs text-brand-700 hover:underline" href={`/financeiro/receber/${r.titleId}`}>título</Link>
           </div>
-        ) : (
-          <Link className="text-xs text-brand-700 hover:underline" href={`/financeiro/receber/${r.titleId}`}>título</Link>
-        ),
+        ) : null,
     },
   ];
   const filters: FilterDef[] = [

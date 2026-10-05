@@ -20,7 +20,8 @@ import { MOVEMENT_LABEL } from "@/domain/stock";
 import { COMPENSATION_LABEL, REFUND_METHOD_LABEL } from "@/domain/sales";
 import { saleDetail } from "../queries";
 import { cancelSaleAction } from "../actions";
-import { EmailReceipt, FiscalStatus, MODEL_NAME, WhatsAppLink } from "../sale-widgets";
+import { EmailReceipt, FiscalStatus, WhatsAppLink } from "../sale-widgets";
+import { MODEL_NAME } from "../labels";
 
 export const metadata = { title: "Detalhes da venda" };
 
@@ -117,7 +118,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
                 <thead>
-                  <tr><th>Produto</th><th className="text-right">Qtd.</th><th className="text-right">Unitário</th><th className="text-right">Desc. item</th><th className="text-right">Rateio desc.</th><th className="text-right">Acrésc.</th><th className="text-right">Subtotal</th><th className="text-right">Custo reg.</th><th className="text-right">Devolvido</th></tr>
+                  <tr><th>Produto</th><th className="text-right">Qtd.</th><th className="text-right">Unitário</th><th className="text-right" title="Desconto no item + rateio do desconto geral; acréscimos">Desc. / acrésc.</th><th className="text-right">Subtotal</th><th className="text-right">Custo reg.</th><th className="text-right">Devolvido</th></tr>
                 </thead>
                 <tbody>
                   {items.map((i) => (
@@ -125,9 +126,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                       <td>{i.description}<span className="block font-mono text-xs text-slate-500">{i.sku}{i.ncm ? ` · NCM ${i.ncm}` : ""}</span></td>
                       <td className="tabular text-right">{formatQty(i.qty, i.unitCode)}</td>
                       <td className="tabular text-right">{formatMoney(i.unitPrice)}</td>
-                      <td className="tabular text-right">{i.itemDiscount ? formatMoney(i.itemDiscount) : "—"}</td>
-                      <td className="tabular text-right">{i.globalDiscount ? formatMoney(i.globalDiscount) : "—"}</td>
-                      <td className="tabular text-right">{i.surcharge ? formatMoney(i.surcharge) : "—"}</td>
+                      <td className="tabular text-right text-xs">
+                        {i.itemDiscount ? <span className="block text-red-700">item −{formatMoney(i.itemDiscount)}</span> : null}
+                        {i.globalDiscount ? <span className="block text-red-700">rateio −{formatMoney(i.globalDiscount)}</span> : null}
+                        {i.surcharge ? <span className="block text-emerald-700">+{formatMoney(i.surcharge)}</span> : null}
+                        {!i.itemDiscount && !i.globalDiscount && !i.surcharge ? "—" : null}
+                      </td>
                       <td className="tabular text-right font-medium">{formatMoney(i.total)}</td>
                       <td className="tabular text-right text-slate-500">{formatMoney(i.costTotal)}</td>
                       <td className="tabular text-right">{i.returnedQty ? formatQty(i.returnedQty) : "—"}</td>
@@ -135,10 +139,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="bg-slate-50 text-sm"><td colSpan={6} className="px-3 py-1.5 text-right text-slate-500">Subtotal (bruto)</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(sale.subtotal)}</td><td colSpan={2} /></tr>
-                  <tr className="bg-slate-50 text-sm"><td colSpan={6} className="px-3 py-1.5 text-right text-slate-500">Descontos (itens + rateio do desconto geral)</td><td className="tabular px-3 py-1.5 text-right text-red-700">−{formatMoney(sale.discountTotal)}</td><td colSpan={2} /></tr>
-                  {sale.surchargeTotal > 0 && <tr className="bg-slate-50 text-sm"><td colSpan={6} className="px-3 py-1.5 text-right text-slate-500">Acréscimos</td><td className="tabular px-3 py-1.5 text-right">+{formatMoney(sale.surchargeTotal)}</td><td colSpan={2} /></tr>}
-                  <tr className="bg-slate-50 font-semibold"><td colSpan={6} className="px-3 py-2 text-right">Total</td><td className="tabular px-3 py-2 text-right text-brand-800">{formatMoney(sale.total)}</td><td className="tabular px-3 py-2 text-right text-slate-500">{formatMoney(sale.costTotal)}</td><td /></tr>
+                  <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">Subtotal (bruto)</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(sale.subtotal)}</td><td colSpan={2} /></tr>
+                  <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">Descontos (itens + rateio do desconto geral)</td><td className="tabular px-3 py-1.5 text-right text-red-700">−{formatMoney(sale.discountTotal)}</td><td colSpan={2} /></tr>
+                  {sale.surchargeTotal > 0 && <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">Acréscimos</td><td className="tabular px-3 py-1.5 text-right">+{formatMoney(sale.surchargeTotal)}</td><td colSpan={2} /></tr>}
+                  <tr className="bg-slate-50 font-semibold"><td colSpan={4} className="px-3 py-2 text-right">Total</td><td className="tabular px-3 py-2 text-right text-brand-800">{formatMoney(sale.total)}</td><td className="tabular px-3 py-2 text-right text-slate-500">{formatMoney(sale.costTotal)}</td><td /></tr>
                 </tfoot>
               </table>
             </div>

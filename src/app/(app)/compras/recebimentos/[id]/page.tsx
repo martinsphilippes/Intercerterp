@@ -149,7 +149,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </div>
       </Card>
 
-      {draft && conf && canReceive && <Conference {...conf} />}
+      {draft && conf && canReceive && <Conference key={r.updatedAt} {...conf} />}
       {draft && !canReceive && <Notice tone="warn">Somente usuários com “Receber mercadorias” na filial do recebimento podem conferir e concluir.</Notice>}
 
       {!draft && (

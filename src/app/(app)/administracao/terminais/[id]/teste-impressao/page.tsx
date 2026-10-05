@@ -22,8 +22,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <div className="no-print">
         <PageHeader title={`Teste de impressão — ${t.name}`} crumbs={[{ label: "Administração" }, { label: "Terminais", href: "/administracao/terminais" }, { label: t.name, href: `/administracao/terminais/${id}` }, { label: "Teste de impressão" }]} description={`Papel ${width} mm (${cols} colunas) · modo ${t.printerMode === "connector" ? "conector local" : "navegador"}.`} />
       </div>
-      <PrintTest id={id} width={width}>
-        <pre className="whitespace-pre-wrap">
+      <PrintTest id={id} width={width} cols={cols}>
+        <pre className="whitespace-pre">
           {[
             (s.company.tradeName || s.company.name).toUpperCase().slice(0, cols),
             branch?.name?.slice(0, cols) ?? "",

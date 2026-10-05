@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeftRight, Copy } from "lucide-react";
+import { ArrowLeftRight, Plus } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
@@ -110,7 +110,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             )}
             {can(s.user, "products", "create") && (
               <LinkButton href="/produtos/novo" title="Cadastrar outro produto">
-                <Copy className="size-4" /> Novo
+                <Plus className="size-4" /> Novo produto
               </LinkButton>
             )}
             {canEdit &&
@@ -320,7 +320,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                             <td className="whitespace-nowrap font-mono text-xs">{skuById.get(b.skuId)?.sku}</td>
                             <td className="tabular text-right">{formatQty(b.physical)}</td>
                             <td className="tabular text-right">{formatQty(b.reserved)}</td>
-                            <td className={`tabular text-right font-semibold ${b.minQty && av < b.minQty ? "text-amber-700" : ""}`}>{formatQty(av)}</td>
+                            <td className={`tabular text-right font-semibold ${b.minQty && av <= b.minQty ? "text-amber-700" : ""}`}>{formatQty(av)}</td>
                             <td className="tabular text-right">{b.inTransit ? <Link className="text-brand-700 hover:underline" href="/estoque/transferencias?status=in_transit">{formatQty(b.inTransit)}</Link> : "—"}</td>
                             <td className="tabular text-right">{formatQty(b.minQty ?? 0)}</td>
                             <td className="tabular text-right">{formatQty(b.maxQty ?? 0)}</td>

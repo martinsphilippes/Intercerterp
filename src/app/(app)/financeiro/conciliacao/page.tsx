@@ -245,6 +245,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           )}
           <Workspace accountId={account.id} rows={rows} entries={freeEntries} installments={installments} categories={cats} feeCategoryId={feeCat} methods={methods} windowDays={ws.windowDays} canWrite={canWrite} writeBlock={writeBlock} />
           <p className="mt-3 text-xs text-slate-500">
+            <a className="mr-2 text-brand-700 hover:underline" href={`/api/export/fin-bank-transactions${qs({ account: account.id, from, to })}`}>
+              Exportar linhas do extrato (CSV)
+            </a>
             Exibindo {rows.length} de {counts.todos} movimentação(ões). Sugestões consideram valor exato, data (±{ws.windowDays} dias, parâmetro em Cadastros financeiros) e documento; nunca são aplicadas sem confirmação.
           </p>
         </>

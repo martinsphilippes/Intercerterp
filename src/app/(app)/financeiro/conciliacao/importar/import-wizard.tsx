@@ -335,7 +335,8 @@ export function ImportWizard({ accounts, defaultAccount, canImport, block }: { a
 
           <div className="flex items-center justify-end gap-3">
             {block && <span className="text-xs text-amber-700">{block}</span>}
-            <Button type="button" variant="accent" disabled={pending || Boolean(r.fatal) || !canImport || (valid === 0 && !issues.length)} loading={pending} onClick={doImport}>
+            {pv.blockReason && !r.fatal && <span className="text-xs text-red-700">Importação bloqueada: {pv.blockReason}</span>}
+            <Button type="button" variant="accent" disabled={pending || Boolean(pv.blockReason) || !canImport || (valid === 0 && !issues.length)} loading={pending} onClick={doImport}>
               <Upload className="size-4" /> {pv.alreadyImported ? "Abrir importação existente" : `Importar ${pv.newCount} transação(ões)`}
             </Button>
           </div>

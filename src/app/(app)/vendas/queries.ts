@@ -28,7 +28,9 @@ async function inChunks<T = any>(ctx: Ctx, collection: string, field: string, id
 export async function querySales(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   const { from, to } = salesPeriod(p.f);
   const { start, end } = dayRange(from, to);
-  const filters: Filter[] = [["eq", "companyId", ctx.companyId], ["gte", "completedAt", start], ["lt", "completedAt", end]];
+  const filters: Filter[] = [["eq", "companyId", ctx.companyId]];
+  // vendas de uma sessão de caixa: sem recorte de período (a sessão já delimita)
+  if (!(p.f.sessao && !p.f.de && !p.f.ate)) filters.push(["gte", "completedAt", start], ["lt", "completedAt", end]);
   const branch = ctx.branchId ?? p.f.filial ?? null;
   if (branch) filters.push(["eq", "branchId", branch]);
   if (p.f.operador) filters.push(["eq", "operatorId", p.f.operador]);

@@ -466,7 +466,7 @@ export function NfeWizard(props: WizardProps) {
           {issues.length > 0 && <p className="mt-2 text-xs text-amber-800">{issues.length} pendência(s) — veja a etapa Revisão.</p>}
         </div>
         <div className="space-y-2 rounded-lg border border-line bg-white p-4">
-          {savedAt && <Badge tone="good">Rascunho salvo às {new Date(savedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</Badge>}
+          {savedAt && <Badge tone="good">Rascunho salvo às {new Date(savedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })}</Badge>}
           {props.draftStatus && props.draftStatus !== "draft" && <Badge tone="warn">Situação atual: {props.draftStatus === "rejected" ? "Rejeitada — corrija e retransmita" : "Pendente"}</Badge>}
           <Button type="button" variant="secondary" className="w-full" onClick={() => save("draft")} loading={pending} disabled={!input.items.length}><Save className="size-4" /> Salvar rascunho</Button>
           <Button type="button" variant="secondary" className="w-full" onClick={() => save("preview")} loading={pending} disabled={!input.items.length}><FileSearch className="size-4" /> Pré-visualizar DANFE</Button>

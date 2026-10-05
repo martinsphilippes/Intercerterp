@@ -367,7 +367,7 @@ export function PdvApp(props: PdvProps) {
         <span className="flex items-center gap-2 font-semibold">
           <ShoppingCart className="size-5 text-accent-500" /> PDV
         </span>
-        <span className="hidden text-brand-200 xl:inline">{props.companyName} · {props.branch.name}</span>
+        <span className="hidden text-brand-200 2xl:inline">{props.companyName} · {props.branch.name}</span>
         <span className="hidden flex-col leading-tight md:flex" title={`Atendimento ${cart.id}`}>
           <span className="text-[11px] text-brand-200">{cart.exchangeReturnId ? "Troca em andamento" : "Venda em andamento"}</span>
           <span className="font-mono text-xs">#{cart.id.slice(0, 8).toUpperCase()}</span>
@@ -383,21 +383,21 @@ export function PdvApp(props: PdvProps) {
             ))}
           </select>
         </label>
-        <span className="flex items-center gap-1.5 text-brand-100">
+        <span className="hidden items-center gap-1.5 text-brand-100 xl:flex" title="Operador">
           <UserRound className="size-4" aria-hidden /> {props.operator.name}
         </span>
         {props.session ? (
           <Link href={`/caixa/${props.session.id}`} className="flex items-center gap-1.5 rounded bg-emerald-600/20 px-2 py-0.5 text-emerald-100 hover:bg-emerald-600/30">
-            <Wallet className="size-4" /> {props.terminal.code} · <span className="size-2 rounded-full bg-emerald-400" aria-hidden /> {props.session.status === "reopened" ? "Reaberto" : "Aberto"} (sessão nº {props.session.number} · {props.session.operatorName})
+            <Wallet className="size-4" /> <span className="size-2 rounded-full bg-emerald-400" aria-hidden /> {props.session.status === "reopened" ? "Reaberto" : "Aberto"} <span className="hidden lg:inline">· sessão nº {props.session.number} · {props.session.operatorName}</span>
           </Link>
         ) : (
           <Link href={`/caixa/abertura?terminal=${props.terminal.id}`} className="flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-0.5 text-red-100 hover:bg-red-500/30">
             <AlertTriangle className="size-4" /> Caixa fechado — abrir
           </Link>
         )}
-        <span className={cn("ml-auto flex items-center gap-1 text-xs", saveState.state === "error" ? "text-red-200" : "text-brand-200")} role="status" aria-live="polite">
+        <span className={cn("ml-auto flex items-center gap-1 text-xs", saveState.state === "error" ? "text-red-200" : "text-brand-200")} role="status" aria-live="polite" title="Gravação automática do atendimento">
           {saveState.state === "saving" ? <RefreshCcw className="size-3.5 animate-spin" /> : saveState.state === "error" ? <CloudOff className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}
-          {saveState.state === "saving" ? "Gravando…" : saveState.state === "error" ? "Não gravado no servidor (cópia local mantida)" : `Atendimento gravado ${saveState.at ? new Date(saveState.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}`}
+          <span className="hidden md:inline">{saveState.state === "saving" ? "Gravando…" : saveState.state === "error" ? "Não gravado no servidor (cópia local mantida)" : `Gravado ${saveState.at ? new Date(saveState.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}`}</span>
         </span>
         <div className="flex items-center gap-1">
           <button type="button" onClick={() => setDialog("parked")} className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800">

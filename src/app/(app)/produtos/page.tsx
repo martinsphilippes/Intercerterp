@@ -30,7 +30,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       if (r.type === "service") return <span className="text-slate-400">—</span>;
       const av = r.stock[b.id] ?? 0;
       const min = r.minByBranch[b.id] ?? 0;
-      const tone = av <= 0 ? "text-red-700" : min && av < min ? "text-amber-700" : "";
+      const tone = av <= 0 ? "text-red-700" : min && av <= min ? "text-amber-700" : "";
       return (
         <span className="block">
           <span className={`font-semibold ${tone}`}>{formatQty(av)} {r.unitCode?.toLowerCase()}.</span>
@@ -104,7 +104,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const canCreate = can(s.user, "products", "create");
   const scopeName = s.branch?.name ?? "todas as filiais";
   const physical = all.filter((r) => r.type === "product" && r.status !== "inactive");
-  const low = physical.filter((r) => r.belowMin && r.scopeAvailable > 0).length;
+  const low = physical.filter((r) => r.belowMin).length;
   const zero = physical.filter((r) => r.scopeAvailable <= 0).length;
   return (
     <>
@@ -138,7 +138,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Produtos ativos" value={all.filter((r) => r.status === "active").length.toLocaleString("pt-BR")} hint={`${all.reduce((a, r) => a + r.skuCount, 0)} variações (SKUs) · ${all.length} no recorte`} href="/produtos?status=active" />
         <Stat label="Valor em estoque" value={formatMoney(all.reduce((a, r) => a + r.scopeValue, 0))} hint={`Custo médio atual · ${scopeName}`} href="/estoque" />
-        <Stat label="Estoque baixo" value={low} hint="Abaixo do mínimo (com saldo)" href="/produtos?stock=below_min" tone={low ? "warn" : "default"} />
+        <Stat label="Estoque baixo" value={low} hint="Disponível ≤ mínimo (SKU × depósito)" href="/produtos?stock=below_min" tone={low ? "warn" : "default"} />
         <Stat label="Sem estoque" value={zero} hint="Disponível ≤ 0 — reposição necessária" href="/produtos?stock=zero&status=active" tone={zero ? "bad" : "default"} />
         <Stat label="Fiscal a revisar" value={all.filter((r) => r.fiscalPending).length} hint="Incompleto (NCM/tributação) ou revisar (CEST)" href="/produtos?fiscal=pending" tone={all.some((r) => r.fiscalPending) ? "warn" : "default"} />
       </div>

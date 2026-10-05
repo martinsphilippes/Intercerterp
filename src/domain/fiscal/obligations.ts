@@ -106,6 +106,8 @@ export async function generateObligations(ctx: Ctx, ref = today()) {
   let created = 0;
   for (const t of templates) {
     const { period, dueDate } = occurrenceFor(t, ref);
+    // não retroage: ocorrências vencidas há mais de 60 dias não são criadas automaticamente (cadastre manualmente se necessário)
+    if (diffDays(dueDate, ref) > 60) continue;
     const id = obligationId(ctx.companyId, t.key, period);
     if (await ctx.store.get("fiscal_obligations", id)) continue;
     try {
