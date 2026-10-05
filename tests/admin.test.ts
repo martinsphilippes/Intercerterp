@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 import { freshStore } from "./helpers";
 import { seedBase, type DemoRefs } from "@/domain/seed/base";
 import { listAll, findOne } from "@/lib/db";
@@ -16,6 +17,8 @@ import { createBranch, createCompany, updateBranch } from "@/domain/companies";
 import { createTerminal, checkConnectorFromServer, recordBrowserPrintPage } from "@/domain/terminals";
 import { ensureHelpArticles, HELP_ARTICLES, articlesForRoute, searchArticles } from "@/domain/help-content";
 import type { Ctx } from "@/lib/core/ctx";
+import { saveParameters, loadParameters } from "@/app/(app)/administracao/parametros/params";
+import { getSetting } from "@/lib/core/settings";
 
 let store: MemoryStore;
 let refs: DemoRefs;
@@ -276,5 +279,39 @@ describe("ajuda", () => {
     const arts = await listAll(store, "help_articles");
     expect(articlesForRoute(arts, "/financeiro/receber/abc")[0].slug).toBe("contas-a-receber-e-pagar");
     expect(searchArticles(arts, "sangria")[0].slug).toBe("caixa-abertura-sangria-fechamento");
+  });
+});
+
+describe("parâmetros", () => {
+  it("filial substitui a empresa, valida limites ABC e audita cada alteração com antes/depois", async () => {
+    const cid = refs.company.id;
+    const shop = refs.branches.shopping.id;
+    expect(await saveParameters(admin, null, { "sales.presaleExpiryHours": "72" })).toEqual([]); // igual ao padrão: nada muda
+    expect(await saveParameters(admin, shop, { "sales.presaleExpiryHours": "48" }, [], "Shopping fecha mais cedo")).toEqual(["sales.presaleExpiryHours"]);
+    expect(await getSetting(store, cid, shop, "sales.presaleExpiryHours", 72)).toBe(48);
+    expect(await getSetting(store, cid, refs.branches.matriz.id, "sales.presaleExpiryHours", 72)).toBe(72);
+    const st = (await loadParameters(store, cid, shop)).find((x) => x.def.key === "sales.presaleExpiryHours")!;
+    expect(st.source).toBe("filial");
+    await expect(saveParameters(admin, null, { "abc.limitA": "96", "abc.limitB": "95" })).rejects.toThrow(/classe B/);
+    await expect(saveParameters(admin, null, { "replenishment.coverageDays": "0" })).rejects.toThrow(/mínimo/);
+    const logs = await listAll(store, "audit_logs", { filters: [["eq", "action", "setting.update"]] });
+    expect(logs.some((l) => l.after?.["sales.presaleExpiryHours"] === 48 && l.before?.["sales.presaleExpiryHours"] === 72 && l.reason === "Shopping fecha mais cedo")).toBe(true);
+    // remover a substituição volta a seguir a empresa
+    expect(await saveParameters(admin, shop, {}, ["sales.presaleExpiryHours"])).toEqual(["sales.presaleExpiryHours"]);
+    expect(await getSetting(store, cid, shop, "sales.presaleExpiryHours", 72)).toBe(72);
+    const cashier = await refs.ctxFor("cashier");
+    await expect(saveParameters(cashier, null, { "sales.presaleExpiryHours": "10" })).rejects.toThrow(PermissionError);
+  });
+
+  it("tentativa sem permissão fica registrada como falha no histórico", async () => {
+    const cashier = await refs.ctxFor("cashier");
+    await expect(createRole(cashier, { name: "Hack", permissions: {}, actions: [], discountLimitBps: 0 })).rejects.toThrow(PermissionError);
+    const denied = await listAll(store, "audit_logs", { filters: [["eq", "action", "role.create.denied"]] });
+    expect(denied.length).toBeGreaterThan(0);
+    expect(denied[0].result).toBe("failure");
+    expect(denied[0].userId).toBe(refs.users.cashier.id);
+    await expect(authenticate(store, "gerente", "senha-errada")).rejects.toThrow(/inválidos/);
+    const failed = await listAll(store, "audit_logs", { filters: [["eq", "action", "auth.login_failed"]] });
+    expect(failed.some((f) => f.entityId === refs.users.manager.id && f.result === "failure")).toBe(true);
   });
 });

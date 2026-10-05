@@ -15,6 +15,8 @@ import { can } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { MOVEMENT_LABEL } from "@/domain/stock";
 import { COMPENSATION_LABEL, REFUND_METHOD_LABEL } from "@/domain/sales";
+import { DOC_STATUS_LABEL } from "@/domain/fiscal/service";
+import { MODEL_NAME } from "../../labels";
 
 export const metadata = { title: "Devolução" };
 
@@ -67,7 +69,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <Stat label="Valor devolvido" value={formatMoney(ret.itemsTotal)} hint={`${items.length} item(ns) · custo retornado ${formatMoney(ret.costTotal)}`} />
         <Stat label="Compensação" value={COMPENSATION_LABEL[ret.compensation] ?? ret.compensation} hint={ret.refundMethod ? REFUND_METHOD_LABEL[ret.refundMethod] : voucher ? `Vale ${voucher.code}` : "—"} />
         <Stat label={ret.kind === "exchange" ? "Diferença da troca" : "Saldo do vale"} value={ret.kind === "exchange" ? (exSale ? formatMoney(Math.abs(ret.difference)) : "—") : voucher ? formatMoney(voucher.balance) : "—"} hint={ret.kind === "exchange" ? (exSale ? (ret.difference >= 0 ? "paga pelo cliente na nova venda" : "a favor do cliente (permanece no vale)") : "nova venda pendente") : voucher ? `de ${formatMoney(voucher.originalAmount)} · validade ${formatDate(voucher.expiresAt)}` : undefined} />
-        <Stat label="Documento fiscal de devolução" value={doc ? `${doc.model === "nfe" ? "NF-e" : doc.model} ${doc.number ?? "(rascunho)"}` : "Não gerado"} hint={doc ? `Situação: ${doc.status}` : "Venda sem documento autorizado a referenciar"} href={doc ? `/fiscal/${doc.model}/${doc.id}` : undefined} />
+        <Stat label="Documento fiscal de devolução" value={doc ? `${doc.model === "nfe" ? "NF-e" : doc.model} ${doc.number ?? "(rascunho)"}` : "Não gerado"} hint={doc ? `Situação: ${DOC_STATUS_LABEL[doc.status] ?? doc.status}${doc.status === "draft" ? " — revisar e transmitir no módulo Fiscal" : ""}` : "Venda sem documento autorizado a referenciar"} href={doc ? `/fiscal/${doc.model}/${doc.id}` : undefined} />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Itens devolvidos" className="lg:col-span-2" bodyClass="p-0">
@@ -99,7 +101,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               { label: "Motivo", value: ret.reason },
               ret.cashSessionId && { label: "Caixa (saída em dinheiro)", value: <Link className="text-brand-700 hover:underline" href={`/caixa/${ret.cashSessionId}`}>Sessão de caixa</Link> },
               exSale && { label: "Nova venda da troca", value: <Link className="text-brand-700 hover:underline" href={`/vendas/${exSale.id}`}>nº {exSale.number} — {formatMoney(exSale.total)}</Link> },
-              doc && { label: "Documento de devolução", value: <Link className="text-brand-700 hover:underline" href={`/fiscal/${doc.model}/${doc.id}`}>{doc.model.toUpperCase()} {doc.number ?? doc.ref} <SimBadge show={Boolean(doc.isSimulated)} /></Link> },
+              doc && { label: "Documento de devolução", value: <Link className="text-brand-700 hover:underline" href={`/fiscal/${doc.model}/${doc.id}`}>{MODEL_NAME[doc.model] ?? doc.model} {doc.number ? `nº ${doc.number}` : "(rascunho)"} <SimBadge show={Boolean(doc.isSimulated)} /></Link> },
             ]}
           />
         </Card>
