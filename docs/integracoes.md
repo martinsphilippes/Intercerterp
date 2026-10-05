@@ -1,5 +1,42 @@
 # Integrações
 
+Princípios: contratos independentes de fornecedor, adaptador real + adaptador de **simulação** explicitamente rotulado, credenciais **somente por referência** (o banco guarda o nome da variável de ambiente, nunca o valor), estados **medidos** (`não configurada`, `configurada sem teste`, `operacional`, `indisponível`, `erro`; o simulador aparece como `Simulação`, nunca `Operacional`), referência única por operação externa, registro de execução saneado (`integration_logs`) e reprocessamento por tarefa durável.
+
+## Resumo — o que foi comprovado e onde
+
+| Integração | Adaptador real | Consumidor | Teste local (contrato) | Sandbox/homologação | Produção |
+|---|---|---|---|---|---|
+| Appwrite (banco, Auth, Storage) | `AppwriteStore`, `AppwriteAuth`, `AppwriteFileStorage`, `provisionAppwrite` | Todo o sistema | **Comprovado** em Appwrite 1.8.0 self-hosted (Docker): provisionamento de ~75 tabelas, transações, índices únicos, incrementos com limite, Auth, Storage, seed completo, backup e restauração em nova base | — | Appwrite Cloud: **não testado** (rede deste ambiente bloqueia `cloud.appwrite.io`; endpoint e Project ID não fornecidos) |
+| NF-e / NFC-e / NFS-e — Focus NFe | `FocusNfeProvider` (API v2; NFS-e municipal `/v2/nfse` e nacional `/v2/nfsen`) | Fiscal, PDV, devoluções, compras | Contrato testado contra **servidor HTTP falso** que imita a Focus (envio 202/processando, consulta autorizado, 401 → erro) — `tests/fiscal.test.ts` | **Não executado** (sem token; rede bloqueia a Focus) | Não |
+| Fiscal — simulação | `SimulatedFiscalProvider` (rotulado, valida NCM/CFOP, simula rejeição) | Demonstração | Comprovado | — | — |
+| Pix — Mercado Pago | `MercadoPagoProvider` (`X-Idempotency-Key` = referência; consulta por `external_reference`; estorno) | PDV → pagamento | Contrato coberto por testes de intenção (pendente/confirmado/falha com consulta da referência anterior) usando o provedor de simulação | **Não executado** (sem `MERCADOPAGO_ACCESS_TOKEN`) | Não |
+| Cartões | Registro manual de NSU/autorização (maquininha); recebível contra adquirente; liquidação com taxa | PDV, Financeiro → cartões | Comprovado | — | — |
+| TEF | Conector local (contrato HTTP abaixo) | Terminais / PDV | Teste do conector com servidor de teste local (HTTP 200) e falha real registrada | Depende do software do conector | Não |
+| Banco — arquivos | Parsers OFX, CSV (mapeável), CNAB 240 (FEBRABAN T/U), CNAB 400 (Itaú, Bradesco) | Conciliação | Comprovado com arquivos de exemplo (`tests/fixtures`) | Layouts devem ser homologados com arquivos reais dos bancos | — |
+| Banco — API/Open Finance | Não implementado (estado “indisponível” na central) | — | — | — | — |
+| E-mail | Resend (API) e Appwrite Messaging | Convites, recuperação local, cobrança, documentos, chamados, contabilidade | Sem canal configurado: todas as telas registram “não enviado / canal não configurado” (comprovado) | Não executado (sem chave) | Não |
+| Recuperação de senha | Appwrite Auth `createRecovery`/`updateRecovery` | Login | Fluxo local comprovado; Appwrite local sem SMTP | — | Appwrite Cloud envia pelo próprio SMTP |
+| Consulta CNPJ | BrasilAPI (pública) | Clientes, fornecedores | Rede deste ambiente bloqueia; erro tratado e exibido | — | — |
+| Contabilidade | Pacote ZIP (XMLs armazenados + CSVs + manifesto SHA-256) e envio por e-mail | Fiscal → relatórios | Pacote comprovado (ZIP inspecionado em teste) | — | — |
+
+## Configuração (variáveis de ambiente)
+
+| Variável | Uso |
+|---|---|
+| `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_API_KEY`, `APPWRITE_DATABASE_ID` | Banco, Auth e Storage |
+| `FOCUSNFE_TOKEN` (nome configurável em Fiscal → Configurações) | NF-e/NFC-e/NFS-e |
+| `NFCE_CSC` (nome configurável) | CSC da NFC-e |
+| `MERCADOPAGO_ACCESS_TOKEN` (nome configurável) | Pix |
+| `RESEND_API_KEY` (nome configurável) | E-mail |
+| `CRON_SECRET` | Protege `/api/jobs` (Vercel Cron) |
+| `SETUP_TOKEN` | Protege o primeiro acesso/provisionamento |
+
+Na Central de integrações (Administração → Integrações) cada integração mostra se a variável referenciada está **definida no servidor** (sem revelar o valor), o último teste medido, pendências (tarefas em retentativa/falhas) com reprocessamento e o histórico de execuções.
+
+## Tarefas duráveis e rotinas
+
+`/api/jobs` (Vercel Cron a cada 10 min; ou “Executar tarefas pendentes agora”) processa: efeitos da venda (`sale.effects`), transmissão/consulta/cancelamento fiscal, recálculo de saldo de conta, backup agendado e rotinas diárias (vencidos, contas a pagar do dia, obrigações fiscais, acompanhamento de compras, estoque, retenção de backup). Cada tentativa é reivindicada por registro único (nunca executa duas vezes em paralelo) e usa recuo exponencial; esgotadas as tentativas, a tarefa vira “morta” e gera notificação.
+
 ## Conector de periféricos
 
 O PDV roda no navegador. Impressoras térmicas, leitores HID e pinpads TEF, porém, falam com o computador do caixa (USB/serial/rede local), não com o servidor na nuvem. O **conector de periféricos** é um pequeno serviço HTTP instalado **no computador de cada caixa** que faz essa ponte. Ele é opcional: sem conector, a impressão usa o diálogo do navegador e o leitor funciona como teclado.
