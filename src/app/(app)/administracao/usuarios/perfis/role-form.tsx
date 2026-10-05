@@ -150,6 +150,11 @@ export function RoleForm({ role, modules, ops, actions, na, readOnly, usersCount
             </div>
           </FormSection>
 
+          {r.id && !readOnly && (
+            <FormSection title="Motivo / contexto da alteração" description="Opcional; fica registrado no histórico de auditoria junto com o antes/depois.">
+              <Textarea name="reason" rows={2} placeholder="Ex.: ajuste do perfil Caixa para a operação do cliente-piloto" />
+            </FormSection>
+          )}
           {error && <Notice tone="bad">{error}</Notice>}
           {!readOnly && (
             <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-end gap-2 border-t border-line bg-canvas/95 px-1 py-3 backdrop-blur">

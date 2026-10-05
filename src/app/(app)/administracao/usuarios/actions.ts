@@ -92,7 +92,7 @@ export async function saveRoleAction(fd: FormData) {
   return runAction({ module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/usuarios/perfis"] }, async (s) => {
     const { permissions, actions } = matrixFromForm(fd);
     const input = { name: fstr(fd, "name"), description: fopt(fd, "description"), permissions, actions, discountLimitBps: pctToBps(fstr(fd, "discountPct")) ?? 0, active: fstr(fd, "active") !== "0" };
-    const r = id ? await updateRole(s.ctx, id, input) : await createRole(s.ctx, input, { idemKey: fstr(fd, "_idem") || undefined });
+    const r = id ? await updateRole(s.ctx, id, input, fopt(fd, "reason")) : await createRole(s.ctx, input, { idemKey: fstr(fd, "_idem") || undefined });
     return { ok: true as const, message: id ? "Perfil atualizado. As permissões valem a partir da próxima ação de cada usuário." : "Perfil criado.", redirect: `/administracao/usuarios/perfis/${r.id}` };
   });
 }

@@ -2,7 +2,7 @@ import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { BusinessError, PermissionError, assert } from "@/lib/core/errors";
 import { requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
-import { audit, diff } from "@/lib/core/audit";
+import { audit } from "@/lib/core/audit";
 import { searchable } from "@/lib/core/text";
 import { MODULES, SPECIAL_ACTIONS, type Crud, type ModuleKey, type PermissionMatrix, type SpecialAction } from "@/lib/permissions";
 
@@ -75,8 +75,50 @@ export function normalizeMatrix(m: PermissionMatrix | null | undefined): Permiss
 }
 
 export function normalizeActions(a: string[] | null | undefined): SpecialAction[] {
-  const known = new Set<string>(SPECIAL_ACTIONS.map((x) => x.key));
-  return [...new Set((a ?? []).filter((x) => known.has(x)))] as SpecialAction[];
+  const wanted = new Set(a ?? []);
+  return SPECIAL_ACTIONS.map((x) => x.key).filter((k) => wanted.has(k)) as SpecialAction[];
+}
+
+/** Diferença legível de perfil (campo a campo): "Vendas · Editar: Não permitido → Permitido", "Desconto máximo: 5% → 8%". */
+export function roleDiff(before: Record<string, any>, after: Record<string, any>) {
+  const b: Record<string, string> = {};
+  const a: Record<string, string> = {};
+  const yes = (v: boolean) => (v ? "Permitido" : "Não permitido");
+  if (before.name !== after.name) {
+    b["Nome"] = before.name;
+    a["Nome"] = after.name;
+  }
+  if ((before.description ?? null) !== (after.description ?? null)) {
+    b["Descrição"] = before.description ?? "—";
+    a["Descrição"] = after.description ?? "—";
+  }
+  if ((before.discountLimitBps ?? 0) !== (after.discountLimitBps ?? 0)) {
+    b["Desconto máximo"] = `${((before.discountLimitBps ?? 0) / 100).toLocaleString("pt-BR")}%`;
+    a["Desconto máximo"] = `${((after.discountLimitBps ?? 0) / 100).toLocaleString("pt-BR")}%`;
+  }
+  if ((before.active ?? true) !== (after.active ?? true)) {
+    b["Situação"] = before.active === false ? "Inativo" : "Ativo";
+    a["Situação"] = after.active === false ? "Inativo" : "Ativo";
+  }
+  for (const m of MODULES) {
+    for (const op of CRUD_OPS) {
+      const x = Boolean(before.permissions?.[m.key]?.[op.key]);
+      const y = Boolean(after.permissions?.[m.key]?.[op.key]);
+      if (x !== y) {
+        b[`${m.label} · ${op.label}`] = yes(x);
+        a[`${m.label} · ${op.label}`] = yes(y);
+      }
+    }
+  }
+  const ba = new Set(before.actions ?? []);
+  const aa = new Set(after.actions ?? []);
+  for (const act of SPECIAL_ACTIONS) {
+    if (ba.has(act.key) !== aa.has(act.key)) {
+      b[act.label] = yes(ba.has(act.key));
+      a[act.label] = yes(aa.has(act.key));
+    }
+  }
+  return { before: b, after: a };
 }
 
 /** Lê a matriz enviada pelo formulário (checkboxes "perm.<módulo>.<op>" e "action"). */
@@ -170,7 +212,7 @@ export async function duplicateRole(ctx: Ctx, id: string, name?: string, idemKey
   return createRole(ctx, { name: n, description: src.description, permissions: src.permissions, actions: src.actions, discountLimitBps: src.discountLimitBps ?? 0 }, { idemKey, duplicatedFrom: id });
 }
 
-export async function updateRole(ctx: Ctx, id: string, input: RoleInput) {
+export async function updateRole(ctx: Ctx, id: string, input: RoleInput, reason?: string | null) {
   await guard(ctx, "edit", `alterar perfil "${input.name}"`, id);
   validate(input);
   const before = await ctx.store.getOrThrow("roles", id);
@@ -185,9 +227,10 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput) {
     name: input.name.trim(), description: input.description?.trim() || null, permissions: normalizeMatrix(input.permissions), actions: normalizeActions(input.actions),
     discountLimitBps: input.discountLimitBps, active: input.active ?? before.active ?? true,
   });
-  const d = diff(before, after);
-  if (Object.keys(d.after).length) {
-    await audit(ctx, { module: "admin", action: "role.update", entityType: "role", entityId: id, summary: `Perfil "${after.name}" alterado${before.system ? " (perfil de sistema)" : ""}`, before: d.before, after: d.after });
+  const d = roleDiff(before, after);
+  const n = Object.keys(d.after).length;
+  if (n) {
+    await audit(ctx, { module: "admin", action: "role.update", entityType: "role", entityId: id, summary: `Permissões do perfil "${after.name}" alteradas (${n} item(ns))${before.system ? " — perfil de sistema" : ""}`, before: d.before, after: d.after, reason: reason ?? null });
   }
   return after;
 }

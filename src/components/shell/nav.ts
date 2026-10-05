@@ -27,6 +27,7 @@ export const NAV: NavGroup[] = [
     label: "Produtos e estoque",
     items: [
       { href: "/produtos", label: "Produtos e serviços", module: "products", icon: "Package" },
+      { href: "/estoque", label: "Saldos de estoque", module: "stock", icon: "Boxes" },
       { href: "/estoque/movimentos", label: "Movimentação de estoque", module: "stock", icon: "ArrowLeftRight" },
       { href: "/estoque/transferencias", label: "Transferências", module: "stock", icon: "Truck" },
       { href: "/estoque/inventarios", label: "Inventário e contagem", module: "stock", icon: "ClipboardList" },
