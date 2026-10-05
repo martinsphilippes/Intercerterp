@@ -7,14 +7,39 @@ import { createCompanyWithDefaults } from "@/domain/setup";
 import { onlyDigits, isValidCnpj } from "@/lib/core/text";
 import type { ActionResult } from "@/lib/server/action";
 
+function checkSetupToken(fd: FormData): string | null {
+  const expected = process.env.SETUP_TOKEN;
+  if (!expected) return null;
+  return String(fd.get("setupToken") ?? "") === expected ? null : "Token de instalação inválido (variável SETUP_TOKEN do servidor).";
+}
+
+/** Cria tabelas/índices/buckets no Appwrite. Retomável: cada chamada continua de onde parou. */
+export async function provisionAction(fd: FormData): Promise<ActionResult<{ done: boolean; tables: number; total: number; log: string[] }>> {
+  if (!(await isEmptyInstallation())) return { ok: false, error: "A instalação já foi inicializada." };
+  const bad = checkSetupToken(fd);
+  if (bad) return { ok: false, error: bad };
+  const { configuredBackend, appwriteConfig } = await import("@/lib/db");
+  if (configuredBackend() !== "appwrite") return { ok: false, error: "Provisionamento aplica-se apenas ao backend Appwrite." };
+  const { provisionAppwrite } = await import("@/lib/db/provision");
+  const log: string[] = [];
+  try {
+    const r = await provisionAppwrite(appwriteConfig(), (m) => log.push(m), { deadline: Date.now() + 240000 });
+    return { ok: true, data: { ...r, log: log.slice(-12) }, message: r.done ? "Banco provisionado." : `Parcial: ${r.tables}/${r.total} tabelas. Clique novamente para continuar.` };
+  } catch (e: any) {
+    return { ok: false, error: `Falha no provisionamento: ${e.message}` };
+  }
+}
+
 /** Instalação inicial: somente quando ainda não existe nenhum usuário. */
 export async function setupInstallationAction(fd: FormData): Promise<ActionResult> {
   if (!(await isEmptyInstallation())) return { ok: false, error: "A instalação já foi inicializada." };
+  const bad = checkSetupToken(fd);
+  if (bad) return { ok: false, error: bad };
   const store = getStore();
   const mode = String(fd.get("mode") ?? "company");
   if (mode === "demo") {
     const { seedDemo } = await import("@/domain/seed");
-    await seedDemo(store, { historyDays: 45 });
+    await seedDemo(store, { historyDays: Number(process.env.DEMO_HISTORY_DAYS ?? 14) });
     return { ok: true, message: "Demonstração carregada. Entre com admin / Intercert@2026.", redirect: "/login" };
   }
   const name = String(fd.get("companyName") ?? "").trim();

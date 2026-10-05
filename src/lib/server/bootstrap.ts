@@ -22,6 +22,19 @@ export function ensureBootstrap() {
 
 export async function isEmptyInstallation() {
   const store = getStore();
-  const res = await store.list("users", { limit: 1 });
-  return res.items.length === 0;
+  try {
+    const res = await store.list("users", { limit: 1 });
+    return res.items.length === 0;
+  } catch {
+    // banco ainda não provisionado (tabelas inexistentes) também é instalação vazia
+    return true;
+  }
+}
+
+/** Estado do banco (somente Appwrite): acessível? provisionado? */
+export async function installationState() {
+  if (configuredBackend() !== "appwrite") return { backend: configuredBackend(), reachable: true, provisioned: true, missing: [] as string[] };
+  const { appwriteProvisionState } = await import("../db/provision");
+  const { appwriteConfig } = await import("../db");
+  return { backend: "appwrite" as const, ...(await appwriteProvisionState(appwriteConfig())) };
 }

@@ -7,7 +7,13 @@ import { BUCKETS } from "../core/files";
  * a partir do esquema único (src/lib/db/schema.ts). Pode ser reexecutado após mudanças do esquema:
  * cria apenas o que estiver faltando.
  */
-export async function provisionAppwrite(cfg: { endpoint: string; projectId: string; apiKey: string; databaseId: string }, log: (m: string) => void = console.log) {
+export async function provisionAppwrite(
+  cfg: { endpoint: string; projectId: string; apiKey: string; databaseId: string },
+  log: (m: string) => void = console.log,
+  opts: { deadline?: number } = {},
+): Promise<{ done: boolean; tables: number; total: number }> {
+  const outOfTime = () => opts.deadline != null && Date.now() > opts.deadline;
+  let tablesOk = 0;
   const client = new Client().setEndpoint(cfg.endpoint).setProject(cfg.projectId).setKey(cfg.apiKey);
   const db = new TablesDB(client);
   const storage = new Storage(client);
@@ -23,6 +29,10 @@ export async function provisionAppwrite(cfg: { endpoint: string; projectId: stri
   log(`banco ${cfg.databaseId} ok`);
   const BIG = 9007199254740991;
   for (const c of COLLECTIONS) {
+    if (outOfTime()) {
+      log(`tempo esgotado — ${tablesOk}/${COLLECTIONS.length} tabelas prontas; execute novamente para continuar`);
+      return { done: false, tables: tablesOk, total: COLLECTIONS.length };
+    }
     await ignore409(db.createTable({ databaseId: cfg.databaseId, tableId: c.id, name: c.label, permissions: [], rowSecurity: false }));
     const existing = await db.listColumns({ databaseId: cfg.databaseId, tableId: c.id, queries: [Query.limit(500)] });
     const have = new Set(existing.columns.map((x: any) => x.key));
@@ -74,6 +84,7 @@ export async function provisionAppwrite(cfg: { endpoint: string; projectId: stri
       await ignore409(db.createIndex({ databaseId: cfg.databaseId, tableId: c.id, key: ix.key, type: ix.type === "unique" ? IndexType.Unique : IndexType.Key, columns: ix.fields.map((f) => (f === "createdAt" ? "$createdAt" : f)) }));
     }
     log(`tabela ${c.id} ok (${Object.keys(c.fields).length} colunas, ${(c.indexes ?? []).length} índices)`);
+    tablesOk++;
   }
   for (const b of Object.values(BUCKETS)) {
     await ignore409(storage.createBucket({ bucketId: b, name: b, permissions: [], fileSecurity: false, enabled: true, maximumFileSize: 30000000, encryption: true, antivirus: false }));
@@ -90,4 +101,19 @@ export async function provisionAppwrite(cfg: { endpoint: string; projectId: stri
     }
   }
   log("provisionamento concluído");
+  return { done: true, tables: tablesOk, total: COLLECTIONS.length };
+}
+
+/** Verifica se o banco do Appwrite já foi provisionado (todas as tabelas existem). */
+export async function appwriteProvisionState(cfg: { endpoint: string; projectId: string; apiKey: string; databaseId: string }) {
+  const db = new TablesDB(new Client().setEndpoint(cfg.endpoint).setProject(cfg.projectId).setKey(cfg.apiKey));
+  try {
+    const res = await db.listTables({ databaseId: cfg.databaseId, queries: [Query.limit(500)] });
+    const have = new Set(res.tables.map((t: any) => t.$id));
+    const missing = COLLECTIONS.filter((c) => !have.has(c.id)).map((c) => c.id);
+    return { reachable: true, provisioned: missing.length === 0, missing };
+  } catch (e) {
+    if (e instanceof AppwriteException && e.code === 404) return { reachable: true, provisioned: false, missing: COLLECTIONS.map((c) => c.id) };
+    return { reachable: false, provisioned: false, missing: [], error: e instanceof Error ? e.message : String(e) };
+  }
 }
