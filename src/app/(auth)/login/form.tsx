@@ -14,11 +14,11 @@ export function LoginForm({ next }: { next?: string }) {
         <>
           <input type="hidden" name="next" value={next ?? ""} />
           <Field label="Usuário ou e-mail" htmlFor="login">
-            <Input id="login" name="login" autoComplete="username" autoFocus required />
+            <Input id="login" name="login" autoComplete="username" autoFocus required placeholder="Digite seu e-mail ou usuário" />
           </Field>
           <Field label="Senha" htmlFor="password">
             <div className="relative">
-              <Input id="password" name="password" type={show ? "text" : "password"} autoComplete="current-password" required className="pr-10" />
+              <Input id="password" name="password" type={show ? "text" : "password"} autoComplete="current-password" required className="pr-10" placeholder="Digite sua senha" />
               <button type="button" onClick={() => setShow((s) => !s)} aria-label={show ? "Ocultar senha" : "Mostrar senha"} className="absolute right-2 top-2 text-slate-400 hover:text-slate-600">
                 {show ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
               </button>
@@ -27,7 +27,7 @@ export function LoginForm({ next }: { next?: string }) {
           <Checkbox name="remember" label="Manter conectado neste dispositivo" />
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
           <SubmitButton pending={pending} className="w-full">
-            Entrar
+            Entrar no sistema
           </SubmitButton>
         </>
       )}

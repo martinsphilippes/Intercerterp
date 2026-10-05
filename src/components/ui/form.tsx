@@ -53,9 +53,9 @@ export function FormGrid({ children, cols = 3, className }: { children: React.Re
   return <div className={cn("grid grid-cols-1 gap-4", map[cols], className)}>{children}</div>;
 }
 
-export function FormSection({ title, description, children, actions }: { title: string; description?: string; children: React.ReactNode; actions?: React.ReactNode }) {
+export function FormSection({ title, description, children, actions, id }: { title: string; description?: string; children: React.ReactNode; actions?: React.ReactNode; id?: string }) {
   return (
-    <section className="rounded-lg border border-line bg-white">
+    <section id={id} className="scroll-mt-20 rounded-lg border border-line bg-white">
       <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-3">
         <div>
           <h2 className="text-sm font-semibold text-ink">{title}</h2>

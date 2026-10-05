@@ -8,7 +8,8 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
 import { useToast } from "@/components/ui/toast";
-import { saveCustomerAction, lookupCnpjAction } from "./actions";
+import Link from "next/link";
+import { saveCustomerAction, checkDocAction } from "./actions";
 import type { Address } from "@/domain/customers";
 
 type Opt = { value: string; label: string };
@@ -22,19 +23,33 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
   const [lookup, setLookup] = useState<{ source?: string; consultedAt?: string; situation?: string } | null>(null);
   const status: string = c.status ?? "active";
   const [pendingLookup, startLookup] = useTransition();
+  const [duplicate, setDuplicate] = useState<{ id: string; name: string } | null>(null);
   const toast = useToast();
   const [form, setForm] = useState({ name: c.name ?? "", tradeName: c.tradeName ?? "", email: c.email ?? "", phone: c.phone ?? "", doc: c.doc ?? "" });
 
   const setAddr = (i: number, patch: Partial<Address>) => setAddresses((a) => a.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
 
   return (
-    <ActionForm action={saveCustomerAction} className="space-y-5">
+    <ActionForm action={saveCustomerAction} className="grid gap-5 lg:grid-cols-[200px_1fr]">
       {({ pending, error }) => (
         <>
+          <nav aria-label="Seções do cadastro" className="no-print hidden lg:block">
+            <ol className="sticky top-20 space-y-1 text-sm">
+              {[["dados", "Dados básicos"], ["contatos", "Contatos"], ["enderecos", "Endereços"], ["fiscal", "Dados fiscais"], ["credito", "Crédito e vendas / observações"]].map(([id, label], i) => (
+                <li key={id}>
+                  <a href={`#${id}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-slate-600 hover:bg-white hover:text-brand-700">
+                    <span className="flex size-5 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold">{i + 1}</span>
+                    {label}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+          <div className="min-w-0 space-y-5">
           {c.id && <input type="hidden" name="id" value={c.id} />}
           <input type="hidden" name="addresses" value={JSON.stringify(addresses)} />
           <input type="hidden" name="contacts" value={JSON.stringify(contacts)} />
-          <FormSection title="Identificação" description="CPF/CNPJ é normalizado e único na empresa — evita cadastros duplicados.">
+          <FormSection id="dados" title="Identificação" description="CPF/CNPJ é normalizado e único na empresa — evita cadastros duplicados.">
             <FormGrid cols={4}>
               <Field label="Tipo de pessoa" required>
                 <Select name="personType" value={personType} onChange={(e) => setPersonType(e.target.value as "PF" | "PJ")} options={[{ value: "PF", label: "Pessoa física" }, { value: "PJ", label: "Pessoa jurídica" }]} />
@@ -42,28 +57,29 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
               <Field label={personType === "PF" ? "CPF" : "CNPJ"} required={personType === "PJ"}>
                 <div className="flex gap-2">
                   <Input name="doc" value={form.doc} onChange={(e) => setForm({ ...form, doc: e.target.value })} inputMode="numeric" placeholder={personType === "PF" ? "000.000.000-00" : "00.000.000/0000-00"} />
-                  {personType === "PJ" && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      title="Consultar CNPJ em serviço externo"
-                      loading={pendingLookup}
-                      onClick={() =>
-                        startLookup(async () => {
-                          const r = await lookupCnpjAction(form.doc);
-                          if (!r.ok) return toast("error", r.error);
-                          const d: any = (r.data as any).result;
-                          if (!d.ok) return toast("error", d.message);
-                          setForm((f) => ({ ...f, name: d.data.name ?? f.name, tradeName: d.data.tradeName ?? f.tradeName, email: d.data.email ?? f.email, phone: d.data.phone ?? f.phone }));
-                          setAddresses((a) => [{ ...a[0], ...d.data.address, type: "principal" }, ...a.slice(1)]);
-                          setLookup({ source: d.source, consultedAt: d.consultedAt, situation: d.data.situation });
-                          toast("info", "Dados preenchidos a partir da consulta. Confira antes de salvar.");
-                        })
-                      }
-                    >
-                      <Search className="size-4" />
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    title={personType === "PJ" ? "Consultar CNPJ no cadastro e na Receita (serviço externo)" : "Consultar CPF no cadastro"}
+                    loading={pendingLookup}
+                    onClick={() =>
+                      startLookup(async () => {
+                        const r = await checkDocAction(personType, form.doc, c.id);
+                        if (!r.ok) return toast("error", r.error);
+                        const { local, external } = r.data as any;
+                        setDuplicate(local);
+                        if (local) return toast("error", `Documento já cadastrado: ${local.name}.`);
+                        if (!external) return toast("success", "Documento válido e sem cadastro duplicado.");
+                        if (!external.ok) return toast("info", `Sem duplicidade. ${external.message}`);
+                        setForm((f) => ({ ...f, name: external.data.name ?? f.name, tradeName: external.data.tradeName ?? f.tradeName, email: external.data.email ?? f.email, phone: external.data.phone ?? f.phone }));
+                        setAddresses((a) => [{ ...a[0], ...external.data.address, type: "principal" }, ...a.slice(1)]);
+                        setLookup({ source: external.source, consultedAt: external.consultedAt, situation: external.data.situation });
+                        toast("info", "Dados preenchidos a partir da consulta. Confira antes de salvar.");
+                      })
+                    }
+                  >
+                    <Search className="size-4" /> Consultar
+                  </Button>
                 </div>
               </Field>
               <Field label="Código do cliente" hint="Gerado automaticamente se vazio.">
@@ -96,6 +112,13 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
                 </>
               )}
             </FormGrid>
+            {duplicate && (
+              <div className="mt-4">
+                <Notice tone="warn" title="Documento já cadastrado">
+                  Este documento pertence a <Link className="underline" href={`/clientes/${duplicate.id}`}>{duplicate.name}</Link>. Use o cadastro existente para não duplicar a identidade do cliente.
+                </Notice>
+              </div>
+            )}
             {lookup && (
               <div className="mt-4">
                 <Notice tone="info" title="Dados sugeridos por consulta externa">
@@ -104,12 +127,14 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
               </div>
             )}
             <div className="mt-4 flex flex-wrap gap-6">
+              <input type="hidden" name="active" value="0" />
+              <Checkbox name="active" value="1" label="Cliente ativo" defaultChecked={status !== "inactive"} />
               <Checkbox name="vip" label="Cliente VIP" defaultChecked={Boolean(c.vip)} />
               <Checkbox name="finalConsumer" label="Consumidor final" defaultChecked={c.finalConsumer ?? personType === "PF"} />
             </div>
           </FormSection>
 
-          <FormSection title="Contato">
+          <FormSection id="contatos" title="Contato">
             <FormGrid cols={3}>
               <Field label="E-mail">
                 <Input name="email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
@@ -152,7 +177,7 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
             )}
           </FormSection>
 
-          <FormSection title="Endereços" actions={<Button type="button" size="sm" variant="ghost" onClick={() => setAddresses((a) => [...a, { type: "entrega" }])}><Plus className="size-4" /> Endereço</Button>}>
+          <FormSection id="enderecos" title="Endereços" actions={<Button type="button" size="sm" variant="ghost" onClick={() => setAddresses((a) => [...a, { type: "entrega" }])}><Plus className="size-4" /> Endereço</Button>}>
             <div className="space-y-5">
               {addresses.map((a, i) => (
                 <div key={i} className="rounded-md border border-line p-3">
@@ -179,7 +204,7 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
             </div>
           </FormSection>
 
-          <FormSection title="Dados fiscais">
+          <FormSection id="fiscal" title="Dados fiscais">
             <FormGrid cols={4}>
               <Field label="Inscrição estadual" hint="Use ISENTO quando aplicável.">
                 <Input name="ie" defaultValue={c.ie ?? ""} />
@@ -193,7 +218,7 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
             </FormGrid>
           </FormSection>
 
-          <FormSection title="Condições comerciais e crédito" description="O limite de crédito é concedido manualmente por usuário autorizado; não há concessão automática.">
+          <FormSection id="credito" title="Condições comerciais e crédito" description="O limite de crédito é concedido manualmente por usuário autorizado; não há concessão automática.">
             <FormGrid cols={4}>
               <Field label="Limite de crédito (crediário)">
                 <MoneyInput name="creditLimit" defaultValue={c.creditLimit ?? 0} />
@@ -215,12 +240,16 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
 
           {error && <Notice tone="bad">{error}</Notice>}
           <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap justify-end gap-2 border-t border-line bg-canvas/95 px-1 py-3 backdrop-blur">
+            <Link href={c.id ? `/clientes/${c.id}` : "/clientes"} className="inline-flex h-9 items-center rounded-md px-4 text-sm text-slate-600 hover:bg-slate-100">
+              Cancelar
+            </Link>
             <SubmitButton pending={pending} variant="secondary" name="status" value="draft">
               Salvar rascunho
             </SubmitButton>
-            <SubmitButton pending={pending} name="status" value={status === "inactive" ? "inactive" : "active"}>
-              Salvar cadastro
+            <SubmitButton pending={pending} name="status" value="save">
+              Salvar cliente
             </SubmitButton>
+          </div>
           </div>
         </>
       )}

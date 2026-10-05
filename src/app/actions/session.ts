@@ -12,6 +12,8 @@ import type { ActionResult } from "@/lib/server/action";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
 
 const secure = process.env.NODE_ENV === "production";
+const MAX_FAILED = 5;
+const LOCK_WINDOW_MIN = 15;
 
 async function rememberUnit(userId: string, value: string) {
   const store = getStore();
@@ -29,15 +31,39 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
   const persistent = fd.get("remember") === "on";
   if (!login || !password) return { ok: false, error: "Informe usuário/e-mail e senha." };
   const store = getStore();
+  const h0 = await headers();
+  const ip = h0.get("x-forwarded-for")?.split(",")[0] ?? undefined;
+  // Bloqueio temporário após tentativas inválidas (registradas no histórico de auditoria)
+  const { detId } = await import("@/lib/db");
+  const loginKey = detId("login", login.toLowerCase());
+  const since = new Date(Date.now() - LOCK_WINDOW_MIN * 60000).toISOString();
+  const recent = await store.list("audit_logs", { filters: [["eq", "entityType", "login"], ["eq", "entityId", loginKey], ["gte", "occurredAt", since]], orderBy: [{ field: "occurredAt", dir: "desc" }], limit: MAX_FAILED + 1 });
+  const lastSuccess = recent.items.findIndex((e) => e.result === "success");
+  const failures = (lastSuccess === -1 ? recent.items : recent.items.slice(0, lastSuccess)).filter((e) => e.result === "failure").length;
+  if (failures >= MAX_FAILED) return { ok: false, error: `Acesso temporariamente bloqueado após ${MAX_FAILED} tentativas inválidas. Tente novamente em ${LOCK_WINDOW_MIN} minutos ou recupere a senha.` };
+  const logAttempt = async (result: "success" | "failure", summary: string, u?: any) =>
+    store
+      .create("audit_logs", {
+        companyId: u?.companyIds?.[0] ?? null, userId: u?.id ?? null, userName: u?.name ?? login, module: "admin", action: result === "success" ? "auth.login" : "auth.login_failed",
+        entityType: "login", entityId: loginKey, summary, result, ip: ip ?? null, occurredAt: new Date().toISOString(), related: u ? [`user:${u.id}`] : [],
+      })
+      .catch(() => undefined);
   const user = await findUserByLogin(store, login);
-  if (!user) return { ok: false, error: "Usuário ou senha inválidos." };
+  if (!user) {
+    await logAttempt("failure", `Tentativa de login inválida (usuário inexistente: ${login.slice(0, 60)})`);
+    return { ok: false, error: "Usuário ou senha inválidos." };
+  }
   if (user.status === "inactive" || user.status === "suspended") return { ok: false, error: user.status === "suspended" ? `Acesso suspenso${user.suspendedReason ? `: ${user.suspendedReason}` : ""}. Procure o administrador.` : "Usuário inativo. Procure o administrador." };
   if (user.status === "invited") return { ok: false, error: "Convite pendente: use o link de primeiro acesso enviado ao seu e-mail." };
   let session;
   try {
     session = await getAuth().login(user.email, password, persistent);
   } catch (e: any) {
-    if (e.message === "invalid_credentials") return { ok: false, error: "Usuário ou senha inválidos." };
+    if (e.message === "invalid_credentials") {
+      await logAttempt("failure", `Senha inválida para ${user.name}`, user);
+      const left = MAX_FAILED - failures - 1;
+      return { ok: false, error: left > 0 ? `Usuário ou senha inválidos. ${left} tentativa(s) restante(s) antes do bloqueio temporário.` : `Usuário ou senha inválidos. Acesso bloqueado por ${LOCK_WINDOW_MIN} minutos.` };
+    }
     console.error("[login]", e);
     return { ok: false, error: "Serviço de autenticação indisponível. Tente novamente em instantes." };
   }
@@ -52,9 +78,9 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
     if (companies.some((x) => x.id === c) && (b === "all" || branches.some((x) => x.id === b))) unit = pref.value;
   }
   if (!unit && companies.length === 1 && branches.filter((b) => b.companyId === companies[0].id).length === 1) unit = `${companies[0].id}:${branches.find((b) => b.companyId === companies[0].id)!.id}`;
-  const h = await headers();
-  const ctxUser = await toCtxUser(store, user);
-  await audit({ store, user: ctxUser, companyId: companies[0]?.id ?? "", branchId: null, ip: h.get("x-forwarded-for") ?? undefined }, { module: "admin", action: "auth.login", entityType: "user", entityId: user.id, summary: `Login de ${user.name}` });
+  await logAttempt("success", `Login de ${user.name}`, user);
+  void toCtxUser;
+  void audit;
   if (unit) {
     jar.set(UNIT_COOKIE, unit, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: 60 * 60 * 24 * 365 });
     return { ok: true, redirect: String(fd.get("next") || "/dashboard") };

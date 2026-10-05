@@ -32,7 +32,7 @@ function parse(fd: FormData): CustomerInput {
     paymentTermId: fopt(fd, "paymentTermId"),
     priceTableId: fopt(fd, "priceTableId"),
     notes: fopt(fd, "notes"),
-    status: (fstr(fd, "status") as any) || "active",
+    status: fstr(fd, "status") === "draft" ? "draft" : fd.has("active") ? (fd.getAll("active").includes("1") ? "active" : "inactive") : "active",
   };
 }
 
@@ -65,6 +65,19 @@ export async function deleteCustomerAction(id: string) {
   return runAction({ module: "customers", op: "delete", revalidate: ["/clientes"] }, async (s) => {
     await deleteCustomer(s.ctx, id);
     return { ok: true as const, message: "Cliente excluído.", redirect: "/clientes" };
+  });
+}
+
+/** Consulta o documento no próprio cadastro (duplicidade) e, para CNPJ, no serviço externo configurado. */
+export async function checkDocAction(personType: "PF" | "PJ", doc: string, selfId?: string) {
+  return runAction({ module: "customers" }, async (s) => {
+    const { normalizeDoc, findCustomerByDoc } = await import("@/domain/customers");
+    const d = normalizeDoc(personType, doc);
+    if (!d) return { local: null, external: null };
+    const dup = await findCustomerByDoc(s.ctx.store, s.ctx.companyId, d);
+    const local = dup && dup.id !== selfId ? { id: dup.id, name: dup.name, status: dup.status } : null;
+    const external = personType === "PJ" && !local ? await lookupCnpj(d) : null;
+    return { local, external };
   });
 }
 
