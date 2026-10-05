@@ -52,7 +52,8 @@ export function ActionForm({
         e.preventDefault();
         if (pending) return;
         if (confirm && !window.confirm(confirm)) return;
-        const fd = new FormData(e.currentTarget);
+        const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+        const fd = new FormData(e.currentTarget, submitter && submitter.name ? submitter : undefined);
         if (!fd.has("_idem")) fd.set("_idem", idem);
         setError(null);
         start(async () => {
@@ -148,9 +149,9 @@ export function ActionButton({
   );
 }
 
-export function SubmitButton({ pending, children, variant = "primary", className }: { pending: boolean; children: React.ReactNode; variant?: "primary" | "accent" | "danger" | "secondary"; className?: string }) {
+export function SubmitButton({ pending, children, variant = "primary", className, name, value, size = "md" }: { pending: boolean; children: React.ReactNode; variant?: "primary" | "accent" | "danger" | "secondary" | "ghost" | "outline"; className?: string; name?: string; value?: string; size?: "sm" | "md" | "lg" }) {
   return (
-    <button type="submit" disabled={pending} aria-busy={pending || undefined} className={buttonClass(variant, "md", className)}>
+    <button type="submit" name={name} value={value} disabled={pending} aria-busy={pending || undefined} className={buttonClass(variant, size, className)}>
       {pending && <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />}
       {children}
     </button>
