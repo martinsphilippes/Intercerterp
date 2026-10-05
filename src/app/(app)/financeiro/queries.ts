@@ -391,7 +391,7 @@ export function cashflowFilter(ctx: Ctx, p: P): CashflowFilter & { preset: strin
   if (granularity === "day" && span > 92) granularity = "week";
   return {
     preset, ref, from, to, granularity,
-    accountId: p.f.account || null,
+    accountId: p.f.account || p.f.conta || null, // "conta" = contrato de links entre módulos
     categoryId: p.f.category || null,
     costCenterId: p.f.costCenter || null,
     branchId: branchScope(ctx, p),

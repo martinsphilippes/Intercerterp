@@ -27,7 +27,9 @@ const neg = (v: number) => formatMoney(v === 0 ? 0 : -v);
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const s = await requireSession("finance");
-  const params = await searchParams;
+  const raw = await searchParams;
+  // alias do contrato de links entre módulos: ?conta=<accountId>
+  const params: SearchParams = raw.conta && !raw.account ? { ...raw, account: raw.conta, conta: undefined } : raw;
   const tab = (params.tab as string) || "resumo";
   const p = parseList(params, { sort: "date", dir: "asc", pageSize: 50 });
   const f = cashflowFilter(s.ctx, p);
