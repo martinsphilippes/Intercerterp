@@ -15,7 +15,7 @@ import { Field, FormGrid, Input, Checkbox } from "@/components/ui/form";
 import { paginate, parseList, qs, sp, type SearchParams } from "@/lib/list";
 import { formatBps, formatMoney, formatQty, roundDiv } from "@/lib/money";
 import { addMonths, diffDays, formatDate, formatDateTime, formatMonth, monthStart, toLocalDate, today, dayRange } from "@/lib/dates";
-import { can, canDo } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
 import { DOC_STATUS_LABEL, MODEL_LABEL } from "@/domain/fiscal/service";
 import { isRevenue, periodDocuments, summarize, sumBy } from "@/domain/fiscal/reports";

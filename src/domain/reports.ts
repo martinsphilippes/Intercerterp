@@ -2,7 +2,6 @@ import { listAll } from "@/lib/db";
 import type { Doc, Filter, Store } from "@/lib/db/types";
 import { DEFAULT_TZ, addDays, dayRange, diffDays, formatDate, monthEnd, monthStart, toLocalDate, today } from "@/lib/dates";
 import { marginBps, roundDiv } from "@/lib/money";
-import type { Ctx } from "@/lib/core/ctx";
 import { PAYMENT_KIND_LABEL } from "./pricing-calc";
 
 /**

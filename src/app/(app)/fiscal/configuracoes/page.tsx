@@ -15,7 +15,6 @@ import { formatBps } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatDoc } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
-import { lookups } from "@/lib/server/lookups";
 import { getFiscalConfig, measuredStatus, PRESENCE_LABEL } from "@/domain/fiscal/service";
 import { certificateDaysLeft, CRT_LABEL, issuerChecklist, numberingStatus, REGIME_LABEL, taxGroupUsage } from "@/domain/fiscal/config";
 import { deleteTaxGroupAction, saveConfigAction, saveIssuerAction, saveTaxGroupAction, setNumberAction, testConnectionAction, uploadCertificateAction } from "../actions";

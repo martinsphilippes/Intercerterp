@@ -81,11 +81,12 @@ export function GlobalSearch() {
         placeholder="Pesquisar produtos, clientes, vendas, notas… (Ctrl+K)"
         aria-label="Pesquisa global"
         role="combobox"
+        aria-controls="global-search-results"
         aria-expanded={open && hits.length > 0}
         className="focus-ring h-9 w-full rounded-md border border-line bg-slate-50 pl-8 pr-3 text-sm focus:bg-white"
       />
       {open && q.trim().length >= 2 && (
-        <div role="listbox" className="absolute z-40 mt-1 max-h-[70vh] w-full overflow-y-auto rounded-md border border-line bg-white py-1 shadow-xl">
+        <div id="global-search-results" role="listbox" className="absolute z-40 mt-1 max-h-[70vh] w-full overflow-y-auto rounded-md border border-line bg-white py-1 shadow-xl">
           {loading && hits.length === 0 && <p className="px-3 py-2 text-sm text-slate-500">Pesquisando…</p>}
           {!loading && hits.length === 0 && <p className="px-3 py-2 text-sm text-slate-500">Nada encontrado para “{q}”.</p>}
           {hits.map((h, i) => (

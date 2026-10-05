@@ -2,7 +2,7 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getStore, listAll } from "@/lib/db";
+import { getStore } from "@/lib/db";
 import { getAuth } from "@/lib/auth/provider";
 import { accessibleUnits, findUserByLogin, findUserByAuthId, toCtxUser } from "@/lib/auth/users";
 import { SESSION_COOKIE, UNIT_COOKIE, getSession } from "@/lib/server/session";
