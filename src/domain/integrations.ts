@@ -154,6 +154,7 @@ export async function saveIntegration(
   }
   const config: Record<string, any> = {};
   for (const k of prov.config) if (input.config?.[k] !== undefined && input.config[k] !== "") config[k] = input.config[k];
+  if (input.config?.connectionName) config.connectionName = String(input.config.connectionName).trim().slice(0, 120);
   if (config.accountantEmail) assert(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(config.accountantEmail)), "E-mail da contabilidade inválido.");
   if (config.baseUrl) assert(/^https:\/\//.test(String(config.baseUrl)), "A URL base deve usar https://.");
   if (config.connectorUrl) assert(/^https?:\/\//.test(String(config.connectorUrl)), "URL do conector inválida.");
@@ -319,7 +320,8 @@ async function mirrorFiscalIntegration(ctx: Ctx, kind: "fiscal_nfe" | "fiscal_nf
   if (!cfg) return null;
   const sk = scopeKey(ctx.companyId, cfg.branchId ?? null, kind);
   const id = detId("integration", sk);
-  const data = { companyId: ctx.companyId, branchId: cfg.branchId ?? null, scopeKey: sk, kind, provider: cfg.provider, environment: cfg.environment, config: { nfseStandard: cfg.nfseStandard ?? null, fiscalConfigId: cfg.id }, secretRefs: cfg.provider === "focusnfe" ? { token: cfg.tokenRef || "FOCUSNFE_TOKEN" } : {}, enabled: true, status: out.status, lastTestAt: nowIso(), lastTestMessage: out.message.slice(0, 1000) };
+  const prev = await ctx.store.get("integrations", detId("integration", sk));
+  const data = { companyId: ctx.companyId, branchId: cfg.branchId ?? null, scopeKey: sk, kind, provider: cfg.provider, environment: cfg.environment, config: { nfseStandard: cfg.nfseStandard ?? null, fiscalConfigId: cfg.id, connectionName: prev?.config?.connectionName ?? null }, secretRefs: cfg.provider === "focusnfe" && cfg.tokenRef !== "" ? { token: cfg.tokenRef || "FOCUSNFE_TOKEN" } : {}, enabled: prev?.enabled ?? true, status: out.status, lastTestAt: nowIso(), lastTestMessage: out.message.slice(0, 1000) };
   if (await ctx.store.get("integrations", id)) await ctx.store.update("integrations", id, data);
   else await ctx.store.create("integrations", { ...data, createdBy: ctx.user.id }, id).catch((e) => (isConflict(e) ? ctx.store.update("integrations", id, data) : Promise.reject(e)));
   await logIntegration(ctx.store, { companyId: ctx.companyId, branchId: cfg.branchId ?? null, integrationId: id, kind, action: "test", status: out.ok ? "success" : "failure", message: out.message });
@@ -327,27 +329,32 @@ async function mirrorFiscalIntegration(ctx: Ctx, kind: "fiscal_nfe" | "fiscal_nf
 }
 
 /** Visão 10 — configuração da integração fiscal (gravada em fiscal_configs da filial/empresa). */
-export async function saveFiscalIntegration(ctx: Ctx, branchId: string | null, input: { kind: "fiscal_nfe" | "fiscal_nfse"; provider: string; environment: string; tokenRef: string; nfseStandard?: string | null; cscId?: string | null; cscTokenRef?: string | null }) {
+export async function saveFiscalIntegration(ctx: Ctx, branchId: string | null, input: { kind: "fiscal_nfe" | "fiscal_nfse"; provider: string; environment: string; tokenRef: string; nfseStandard?: string | null; cscId?: string | null; cscTokenRef?: string | null; enabled?: boolean; connectionName?: string | null }) {
   requireAction(ctx, "admin.integrations");
   assert(["focusnfe", "simulated"].includes(input.provider), "Provedor fiscal não suportado.");
   assert(["homologacao", "producao"].includes(input.environment), "Ambiente inválido.");
-  if (input.provider === "focusnfe") assert(ENV_NAME.test(input.tokenRef || ""), "Informe o NOME da variável de ambiente do token (ex.: FOCUSNFE_TOKEN), nunca o token.");
+  if (input.provider === "focusnfe" && input.tokenRef !== "") assert(ENV_NAME.test(input.tokenRef || ""), "Informe o NOME da variável de ambiente do token (ex.: FOCUSNFE_TOKEN), nunca o token.");
+  if (input.connectionName !== undefined) assert(input.connectionName?.trim(), "Informe o nome da conexão.");
   if (input.cscTokenRef) assert(ENV_NAME.test(input.cscTokenRef), "Informe o NOME da variável do CSC (ex.: NFCE_CSC).");
   const { saveFiscalConfig, getFiscalConfig } = await import("./fiscal/service");
   const cur = await getFiscalConfig(ctx.store, ctx.companyId, branchId);
-  const patch: Record<string, any> = { provider: input.provider, environment: input.environment, tokenRef: input.tokenRef || "FOCUSNFE_TOKEN" };
+  const patch: Record<string, any> = { provider: input.provider, environment: input.environment, tokenRef: input.tokenRef === "" ? "" : input.tokenRef || "FOCUSNFE_TOKEN" };
+  if (input.enabled !== undefined) {
+    if (input.kind === "fiscal_nfe") Object.assign(patch, { nfeEnabled: input.enabled, nfceEnabled: input.enabled });
+    else patch.nfseEnabled = input.enabled;
+  }
   if (input.kind === "fiscal_nfse" && input.nfseStandard) patch.nfseStandard = input.nfseStandard;
   if (input.kind === "fiscal_nfe") {
     if (input.cscId !== undefined) patch.cscId = input.cscId || null;
     if (input.cscTokenRef !== undefined) patch.cscTokenRef = input.cscTokenRef || null;
   }
-  // configuração nova da filial herda as demais opções da empresa
-  const base = cur && (cur.branchId ?? null) !== branchId ? { nfeEnabled: cur.nfeEnabled, nfceEnabled: cur.nfceEnabled, nfseEnabled: cur.nfseEnabled, nfeSeries: cur.nfeSeries, nfceSeries: cur.nfceSeries, nfseSeries: cur.nfseSeries, nfseStandard: cur.nfseStandard, defaultPresence: cur.defaultPresence, defaultTaxGroupId: cur.defaultTaxGroupId } : {};
-  const doc = await saveFiscalConfig(ctx, branchId, { ...base, ...patch });
+  void cur; // configuração nova da filial herda as opções da empresa (saveFiscalConfig)
+  const doc = await saveFiscalConfig(ctx, branchId, patch);
   const out: TestOutcome = { status: "configured_untested", ok: false, message: "Configuração salva — execute o teste para medir a conexão." };
   const sk = scopeKey(ctx.companyId, branchId, input.kind);
   const id = detId("integration", sk);
-  const data = { companyId: ctx.companyId, branchId, scopeKey: sk, kind: input.kind, provider: input.provider, environment: input.environment, config: { nfseStandard: doc.nfseStandard ?? null, fiscalConfigId: doc.id }, secretRefs: input.provider === "focusnfe" ? { token: patch.tokenRef } : {}, enabled: true, status: out.status, lastTestMessage: out.message };
+  const prevInteg = await ctx.store.get("integrations", detId("integration", scopeKey(ctx.companyId, branchId, input.kind)));
+  const data = { companyId: ctx.companyId, branchId, scopeKey: sk, kind: input.kind, provider: input.provider, environment: input.environment, config: { nfseStandard: doc.nfseStandard ?? null, fiscalConfigId: doc.id, connectionName: input.connectionName?.trim() || prevInteg?.config?.connectionName || null }, secretRefs: input.provider === "focusnfe" && patch.tokenRef ? { token: patch.tokenRef } : {}, enabled: input.enabled ?? true, status: out.status, lastTestMessage: out.message };
   if (await ctx.store.get("integrations", id)) await ctx.store.update("integrations", id, data);
   else await ctx.store.create("integrations", { ...data, createdBy: ctx.user.id }, id).catch((e) => (isConflict(e) ? ctx.store.update("integrations", id, data) : Promise.reject(e)));
   await audit(ctx, { module: "admin", action: "integration.save", entityType: "integration", entityId: id, summary: `Integração ${INTEGRATION_CATALOG[input.kind].label} configurada (${input.provider}, ${input.environment})`, after: patch, branchId });

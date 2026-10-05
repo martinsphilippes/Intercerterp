@@ -9,6 +9,7 @@ import { getSetting } from "@/lib/core/settings";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { ensureOpenCart, listParkedCarts, saveCart } from "@/domain/carts";
 import { resolveTerminal } from "./terminal";
+import { getFiscalConfig } from "@/domain/fiscal/service";
 import { PdvApp } from "./pdv-app";
 import type { CustomerInfo } from "./customer-picker";
 import type { PlainCart } from "./actions";
@@ -22,7 +23,7 @@ async function customerInfo(store: any, id: string | null): Promise<CustomerInfo
   if (!c) return null;
   const open = await listAll(store, "installments", { filters: [["eq", "partyId", id], ["eq", "kind", "receivable"], ["eq", "status", ["open", "partial"]]] });
   const openBalance = open.reduce((a, i) => a + i.balance, 0);
-  return { id: c.id, name: c.name, tradeName: c.tradeName ?? null, personType: c.personType, doc: c.doc ?? null, email: c.email ?? null, mobile: c.mobile ?? c.phone ?? null, vip: Boolean(c.vip), creditLimit: c.creditLimit ?? 0, openBalance, creditAvailable: Math.max(0, (c.creditLimit ?? 0) - openBalance) };
+  return { id: c.id, name: c.name, tradeName: c.tradeName ?? null, personType: c.personType, doc: c.doc ?? null, email: c.email ?? null, mobile: c.mobile ?? c.phone ?? null, vip: Boolean(c.vip), status: c.status, creditLimit: c.creditLimit ?? 0, openBalance, creditAvailable: Math.max(0, (c.creditLimit ?? 0) - openBalance), priceTableId: c.priceTableId ?? null };
 }
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -82,18 +83,30 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       exchange = { returnId: ret.id, number: ret.number, saleNumber: orig?.number ?? 0, voucherCode: v?.code ?? null, voucherBalance: v?.status === "active" ? v.balance : 0 };
     }
   }
-  const [priceTables, categories, parkedRaw, users, terminalNames] = await Promise.all([
+  const [priceTables, categories, brands, sellers, parkedRaw, users, terminalNames, methods] = await Promise.all([
     lookups.priceTables(s.ctx),
     lookups.categories(s.ctx),
+    lookups.brands(s.ctx),
+    lookups.users(s.ctx),
     listParkedCarts(s.ctx),
     nameMap(s.ctx, "users"),
     nameMap(s.ctx, "terminals"),
+    listAll(store, "payment_methods", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "active", true]] }),
   ]);
+  const fiscalCfg = await getFiscalConfig(store, s.ctx.companyId, s.ctx.branchId);
+  const fiscal: { label: string; tone: "sim" | "warn" | "good" | "neutral" } = !fiscalCfg
+    ? { label: "Fiscal não configurado", tone: "warn" }
+    : fiscalCfg.provider === "simulated"
+      ? { label: "Ambiente: simulação (sem validade)", tone: "sim" }
+      : fiscalCfg.environment === "producao"
+        ? { label: "Ambiente de produção", tone: "good" }
+        : { label: "Ambiente de homologação", tone: "warn" };
   const allowNegative = Boolean(terminal.allowNegativeStock) || Boolean(await getSetting(store, s.ctx.companyId, s.ctx.branchId, "sales.allowNegativeStock", false));
   const plain: PlainCart = {
     id: cart.id, status: cart.status, terminalId: cart.terminalId, customerId: cart.customerId ?? null, customerName: cart.customerName ?? null, cpfOnInvoice: cart.cpfOnInvoice ?? null,
     priceTableId: cart.priceTableId ?? null, items: cart.items ?? [], globalDiscount: cart.globalDiscount ?? 0, globalDiscountBps: cart.globalDiscountBps ?? 0, surcharge: cart.surcharge ?? 0,
-    notes: cart.notes ?? null, payments: cart.payments ?? [], exchangeReturnId: cart.exchangeReturnId ?? null, revision: cart.revision ?? 0, total: cart.total ?? 0, updatedAt: cart.updatedAt,
+    notes: cart.notes ?? null, payments: cart.payments ?? [], exchangeReturnId: cart.exchangeReturnId ?? null, sellerId: cart.sellerId ?? null, emitFiscal: cart.emitFiscal !== false,
+    revision: cart.revision ?? 0, total: cart.total ?? 0, updatedAt: cart.updatedAt,
   };
   return (
     <PdvApp
@@ -108,6 +121,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       customer={await customerInfo(store, cart.customerId ?? null)}
       priceTables={priceTables}
       categories={categories}
+      brands={brands}
+      sellers={sellers}
+      quickMethods={methods.filter((m) => m.availablePdv !== false).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).slice(0, 8).map((m) => ({ id: m.id, name: m.name, kind: m.kind }))}
+      fiscal={fiscal}
       parked={parkedRaw.map((p) => ({ id: p.id, name: p.name ?? null, customerName: p.customerName ?? null, total: p.total ?? 0, itemsCount: p.itemsCount ?? (p.items ?? []).length, parkedAt: p.parkedAt ?? p.updatedAt, expired: p.expired, operatorName: users.get(p.operatorId) ?? "—", terminalName: terminalNames.get(p.terminalId) ?? "—" }))}
       allowNegative={allowNegative}
       exchange={exchange}

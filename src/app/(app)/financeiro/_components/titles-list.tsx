@@ -77,7 +77,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
   const origins = Object.entries(ORIGIN_LABEL)
     .filter(([key]) => (rec ? ["manual", "sale", "sale_card", "renegotiation", "service"] : ["manual", "purchase", "receipt", "return"]).includes(key))
     .map(([value, label]) => ({ value, label }));
-  const withCharges = (r: Row) => (rec && r.state === "overdue" ? r.balance + (() => { const c = suggestLateCharges(r.dueDate, t0, r.balance, late); return c.fine + c.interest; })() : r.balance);
+  const withCharges = (r: Row) => (rec && r.state === "overdue" && r.originType !== "sale_card" ? r.balance + (() => { const c = suggestLateCharges(r.dueDate, t0, r.balance, late); return c.fine + c.interest; })() : r.balance);
   const columns: Column<Row>[] = [
     {
       key: "partyName",
@@ -168,7 +168,12 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
       fixed: true,
       cell: (r) => (
         <div className="no-print flex items-center justify-end gap-1">
-          {["open", "partial"].includes(r.status) && (rec || r.approvalStatus === "approved") && (
+          {["open", "partial"].includes(r.status) && r.originType === "sale_card" && (
+            <Link className={buttonClass("secondary", "sm")} href={`/financeiro/cartoes?status=open&to=${r.dueDate}`} title="Recebível da adquirente: liquide com a taxa em Recebíveis de cartão">
+              Liquidar
+            </Link>
+          )}
+          {["open", "partial"].includes(r.status) && r.originType !== "sale_card" && (rec || r.approvalStatus === "approved") && (
             <SettleDialog
               kind={kind}
               installment={{ id: r.id, number: r.installment, balance: r.balance, dueDate: r.dueDate, amount: r.amount }}
@@ -241,7 +246,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
     const pending = openAll.filter((r) => r.approvalStatus !== "approved");
     const pendingTitles = [...new Map(pending.map((r) => [r.titleId, r])).values()].slice(0, 6);
     side = (
-      <aside className="space-y-4">
+      <aside className="mb-4 grid gap-4 lg:grid-cols-3">
         <Card title="Previsão de caixa" description="Saldo atual das contas ativas (todas as filiais)">
           <p className="tabular text-2xl font-semibold text-ink">{formatMoney(available)}</p>
           <p className="mt-1 text-sm">
@@ -360,14 +365,8 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
         <Stat label="Em atraso" value={formatMoney(k.overdue.amount)} tone={k.overdue.amount ? "bad" : "default"} hint={`${k.overdue.count} parcela(s) vencida(s) antes de ${formatDate(t0)}`} href={link({ state: "overdue" })} />
         <Stat label="Próximos 7 dias" value={formatMoney(k.next7.amount + k.dueToday.amount)} hint={`${k.next7.count + k.dueToday.count} parcela(s) de ${formatDate(t0)} a ${formatDate(k.next7.to)}${rec ? "" : ` · ${k.pendingApproval.count} a autorizar`}`} href={link({ state: "open", dueFrom: t0, dueTo: k.next7.to })} />
       </div>
-      {side ? (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-          {table}
-          {side}
-        </div>
-      ) : (
-        table
-      )}
+      {side}
+      {table}
     </>
   );
 }

@@ -113,7 +113,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <Stat label="Realizado até" value={!ref ? "—" : ref.status === "not_started" ? "Não iniciado" : ref.to.split("-").reverse().join("/")} hint={!ref ? "Sem metas no mês" : ref.status === "not_started" ? "O mês ainda não começou" : `dia ${ref.elapsedDays} de ${ref.monthDays} do mês`} />
       </section>
 
-      <div className="grid gap-4 2xl:grid-cols-3">
+      <div className="grid gap-4 2xl:grid-cols-3 [&>*]:min-w-0">
         <Card className="2xl:col-span-2" title={`Metas de ${formatMonth(mes)}`} bodyClass="p-0">
           {goals.length === 0 ? (
             <EmptyState title="Nenhuma meta cadastrada para o mês" description={canCreate ? "Cadastre ao lado ou copie as metas do mês anterior." : "Solicite ao gestor o cadastro das metas."} />
@@ -195,7 +195,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             Realizado do 1º dia do mês até hoje (ou até o fim do mês, se encerrado). Ritmo esperado = meta × dias decorridos ÷ dias do mês (traço no medidor). Ticket médio compara diretamente com a meta.
           </p>
         </Card>
-        <div id="form-meta" className="grid scroll-mt-20 gap-4 lg:grid-cols-2 2xl:block 2xl:space-y-4">
+        <div id="form-meta" className="grid scroll-mt-20 gap-4 lg:grid-cols-2 2xl:block 2xl:space-y-4 [&>*]:min-w-0">
           {(canCreate || (editing && canEdit)) && (
             <Card title={editing ? "Editar meta" : "Nova meta"} description="Uma meta por filial, mês e métrica.">
               <GoalForm key={editing?.id ?? "new"} goal={editing} branches={branchOpts} metrics={metrics} defaultPeriod={mes} defaultBranch={filial || s.ctx.branchId || accessible[0]?.id || "*"} />

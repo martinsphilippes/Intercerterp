@@ -14,6 +14,7 @@ import { pixProviderFrom } from "@/domain/payments/providers";
 import { cartIntents } from "@/domain/payments/intents";
 import { nameMap } from "@/lib/server/lookups";
 import { PaymentApp } from "./payment-app";
+import { getFiscalConfig } from "@/domain/fiscal/service";
 
 export const metadata = { title: "Pagamento da venda" };
 export const dynamic = "force-dynamic";
@@ -42,10 +43,16 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   // validação e total oficiais do servidor (preços vigentes, limites de desconto, estoque)
   let prep: Awaited<ReturnType<typeof prepareSale>> | null = null;
   let problem: string | null = null;
+  let needsApproval = false;
   try {
     prep = await prepareSale(s.ctx, cartToSaleInput(cart, []));
   } catch (e: any) {
     problem = e?.message ?? String(e);
+    // desconto acima do limite do operador: recalcula como se autorizado e pede a autorização do supervisor na conclusão
+    if (e?.code === "discount_limit") {
+      needsApproval = true;
+      prep = await prepareSale(s.ctx, cartToSaleInput(cart, []), { approver: { ...s.user, isAdmin: true } }).catch(() => null);
+    }
   }
   if (!prep) {
     return (
@@ -77,6 +84,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     if (ret && v && v.status === "active") exchangeVoucher = { code: v.code, balance: v.balance, returnNumber: ret.number };
   }
   const users = await nameMap(s.ctx, "users");
+  const fiscalCfg = await getFiscalConfig(store, s.ctx.companyId, s.ctx.branchId);
+  const fiscalLabel = !fiscalCfg ? "Fiscal não configurado" : fiscalCfg.provider === "simulated" ? "Simulação (sem validade fiscal)" : fiscalCfg.environment === "producao" ? "Produção" : "Homologação";
   return (
     <PaymentApp
       cartId={cart.id}
@@ -95,6 +104,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       drafts={(cart.payments ?? []) as any[]}
       exchangeVoucher={exchangeVoucher}
       today={today()}
+      initialMethodId={sp(params, "meio") || null}
+      approvalNeeded={needsApproval ? problem : null}
+      emitFiscal={cart.emitFiscal !== false}
+      fiscalLabel={fiscalLabel}
+      itemsCount={prep.lines.length}
+      unitsCount={prep.lines.reduce((a, l) => a + l.input.qty, 0)}
+      discountLimitBps={s.user.discountLimitBps ?? 0}
     />
   );
 }

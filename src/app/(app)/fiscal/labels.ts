@@ -53,7 +53,7 @@ export const STATUS_OPTIONS = [
 
 export function docNumberLabel(d: Record<string, any>) {
   if (d.model === "nfse") return d.number ? `nº ${d.number}` : d.rpsNumber ? `RPS ${d.rpsNumber}` : "Sem RPS";
-  return d.number ? `nº ${String(d.number).padStart(9, "0").replace(/(\d{3})(\d{3})(\d{3})/, "$1.$2.$3")}` : "Sem numeração";
+  return d.number ? `${String(d.number).padStart(9, "0").replace(/(\d{3})(\d{3})(\d{3})/, "$1.$2.$3")}` : "Sem numeração";
 }
 
 export function formatKey(k?: string | null) {

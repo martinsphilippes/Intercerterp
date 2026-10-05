@@ -408,3 +408,16 @@ export function stepState(req: Doc, i: number, decisions: Doc[]) {
 }
 
 void (null as unknown as OrderStatus);
+
+/** Política ativa com responsáveis resolvidos (prévia do fluxo no formulário do pedido e na fila). */
+export async function policyPreview(store: Store, companyId: string) {
+  const doc = await activePolicy(store, companyId);
+  const policy: PolicyInput = doc ? { name: doc.name, rules: doc.rules, autoApproveBelow: doc.autoApproveBelow ?? 0, allowSelfApproval: Boolean(doc.allowSelfApproval), expiredProposalAction: doc.expiredProposalAction ?? "warn", reviewOnRevision: doc.reviewOnRevision ?? "relevant" } : DEFAULT_POLICY;
+  const tiers = [];
+  for (const t of [...policy.rules.tiers].sort((a, b) => a.above - b.above)) {
+    const steps = [];
+    for (const s of t.steps) steps.push({ name: s.name, kind: s.kind, responsibleNames: (await stepResponsibles(store, companyId, s)).map((u) => u.name) });
+    tiers.push({ above: t.above, steps });
+  }
+  return { configured: Boolean(doc), name: policy.name, tiers, autoApproveBelow: policy.autoApproveBelow, allowSelfApproval: policy.allowSelfApproval, distinctApprovers: Boolean(policy.rules.distinctApprovers), expiredProposalAction: policy.expiredProposalAction, reviewOnRevision: policy.reviewOnRevision };
+}

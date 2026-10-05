@@ -3,10 +3,10 @@ import { listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import type { Ctx } from "@/lib/core/ctx";
 import { normalizeSearch, type ListParams } from "@/lib/list";
-import { addDays, today } from "@/lib/dates";
+import { addDays, diffDays, monthEnd, monthStart, today } from "@/lib/dates";
 import { nameMap } from "@/lib/server/lookups";
 import { cardFeeByInstallment, dueState, type TitleKind } from "@/domain/finance";
-import { categoryDefaults, entrySide, resolveCategory } from "@/domain/cashflow";
+import { categoryDefaults, computeCashflow, entrySide, methodAccountMap, resolveCategory, type CashflowFilter, type Granularity } from "@/domain/cashflow";
 import { roundDiv } from "@/lib/money";
 
 type P = Pick<ListParams, "q" | "f">;
@@ -198,10 +198,11 @@ export async function queryCashflowEntries(ctx: Ctx, p: P) {
   const from = p.f.from || `${today().slice(0, 7)}-01`;
   const to = p.f.to || today();
   const filters: any[] = [["eq", "companyId", ctx.companyId], ["between", "date", from, to]];
-  const branch = branchScope(ctx, p);
-  if (branch) filters.push(["eq", "branchId", branch]);
   if (p.f.account) filters.push(["eq", "accountId", p.f.account]);
-  const entries = await listAll(ctx.store, "account_entries", { filters, orderBy: [{ field: "date", dir: "asc" }] });
+  // filial: contas da filial + contas compartilhadas (mesmo critério de computeCashflow)
+  const branch = branchScope(ctx, p);
+  const scopeAccounts = branch ? new Set((await listAll(ctx.store, "financial_accounts", { filters: [["eq", "companyId", ctx.companyId]] })).filter((a) => !a.branchId || a.branchId === branch).map((a) => a.id)) : null;
+  const entries = (await listAll(ctx.store, "account_entries", { filters, orderBy: [{ field: "date", dir: "asc" }] })).filter((e) => !scopeAccounts || scopeAccounts.has(e.accountId));
   const titles = await titlesMap(ctx, entries.map((e) => e.titleId).filter(Boolean));
   const defaults = await categoryDefaults(ctx.store, ctx.companyId);
   const [accounts, cats, ccs] = await Promise.all([nameMap(ctx, "financial_accounts"), nameMap(ctx, "fin_categories"), nameMap(ctx, "cost_centers")]);
@@ -358,4 +359,112 @@ export async function queryAccountEntries(ctx: Ctx, accountId: string, p: P) {
         reversedBy: e.reversedBy as string | null, reversalOf: e.reversalOf as string | null, transferId: e.transferId as string | null,
       };
     });
+}
+
+// ───────────────────────────── Fluxo de caixa: filtro e movimentações (realizadas + previstas)
+
+export const CASHFLOW_PRESETS = [
+  { value: "month", label: "Mês da data de referência" },
+  { value: "next7", label: "Próximos 7 dias" },
+  { value: "next30", label: "Próximos 30 dias" },
+  { value: "last30", label: "Últimos 30 dias" },
+  { value: "prev_month", label: "Mês anterior" },
+  { value: "next90", label: "Próximos 90 dias" },
+  { value: "custom", label: "Personalizado (de/até)" },
+];
+
+/** Filtro do fluxo de caixa a partir da URL (mesmo critério na tela e na exportação). */
+export function cashflowFilter(ctx: Ctx, p: P): CashflowFilter & { preset: string; ref: string } {
+  const ref = /^\d{4}-\d{2}-\d{2}$/.test(p.f.ref ?? "") ? p.f.ref : today();
+  const preset = p.f.from || p.f.to ? "custom" : p.f.preset || "month";
+  let from = monthStart(ref);
+  let to = monthEnd(ref);
+  if (preset === "next7") [from, to] = [ref, addDays(ref, 6)];
+  else if (preset === "next30") [from, to] = [ref, addDays(ref, 29)];
+  else if (preset === "next90") [from, to] = [ref, addDays(ref, 89)];
+  else if (preset === "last30") [from, to] = [addDays(ref, -29), ref];
+  else if (preset === "prev_month") [from, to] = [monthStart(addDays(monthStart(ref), -1)), addDays(monthStart(ref), -1)];
+  else if (preset === "custom") [from, to] = [p.f.from || monthStart(ref), p.f.to || monthEnd(ref)];
+  if (to < from) [from, to] = [to, from];
+  const span = diffDays(from, to);
+  let granularity = (["day", "week", "month"].includes(p.f.g) ? p.f.g : span > 62 ? "month" : span > 31 ? "week" : "day") as Granularity;
+  if (granularity === "day" && span > 92) granularity = "week";
+  return {
+    preset, ref, from, to, granularity,
+    accountId: p.f.account || null,
+    categoryId: p.f.category || null,
+    costCenterId: p.f.costCenter || null,
+    branchId: branchScope(ctx, p),
+    includeOverdue: p.f.overdue === "1",
+  };
+}
+
+/**
+ * Movimentações do período: lançamentos realizados (extrato interno) + parcelas previstas em aberto,
+ * em ordem cronológica, com saldo acumulado a partir do saldo inicial (quando o recorte permite).
+ */
+export async function queryCashflowMovements(ctx: Ctx, p: P) {
+  const f = cashflowFilter(ctx, p);
+  const t0 = today();
+  const type = p.f.type || "";
+  const status = p.f.status || "";
+  const realized = status === "forecast" ? [] : await queryCashflowEntries(ctx, { q: p.q, f: { ...p.f, from: f.from, to: f.to, side: type, branch: f.branchId ?? "", account: f.accountId ?? "" } });
+  const rows: Array<{
+    id: string; date: string; status: "realized" | "forecast"; description: string; party: string | null; category: string; account: string; accountId: string | null; document: string | null;
+    amount: number; side: string; balance: number | null; href: string | null; reconciled: boolean;
+  }> = realized.map((e) => ({
+    id: e.id, date: e.date, status: "realized", description: e.description, party: e.party, category: e.category, account: e.account, accountId: e.accountId, document: e.titleNumber ? `Título nº ${e.titleNumber}` : null,
+    amount: e.amount, side: e.side, balance: null, href: e.titleId ? `/financeiro/${e.titleKind === "payable" ? "pagar" : "receber"}/${e.titleId}` : `/financeiro/contas/${e.accountId}?from=${e.date}&to=${e.date}`, reconciled: e.reconciled,
+  }));
+  if (!f.accountId && status !== "realized" && type !== "transfer") {
+    const filters: any[] = [["eq", "companyId", ctx.companyId], ["eq", "status", ["open", "partial"]], ["lte", "dueDate", f.to]];
+    if (f.branchId) filters.push(["eq", "branchId", f.branchId]);
+    if (f.categoryId) filters.push(["eq", "categoryId", f.categoryId]);
+    if (f.costCenterId) filters.push(["eq", "costCenterId", f.costCenterId]);
+    const open = await listAll(ctx.store, "installments", { filters });
+    const titles = await titlesMap(ctx, open.map((i) => i.titleId));
+    const cardTitles = [...titles.values()].filter((t) => t.originType === "sale_card");
+    const fees = cardTitles.length ? await cardFeeByInstallment(ctx.store, cardTitles) : new Map<string, number>();
+    const [cats, accs] = await Promise.all([nameMap(ctx, "fin_categories"), nameMap(ctx, "financial_accounts")]);
+    const mAcc = await methodAccountMap(ctx.store, ctx.companyId);
+    const defaults = await categoryDefaults(ctx.store, ctx.companyId);
+    const q = p.q ? normalizeSearch(p.q) : "";
+    for (const i of open) {
+      const t = titles.get(i.titleId);
+      if (!t || t.status === "cancelled") continue;
+      const overdue = i.dueDate < t0;
+      if (overdue && !f.includeOverdue) continue;
+      const date = overdue ? t0 : i.dueDate;
+      if (date < f.from || date > f.to) continue;
+      let value = i.balance;
+      if (t.originType === "sale_card") value -= roundDiv((fees.get(i.id) ?? 0) * i.balance, Math.max(1, i.amount));
+      const amount = i.kind === "receivable" ? value : -value;
+      const side = amount > 0 ? "in" : "out";
+      if (type && type !== side) continue;
+      const catId = resolveCategory({ categoryId: i.categoryId, kind: "", originType: t.originType }, t, defaults);
+      if (!f.categoryId && p.f.category === "none" && catId) continue;
+      if (q && !normalizeSearch(`${i.description} ${i.partyName ?? ""} ${t.documentNumber ?? ""} ${t.number}`).includes(q)) continue;
+      const accId = i.kind === "receivable" && i.methodKind ? (mAcc.get(i.methodKind) ?? null) : null;
+      rows.push({
+        id: `f-${i.id}`, date, status: "forecast", description: `${i.description} — parcela ${i.number}/${t.installmentsCount}${overdue ? ` (vencida em ${i.dueDate.split("-").reverse().join("/")})` : ""}${t.kind === "payable" && t.approvalStatus !== "approved" ? " · a autorizar" : ""}`,
+        party: i.partyName ?? t.partyName ?? null, category: catId ? (cats.get(catId) ?? "—") : "Sem categoria", account: accId ? (accs.get(accId) ?? "—") : "Sem conta definida", accountId: accId,
+        document: t.documentNumber ? `Doc. ${t.documentNumber}` : `Título nº ${t.number}`, amount, side, balance: null, href: `/financeiro/${t.kind === "payable" ? "pagar" : "receber"}/${t.id}`, reconciled: false,
+      });
+    }
+  }
+  rows.sort((a, b) => a.date.localeCompare(b.date) || (a.status === b.status ? 0 : a.status === "realized" ? -1 : 1));
+  // saldo acumulado só faz sentido sem recortes que excluem movimentos (tipo, categoria, centro, busca)
+  const canRun = !type && !f.categoryId && !f.costCenterId && !p.q && !status;
+  let opening: number | null = null;
+  if (canRun) {
+    const cf = await computeCashflow(ctx, f);
+    opening = cf.openingProjected;
+    let run = opening;
+    for (const r of rows) {
+      if (r.side === "skip") continue;
+      run += r.amount;
+      r.balance = run;
+    }
+  }
+  return { rows, filter: f, opening };
 }

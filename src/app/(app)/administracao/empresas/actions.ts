@@ -42,7 +42,7 @@ export async function setCompanyStatusAction(id: string, status: "active" | "ina
 function branchInput(fd: FormData) {
   return {
     code: fstr(fd, "code"), name: fstr(fd, "name"), cnpj: fopt(fd, "cnpj"), ie: fopt(fd, "ie"), im: fopt(fd, "im"), phone: fopt(fd, "phone"), email: fopt(fd, "email"), address: address(fd),
-    defaultWarehouseId: fopt(fd, "defaultWarehouseId"), defaultPriceTableId: fopt(fd, "defaultPriceTableId"), timezone: fopt(fd, "timezone"),
+    defaultWarehouseId: fopt(fd, "defaultWarehouseId"), defaultPriceTableId: fopt(fd, "defaultPriceTableId"), timezone: fopt(fd, "timezone"), managerUserId: fopt(fd, "managerUserId"),
   };
 }
 

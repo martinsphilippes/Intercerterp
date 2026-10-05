@@ -4,7 +4,7 @@ import { runAction, fstr, fopt, fint, fjson } from "@/lib/server/action";
 import { listAll } from "@/lib/db";
 import { normalizeSearch } from "@/lib/list";
 import { adjustStock, balanceId, type ManualType } from "@/domain/stock";
-import { createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, type TransferReceiptLine } from "@/domain/transfers";
+import { transferCode, createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, type TransferReceiptLine } from "@/domain/transfers";
 import { createInventory, saveCounts, concludeInventory, cancelInventory, addInventoryItem, type CountEntry } from "@/domain/inventory";
 
 /** Pesquisa de SKUs para os seletores (nome, SKU, código de barras); traz o saldo do depósito informado. */
@@ -70,6 +70,8 @@ function parseTransfer(fd: FormData) {
     toWarehouseId: fopt(fd, "toWarehouseId"),
     responsibleId: fopt(fd, "responsibleId"),
     notes: fopt(fd, "notes"),
+    expectedAt: fopt(fd, "expectedAt"),
+    documentRef: fopt(fd, "documentRef"),
     items: fjson<Array<{ skuId: string; qty: number }>>(fd, "items", []),
   };
 }
@@ -78,7 +80,11 @@ export async function saveTransferAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "stock", op: id ? "edit" : "create", requireBranch: true, revalidate: [T] }, async (s) => {
     const t = id ? await updateTransferDraft(s.ctx, id, parseTransfer(fd)) : await createTransfer(s.ctx, parseTransfer(fd), { idemKey: fopt(fd, "_idem") });
-    return { ok: true as const, message: id ? "Rascunho atualizado." : `Transferência nº ${t.number} criada como rascunho.`, redirect: `${T}/${t.id}` };
+    if (fstr(fd, "mode") === "send") {
+      await shipTransfer(s.ctx, t.id);
+      return { ok: true as const, message: `Transferência ${transferCode(t.number)} enviada — em trânsito até o recebimento no destino.`, redirect: `${T}/${t.id}` };
+    }
+    return { ok: true as const, message: id ? "Rascunho atualizado." : `Transferência ${transferCode(t.number)} salva como rascunho.`, redirect: `${T}/${t.id}` };
   });
 }
 
@@ -136,10 +142,10 @@ export async function createInventoryAction(fd: FormData) {
   return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: [I] }, async (s) => {
     const inv = await createInventory(
       s.ctx,
-      { warehouseId: fstr(fd, "warehouseId"), scope: (fstr(fd, "scope") as "all" | "category" | "location") || "all", categoryId: fopt(fd, "categoryId"), location: fopt(fd, "location"), notes: fopt(fd, "notes") },
+      { warehouseId: fstr(fd, "warehouseId"), scope: (fstr(fd, "scope") as "all" | "category" | "location") || "all", categoryId: fopt(fd, "categoryId"), location: fopt(fd, "location"), notes: fopt(fd, "notes"), responsibleId: fopt(fd, "responsibleId") },
       { idemKey: fopt(fd, "_idem") },
     );
-    return { ok: true as const, message: `Inventário nº ${inv.number} aberto — base registrada.`, redirect: `${I}/${inv.id}` };
+    return { ok: true as const, message: `Inventário ${inv.code ?? inv.number} aberto — base registrada.`, redirect: `${I}/${inv.id}` };
   });
 }
 

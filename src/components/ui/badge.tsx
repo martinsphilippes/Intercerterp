@@ -46,6 +46,7 @@ export const STATUS: Record<string, Record<string, [string, Tone]>> = {
   },
   transfer: { draft: ["Rascunho", "neutral"], separated: ["Separado", "info"], in_transit: ["Em trânsito", "accent"], partial: ["Recebido parcial", "warn"], received: ["Recebido", "good"], cancelled: ["Cancelado", "neutral"] },
   inventory: { open: ["Aberto", "info"], counting: ["Em contagem", "accent"], review: ["Em revisão", "warn"], completed: ["Concluído", "good"], cancelled: ["Cancelado", "neutral"] },
+  obligation: { pending: ["A fazer", "neutral"], in_progress: ["Em andamento", "info"], done: ["Concluída", "good"], waived: ["Dispensada", "neutral"], late: ["Atrasada", "bad"], due_soon: ["Vence em breve", "warn"] },
   integration: { not_configured: ["Não configurada", "neutral"], configured_untested: ["Configurada sem teste", "warn"], operational: ["Operacional", "good"], unavailable: ["Indisponível", "bad"], error: ["Erro", "bad"], simulated: ["Simulação", "sim"] },
   user: { active: ["Ativo", "good"], invited: ["Convite pendente", "info"], inactive: ["Inativo", "neutral"], suspended: ["Suspenso", "bad"], invite_expired: ["Convite expirado", "warn"] },
   ticket: { open: ["Aberto", "info"], in_progress: ["Em atendimento", "accent"], waiting: ["Aguardando usuário", "warn"], resolved: ["Resolvido", "good"], closed: ["Encerrado", "neutral"] },
@@ -54,6 +55,7 @@ export const STATUS: Record<string, Record<string, [string, Tone]>> = {
   occurrence: { open: ["Ocorrência aberta", "warn"], resolved: ["Resolvida na origem", "good"], informative: ["Informativa", "info"] },
   priority: { critical: ["Crítica", "bad"], high: ["Alta", "accent"], normal: ["Normal", "neutral"], low: ["Baixa", "neutral"] },
   audit: { success: ["Sucesso", "good"], failure: ["Falha", "bad"] },
+  branch: { active: ["Ativa", "good"], implementation: ["Em implantação", "accent"], inactive: ["Inativa", "neutral"] },
   generic: { active: ["Ativo", "good"], inactive: ["Inativo", "neutral"], draft: ["Rascunho", "neutral"], completed: ["Concluído", "good"], cancelled: ["Cancelado", "neutral"], pending: ["Pendente", "warn"], processing: ["Processando", "info"], reconciled: ["Conciliado", "good"], ignored: ["Ignorado", "neutral"] },
 };
 

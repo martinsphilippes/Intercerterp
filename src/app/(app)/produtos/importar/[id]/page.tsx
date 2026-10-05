@@ -42,7 +42,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <Stat label="Ignorados" value={t.skip ?? 0} href={`${base}?acao=skip`} />
         <Stat label="Com erro" value={t.error ?? 0} href={`${base}?acao=error`} tone={t.error ? "bad" : "default"} />
       </div>
-      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card title={`Resultado por linha${acao ? ` — ${ACTION[acao]?.[0] ?? acao}` : ""}`} bodyClass="p-0">
           <div className="overflow-x-auto">
             <table className="table-base w-full text-sm">

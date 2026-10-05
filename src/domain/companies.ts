@@ -51,6 +51,7 @@ export interface BranchInput {
   defaultWarehouseId?: string | null;
   defaultPriceTableId?: string | null;
   timezone?: string | null;
+  managerUserId?: string | null;
 }
 
 export const REGIMES = [
@@ -200,7 +201,21 @@ function branchData(input: BranchInput) {
     cityCode: address.cityCode || null,
     cityName: address.cityName || null,
     timezone: tz,
+    managerUserId: input.managerUserId || null,
   };
+}
+
+/** Matriz (ordem 0001 do CNPJ ou código 01 sem CNPJ) ou filial. */
+export function branchKind(b: { cnpj?: string | null; code?: string | null }): "Matriz" | "Filial" {
+  const c = onlyDigits(b.cnpj);
+  if (c.length === 14) return c.slice(8, 12) === "0001" ? "Matriz" : "Filial";
+  return b.code === "01" ? "Matriz" : "Filial";
+}
+
+/** Situação da unidade no ERP: inativa; em implantação (sem configuração fiscal); ativa. */
+export function branchSituation(b: { status?: string | null; id: string }, fiscalBranchIds: Set<string>): "active" | "implementation" | "inactive" {
+  if (b.status === "inactive") return "inactive";
+  return fiscalBranchIds.has(b.id) ? "active" : "implementation";
 }
 
 /** Nova filial: cria depósitos (principal e avarias), conta caixa e parâmetros padrão. Idempotente pelo código. */
@@ -211,6 +226,10 @@ export async function createBranch(ctx: Ctx, companyId: string, input: BranchInp
   const branches = await listAll(ctx.store, "branches", { filters: [["eq", "companyId", companyId]] });
   if (branches.some((b) => b.code === data.code)) throw new BusinessError(`Já existe filial com o código ${data.code} nesta empresa.`, "duplicate");
   if (data.cnpj && branches.some((b) => b.cnpj === data.cnpj)) throw new BusinessError("Já existe filial com este CNPJ nesta empresa.", "duplicate");
+  if (data.managerUserId) {
+    const m = await ctx.store.get("users", data.managerUserId);
+    assert(m && (m.isAdmin || (m.companyIds ?? []).includes(companyId)), "Responsável deve ser um usuário com acesso à empresa.");
+  }
   const base = { companyId, createdBy: ctx.user.id };
   const branchId = detId("branch", companyId, data.code);
   const whMain = detId("warehouse", branchId, "main");
@@ -252,6 +271,10 @@ export async function updateBranch(ctx: Ctx, id: string, input: BranchInput) {
     const wh = await ctx.store.get("warehouses", input.defaultWarehouseId);
     assert(wh && wh.branchId === id, "O depósito padrão deve pertencer à filial.");
     assert(wh.status !== "inactive", "Depósito padrão inativo.");
+  }
+  if (input.managerUserId) {
+    const m = await ctx.store.get("users", input.managerUserId);
+    assert(m && (m.isAdmin || (m.companyIds ?? []).includes(before.companyId)), "Responsável deve ser um usuário com acesso à empresa.");
   }
   if (input.defaultPriceTableId) {
     const t = await ctx.store.get("price_tables", input.defaultPriceTableId);

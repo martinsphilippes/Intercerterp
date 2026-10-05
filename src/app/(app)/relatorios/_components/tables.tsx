@@ -53,10 +53,10 @@ export function ResultTable({
         {showSurcharge && <td className={cn(num, muted && "text-slate-400")}>{formatMoney(r.surcharges)}</td>}
         <td className={cn(num, r.returns ? "text-amber-800" : muted && "text-slate-400")}>{r.returns ? `− ${formatMoney(r.returns)}` : formatMoney(0)}</td>
         <td className={cn(num, "font-semibold", r.netRevenue < 0 && "text-red-700", muted && "font-normal text-slate-400")}>{formatMoney(r.netRevenue)}</td>
-        {cmp && <td className={cn(num, "text-slate-600")}>{prevRow ? formatMoney(prevRow.netRevenue) : formatMoney(0)}</td>}
         {cmp && (
-          <td className={num}>
+          <td className={num} title={`Período anterior: ${formatMoney(prevRow?.netRevenue ?? 0)}`}>
             <Var cur={r.netRevenue} prev={prevRow?.netRevenue ?? 0} />
+            <span className="block text-[11px] text-slate-500">{formatMoney(prevRow?.netRevenue ?? 0)}</span>
           </td>
         )}
         {showShare && <td className={num}>{total.netRevenue > 0 ? formatBps(roundDiv(r.netRevenue * 10000, total.netRevenue), 1) : "—"}</td>}
@@ -79,8 +79,7 @@ export function ResultTable({
             {showSurcharge && <th className="text-right">Acréscimos</th>}
             <th className="text-right">Devoluções</th>
             <th className="text-right">Vendas líquidas</th>
-            {cmp && <th className="text-right">Anterior</th>}
-            {cmp && <th className="text-right">Var.</th>}
+            {cmp && <th className="text-right">Var. (anterior)</th>}
             {showShare && <th className="text-right">Part.</th>}
             <th className="text-right">CMV</th>
             <th className="hidden text-right 2xl:table-cell">Lucro bruto</th>

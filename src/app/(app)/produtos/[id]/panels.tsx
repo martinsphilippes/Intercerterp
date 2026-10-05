@@ -77,23 +77,22 @@ export function ConversionsPanel({ productId, unitCode, units, conversions, canE
         </ul>
       )}
       {canEdit && (
-        <ActionForm action={saveConversionAction} resetOnSuccess className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+        <ActionForm action={saveConversionAction} resetOnSuccess className="space-y-2">
           {({ pending }) => (
             <>
               <input type="hidden" name="productId" value={productId} />
-              <Field label="1 unidade de">
-                <Select name="fromUnit" defaultValue={units.find((u) => u.value !== unitCode)?.value ?? ""} options={units} />
-              </Field>
-              <span className="pb-2 text-sm text-slate-500">=</span>
-              <div className="flex items-end gap-2">
-                <Field label="Quantidade">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="1 unidade de">
+                  <Select name="fromUnit" defaultValue={units.find((u) => u.value !== unitCode)?.value ?? ""} options={units.map((u) => ({ value: u.value, label: u.value }))} />
+                </Field>
+                <Field label="Equivale a">
                   <QtyInput name="factor" defaultValue={1000} />
                 </Field>
-                <Field label="de">
+                <Field label="Unidade" className="col-span-2">
                   <Select name="toUnit" defaultValue={unitCode} options={units} />
                 </Field>
               </div>
-              <div className="col-span-3 flex justify-end">
+              <div className="flex justify-end">
                 <SubmitButton pending={pending} size="sm" variant="secondary">
                   <Plus className="size-4" /> Adicionar conversão
                 </SubmitButton>

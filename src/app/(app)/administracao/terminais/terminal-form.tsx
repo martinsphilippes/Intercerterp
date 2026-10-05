@@ -65,6 +65,11 @@ export function TerminalForm({
               </Field>
               <Field label="Largura do papel"><Select name="paperWidth" defaultValue={String(t.paperWidth ?? 80)} options={paperWidths} /></Field>
               <Field label="Nome/modelo da impressora" hint="Ex.: Elgin i9, Epson TM-T20"><Input name="printerName" defaultValue={t.printerName ?? ""} /></Field>
+              <div className="flex flex-col justify-end gap-1 pb-1 sm:col-span-2">
+                <span className="text-xs font-medium text-slate-600">Gaveta de dinheiro</span>
+                <Checkbox name="drawerOnCash" label="Abrir no recebimento em dinheiro" defaultChecked={t.drawerOnCash ?? printer !== "none"} disabled={printer === "none"} />
+                <span className="text-xs text-slate-500">Gaveta acionada pela impressora configurada no terminal.</span>
+              </div>
               <Field label="Leitor de código de barras" className="sm:col-span-2">
                 <Select name="scannerMode" value={scanner} onChange={(e) => setScanner(e.target.value)} options={scannerModes} />
               </Field>

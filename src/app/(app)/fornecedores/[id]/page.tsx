@@ -10,7 +10,7 @@ import { LinkTabs } from "@/components/ui/tabs";
 import { ActionButton } from "@/components/ui/action-form";
 import { Timeline } from "@/components/ui/timeline";
 import { EmptyState } from "@/components/ui/empty";
-import { supplierSummary } from "@/domain/suppliers";
+import { supplierPerformance, supplierSummary } from "@/domain/suppliers";
 import { dueState } from "@/domain/finance";
 import { formatMoney, formatQty } from "@/lib/money";
 import { formatDate, formatDateTime, today } from "@/lib/dates";
@@ -29,6 +29,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const c = await s.ctx.store.get("suppliers", id);
   if (!c || c.companyId !== s.ctx.companyId) notFound();
   const sum = await supplierSummary(s.ctx, id);
+  const perf = (await supplierPerformance(s.ctx.store, s.ctx.companyId, [id])).get(id);
   const [terms, quotations] = await Promise.all([nameMap(s.ctx, "payment_terms"), nameMap(s.ctx, "quotations", (q) => `nº ${q.number} — ${q.title ?? ""}`)]);
   const label = c.tradeName || c.name;
   const base = `/fornecedores/${id}`;
@@ -45,8 +46,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         crumbs={[{ label: "Fornecedores", href: "/fornecedores" }, { label }]}
         badges={
           <>
-            <StatusBadge kind="generic" status={c.status} />
+            <StatusBadge kind="supplier" status={c.status} />
             <Badge>{c.personType === "PF" ? "Pessoa física" : "Pessoa jurídica"}</Badge>
+            {c.category && <Badge tone="brand">{c.category}</Badge>}
           </>
         }
         description={[c.doc ? formatDoc(c.doc) : "Sem documento", c.code, c.tradeName && c.name !== c.tradeName ? c.name : null].filter(Boolean).join(" · ")}
@@ -62,23 +64,22 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 <Pencil className="size-4" /> Editar
               </LinkButton>
             )}
-            {canEdit &&
-              (c.status === "inactive" ? (
-                <ActionButton action={setSupplierStatusAction.bind(null, id, "active")} label="Reativar" />
-              ) : (
-                <ActionButton action={setSupplierStatusAction.bind(null, id, "inactive")} label="Inativar" askReason="Motivo da inativação (o histórico de pedidos, recebimentos e títulos é preservado):" />
-              ))}
+            {canEdit && ["inactive", "blocked"].includes(c.status) && <ActionButton action={setSupplierStatusAction.bind(null, id, "active")} label={c.status === "blocked" ? "Desbloquear" : "Reativar"} confirm="Liberar o fornecedor para novas cotações e pedidos?" />}
+            {canEdit && c.status === "active" && <ActionButton action={setSupplierStatusAction.bind(null, id, "blocked")} label="Bloquear" askReason="Motivo do bloqueio (impede novas cotações e pedidos; recebimentos de pedidos já aprovados continuam):" />}
+            {canEdit && c.status !== "inactive" && <ActionButton action={setSupplierStatusAction.bind(null, id, "inactive")} label="Inativar" askReason="Motivo da inativação (o histórico de pedidos, recebimentos e títulos é preservado):" />}
             {can(s.user, "suppliers", "delete") && !hasOps && <ActionButton action={deleteSupplierAction.bind(null, id)} label="Excluir" variant="danger" confirm="Excluir definitivamente? Só é permitido sem operações." />}
           </>
         }
       />
-      {c.status === "inactive" && <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">Fornecedor inativo: não aparece em novas cotações e pedidos. Histórico preservado abaixo.</p>}
+      {c.status === "inactive" && <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">Fornecedor inativo{c.statusReason ? ` (${c.statusReason})` : ""}: não aparece em novas cotações e pedidos. Histórico preservado abaixo.</p>}
+      {c.status === "blocked" && <p className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-900">Fornecedor bloqueado{c.statusReason ? `: ${c.statusReason}` : ""}. Novas cotações e pedidos estão impedidos; recebimentos e títulos de pedidos já aprovados seguem normalmente.</p>}
+      {c.status === "draft" && <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">Documentação pendente: complete o cadastro (CPF/CNPJ) para liberar cotações e pedidos.</p>}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Produtos fornecidos" value={sum.products.length} href={`${base}?tab=produtos`} />
         <Stat label="Pedidos a receber" value={formatMoney(sum.openOrdersTotal)} hint={`${sum.openOrders.length} pedido(s) aprovados/enviados/parciais`} href={`/compras/pedidos?supplier=${id}&status=open`} />
         <Stat label="Comprado (recebido)" value={formatMoney(sum.purchasedTotal)} hint={`${sum.receipts.filter((r) => r.status === "confirmed").length} recebimento(s) confirmados`} href={`${base}?tab=recebimentos`} />
         <Stat label="A pagar em aberto" value={formatMoney(sum.openBalance)} hint={sum.overdueBalance ? `${formatMoney(sum.overdueBalance)} vencido` : "Nada vencido"} tone={sum.overdueBalance ? "bad" : "default"} href={`${base}?tab=titulos`} />
-        <Stat label="Prazo / pedido mínimo" value={`${c.leadTimeDays ?? "—"} d`} hint={c.minOrderValue ? `Mínimo ${formatMoney(c.minOrderValue)}` : "Sem pedido mínimo"} />
+        <Stat label="Desempenho (0–5)" value={perf?.score != null ? (perf.score / 10).toLocaleString("pt-BR", { minimumFractionDigits: 1 }) : "—"} hint={perf ? `Pontualidade ${perf.onTimeRate != null ? `${Math.round(perf.onTimeRate / 100)}%` : "—"} · conformidade ${perf.conformityRate != null ? `${Math.round(perf.conformityRate / 100)}%` : "—"} (${perf.receipts} receb.)` : `Prazo ${c.leadTimeDays ?? "—"} d · mínimo ${formatMoney(c.minOrderValue)}`} href={`${base}?tab=custos`} />
       </div>
       <LinkTabs
         basePath={base}
@@ -117,6 +118,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 { label: "Prazo de entrega", value: c.leadTimeDays != null ? `${c.leadTimeDays} dias` : "—" },
                 { label: "Pedido mínimo", value: c.minOrderValue ? formatMoney(c.minOrderValue) : "—" },
                 { label: "Política de frete", value: c.freightPolicy },
+                { label: "Categoria", value: c.category },
                 { label: "Endereços", value: (c.addresses ?? []).length ? (c.addresses ?? []).map((a: any, i: number) => <span key={i} className="block">{a.type ? <span className="text-xs text-slate-500">{a.type}: </span> : null}{a.street ?? ""}, {a.number ?? "s/n"} — {a.district ?? ""}, {a.cityName ?? ""}/{a.uf ?? ""} {a.zip ?? ""}</span>) : "—" },
                 { label: "Observações", value: c.notes },
               ]}

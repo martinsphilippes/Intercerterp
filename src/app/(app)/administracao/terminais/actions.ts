@@ -19,6 +19,7 @@ function parse(fd: FormData): TerminalInput {
     tefConfig: { acquirer: fopt(fd, "tefAcquirer"), merchantId: fopt(fd, "tefMerchantId") },
     allowNegativeStock: fbool(fd, "allowNegativeStock"),
     defaultWarehouseId: fopt(fd, "defaultWarehouseId"),
+    drawerOnCash: fbool(fd, "drawerOnCash"),
   };
 }
 

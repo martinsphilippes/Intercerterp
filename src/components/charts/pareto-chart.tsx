@@ -21,7 +21,7 @@ const CLASS_COLOR = { A: CHART_COLORS.classA, B: CHART_COLORS.classB, C: CHART_C
  * Curva ABC (Pareto) num ÚNICO eixo em % do total da base: colunas = participação de cada item
  * (cor pela classe, rampa ordinal), linha = participação acumulada; linhas de referência nos limites A e B.
  */
-export function ParetoChart({ points, limitA, limitB, highlight, height = 300, drillBase, caption }: { points: ParetoPoint[]; limitA: number; limitB: number; highlight?: "A" | "B" | "C" | null; height?: number; drillBase?: string | null; caption: string }) {
+export function ParetoChart({ points, limitA, limitB, highlight, height = 300, drillBase, caption, summary }: { points: ParetoPoint[]; limitA: number; limitB: number; highlight?: "A" | "B" | "C" | null; height?: number; drillBase?: string | null; caption: string; summary?: Record<"A" | "B" | "C", { count: number; shareBps: number }> }) {
   const router = useRouter();
   const data = points.map((p) => ({ ...p, share: p.shareBps / 100, cum: p.cumBps / 100 }));
   return (
@@ -30,12 +30,17 @@ export function ParetoChart({ points, limitA, limitB, highlight, height = 300, d
         {(["A", "B", "C"] as const).map((k) => (
           <span key={k} className="inline-flex items-center gap-1.5" style={{ opacity: highlight && highlight !== k ? 0.45 : 1 }}>
             <span className="inline-block size-2.5 rounded-sm" style={{ background: CLASS_COLOR[k] }} /> Classe {k}
+            {summary && (
+              <span className="text-slate-500">
+                ({summary[k].count} {summary[k].count === 1 ? "produto" : "produtos"} · {pctBR(summary[k].shareBps)})
+              </span>
+            )}
           </span>
         ))}
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-0.5 w-4 rounded" style={{ background: CHART_COLORS.previous }} /> Participação acumulada
         </span>
-        <span className="ml-auto text-slate-500">% do total da base da curva</span>
+        <span className="ml-auto text-slate-500">Eixo vertical: % da base da curva</span>
       </div>
       <div style={{ height }} className="w-full">
         <ResponsiveContainer width="100%" height="100%">

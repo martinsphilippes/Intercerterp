@@ -28,6 +28,39 @@ export const NOTIFICATION_TYPES: Array<{ key: string; label: string; description
 
 export const TYPE_LABEL: Record<string, string> = Object.fromEntries(NOTIFICATION_TYPES.map((t) => [t.key, t.label]));
 
+/** Próxima ação sugerida por tipo (texto e rótulo do botão que leva à origem). */
+export const NEXT_ACTION: Record<string, { text: string; cta: string }> = {
+  stock_min: { text: "Confira o saldo do item e gere a reposição no planejamento de compras ou uma transferência entre filiais.", cta: "Abrir reposição" },
+  receivable_overdue: { text: "Contate o cliente, registre o recebimento ou renegocie o título vencido.", cta: "Consultar título" },
+  payable_due: { text: "Confira a conta a pagar, autorize se necessário e registre a baixa no vencimento.", cta: "Consultar conta" },
+  purchase_review: { text: "Analise o pedido/solicitação e registre a decisão na etapa de aprovação.", cta: "Abrir aprovação" },
+  fiscal_rejected: { text: "Consulte o retorno da SEFAZ/prefeitura, corrija o dado indicado e retransmita o documento.", cta: "Consultar documento fiscal" },
+  integration_failure: { text: "Veja o erro da tarefa ou integração, corrija a configuração e reprocesse.", cta: "Abrir integrações" },
+  deadline: { text: "Prepare e entregue a obrigação antes do prazo; anexe o comprovante.", cta: "Abrir obrigação" },
+  cash: { text: "Confira o fechamento, as diferenças e a justificativa da sessão de caixa.", cta: "Abrir caixa" },
+  ticket: { text: "Leia a mensagem e responda pelo próprio chamado.", cta: "Abrir chamado" },
+  backup: { text: "Abra a cópia, verifique a falha e gere uma nova cópia verificada.", cta: "Abrir backup" },
+  info: { text: "Aviso informativo — nenhuma ação obrigatória.", cta: "Abrir" },
+};
+
+/** Nível exibido: Alta (alta/crítica), Atenção (pendência), Informativa. */
+export function noticeLevel(n: { priority?: string | null; occurrenceStatus?: string | null }): { label: string; tone: "bad" | "accent" | "neutral" } {
+  if (n.priority === "critical" || n.priority === "high") return { label: n.priority === "critical" ? "Crítica" : "Alta", tone: "bad" };
+  if (n.occurrenceStatus === "informative") return { label: "Informativa", tone: "neutral" };
+  return { label: "Atenção", tone: "accent" };
+}
+
+/** Módulo dono da rota (para respeitar o acesso do usuário ao conteúdo relacionado). */
+export function moduleOfLink(link: string | null | undefined): string | null {
+  if (!link) return null;
+  const map: Array<[string, string]> = [["/estoque", "stock"], ["/financeiro", "finance"], ["/compras", "purchases"], ["/fiscal", "fiscal"], ["/vendas", "sales"], ["/caixa", "cash"], ["/pdv", "pdv"], ["/produtos", "products"], ["/clientes", "customers"], ["/fornecedores", "suppliers"], ["/administracao", "admin"], ["/ajuda", "support"], ["/relatorios", "reports"], ["/dashboard", "dashboard"]];
+  return map.find(([p]) => link === p || link.startsWith(`${p}/`) || link.startsWith(`${p}?`))?.[1] ?? null;
+}
+
+export function noticeCode(id: string) {
+  return `ALR-${id.slice(0, 6).toUpperCase()}`;
+}
+
 export const PRIORITY_LABEL: Record<string, string> = { critical: "Crítica", high: "Alta", normal: "Normal", low: "Baixa" };
 const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, normal: 2, low: 3 };
 
@@ -40,12 +73,20 @@ export interface NotificationFilter {
   to?: string;
   /** "1" = somente arquivadas; padrão: caixa de entrada (não arquivadas) */
   archived?: string;
+  /** visão: inbox | unread | pending | high | archived */
+  view?: string;
+  branch?: string;
   q?: string;
 }
 
 export async function queryNotifications(ctx: Ctx, f: NotificationFilter) {
   const filters: Filter[] = [["eq", "userId", ctx.user.id], ["eq", "companyId", ctx.companyId]];
-  filters.push(f.archived === "1" ? ["notNull", "archivedAt"] : ["isNull", "archivedAt"]);
+  const archived = f.archived === "1" || f.view === "archived";
+  filters.push(archived ? ["notNull", "archivedAt"] : ["isNull", "archivedAt"]);
+  if (f.view === "unread") filters.push(["isNull", "readAt"]);
+  if (f.view === "pending") filters.push(["eq", "occurrenceStatus", "open"]);
+  if (f.view === "high") filters.push(["eq", "priority", ["high", "critical"]]);
+  if (f.branch) filters.push(["eq", "branchId", f.branch]);
   if (f.type) filters.push(["eq", "type", f.type]);
   if (f.read === "unread") filters.push(["isNull", "readAt"]);
   if (f.read === "read") filters.push(["notNull", "readAt"]);

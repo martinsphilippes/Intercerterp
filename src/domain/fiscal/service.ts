@@ -81,6 +81,13 @@ export async function getFiscalConfig(store: Store, companyId: string, branchId:
   return store.get("fiscal_configs", detId("fiscalcfg", fiscalScope(companyId, null)));
 }
 
+/** Mensagem acionável quando o provedor não pode ser iniciado por falta de credencial. */
+export function credentialMessage(cfg: Doc | null) {
+  if (!cfg) return "Configuração fiscal não cadastrada.";
+  if (cfg.tokenRef === "") return "Vínculo de credencial removido: vincule a variável do token na Central de integrações.";
+  return `Credencial do provedor ausente: defina a variável de ambiente ${cfg.tokenRef || "FOCUSNFE_TOKEN"} no servidor.`;
+}
+
 export function providerFor(store: Store, cfg: Doc | null) {
   return fiscalProviderFrom(cfg, store);
 }
@@ -123,7 +130,7 @@ export async function testFiscalConnection(ctx: Ctx, branchId: string | null) {
   const provider = providerFor(ctx.store, cfg);
   let result: { ok: boolean; message: string };
   const t0 = Date.now();
-  if (!provider) result = { ok: false, message: `Credencial ausente: defina a variável de ambiente ${cfg.tokenRef || "FOCUSNFE_TOKEN"} no servidor.` };
+  if (!provider) result = { ok: false, message: credentialMessage(cfg) };
   else {
     try {
       const branch = branchId ? await ctx.store.get("branches", branchId) : null;
@@ -644,7 +651,7 @@ export async function createDocument(ctx: Ctx, input: CreateDocInput) {
       ? "Configuração fiscal da filial não cadastrada (Fiscal → Configurações)."
       : enabled === false
         ? `Emissão de ${MODEL_LABEL[input.model]} desabilitada na configuração fiscal.`
-        : `Credencial do provedor fiscal ausente (variável ${cfg.tokenRef || "FOCUSNFE_TOKEN"}).`;
+        : credentialMessage(cfg);
   }
   const contingency = input.model === "nfce" && status === "queued" && Boolean(cfg?.contingency);
   if (contingency) statusMessage = "Contingência ativa: transmissão retida na fila até a normalização (Fiscal → NFC-e → Pendências).";
@@ -1045,7 +1052,7 @@ export async function transmitDocument(ctx: Ctx, documentId: string) {
   const branch = doc.branchId ? await ctx.store.get("branches", doc.branchId) : null;
   const { cfg, provider } = await providerForDoc(ctx, doc);
   if (!cfg || !provider) {
-    const msg = !cfg ? "Configuração fiscal não cadastrada." : `Credencial do provedor ausente (variável ${cfg.tokenRef || "FOCUSNFE_TOKEN"} não definida no servidor).`;
+    const msg = credentialMessage(cfg);
     doc = await ctx.store.update("fiscal_documents", doc.id, { status: "pending", statusMessage: msg });
     await addEvent(ctx, doc.id, "validation", "pending", msg);
     await raiseFiscalIssue(ctx, doc, msg);

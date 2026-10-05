@@ -139,10 +139,9 @@ export function RoleForm({ role, modules, ops, actions, na, readOnly, usersCount
                   <p className="mb-2 text-xs font-semibold text-slate-600">{g.label}</p>
                   <div className="space-y-1.5">
                     {g.acts.map((a) => (
-                      <label key={a.key} className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" name="action" value={a.key} checked={acts.includes(a.key)} onChange={(e) => toggleAct(a.key, e.target.checked)} className="focus-ring size-4 accent-brand-700" />
+                      <label key={a.key} className="flex items-center gap-2 text-sm" title={a.key}>
+                        <input type="checkbox" name="action" value={a.key} checked={acts.includes(a.key)} onChange={(e) => toggleAct(a.key, e.target.checked)} className="focus-ring size-4 shrink-0 accent-brand-700" />
                         {a.label}
-                        <code className="ml-auto text-[10px] text-slate-400">{a.key}</code>
                       </label>
                     ))}
                   </div>

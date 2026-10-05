@@ -22,9 +22,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ f
       <PageHeader
         title="Novo pedido de compra"
         crumbs={[{ label: "Pedidos de compra", href: "/compras/pedidos" }, { label: "Novo" }]}
-        description={`Entrega na filial ${s.branch?.name}. Para importar de cotação ou reposição sem redigitar, use Cotações ou Planejamento de reposição.`}
+        description="Defina fornecedor, produtos, custos, entrega e condição financeira. O número é atribuído ao salvar o rascunho."
+        badges={<span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">Novo rascunho</span>}
       />
-      <OrderForm suppliers={data.suppliers} warehouses={data.warehouses} terms={data.terms} defaultSupplierId={fornecedor ?? null} />
+      <OrderForm {...data} branchName={s.branch?.name ?? ""} currentUserId={s.user.id} defaultSupplierId={fornecedor ?? null} />
     </>
   );
 }

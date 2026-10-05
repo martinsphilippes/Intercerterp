@@ -81,7 +81,8 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
         className="space-y-4 p-4"
       >
         {({ pending, error }) => (
-          <>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="space-y-4">
             <Field label="Produto">
               <SkuPicker value={sku} onChange={choose} warehouseId={wh} />
             </Field>
@@ -114,6 +115,25 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
                 </button>
               ))}
             </div>
+            {kind !== "transfer" && (
+              <dl className="grid grid-cols-3 gap-2 rounded-md bg-slate-50 p-3 text-center text-sm">
+                <div>
+                  <dt className="text-xs text-slate-500">Saldo anterior</dt>
+                  <dd className="tabular font-semibold">{sku ? `${fmt(before)} ${sku.unitCode}` : "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-500">Movimentação</dt>
+                  <dd className={cn("tabular font-semibold", sign > 0 ? "text-emerald-700" : "text-red-700")}>{qty ? `${sign > 0 ? "+" : "−"} ${fmt(qty)}` : "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-500">Novo saldo estimado</dt>
+                  <dd className={cn("tabular text-base font-bold", after < 0 ? "text-red-700" : "text-brand-800")}>{sku ? fmt(after) : "—"}</dd>
+                </div>
+              </dl>
+            )}
+            {kind !== "transfer" && after < 0 && <Notice tone="bad">A saída deixaria o saldo negativo; o sistema vai recusar.</Notice>}
+            </div>
+            <div className="space-y-4">
             {kind === "transfer" ? (
               <Notice tone="info" title="Transferência entre filiais">
                 Transferências têm fluxo próprio (separação, expedição, trânsito e recebimento no destino).{" "}
@@ -166,38 +186,24 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
                       </Field>
                     </>
                   )}
-                  <Field label="Documento de referência" className="sm:col-span-2">
+                  <Field label="Documento de referência">
                     <Input name="documentRef" maxLength={120} placeholder="NF-e, pedido, OS ou documento interno" />
                   </Field>
-                  <Field label="Data do movimento" hint="Vazio = agora. Não pode ser futura." className="sm:col-span-2">
+                  <Field label="Data do movimento" hint="Vazio = agora. Não pode ser futura.">
                     <Input name="occurredAt" type="datetime-local" />
                   </Field>
                 </FormGrid>
                 <Field label="Observações">
                   <Textarea name="notes" rows={2} placeholder="Detalhes adicionais para auditoria" />
                 </Field>
-                <dl className="grid grid-cols-3 gap-2 rounded-md bg-slate-50 p-3 text-center text-sm">
-                  <div>
-                    <dt className="text-xs text-slate-500">Saldo anterior</dt>
-                    <dd className="tabular font-semibold">{sku ? `${fmt(before)} ${sku.unitCode}` : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-slate-500">Movimentação</dt>
-                    <dd className={cn("tabular font-semibold", sign > 0 ? "text-emerald-700" : "text-red-700")}>{qty ? `${sign > 0 ? "+" : "−"} ${fmt(qty)}` : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-slate-500">Novo saldo estimado</dt>
-                    <dd className={cn("tabular text-base font-bold", after < 0 ? "text-red-700" : "text-brand-800")}>{sku ? fmt(after) : "—"}</dd>
-                  </div>
-                </dl>
-                {after < 0 && <Notice tone="bad">A saída deixaria o saldo negativo; o sistema vai recusar.</Notice>}
                 {error && <Notice tone="bad">{error}</Notice>}
                 <SubmitButton pending={pending} variant="accent" className="w-full">
                   Confirmar movimentação
                 </SubmitButton>
               </>
             )}
-          </>
+            </div>
+          </div>
         )}
       </ActionForm>
     </section>

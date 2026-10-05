@@ -123,7 +123,8 @@ export async function saveNfeAction(fd: FormData) {
     if (input.origin.type !== "transfer") input.branchId = branchId;
     const transmit = fstr(fd, "intent") === "transmit";
     const doc = await saveNfe(s.ctx, input, { idemKey: fstr(fd, "_idem"), draftId: fopt(fd, "draftId"), transmit });
-    return { ok: true as const, message: transmit ? `NF-e enviada: ${DOC_STATUS_LABEL[doc.status]}${doc.statusMessage ? ` — ${doc.statusMessage}` : ""}`.slice(0, 300) : "Rascunho salvo.", redirect: docPath("nfe", doc.id) };
+    if (fstr(fd, "stay") === "1") return { ok: true as const, message: `Rascunho salvo às ${new Date().toLocaleTimeString("pt-BR", { timeZone: process.env.APP_TIMEZONE || "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })}.`, data: { id: doc.id, updatedAt: doc.updatedAt } };
+    return { ok: true as const, message: transmit ? `NF-e enviada: ${DOC_STATUS_LABEL[doc.status]}${doc.statusMessage ? ` — ${doc.statusMessage}` : ""}`.slice(0, 300) : "Rascunho salvo.", redirect: docPath("nfe", doc.id), data: { id: doc.id, updatedAt: doc.updatedAt } };
   });
 }
 
@@ -139,6 +140,7 @@ function parseNfse(fd: FormData, branchId: string): NfseInput {
       doc: fstr(fd, "doc"),
       email: fopt(fd, "email"),
       im: fopt(fd, "im"),
+      simplesOptant: fstr(fd, "simplesOptant") === "" ? null : fstr(fd, "simplesOptant") === "1",
       address: { street: fopt(fd, "street"), number: fopt(fd, "number"), district: fopt(fd, "district"), cityName: fopt(fd, "cityName"), cityCode: fopt(fd, "cityCode"), uf: fopt(fd, "uf"), zip: fopt(fd, "zip") },
     },
     customerId: fopt(fd, "customerId"),
@@ -204,9 +206,10 @@ export async function saveConfigAction(fd: FormData) {
         nfseStandard: fstr(fd, "nfseStandard") || "municipal",
         defaultPresence: fstr(fd, "defaultPresence") || "1",
         defaultNature: fopt(fd, "defaultNature"),
-        defaultTaxGroupId: fopt(fd, "defaultTaxGroupId"),
         nfeCancelHours: fint(fd, "nfeCancelHours", 24),
         nfceCancelMinutes: fint(fd, "nfceCancelMinutes", 30),
+        autoEmail: fbool(fd, "autoEmail"),
+        checkAvailability: fbool(fd, "checkAvailability"),
       });
       assert(data.nfeSeries >= 0 && data.nfeSeries <= 999 && data.nfceSeries >= 0 && data.nfceSeries <= 999, "Série deve estar entre 0 e 999.");
       assert(data.nfeCancelHours > 0 && data.nfceCancelMinutes > 0, "Prazos de cancelamento devem ser positivos.");
@@ -218,6 +221,9 @@ export async function saveConfigAction(fd: FormData) {
       const cscTokenRef = fopt(fd, "cscTokenRef");
       if (cscTokenRef) assert(/^[A-Z][A-Z0-9_]{1,80}$/.test(cscTokenRef), "Informe o NOME da variável do CSC.");
       Object.assign(data, { provider, environment: fstr(fd, "environment") === "producao" ? "producao" : "homologacao", tokenRef, cscId: fopt(fd, "cscId"), cscTokenRef });
+    } else if (section === "taxdefault") {
+      Object.assign(data, { defaultTaxGroupId: fopt(fd, "defaultTaxGroupId"), approxTaxBps: parseBps(fstr(fd, "approxTax") || "0") });
+      assert(data.approxTaxBps >= 0 && data.approxTaxBps <= 10000, "Percentual de tributos aproximados inválido.");
     } else if (section === "contingency") {
       Object.assign(data, { contingency: fbool(fd, "contingency"), contingencyReason: fopt(fd, "contingencyReason"), simulateOutage: fbool(fd, "simulateOutage") });
       if (data.contingency) assert(data.contingencyReason, "Informe o motivo da contingência.");
@@ -287,6 +293,7 @@ function parseTaxGroup(fd: FormData): TaxGroupInput {
     validTo: fopt(fd, "validTo"),
     active: fbool(fd, "active"),
     notes: fopt(fd, "notes"),
+    approxTaxBps: bps("approxTax"),
   };
 }
 
@@ -384,5 +391,27 @@ export async function toggleContingencyAction(on: boolean, fd: FormData) {
     if (on) assert(reason && reason.length >= 5, "Informe o motivo da contingência.");
     await saveFiscalConfig(s.ctx, branchId, on ? { contingency: true, contingencyReason: reason } : { contingency: false });
     return { ok: true as const, message: on ? "Contingência ativada: novas NFC-e ficam retidas na fila até a normalização." : "Contingência encerrada: a fila retida foi liberada para transmissão." };
+  });
+}
+
+/** Pesquisa de produtos (SKU) para a NF-e: preço da tabela padrão da filial, unidade, NCM e saldo disponível. */
+export async function searchSkusAction(q: string) {
+  return runAction({ module: "fiscal", op: "create" }, async (s) => {
+    const { listAll } = await import("@/lib/db");
+    const { normalizeSearch } = await import("@/lib/list");
+    const term = normalizeSearch(q ?? "");
+    if (term.length < 2) return [];
+    const skus = await listAll(s.ctx.store, "skus", { filters: [["eq", "companyId", s.ctx.companyId], ["or", [["contains", "searchText", term], ["eq", "barcode", q.trim()], ["eq", "sku", q.trim().toUpperCase()]]]] }, 60);
+    const products = new Map((await listAll(s.ctx.store, "products", { filters: [["eq", "id", [...new Set(skus.map((k) => k.productId))]]] })).map((p) => [p.id, p]));
+    const list = skus.filter((k) => k.active !== false && products.get(k.productId)?.type !== "service").slice(0, 20);
+    const branch = s.ctx.branchId ? await s.ctx.store.get("branches", s.ctx.branchId) : null;
+    const prices = branch?.defaultPriceTableId && list.length ? await listAll(s.ctx.store, "prices", { filters: [["eq", "priceTableId", branch.defaultPriceTableId], ["eq", "skuId", list.map((k) => k.id)]] }) : [];
+    const priceMap = new Map(prices.map((p) => [p.skuId, p.price]));
+    const { availableMap } = await import("@/domain/stock");
+    const avail = s.ctx.branchId && list.length ? await availableMap(s.ctx.store, s.ctx.branchId, list.map((k) => k.id)) : new Map();
+    return list.map((k) => {
+      const p = products.get(k.productId)!;
+      return { skuId: k.id, sku: k.sku, name: k.name ?? p.name, unit: k.unitCode ?? p.unitCode ?? "UN", ncm: p.ncm ?? "", price: priceMap.get(k.id) ?? k.costTotal ?? 0, cost: k.costTotal ?? 0, available: avail.get(k.id)?.available ?? null, taxGroupId: p.taxGroupId ?? null, productId: p.id };
+    });
   });
 }

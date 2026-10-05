@@ -68,7 +68,7 @@ function GeneralFields({ p, o, type, setType, code, setCode, withImage }: { p: R
       <div>
       <FormGrid cols={4}>
         <Field label="Tipo" required>
-          <Select name="type" value={type} onChange={(e) => setType(e.target.value)} options={[{ value: "product", label: "Produto (mercadoria)" }, { value: "service", label: "Serviço" }]} />
+          <Select name="type" value={type} onChange={(e) => setType(e.target.value)} options={[{ value: "product", label: "Produto" }, { value: "service", label: "Serviço" }]} />
         </Field>
         <Field label="Nome" required className="sm:col-span-2 lg:col-span-3">
           <Input name="name" maxLength={200} defaultValue={p.name ?? ""} placeholder="Ex.: Camiseta algodão básica" />

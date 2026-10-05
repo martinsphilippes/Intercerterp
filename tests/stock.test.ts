@@ -236,3 +236,25 @@ describe("movimentos e concorrência", () => {
     await expect(adjustStock(stockist, { warehouseId: refs.warehouses["shopping-main"].id, skuId: sku.id, type: "adjust_in", qty: 1000, reason: "x", idemKey: "a2" })).rejects.toThrow(/filial/);
   });
 });
+
+describe("demonstração do estoque", () => {
+  it("é idempotente e traz trânsito, recebimento parcial, inventário com contagens parciais e produto sem vendas", async () => {
+    const store = freshStore();
+    const { seedDemo } = await import("@/domain/seed");
+    await seedDemo(store, { historyDays: 3 });
+    const movs1 = (await listAll(store, "stock_movements")).length;
+    await seedDemo(store, { historyDays: 3 });
+    expect((await listAll(store, "stock_movements")).length).toBe(movs1);
+    const transfers = await listAll(store, "transfers");
+    expect(transfers.some((t) => t.status === "in_transit")).toBe(true);
+    expect(transfers.some((t) => t.status === "partial" && (t.divergences ?? []).some((d: any) => d.kind === "damaged"))).toBe(true);
+    const inv = (await listAll(store, "inventories")).find((i) => i.status === "counting")!;
+    const counts = await listAll(store, "inventory_counts", { filters: [["eq", "inventoryId", inv.id]] });
+    expect(counts.some((c) => c.counted)).toBe(true);
+    expect(counts.some((c) => !c.counted)).toBe(true);
+    const vela = (await listAll(store, "products", { filters: [["eq", "code", "VELA"]] }))[0];
+    expect(await listAll(store, "sale_items", { filters: [["eq", "productId", vela.id]] })).toHaveLength(0);
+    const bals = await listAll(store, "stock_balances");
+    expect(bals.every((b) => b.inTransit >= 0 && b.reserved >= 0)).toBe(true);
+  });
+});

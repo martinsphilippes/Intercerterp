@@ -3,6 +3,7 @@
 import { runAction } from "@/lib/server/action";
 import { listAll } from "@/lib/db";
 import { searchable } from "@/lib/core/text";
+import { availableMap } from "@/domain/stock";
 
 export interface SkuHit {
   id: string;
@@ -16,6 +17,9 @@ export interface SkuHit {
   leadTimeDays: number | null;
   minQty: number | null;
   multiple: number | null;
+  /** saldo disponível e mínimo na filial atual (milésimos) */
+  available: number | null;
+  stockMin: number | null;
 }
 
 /** Pesquisa de SKUs de produto (nome, SKU, código de barras ou código do fornecedor) com dados do vínculo do fornecedor. */
@@ -35,12 +39,14 @@ export async function searchSkusAction(q: string, supplierId?: string | null) {
     }
     if (!items.length) return [] as SkuHit[];
     const sps = supplierId ? await listAll(store, "supplier_products", { filters: [["eq", "supplierId", supplierId], ["eq", "skuId", items.map((i) => i.id)]] }) : [];
+    const avail = s.ctx.branchId ? await availableMap(store, s.ctx.branchId, items.map((i) => i.id)) : new Map();
+    const bals = s.ctx.branchId ? await listAll(store, "stock_balances", { filters: [["eq", "branchId", s.ctx.branchId], ["eq", "skuId", items.map((i) => i.id)]] }) : [];
     const products = new Map((await listAll(store, "products", { filters: [["eq", "id", [...new Set(items.map((i) => i.productId))]]] })).map((p) => [p.id, p]));
     return items
       .filter((i) => i.active !== false && products.get(i.productId)?.type !== "service")
       .map((i): SkuHit => {
         const sp = sps.find((x) => x.skuId === i.id);
-        return { id: i.id, sku: i.sku, name: i.name ?? i.sku, unitCode: i.unitCode ?? "UN", barcode: i.barcode ?? null, costAcquisition: i.costAcquisition ?? 0, supplierCode: sp?.supplierCode ?? null, lastCost: sp?.lastCost ?? null, leadTimeDays: sp?.leadTimeDays ?? null, minQty: sp?.minQty ?? null, multiple: sp?.multiple ?? null };
+        return { id: i.id, sku: i.sku, name: i.name ?? i.sku, unitCode: i.unitCode ?? "UN", barcode: i.barcode ?? null, costAcquisition: i.costAcquisition ?? 0, supplierCode: sp?.supplierCode ?? null, lastCost: sp?.lastCost ?? null, leadTimeDays: sp?.leadTimeDays ?? null, minQty: sp?.minQty ?? null, multiple: sp?.multiple ?? null, available: avail.get(i.id)?.available ?? (s.ctx.branchId ? 0 : null), stockMin: bals.filter((b) => b.skuId === i.id).reduce((a, b) => a + (b.minQty ?? 0), 0) || null };
       });
   });
 }

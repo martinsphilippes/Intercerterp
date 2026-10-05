@@ -160,26 +160,33 @@ export interface CashflowResult {
     forecastItems: number;
   };
   byCategory: CategoryRow[];
-  accounts: Array<{ id: string; name: string; kind: string; branchId: string | null; active: boolean; opening: number; inflow: number; outflow: number; transfers: number; closing: number; current: number }>;
+  accounts: Array<{ id: string; name: string; kind: string; branchId: string | null; active: boolean; opening: number; inflow: number; outflow: number; transfers: number; closing: number; current: number; forecast: number }>;
+  /** previsto sem conta definida (meio de pagamento sem conta de destino, contas a pagar sem conta) */
+  forecastUnassigned: number;
 }
 
-function inScope(e: Doc, f: CashflowFilter) {
-  if (f.branchId && e.branchId !== f.branchId) return false;
-  return true;
+/** Conta provável de uma parcela prevista: conta de destino do meio de pagamento do mesmo tipo (quando cadastrada). */
+export async function methodAccountMap(store: Store, companyId: string) {
+  const methods = await listAll(store, "payment_methods", { filters: [["eq", "companyId", companyId], ["eq", "active", true]], orderBy: [{ field: "sortOrder", dir: "asc" }] });
+  const map = new Map<string, string>();
+  for (const m of methods) if (m.accountId && !map.has(m.kind)) map.set(m.kind, m.accountId);
+  return map;
 }
+
 
 export async function computeCashflow(ctx: Ctx, f: CashflowFilter): Promise<CashflowResult> {
   const store = ctx.store;
   const t0 = today();
   const defaults = await categoryDefaults(store, ctx.companyId);
   const allAccounts = await listAll(store, "financial_accounts", { filters: [["eq", "companyId", ctx.companyId]] });
-  const accounts = allAccounts.filter((a) => (!f.accountId || a.id === f.accountId));
+  // filial: contas da filial + contas compartilhadas (sem filial), com saldo e lançamentos integrais
+  const accounts = allAccounts.filter((a) => (!f.accountId || a.id === f.accountId) && (!f.branchId || !a.branchId || a.branchId === f.branchId));
   const accIds = new Set(accounts.map((a) => a.id));
   const showBalance = !f.categoryId && !f.costCenterId;
 
   // lançamentos desde o início do período (para resultado e para posicionar o saldo pelo saldo atual)
   const sinceFrom = await listAll(store, "account_entries", { filters: [["eq", "companyId", ctx.companyId], ["gte", "date", f.from]], orderBy: [{ field: "date", dir: "asc" }] });
-  const scopedSince = sinceFrom.filter((e) => accIds.has(e.accountId) && inScope(e, f));
+  const scopedSince = sinceFrom.filter((e) => accIds.has(e.accountId));
   const inPeriod = scopedSince.filter((e) => e.date <= f.to);
   const titles = await titlesByIds(store, inPeriod.map((e) => e.titleId));
   const passCat = (e: Doc, title?: Doc | null) => (!f.categoryId || resolveCategory(e, title, defaults) === f.categoryId) && (!f.costCenterId || (e.costCenterId ?? title?.costCenterId ?? null) === f.costCenterId);
@@ -187,25 +194,13 @@ export async function computeCashflow(ctx: Ctx, f: CashflowFilter): Promise<Cash
   // saldo inicial por conta na data `from`
   const accountRows = new Map<string, CashflowResult["accounts"][number]>();
   let opening = 0;
-  if (!f.branchId) {
-    for (const a of accounts) {
-      const after = scopedSince.filter((e) => e.accountId === a.id).reduce((s, e) => s + e.amount, 0);
-      // saldo inicial vale a partir do início do dia de referência
-      const initialAfter = a.initialBalanceDate && a.initialBalanceDate > f.from ? (a.initialBalance ?? 0) : 0;
-      const op = (a.balance ?? 0) - after - initialAfter;
-      opening += op;
-      accountRows.set(a.id, { id: a.id, name: a.name, kind: a.kind, branchId: a.branchId ?? null, active: a.active !== false, opening: op, inflow: 0, outflow: 0, transfers: 0, closing: op, current: a.balance ?? 0 });
-    }
-  } else {
-    const before = await listAll(store, "account_entries", { filters: [["eq", "companyId", ctx.companyId], ["eq", "branchId", f.branchId], ["lt", "date", f.from]] });
-    for (const a of accounts) {
-      const own = a.branchId === f.branchId;
-      const init = own && (!a.initialBalanceDate || a.initialBalanceDate <= f.from) ? (a.initialBalance ?? 0) : 0;
-      const op = init + before.filter((e) => e.accountId === a.id).reduce((s, e) => s + e.amount, 0);
-      opening += op;
-      const cur = (own ? (a.initialBalance ?? 0) : 0) + before.filter((e) => e.accountId === a.id).reduce((s, e) => s + e.amount, 0) + scopedSince.filter((e) => e.accountId === a.id).reduce((s, e) => s + e.amount, 0);
-      accountRows.set(a.id, { id: a.id, name: a.name, kind: a.kind, branchId: a.branchId ?? null, active: a.active !== false, opening: op, inflow: 0, outflow: 0, transfers: 0, closing: op, current: cur });
-    }
+  for (const a of accounts) {
+    const after = scopedSince.filter((e) => e.accountId === a.id).reduce((sum, e) => sum + e.amount, 0);
+    // saldo inicial vale a partir do início do dia de referência
+    const initialAfter = a.initialBalanceDate && a.initialBalanceDate > f.from ? (a.initialBalance ?? 0) : 0;
+    const op = (a.balance ?? 0) - after - initialAfter;
+    opening += op;
+    accountRows.set(a.id, { id: a.id, name: a.name, kind: a.kind, branchId: a.branchId ?? null, active: a.active !== false, opening: op, inflow: 0, outflow: 0, transfers: 0, closing: op, current: a.balance ?? 0, forecast: 0 });
   }
 
   const buckets: CashflowBucket[] = buildBuckets(f.from, f.to, f.granularity).map((b) => ({ ...b, realizedIn: 0, realizedOut: 0, transfersIn: 0, transfersOut: 0, forecastIn: 0, forecastOut: 0, openings: 0, balance: 0, future: b.from > t0 }));
@@ -213,7 +208,6 @@ export async function computeCashflow(ctx: Ctx, f: CashflowFilter): Promise<Cash
   // contas cujo saldo inicial é posterior ao início do período: entra no saldo no dia de referência
   for (const a of accounts) {
     if (!a.initialBalanceDate || a.initialBalanceDate <= f.from || a.initialBalanceDate > f.to) continue;
-    if (f.branchId && a.branchId !== f.branchId) continue;
     const b = bucketOf(a.initialBalanceDate);
     if (b) b.openings += a.initialBalance ?? 0;
     const row = accountRows.get(a.id);
@@ -269,7 +263,9 @@ export async function computeCashflow(ctx: Ctx, f: CashflowFilter): Promise<Cash
   // previsto: parcelas em aberto (sem conta definida → só sem filtro de conta)
   const forecastAvailable = !f.accountId;
   let projectedBeforeFrom = 0;
+  let forecastUnassigned = 0;
   if (forecastAvailable) {
+    const mAcc = await methodAccountMap(store, ctx.companyId);
     const filters: any[] = [["eq", "companyId", ctx.companyId], ["eq", "status", ["open", "partial"]], ["lte", "dueDate", f.to]];
     if (f.branchId) filters.push(["eq", "branchId", f.branchId]);
     const open = await listAll(store, "installments", { filters });
@@ -297,6 +293,9 @@ export async function computeCashflow(ctx: Ctx, f: CashflowFilter): Promise<Cash
       if (date > f.to) continue;
       const b = bucketOf(date);
       totals.forecastItems++;
+      const accRow = i.kind === "receivable" && i.methodKind ? accountRows.get(mAcc.get(i.methodKind) ?? "") : undefined;
+      if (accRow) accRow.forecast += signed;
+      else forecastUnassigned += signed;
       const c = cat(resolveCategory({ categoryId: i.categoryId, kind: "", originType: title.originType }, title, defaults));
       if (signed > 0) {
         totals.forecastIn += signed;
@@ -327,6 +326,7 @@ export async function computeCashflow(ctx: Ctx, f: CashflowFilter): Promise<Cash
     totals,
     byCategory: [...cats.values()].sort((a, b) => Math.abs(b.realizedIn + b.realizedOut) - Math.abs(a.realizedIn + a.realizedOut)),
     accounts: [...accountRows.values()],
+    forecastUnassigned,
   };
 }
 

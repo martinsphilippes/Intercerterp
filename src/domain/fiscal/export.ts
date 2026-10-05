@@ -119,7 +119,7 @@ export const SERVICE_COLS: Col[] = [
   { key: "net", label: "Líquido", type: "money" },
 ];
 
-export function docRows(docs: Doc[]) {
+export function docRows(docs: Doc[]): Array<Record<string, any> & { id: string }> {
   return docs.map((d) => ({ ...d, modelLabel: MODEL_LABEL[d.model] ?? d.model, statusLabel: DOC_STATUS_LABEL[d.status] ?? d.status, simLabel: d.isSimulated ? "SIMULAÇÃO" : "", number: d.number ?? d.rpsNumber ?? null }));
 }
 

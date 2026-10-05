@@ -68,6 +68,13 @@ export function PaymentApp(props: {
   drafts: Draft[];
   exchangeVoucher: { code: string; balance: number; returnNumber: number } | null;
   today: string;
+  initialMethodId: string | null;
+  emitFiscal: boolean;
+  fiscalLabel: string;
+  itemsCount: number;
+  unitsCount: number;
+  discountLimitBps: number;
+  approvalNeeded: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -79,7 +86,18 @@ export function PaymentApp(props: {
     }
     return d;
   });
-  const [methodId, setMethodId] = useState<string>(props.methods[0]?.id ?? "");
+  const [methodId, setMethodId] = useState<string>(props.methods.find((m) => m.id === props.initialMethodId)?.id ?? props.methods[0]?.id ?? "");
+  const [emitFiscal, setEmitFiscal] = useState(props.emitFiscal);
+  const [receipt, setReceipt] = useState("imprimir");
+  const [approval, setApproval] = useState({ login: "", password: "" });
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("ic.pdv.receipt");
+      if (v) setReceipt(v);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const firstSave = useRef(true);
@@ -110,7 +128,12 @@ export function PaymentApp(props: {
     if (remaining !== 0 || pending) return;
     setError(null);
     start(async () => {
-      const res = await finalizeCartAction(props.cartId, payments.map(({ key: _k, kind: _kind, label: _l, detail: _d, ...p }) => p));
+      try {
+        localStorage.setItem("ic.pdv.receipt", receipt);
+      } catch {
+        /* ignore */
+      }
+      const res = await finalizeCartAction(props.cartId, payments.map(({ key: _k, kind: _kind, label: _l, detail: _d, ...p }) => p), { approval: props.approvalNeeded ? approval : null, receipt });
       if (!res.ok) {
         setError(res.error);
         toast("error", res.error);
@@ -119,7 +142,7 @@ export function PaymentApp(props: {
       toast("success", res.message ?? "Venda concluída.");
       router.push(res.redirect ?? "/pdv");
     });
-  }, [remaining, pending, payments, props.cartId, router, toast]);
+  }, [remaining, pending, payments, props.cartId, props.approvalNeeded, approval, receipt, router, toast]);
 
   // atalhos: 1–9 escolhe o meio; F10/Ctrl+Enter conclui; Esc volta ao PDV
   useEffect(() => {
@@ -146,7 +169,14 @@ export function PaymentApp(props: {
       <header className="flex flex-wrap items-center gap-3 bg-brand-900 px-3 py-2 text-sm text-white">
         <Link href="/pdv" className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800"><ArrowLeft className="size-4" /> Voltar ao atendimento <kbd className="rounded border border-white/30 px-1 text-xs">Esc</kbd></Link>
         <span className="font-semibold">Pagamento da venda</span>
-        <span className="text-brand-200">{props.terminal.name}</span>
+        <span className="text-brand-200">{props.itemsCount} {props.itemsCount === 1 ? "produto" : "produtos"} • {formatQty(props.unitsCount)} un. · {props.terminal.name}</span>
+        <ol className="hidden items-center gap-1 text-xs lg:flex" aria-label="Etapas">
+          <li className="rounded-full bg-brand-800 px-2 py-0.5 text-brand-200">1 Carrinho ✓</li>
+          <li aria-hidden>›</li>
+          <li className="rounded-full bg-brand-800 px-2 py-0.5 text-brand-200">2 Cliente ✓</li>
+          <li aria-hidden>›</li>
+          <li className="rounded-full bg-accent-500 px-2 py-0.5 font-semibold text-white" aria-current="step">3 Pagamento</li>
+        </ol>
         {props.session ? <span className="rounded bg-emerald-600/20 px-2 py-0.5 text-emerald-100">Caixa nº {props.session.number} · {props.session.operatorName}</span> : <span className="rounded bg-red-500/20 px-2 py-0.5 text-red-100">Caixa fechado</span>}
         <span className="ml-auto text-brand-200">{props.customer ? `${props.customer.name}${props.customer.doc ? " · " + formatDoc(props.customer.doc) : ""}` : props.cpfOnInvoice ? `Consumidor final · CPF/CNPJ ${formatDoc(props.cpfOnInvoice)}` : "Consumidor final"}</span>
       </header>
@@ -222,9 +252,49 @@ export function PaymentApp(props: {
               </ul>
             )}
           </div>
+          <div className="space-y-2 rounded-lg border border-line bg-white p-3 text-sm">
+            <label className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-brand-700"
+                  checked={emitFiscal}
+                  onChange={(e) => {
+                    setEmitFiscal(e.target.checked);
+                    void saveCartAction(props.cartId, { emitFiscal: e.target.checked });
+                  }}
+                />
+                Emitir NFC-e após confirmar
+              </span>
+              <span className="text-xs text-slate-500">{props.fiscalLabel}</span>
+            </label>
+            <Field label="Comprovante">
+              <Select
+                value={receipt}
+                onChange={(e) => setReceipt(e.target.value)}
+                options={[
+                  { value: "imprimir", label: "Imprimir recibo ao concluir" },
+                  ...(props.customer?.email ? [{ value: "email", label: `Enviar por e-mail (${props.customer.email})` }, { value: "imprimir_email", label: "Imprimir e enviar por e-mail" }] : []),
+                  { value: "nenhum", label: "Não imprimir agora" },
+                ]}
+              />
+            </Field>
+            <p className="text-xs text-slate-500">DANFE NFC-e: disponível na conclusão após a autorização do documento. <Link className="text-brand-700 underline" href="/pdv">Aplicar desconto (voltar ao atendimento)</Link></p>
+          </div>
+          {props.approvalNeeded && (
+            <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+              <p className="font-medium text-amber-900"><AlertTriangle className="mr-1 inline size-4" />Autorização do supervisor</p>
+              <p className="text-xs text-amber-900">{props.approvalNeeded}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Login do supervisor" value={approval.login} onChange={(e) => setApproval({ ...approval, login: e.target.value })} autoComplete="off" aria-label="Login do supervisor" />
+                <Input placeholder="Senha" type="password" value={approval.password} onChange={(e) => setApproval({ ...approval, password: e.target.value })} autoComplete="new-password" aria-label="Senha do supervisor" />
+              </div>
+              <p className="text-xs text-amber-800">A credencial é validada na conclusão e o autorizador fica registrado na venda e na auditoria.</p>
+            </div>
+          )}
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-          <Button size="lg" variant="accent" className="h-14 text-lg" disabled={remaining !== 0 || pending || !props.session} loading={pending} onClick={conclude}>
-            <CheckCircle2 className="size-5" /> Concluir venda <kbd className="ml-1 rounded border border-white/40 px-1 text-xs">F10</kbd>
+          <Button size="lg" variant="accent" className="h-14 text-lg" disabled={remaining !== 0 || pending || !props.session || (Boolean(props.approvalNeeded) && (!approval.login || !approval.password))} loading={pending} onClick={conclude}>
+            <CheckCircle2 className="size-5" /> {emitFiscal ? "Confirmar e emitir NFC-e" : "Confirmar venda"} <kbd className="ml-1 rounded border border-white/40 px-1 text-xs">F10</kbd>
           </Button>
           <p className="text-xs text-slate-500">Ao concluir: baixa de estoque, caixa, financeiro (recebíveis/parcelas) e emissão da NFC-e. Repetir o envio não duplica a venda.</p>
           <details className="rounded-lg border border-line bg-white p-3 text-sm">
@@ -278,7 +348,7 @@ function CashForm({ method, remaining, onAdd }: { method: Method; remaining: num
   const applied = Math.min(received, remaining);
   const change = changeFor(received, applied);
   const submit = () => onAdd({ methodId: method.id, kind: "cash", label: method.name, amount: applied, received, detail: change ? `Recebido ${formatMoney(received)} · troco ${formatMoney(change)}` : "Valor exato" });
-  const notes = [remaining, Math.ceil(remaining / 1000) * 1000, Math.ceil(remaining / 5000) * 5000, Math.ceil(remaining / 10000) * 10000].filter((v, i, a) => v >= remaining && a.indexOf(v) === i).slice(0, 4);
+  const notes = [remaining, Math.ceil(remaining / 1000) * 1000, Math.ceil(remaining / 5000) * 5000, Math.ceil(remaining / 10000) * 10000, 10000, 20000].filter((v, i, a) => v >= remaining && a.indexOf(v) === i).sort((a, b) => a - b).slice(0, 5);
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="grid gap-3 sm:grid-cols-2">
       <Field label="Valor recebido em dinheiro" hint={`Saldo restante ${formatMoney(remaining)}`}>
@@ -316,7 +386,7 @@ function CardForm({ method, remaining, onAdd, card }: { method: Method; remainin
         {card.provider === "tef_connector" ? "TEF por conector local configurado, mas a transação integrada não está disponível neste navegador: " : "Sem TEF integrado: "}
         passe o cartão na maquininha{card.acquirer ? ` (${card.acquirer})` : ""} e registre o NSU e/ou a autorização impressos no comprovante. O pagamento fica marcado como manual.
       </p>
-      <Field label="Valor">
+      <Field label="Valor" hint={<button type="button" className="text-brand-700 underline" onClick={() => setAmount(remaining)}>Valor restante ({formatMoney(remaining)})</button>}>
         <MoneyInput value={amount} onChange={setAmount} autoFocus ariaLabel="Valor no cartão" />
       </Field>
       {credit ? (
@@ -514,7 +584,7 @@ function DeferredForm({ method, remaining, onAdd, props }: { method: Method; rem
     <form onSubmit={(e) => { e.preventDefault(); if (!overLimit && !noLimit) onAdd({ methodId: method.id, kind: method.kind, label: method.name, amount, paymentTermId: term?.id ?? null, installments: term?.installments ?? 1, detail: `${term?.name ?? "1x"} · 1º venc. ${formatDate(schedule[0]?.dueDate)}` }); }} className="grid gap-3 sm:grid-cols-2">
       <p className="sm:col-span-2 text-sm">Cliente: <b>{c.name}</b>{isCred && <> · limite {formatMoney(c.creditLimit)} · disponível <b className="tabular">{formatMoney(c.creditAvailable)}</b></>}</p>
       {noLimit && <div className="sm:col-span-2"><Notice tone="warn">Cliente sem limite de crédito no cadastro: o crediário não é concedido automaticamente. Ajuste o limite em Clientes.</Notice></div>}
-      <Field label="Valor a prazo"><MoneyInput value={amount} onChange={setAmount} autoFocus ariaLabel="Valor a prazo" /></Field>
+      <Field label="Valor a prazo" hint={<button type="button" className="text-brand-700 underline" onClick={() => setAmount(remaining)}>Valor restante</button>}><MoneyInput value={amount} onChange={setAmount} autoFocus ariaLabel="Valor a prazo" /></Field>
       <Field label="Condição de pagamento"><Select value={termId} onChange={(e) => setTermId(e.target.value)} options={props.terms.map((t) => ({ value: t.id, label: t.name }))} /></Field>
       <div className="sm:col-span-2 rounded-md border border-line">
         <table className="w-full text-sm">

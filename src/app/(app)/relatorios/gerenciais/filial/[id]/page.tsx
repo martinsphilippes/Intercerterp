@@ -116,7 +116,7 @@ export default async function Page({ params: routeParams, searchParams }: { para
         <Stat label="Vendas líquidas" value={formatMoney(t.netRevenue)} href={`/vendas${moduleQs(rp)}`} hint={<Delta cur={t.netRevenue} prev={prev.netRevenue} />} />
         <Stat label="Custo direto (CMV)" value={formatMoney(t.cmv)} hint={`Custo revertido nas devoluções ${formatMoney(t.costReturned)}`} />
         <Stat label="Resultado bruto" value={formatMoney(t.grossProfit)} hint={<>Margem {marginText(t.marginBps)} · <Delta cur={t.marginBps} prev={prev.marginBps} kind="points" /></>} tone={t.grossProfit < 0 ? "bad" : "default"} />
-        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { status: "completed" })}`} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
+        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { situacao: "completed" })}`} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
         <Stat label="Ticket médio" value={t.ticket == null ? "Sem vendas" : formatMoney(t.ticket)} hint={<Delta cur={t.ticket} prev={prev.ticket} />} />
       </section>
 

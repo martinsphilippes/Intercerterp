@@ -87,6 +87,7 @@ export function BranchForm({
   priceTables,
   timezones,
   ufs,
+  users,
 }: {
   branch?: Record<string, any> | null;
   companyId: string;
@@ -94,6 +95,7 @@ export function BranchForm({
   priceTables: Opt[];
   timezones: string[];
   ufs: string[];
+  users: Opt[];
 }) {
   const b = branch ?? {};
   return (
@@ -110,7 +112,8 @@ export function BranchForm({
               <Field label="Inscrição estadual"><Input name="ie" defaultValue={b.ie ?? ""} /></Field>
               <Field label="Inscrição municipal"><Input name="im" defaultValue={b.im ?? ""} /></Field>
               <Field label="Telefone"><Input name="phone" defaultValue={b.phone ?? ""} inputMode="tel" /></Field>
-              <Field label="E-mail" className="sm:col-span-2"><Input name="email" type="email" defaultValue={b.email ?? ""} /></Field>
+              <Field label="E-mail"><Input name="email" type="email" defaultValue={b.email ?? ""} /></Field>
+              <Field label="Responsável pela unidade"><Select name="managerUserId" defaultValue={b.managerUserId ?? ""} options={users} placeholder="—" /></Field>
             </FormGrid>
           </FormSection>
           <FormSection title="Endereço">

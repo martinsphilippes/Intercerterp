@@ -28,6 +28,12 @@ let thirdSupplierId: string;
 
 const MATRIZ_CNPJ = "11222333000181";
 
+/** conferência física concluída + confirmação */
+async function checkAndConfirm(ctx: Ctx, id: string) {
+  await updateReceipt(ctx, id, { checkAll: true });
+  return confirmReceipt(ctx, id);
+}
+
 async function policy(ctx: Ctx, opts: Partial<{ auto: number; review: "always" | "relevant" | "never"; expired: "block" | "warn" | "allow" }> = {}) {
   const roleManager = (await listAll(store, "roles")).find((r) => r.key === "manager")!;
   return savePolicy(ctx, {
@@ -277,7 +283,8 @@ describe("recebimento: parcial, nova entrada, saldo, obrigação, XML repetido e
     await expect(importNfeXml(stockist, { xml: xml1 })).rejects.toThrow(/já foi importada/);
     expect(await listAll(store, "receipts")).toHaveLength(1);
 
-    const c1 = await confirmReceipt(stockist, r1.id);
+    await expect(confirmReceipt(stockist, r1.id)).rejects.toThrow(/conferência física/);
+    const c1 = await checkAndConfirm(stockist, r1.id);
     expect(c1.status).toBe("confirmed");
     expect(c1.dueTotal).toBe(c1.invoicedTotal);
     // rateio do frete por valor: M 453,60 + 45,00; G 151,20 + 15,00 → custo de entrada 20,775 → 20,78
@@ -314,7 +321,7 @@ describe("recebimento: parcial, nova entrada, saldo, obrigação, XML repetido e
     const xml2 = buildSampleNfeXml({ number: 5002, issueDate: today(), emitter: { cnpj: "45997418000153", name: "Têxtil Paulista Indústria Ltda" }, recipient: { cnpj: MATRIZ_CNPJ, name: "Intercert" }, items: [{ cProd: "F-CAMISETA-G-PRETA", xProd: "CAMISETA G PRETA", qCom: 8000, vUnCom: 1890 }] });
     const r2 = await importNfeXml(stockist, { xml: xml2 });
     expect(r2.items[0].expectedQty).toBe(8000);
-    const c2 = await confirmReceipt(stockist, r2.id);
+    const c2 = await checkAndConfirm(stockist, r2.id);
     const ord2 = await store.getOrThrow("purchase_orders", o.id);
     expect(ord2.status).toBe("received");
     expect((await orderBalance(store, o.id)).every((b) => b.remaining === 0)).toBe(true);
@@ -333,6 +340,7 @@ describe("recebimento: parcial, nova entrada, saldo, obrigação, XML repetido e
     const xml = buildSampleNfeXml({ number: 5003, issueDate: today(), emitter: { cnpj: "45997418000153", name: "Têxtil Paulista" }, recipient: { cnpj: MATRIZ_CNPJ, name: "Intercert" }, items: [{ cProd: "F-BONE", xProd: "BONE ABA CURVA", qCom: 10000, vUnCom: 1500 }] });
     const r = await importNfeXml(stockist, { xml });
     const before = (await listAll(store, "stock_balances", { filters: [["eq", "skuId", sku.id], ["eq", "warehouseId", refs.warehouses["matriz-main"].id]] }))[0].physical;
+    await updateReceipt(stockist, r.id, { checkAll: true });
     await Promise.all([confirmReceipt(stockist, r.id), confirmReceipt(stockist, r.id)]);
     await confirmReceipt(stockist, r.id);
     const after = (await listAll(store, "stock_balances", { filters: [["eq", "skuId", sku.id], ["eq", "warehouseId", refs.warehouses["matriz-main"].id]] }))[0].physical;
@@ -358,14 +366,14 @@ describe("recebimento: parcial, nova entrada, saldo, obrigação, XML repetido e
     expect(u.invoicedTotal).toBe(14000);
     expect(u.divergences.map((d: any) => d.kind)).toEqual(expect.arrayContaining(["qty", "value", "installments", "note"]));
     expect(u.installments.reduce((a: number, x: any) => a + x.amount, 0)).toBe(11600);
-    const c = await confirmReceipt(stockist, r.id);
+    const c = await checkAndConfirm(stockist, r.id);
     const t = await store.getOrThrow("titles", c.payableTitleId);
     expect(t.total).toBe(11600);
     expect(t.total).toBeLessThanOrEqual(c.dueTotal);
 
     // pagar o valor faturado exige divergência registrada (justificativa)
     const r2 = await importNfeXml(stockist, { xml: mk(9002) });
-    const u2 = await updateReceipt(stockist, r2.id, { items: [{ idx: 1, receivedQty: 8000 }], differenceAction: "pay_invoiced" });
+    const u2 = await updateReceipt(stockist, r2.id, { items: [{ idx: 1, receivedQty: 8000 }], differenceAction: "pay_invoiced", checkAll: true });
     expect(confirmBlockers(u2).join(" ")).toMatch(/justificativa/);
     await expect(confirmReceipt(stockist, r2.id)).rejects.toThrow(/justificativa/);
     expect(await listAll(store, "titles", { filters: [["eq", "originId", r2.id]] })).toHaveLength(0);
@@ -382,7 +390,7 @@ describe("recebimento: parcial, nova entrada, saldo, obrigação, XML repetido e
     await decideRequest(manager, (await store.getOrThrow("purchase_orders", o.id)).requestId, "approve");
     const r = await createManualReceipt(stockist, { supplierId: refs.suppliers.papel.id, orderIds: [o.id], nfeNumber: "333", idemKey: "t-manual-1" });
     expect(r.items[0].receivedQty).toBe(50000);
-    await updateReceipt(stockist, r.id, { items: [{ idx: 1, receivedQty: 30000 }] });
+    await updateReceipt(stockist, r.id, { items: [{ idx: 1, receivedQty: 30000, checked: true }] });
     const c = await confirmReceipt(stockist, r.id);
     expect(c.dueTotal).toBe(30 * 990);
     expect((await store.getOrThrow("purchase_orders", o.id)).status).toBe("partial");

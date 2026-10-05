@@ -207,7 +207,7 @@ export async function transferItemsFromMovements(ctx: Ctx, t: Doc): Promise<Tran
     const m = movs.filter((x) => x.skuId === i.skuId);
     const sum = (type: string) => m.filter((x) => x.type === type).reduce((a, x) => a + x.qty, 0);
     const out = m.find((x) => x.type === "transfer_out");
-    const lost = -sum("loss");
+    const lost = Math.max(0, -sum("loss"));
     return {
       ...i,
       shippedQty: -sum("transfer_out"),

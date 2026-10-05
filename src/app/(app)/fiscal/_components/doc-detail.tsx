@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ShieldCheck } from "lucide-react";
 import QRCode from "qrcode";
 import { listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
@@ -43,6 +44,11 @@ export const EVENT_LABEL: Record<string, string> = {
 
 const ENV_LABEL: Record<string, string> = { simulacao: "Simulação", homologacao: "Homologação", producao: "Produção" };
 
+function formatDateTimeSec(v?: string | null) {
+  if (!v) return "—";
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: process.env.APP_TIMEZONE || "America/Sao_Paulo", dateStyle: "short", timeStyle: "medium" }).format(new Date(v));
+}
+
 function statusTone(status: string): "bad" | "warn" | "info" | "good" | "sim" {
   if (["rejected", "denied", "error"].includes(status)) return "bad";
   if (["pending", "draft"].includes(status)) return "warn";
@@ -73,6 +79,8 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
   const label = `${MODEL_LABEL[model]} ${docNumberLabel(doc)}`;
   const editHref = model === "nfe" ? `/fiscal/nfe/nova?rascunho=${doc.id}` : model === "nfse" ? `/fiscal/nfse/nova?id=${doc.id}` : null;
   const crumbsHref = `/fiscal/${model}`;
+  const units = items.reduce((a, i) => a + i.qty, 0);
+  const payLabel = [...new Set(((doc.payments ?? []) as Array<{ kind: string }>).map((p) => TPAG_LABEL[p.kind] ?? p.kind))].join(" + ") || "—";
   return (
     <>
       <PageHeader
@@ -142,12 +150,58 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
           </Notice>
         </div>
       )}
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Valor do documento" value={formatMoney(doc.total)} hint={model === "nfse" ? `Líquido: ${formatMoney(svc.net)}` : `${items.length} item(ns)`} />
-        {model === "nfse" ? <Stat label="ISS calculado / retido" value={`${formatMoney(svc.iss)} / ${formatMoney(svc.issWithheldValue)}`} hint={`Alíquota ${formatBps(svc.issRateBps)} sobre base ${formatMoney(svc.base)}`} /> : <Stat label="ICMS destacado" value={formatMoney(t.icms ?? 0)} hint={`Base ${formatMoney(t.icmsBase ?? 0)}`} />}
-        <Stat label="Emissão" value={formatDateTime(doc.issuedAt)} hint={doc.authorizedAt ? `Autorizado em ${formatDateTime(doc.authorizedAt)}` : doc.status === "cancelled" ? `Cancelado em ${formatDateTime(doc.cancelledAt)}` : `Tentativas de envio: ${doc.attempts ?? 0}`} />
-        <Stat label="Prazo de cancelamento" value={doc.status === "authorized" ? (win.until ? formatDateTime(win.until) : "Conforme município") : "—"} hint={doc.status === "authorized" ? (win.allowed ? "Dentro do prazo" : "Prazo encerrado") : DOC_STATUS_LABEL[doc.status]} tone={doc.status === "authorized" && !win.allowed ? "warn" : "default"} />
+      {doc.status === "authorized" && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <ShieldCheck className="size-5 shrink-0" />
+          <div>
+            <p className="font-semibold">{doc.isSimulated ? `${MODEL_LABEL[model]} autorizada pelo provedor de SIMULAÇÃO (sem validade fiscal)` : `${MODEL_LABEL[model]} autorizada ${model === "nfse" ? "pela prefeitura/ambiente nacional" : "pela SEFAZ"}`}</p>
+            <p className="text-xs">Protocolo {doc.protocol ?? "—"} • {formatDateTimeSec(doc.authorizedAt)} • {doc.contingency ? "Emissão em contingência" : "Autorização normal"}{doc.verificationCode ? ` • Código de verificação ${doc.verificationCode}` : ""}</p>
+          </div>
+        </div>
+      )}
+      {doc.status === "cancelled" && (
+        <div className="mb-4 rounded-lg border border-line bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <p className="font-semibold">Documento cancelado em {formatDateTimeSec(doc.cancelledAt)}</p>
+          <p className="text-xs">Justificativa: {doc.cancelReason ?? "—"} • protocolo de autorização original {doc.protocol ?? "—"}</p>
+        </div>
+      )}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {model === "nfce" ? (
+          <>
+            <Stat label="Consumidor" value={<span className="text-base">{doc.recipientName ?? "Não identificado"}</span>} hint={doc.recipientDoc ? formatDoc(doc.recipientDoc) : undefined} />
+            <Stat label="Operador • caixa" value={<span className="text-base">{operator?.name ?? "—"}</span>} hint={terminal ? `${terminal.code} — ${terminal.name}` : undefined} />
+            <Stat label="Produtos" value={<span className="text-base">{items.length} itens • {formatQty(units)} un.</span>} />
+            <Stat label="Valor total" value={formatMoney(doc.total)} />
+            <Stat label="Tributos estimados" value={formatMoney(t.approxTax ?? 0)} hint="Lei 12.741/2012 (percentual parametrizado)" />
+            <Stat label="Forma de pagamento" value={<span className="text-base">{payLabel}</span>} />
+          </>
+        ) : model === "nfse" ? (
+          <>
+            <Stat label="Tomador" value={<span className="text-base">{doc.recipientName ?? "—"}</span>} hint={doc.recipientDoc ? formatDoc(doc.recipientDoc) : undefined} />
+            <Stat label="Valor dos serviços" value={formatMoney(doc.total)} />
+            <Stat label="Base de cálculo" value={formatMoney(svc.base)} />
+            <Stat label="ISS calculado" value={formatMoney(svc.iss)} hint={`${formatBps(svc.issRateBps)} · ${svc.issWithheld ? "retido pelo tomador" : "não retido"}`} />
+            <Stat label="Retenções" value={formatMoney(svc.withheld)} />
+            <Stat label="Valor líquido" value={formatMoney(svc.net)} tone="good" />
+          </>
+        ) : (
+          <>
+            <Stat label="Destinatário" value={<span className="text-base">{doc.recipientName ?? "—"}</span>} hint={doc.recipientDoc ? formatDoc(doc.recipientDoc) : undefined} />
+            <Stat label="Natureza da operação" value={<span className="text-base">{doc.nature}</span>} hint={`${OP_LABEL[doc.operationType] ?? doc.operationType} · ${PURPOSE_LABEL[doc.purpose] ?? doc.purpose}`} />
+            <Stat label="Valor total" value={formatMoney(doc.total)} hint={`ICMS ${formatMoney(t.icms ?? 0)}`} />
+            <Stat label="Produtos" value={<span className="text-base">{items.length} itens • {formatQty(units)} un.</span>} />
+            <Stat label="Transportadora" value={<span className="text-base">{doc.transport?.carrierName ?? (String(doc.transport?.mode ?? "9") === "9" ? "Sem frete" : "Não informada")}</span>} hint={FREIGHT_MODE_LABEL[String(doc.transport?.mode ?? "9")]} />
+            <Stat label="Tributos estimados" value={formatMoney(t.approxTax ?? 0)} hint="Lei 12.741/2012 (percentual parametrizado)" />
+          </>
+        )}
       </div>
+      {model !== "nfse" && (
+        <div className="mb-4 rounded-lg border border-line bg-slate-50 px-4 py-3">
+          <p className="text-xs font-medium text-slate-500">Chave de acesso</p>
+          <p className="mt-1 break-all font-mono text-sm tracking-wide text-ink">{doc.accessKey ? formatKey(doc.accessKey) : "Gerada na autorização"}</p>
+          <p className="mt-1 text-xs text-slate-500">Emissão {formatDateTime(doc.issuedAt)} · tentativas de envio: {doc.attempts ?? 0} · prazo de cancelamento: {doc.status === "authorized" ? (win.until ? `${formatDateTime(win.until)}${win.allowed ? "" : " (encerrado)"}` : "conforme município") : "—"}</p>
+        </div>
+      )}
       <LinkTabs
         basePath={base}
         active={tab}
@@ -241,6 +295,7 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
                   <tr className="border-t border-line font-semibold"><td>Total da nota</td><td className="tabular text-right">{formatMoney(t.total)}</td></tr>
                   <tr className="text-slate-500"><td>Base ICMS / ICMS</td><td className="tabular text-right">{formatMoney(t.icmsBase)} / {formatMoney(t.icms)}</td></tr>
                   <tr className="text-slate-500"><td>PIS / COFINS</td><td className="tabular text-right">{formatMoney(t.pis)} / {formatMoney(t.cofins)}</td></tr>
+                  <tr className="text-slate-500"><td>Tributos aproximados (Lei 12.741/2012)</td><td className="tabular text-right">{formatMoney(t.approxTax ?? 0)}</td></tr>
                 </tbody>
               </table>
             </Card>
@@ -253,7 +308,7 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
                   <tbody>
                     {salePayments.map((p) => (
                       <tr key={p.id}>
-                        <td>{p.methodName ?? TPAG_LABEL[p.methodKind] ?? p.methodKind}{p.nsu ? ` · NSU ${p.nsu}` : ""}</td>
+                        <td>{p.methodName ?? TPAG_LABEL[p.methodKind] ?? p.methodKind}<span className="block text-xs text-slate-500">{[p.nsu ? `NSU ${p.nsu}` : "", p.authCode ? `Aut. ${p.authCode}` : "", p.providerRef ? `Transação ${p.providerRef}` : "", p.cardBrand ?? ""].filter(Boolean).join(" · ") || "—"}</span></td>
                         <td><StatusBadge kind="payment" status={p.status} /></td>
                         <td className="tabular text-right">{formatMoney(p.amount)}</td>
                         <td>{p.titleId ? <Link className="text-brand-700 hover:underline" href={`/financeiro/receber/${p.titleId}`}>abrir</Link> : "—"}</td>

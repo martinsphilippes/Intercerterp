@@ -154,12 +154,12 @@ export async function createUser(
   input: UserInput & { mode: "password" | "invite"; password?: string; origin?: string; idemKey?: string },
 ): Promise<{ user: Doc; invite?: InviteResult }> {
   await guard(ctx, "create", `criar usuário ${input.email}`);
-  const data = await validateInput(ctx, input);
   const id = input.idemKey ? detId("user", input.idemKey) : undefined;
   if (id) {
     const prev = await ctx.store.get("users", id);
     if (prev) return { user: prev };
   }
+  const data = await validateInput(ctx, input);
   if (input.mode === "password") {
     assert((input.password ?? "").length >= 8, "A senha inicial deve ter ao menos 8 caracteres.");
     let user: Doc;

@@ -23,6 +23,8 @@ function plainCart(c: Record<string, any>) {
     notes: (c.notes ?? null) as string | null,
     payments: (c.payments ?? []) as any[],
     exchangeReturnId: (c.exchangeReturnId ?? null) as string | null,
+    sellerId: (c.sellerId ?? null) as string | null,
+    emitFiscal: c.emitFiscal !== false,
     revision: (c.revision ?? 0) as number,
     total: (c.total ?? 0) as number,
     updatedAt: c.updatedAt as string,
@@ -95,7 +97,7 @@ export async function cancelPixAction(intentId: string) {
 }
 
 /** Conclui a venda do atendimento. Idempotente pela chave do atendimento: repetir nunca cria outra venda ou cobrança. */
-export async function finalizeCartAction(cartId: string, payments: SalePaymentInput[]) {
+export async function finalizeCartAction(cartId: string, payments: SalePaymentInput[], opts: { approval?: { login: string; password: string } | null; receipt?: string | null } = {}) {
   return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv", "/vendas", "/caixa"] }, async (s) => {
     const cart = await s.ctx.store.getOrThrow("carts", cartId);
     if (cart.companyId !== s.ctx.companyId) throw new BusinessError("Atendimento de outra empresa.");
@@ -106,7 +108,8 @@ export async function finalizeCartAction(cartId: string, payments: SalePaymentIn
       paymentTermId: p.paymentTermId ?? null, intentId: p.intentId ?? null, nsu: p.nsu?.trim() || null, authCode: p.authCode?.trim() || null, cardBrand: p.cardBrand?.trim() || null,
       voucherCode: p.voucherCode?.trim() || null, reference: p.reference?.trim() || null,
     }));
-    const sale = await finalizeSale(s.ctx, cartToSaleInput(cart, clean));
-    return { ok: true as const, message: `Venda nº ${sale.number} concluída.`, data: { saleId: sale.id }, redirect: `/vendas/${sale.id}/conclusao` };
+    const sale = await finalizeSale(s.ctx, { ...cartToSaleInput(cart, clean), discountApproval: opts.approval?.login ? opts.approval : null });
+    const receipt = opts.receipt && ["imprimir", "email", "imprimir_email"].includes(opts.receipt) ? `?comprovante=${opts.receipt}` : "";
+    return { ok: true as const, message: `Venda nº ${sale.number} concluída.`, data: { saleId: sale.id }, redirect: `/vendas/${sale.id}/conclusao${receipt}` };
   });
 }

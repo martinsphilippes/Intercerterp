@@ -11,6 +11,8 @@ import { useToast } from "@/components/ui/toast";
 import { saveSupplierAction, lookupSupplierCnpjAction } from "./actions";
 import type { SupplierAddress, SupplierContact } from "@/domain/suppliers";
 
+const CATEGORIES = ["Mercadorias", "Logística / fretes", "Serviços", "Tecnologia", "Materiais de uso e consumo", "Embalagens"];
+
 type Opt = { value: string; label: string };
 
 export function SupplierForm({ supplier, terms }: { supplier?: Record<string, any> | null; terms: Opt[] }) {
@@ -78,6 +80,9 @@ export function SupplierForm({ supplier, terms }: { supplier?: Record<string, an
               </Field>
               <Field label="Inscrição municipal">
                 <Input name="im" defaultValue={c.im ?? ""} />
+              </Field>
+              <Field label="Categoria">
+                <Select name="category" defaultValue={c.category ?? ""} options={CATEGORIES.map((x) => ({ value: x, label: x }))} placeholder="—" />
               </Field>
               <Field label="E-mail (pedidos)">
                 <Input name="email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
@@ -168,7 +173,7 @@ export function SupplierForm({ supplier, terms }: { supplier?: Record<string, an
             <SubmitButton pending={pending} variant="secondary" name="status" value="draft">
               Salvar rascunho
             </SubmitButton>
-            <SubmitButton pending={pending} name="status" value={status === "inactive" ? "inactive" : "active"}>
+            <SubmitButton pending={pending} name="status" value={["inactive", "blocked"].includes(status) ? status : "active"}>
               Salvar fornecedor
             </SubmitButton>
           </div>

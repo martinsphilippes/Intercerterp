@@ -23,6 +23,7 @@ function parse(fd: FormData): SupplierInput {
     leadTimeDays: lead === "" ? null : fint(fd, "leadTimeDays"),
     minOrderValue: fint(fd, "minOrderValue"),
     freightPolicy: fopt(fd, "freightPolicy"),
+    category: fopt(fd, "category"),
     notes: fopt(fd, "notes"),
     status: (fstr(fd, "status") as any) || "active",
   };
@@ -37,10 +38,10 @@ export async function saveSupplierAction(fd: FormData) {
   });
 }
 
-export async function setSupplierStatusAction(id: string, status: "active" | "inactive", fd: FormData) {
+export async function setSupplierStatusAction(id: string, status: "active" | "inactive" | "blocked", fd: FormData) {
   return runAction({ module: "suppliers", op: "edit", revalidate: [`/fornecedores/${id}`, "/fornecedores"] }, async (s) => {
     await setSupplierStatus(s.ctx, id, status, fopt(fd, "reason"));
-    return { ok: true as const, message: status === "inactive" ? "Fornecedor inativado. O histórico foi preservado." : "Fornecedor reativado." };
+    return { ok: true as const, message: status === "inactive" ? "Fornecedor inativado. O histórico foi preservado." : status === "blocked" ? "Fornecedor bloqueado para novas cotações e pedidos." : "Fornecedor reativado." };
   });
 }
 

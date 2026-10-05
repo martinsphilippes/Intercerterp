@@ -23,7 +23,10 @@ export async function refreshFiscalAction(saleId: string) {
   return runAction({ module: "sales" }, async (s) => {
     const r = await refreshSaleFiscal(s.ctx, saleId);
     const d = r.document;
-    return { status: d?.status ?? r.sale.fiscalStatus, message: d?.statusMessage ?? null, documentId: d?.id ?? null, number: d?.number ?? null, simulated: Boolean(d?.isSimulated) };
+    return {
+      status: d?.status ?? r.sale.fiscalStatus, message: d?.statusMessage ?? null, documentId: d?.id ?? null, number: d?.number ?? null, simulated: Boolean(d?.isSimulated),
+      series: d?.series ?? null, protocol: d?.protocol ?? null, authorizedAt: d?.authorizedAt ?? null, accessKey: d?.accessKey ?? null, xmlFileId: d?.xmlFileId ?? null,
+    };
   });
 }
 

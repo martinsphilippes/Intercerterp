@@ -24,20 +24,18 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const scope = branchScope(s.ctx, p.f);
   const [branches, warehouses, categories] = await Promise.all([lookups.branches(s.ctx), lookups.warehouses(s.ctx, scope), lookups.categories(s.ctx)]);
   const columns: Column<BalanceRow>[] = [
-    { key: "productName", label: "Produto", sortable: true, fixed: true, cell: (r) => <span>{r.skuName}{!r.productActive && <Badge className="ml-2">Inativo</Badge>}</span> },
-    { key: "skuCode", label: "SKU", sortable: true, cell: (r) => <span className="font-mono text-xs">{r.skuCode}</span> },
-    { key: "branchName", label: "Filial", sortable: true, cell: (r) => r.branchName },
-    { key: "warehouseName", label: "Depósito", sortable: true, cell: (r) => <span>{r.warehouseName}{r.warehouseKind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</span> },
+    { key: "productName", label: "Produto / SKU", sortable: true, fixed: true, cell: (r) => <span className="block min-w-48">{r.skuName}{!r.productActive && <Badge className="ml-2">Inativo</Badge>}<span className="block font-mono text-xs font-normal text-slate-500">{r.skuCode}</span></span> },
+    { key: "warehouseName", label: "Filial · depósito", sortable: true, cell: (r) => <span className="block whitespace-nowrap text-xs">{r.branchName}<span className="block text-slate-500">{r.warehouseName}{r.warehouseKind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</span></span> },
     { key: "location", label: "Local", hidden: true, cell: (r) => r.location ?? "—" },
-    { key: "physical", label: "Físico", align: "right", sortable: true, cell: (r) => <span className={r.physical < 0 ? "text-red-700" : ""}>{formatQty(r.physical)} <span className="text-xs text-slate-400">{r.unitCode}</span></span> },
+    { key: "physical", label: "Físico", align: "right", sortable: true, cell: (r) => <span className={`whitespace-nowrap ${r.physical < 0 ? "text-red-700" : ""}`}>{formatQty(r.physical)} <span className="text-xs text-slate-400">{r.unitCode}</span></span> },
     { key: "reserved", label: "Reservado", align: "right", sortable: true, cell: (r) => (r.reserved ? formatQty(r.reserved) : "—") },
     { key: "available", label: "Disponível", align: "right", sortable: true, cell: (r) => <span className={`font-semibold ${r.belowMin ? "text-amber-700" : ""}`}>{formatQty(r.available)}</span> },
     { key: "inTransit", label: "Em trânsito", align: "right", sortable: true, cell: (r) => (r.inTransit ? <Link className="text-brand-700 hover:underline" href={`/estoque/transferencias?status=in_transit,partial&q=${encodeURIComponent(r.skuCode)}&filial=all`}>{formatQty(r.inTransit)}</Link> : "—") },
     { key: "minQty", label: "Mínimo", align: "right", sortable: true, cell: (r) => (r.minQty ? formatQty(r.minQty) : "—") },
     { key: "maxQty", label: "Máx./alvo", align: "right", hidden: true, cell: (r) => (r.maxQty ? formatQty(r.maxQty) : "—") },
     { key: "safetyQty", label: "Segurança", align: "right", hidden: true, cell: (r) => (r.safetyQty ? formatQty(r.safetyQty) : "—") },
-    { key: "avgCost", label: "Custo médio", align: "right", sortable: true, cell: (r) => formatMoney(r.avgCost) },
-    { key: "value", label: "Valor (custo médio)", align: "right", sortable: true, cell: (r) => formatMoney(r.value) },
+    { key: "avgCost", label: "Custo médio", align: "right", sortable: true, cell: (r) => <span className="whitespace-nowrap">{formatMoney(r.avgCost)}</span> },
+    { key: "value", label: "Valor", align: "right", sortable: true, cell: (r) => <span className="whitespace-nowrap">{formatMoney(r.value)}</span> },
     { key: "lastMovementAt", label: "Último movimento", sortable: true, hidden: true, cell: (r) => (r.lastMovementAt ? <Link className="text-brand-700 hover:underline" href={`/estoque/movimentos?sku=${r.skuId}&deposito=${r.warehouseId}&filial=${r.branchId}`}>{formatDateTime(r.lastMovementAt)}</Link> : "—") },
     { key: "status", label: "Situação", cell: (r) => (r.physical < 0 ? <Badge tone="bad">Negativo</Badge> : r.belowMin ? <Badge tone="warn">Abaixo do mínimo</Badge> : r.physical === 0 ? <Badge>Sem saldo</Badge> : <Badge tone="good">Normal</Badge>) },
   ];

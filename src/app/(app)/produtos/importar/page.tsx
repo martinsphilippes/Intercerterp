@@ -22,7 +22,7 @@ export default async function Page() {
         crumbs={[{ label: "Produtos", href: "/produtos" }, { label: "Importar" }]}
         description="Mapeie as colunas, confira a prévia linha a linha e importe com uma política de atualização explícita. Reenviar a mesma importação não duplica produtos."
       />
-      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <ImportWizard modes={IMPORT_MODES} />
         <Card title="Importações anteriores" bodyClass="p-0">
           {imports.length === 0 ? (

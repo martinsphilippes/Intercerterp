@@ -92,12 +92,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <Stat label="Vendas brutas" value={formatMoney(t.gross)} href={`/vendas${moduleQs(rp)}`} hint={<Hint text={`Descontos ${formatMoney(t.discounts)} · devoluções ${formatMoney(t.returns)}`}>{compare && <Delta cur={t.gross} prev={prev?.gross ?? null} />}</Hint>} />
         <Stat label="Custo direto (CMV)" value={formatMoney(t.cmv)} hint={<Hint text={`Custo revertido ${formatMoney(t.costReturned)}`}>{compare && <Delta cur={t.cmv} prev={prev?.cmv ?? null} goodWhenUp={false} />}</Hint>} />
         <Stat label="Margem bruta" value={marginText(t.marginBps)} hint={<Hint text={`${formatMoney(t.grossProfit)} de resultado bruto`}>{compare && <Delta cur={t.marginBps} prev={prev?.marginBps ?? null} kind="points" />}</Hint>} tone={t.marginBps != null && t.marginBps < 0 ? "bad" : "default"} />
-        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { status: "completed" })}`} hint={<Hint text={`${t.returnsCount} ${t.returnsCount === 1 ? "devolução" : "devoluções"} no período`}>{compare && <Delta cur={t.salesCount} prev={prev?.salesCount ?? null} kind="count" />}</Hint>} />
+        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { situacao: "completed" })}`} hint={<Hint text={`${t.returnsCount} ${t.returnsCount === 1 ? "devolução" : "devoluções"} no período`}>{compare && <Delta cur={t.salesCount} prev={prev?.salesCount ?? null} kind="count" />}</Hint>} />
         <Stat label="Ticket médio" value={t.ticket == null ? "Sem vendas" : formatMoney(t.ticket)} hint={<Hint text="Vendas líquidas ÷ vendas concluídas">{compare && <Delta cur={t.ticket} prev={prev?.ticket ?? null} />}</Hint>} />
       </section>
       {report.cancelled.count > 0 && (
         <p className="-mt-2 mb-4 text-xs text-slate-500">
-          <Link className="text-brand-700 hover:underline" href={`/vendas${moduleQs(rp, { status: "cancelled" })}`}>
+          <Link className="text-brand-700 hover:underline" href={`/vendas${moduleQs(rp, { situacao: "cancelled" })}`}>
             {report.cancelled.count} venda(s) cancelada(s) ({formatMoney(report.cancelled.total)})
           </Link>{" "}
           no período não entram nos totais.
@@ -163,7 +163,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           </Card>
         </>
       ) : tab === "categoria" ? (
-        <div className="grid gap-4 2xl:grid-cols-3">
+        <div className="grid gap-4 2xl:grid-cols-3 [&>*]:min-w-0">
           <Card className="2xl:col-span-1" title="Participação na receita líquida">
             <BarList
               ariaLabel="Receita líquida por categoria"

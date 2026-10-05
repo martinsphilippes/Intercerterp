@@ -199,6 +199,7 @@ export function PrintStyles({ landscape = true }: { landscape?: boolean }) {
   section,figure,table{break-inside:auto}
   tr,figure{break-inside:avoid}
   table{font-size:10px}
+  tfoot{display:table-row-group}
   .table-base td,.table-base th{padding:3px 6px}
   a{color:inherit!important;text-decoration:none!important}
   [data-print-hide]{display:none!important}

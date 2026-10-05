@@ -32,7 +32,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const store = s.ctx.store;
   const o = await store.get("purchase_orders", id);
   if (!o || o.companyId !== s.ctx.companyId) notFound();
-  const [items, receipts, revisions, requests, supplier, users, terms] = await Promise.all([
+  const [items, receipts, revisions, requests, supplier, users, terms, methods, costCenters] = await Promise.all([
     orderItems(store, id),
     listAll(store, "receipts", { filters: [["contains", "orderIds", id]], orderBy: [{ field: "number", dir: "asc" }] }),
     listAll(store, "purchase_order_revisions", { filters: [["eq", "orderId", id]], orderBy: [{ field: "revision", dir: "asc" }] }),
@@ -40,6 +40,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     store.get("suppliers", o.supplierId),
     nameMap(s.ctx, "users"),
     nameMap(s.ctx, "payment_terms"),
+    nameMap(s.ctx, "payment_methods"),
+    nameMap(s.ctx, "cost_centers"),
   ]);
   const skus = new Map((await Promise.all(items.map((i) => store.get("skus", i.skuId)))).filter(Boolean).map((k) => [k!.id, k!]));
   const wh = o.warehouseId ? await store.get("warehouses", o.warehouseId) : null;
@@ -72,7 +74,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             {orderNeedsSending(o) && o.status === "sent" && <Badge tone="warn">Revisão {o.revision} ainda não enviada</Badge>}
           </>
         }
-        description={`${label ?? "—"} · ${branch?.name ?? ""} · criado em ${formatDateTime(o.createdAt)} por ${users.get(o.createdBy) ?? "—"}`}
+        description={`${o.purpose ? `${o.purpose} · ` : ""}${label ?? "—"} · ${branch?.name ?? ""} · solicitado em ${formatDateTime(o.createdAt)} por ${users.get(o.createdBy) ?? "—"}${o.buyerId ? ` · comprador ${users.get(o.buyerId) ?? "—"}` : ""}`}
         actions={
           sameBranch && canEdit ? (
             <>
@@ -119,7 +121,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
                 <thead>
-                  <tr><th>Produto</th><th>Cód. fornecedor</th><th className="text-right">Pedido</th><th className="text-right">Recebido</th><th className="text-right">Saldo</th><th className="text-right">Custo unit.</th><th className="text-right">Desconto</th><th className="text-right">Total</th></tr>
+                  <tr><th>Produto</th><th>Cód. fornecedor</th><th className="text-right">Pedido</th><th className="text-right">Recebido</th><th className="text-right">Saldo</th><th className="text-right">Custo unit.</th><th className="text-right">Desconto</th><th className="text-right">IPI</th><th className="text-right">Total</th></tr>
                 </thead>
                 <tbody>
                   {items.map((i) => (
@@ -131,16 +133,19 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                       <td className="tabular text-right">{remainingQty(i) ? <span className="text-amber-700">{formatQty(remainingQty(i))}</span> : "—"}</td>
                       <td className="tabular text-right">{formatMoney(i.unitCost)}</td>
                       <td className="tabular text-right">{i.discount ? formatMoney(i.discount) : "—"}</td>
+                      <td className="tabular text-right">{i.ipi ? formatMoney(i.ipi) : "—"}</td>
                       <td className="tabular text-right">{formatMoney(i.total)}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr><td colSpan={7} className="px-3 py-1.5 text-right text-slate-600">Produtos (bruto)</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.subtotal)}</td></tr>
-                  <tr><td colSpan={7} className="px-3 py-1.5 text-right text-slate-600">Descontos</td><td className="tabular px-3 py-1.5 text-right">− {formatMoney(o.discountTotal)}</td></tr>
-                  <tr><td colSpan={7} className="px-3 py-1.5 text-right text-slate-600">Frete</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.freight)}</td></tr>
-                  <tr><td colSpan={7} className="px-3 py-1.5 text-right text-slate-600">Outras despesas</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.otherExpenses)}</td></tr>
-                  <tr className="font-semibold"><td colSpan={7} className="border-t border-line px-3 py-2 text-right">Total</td><td className="tabular border-t border-line px-3 py-2 text-right">{formatMoney(o.total)}</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-1.5 text-right text-slate-600">Produtos (bruto)</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.subtotal)}</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-1.5 text-right text-slate-600">Descontos</td><td className="tabular px-3 py-1.5 text-right">− {formatMoney(o.discountTotal)}</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-1.5 text-right text-slate-600">IPI</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.ipiTotal ?? 0)}</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-1.5 text-right text-slate-600">Frete</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.freight)}</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-1.5 text-right text-slate-600">Seguro</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.insurance ?? 0)}</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-1.5 text-right text-slate-600">Outras despesas</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(o.otherExpenses)}</td></tr>
+                  <tr className="font-semibold"><td colSpan={8} className="border-t border-line px-3 py-2 text-right">Total</td><td className="tabular border-t border-line px-3 py-2 text-right">{formatMoney(o.total)}</td></tr>
                 </tfoot>
               </table>
             </div>
@@ -154,6 +159,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   { label: "Filial / depósito de entrega", value: `${branch?.name ?? "—"} · ${wh?.name ?? "—"}` },
                   { label: "Previsão de entrega", value: formatDate(o.expectedDate) },
                   { label: "Condição de pagamento", value: [o.paymentTermId ? terms.get(o.paymentTermId) : null, o.paymentTermsText].filter((x, i, a) => x && a.indexOf(x) === i).join(" · ") || "—" },
+                  { label: "Forma de pagamento / centro de custo", value: [o.paymentMethodId ? methods.get(o.paymentMethodId) : null, o.costCenterId ? costCenters.get(o.costCenterId) : null].filter(Boolean).join(" · ") || "—" },
                   { label: "Parcelas previstas", value: (o.installmentsPlan ?? []).map((p: any) => `${p.days ? `${p.days}d` : "à vista"} ${formatMoney(p.amount)}`).join(" · ") || "—" },
                   { label: "Envio", value: o.sentInfo ? `${formatDateTime(o.sentInfo.at)} · ${o.sentInfo.method === "email" ? `e-mail para ${o.sentInfo.to} (${o.sentInfo.channel})` : `${o.sentInfo.channel}, contato ${o.sentInfo.contact}`} · por ${o.sentInfo.by} (rev. ${o.sentInfo.revision})` : "Não enviado" },
                   { label: "Observações", value: o.notes },

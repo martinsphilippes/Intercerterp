@@ -21,6 +21,7 @@ import { FISCAL_BUCKETS, certificateAlerts, financeSnapshot, fiscalSnapshot, lat
 export const metadata = { title: "Painel do gestor" };
 
 const MODEL_LABEL: Record<string, string> = { nfce: "NFC-e", nfe: "NF-e", nfse: "NFS-e" };
+const BUCKET_WORD: Record<string, [string, string]> = { pending: ["pendente", "pendentes"], processing: ["processando", "processando"], rejected: ["rejeitado/com erro", "rejeitados/com erro"] };
 
 function goalTone(g: GoalProgress): "good" | "warn" | "bad" | "neutral" {
   return g.status === "achieved" ? "good" : g.status === "on_track" ? "neutral" : g.status === "behind" ? "warn" : g.status === "closed_missed" ? "bad" : "neutral";
@@ -54,6 +55,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const canFiscal = can(s.user, "fiscal");
   const canStock = can(s.user, "stock") || can(s.user, "purchases");
   const canCash = can(s.user, "cash") || can(s.user, "pdv");
+  // custo/margem: somente perfis com acesso aos relatórios gerenciais
+  const canCost = can(s.user, "reports");
   const consolidated = !rp.single;
   const goalMonth = rp.period.to.slice(0, 7);
   const ref = today();
@@ -77,18 +80,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const prev = overview?.previous;
   const salesHref = `/vendas${moduleQs(rp)}`;
   const outOfStock = alerts.filter((a) => a.available <= 0);
+  // pendências fiscais são estado atual: lista desde o início (não só o mês corrente), por grupo de situações
+  const fiscalQs = (k: FiscalBucket) => qs({ status: FISCAL_BUCKETS[k].statuses.join(","), from: "2000-01-01", branch: filial });
 
   // Alertas importantes: somente fatos medidos agora (sem estados presumidos)
   const alertList: Alert[] = [];
-  if (outOfStock.length) alertList.push({ key: "nostock", tone: "bad", icon: PackageSearch, title: `${outOfStock.length} produto(s) sem estoque`, text: "Disponível zerado ou negativo com mínimo cadastrado — reposição necessária.", href: `/compras/reposicao${qs({ filial, situacao: "sem-estoque" })}` });
-  if (alerts.length - outOfStock.length > 0) alertList.push({ key: "minstock", tone: "warn", icon: PackageSearch, title: `${alerts.length - outOfStock.length} produto(s) no mínimo ou abaixo`, text: "Avalie a reposição antes da ruptura.", href: `/compras/reposicao${qs({ filial, situacao: "abaixo-minimo" })}` });
-  if (fin && fin.receivableOverdue.count) alertList.push({ key: "recov", tone: "bad", icon: DollarSign, title: `${fin.receivableOverdue.count} parcela(s) a receber vencida(s)`, text: `Total de ${formatMoney(fin.receivableOverdue.amount)} em atraso.`, href: `/financeiro/receber${qs({ state: "overdue", filial })}` });
-  if (fin && fin.payableOverdue.count) alertList.push({ key: "payov", tone: "bad", icon: ArrowUpCircle, title: `${fin.payableOverdue.count} conta(s) a pagar vencida(s)`, text: `Total de ${formatMoney(fin.payableOverdue.amount)}.`, href: `/financeiro/pagar${qs({ state: "overdue", filial })}` });
-  if (fin && fin.payableToday.count) alertList.push({ key: "paytoday", tone: "warn", icon: ArrowUpCircle, title: `${fin.payableToday.count} conta(s) a pagar vencem hoje`, text: `Total de ${formatMoney(fin.payableToday.amount)}.`, href: `/financeiro/pagar${qs({ state: "due_today", filial })}` });
+  if (outOfStock.length) alertList.push({ key: "nostock", tone: "bad", icon: PackageSearch, title: `${outOfStock.length} produto(s) sem estoque`, text: "Disponível zerado ou negativo com mínimo cadastrado — reposição necessária.", href: `/estoque${qs({ filial, situacao: "below_min" })}` });
+  if (alerts.length - outOfStock.length > 0) alertList.push({ key: "minstock", tone: "warn", icon: PackageSearch, title: `${alerts.length - outOfStock.length} produto(s) abaixo do mínimo`, text: "Avalie a reposição antes da ruptura.", href: `/estoque${qs({ filial, situacao: "below_min" })}` });
+  if (fin && fin.receivableOverdue.count) alertList.push({ key: "recov", tone: "bad", icon: DollarSign, title: `${fin.receivableOverdue.count} parcela(s) a receber vencida(s)`, text: `Total de ${formatMoney(fin.receivableOverdue.amount)} em atraso.`, href: `/financeiro/receber${qs({ state: "overdue", branch: filial })}` });
+  if (fin && fin.payableOverdue.count) alertList.push({ key: "payov", tone: "bad", icon: ArrowUpCircle, title: `${fin.payableOverdue.count} conta(s) a pagar vencida(s)`, text: `Total de ${formatMoney(fin.payableOverdue.amount)}.`, href: `/financeiro/pagar${qs({ state: "overdue", branch: filial })}` });
+  if (fin && fin.payableToday.count) alertList.push({ key: "paytoday", tone: "warn", icon: ArrowUpCircle, title: `${fin.payableToday.count} conta(s) a pagar vencem hoje`, text: `Total de ${formatMoney(fin.payableToday.amount)}.`, href: `/financeiro/pagar${qs({ state: "due_today", branch: filial })}` });
   if (fiscal) {
     for (const g of fiscal.grid) {
-      if (g.counts.rejected) alertList.push({ key: `rej-${g.model}`, tone: "bad", icon: FileWarning, title: `${g.counts.rejected} ${MODEL_LABEL[g.model]} rejeitada(s)/com erro`, text: "Corrija e retransmita o documento.", href: `/fiscal/${g.model}${qs({ status: "rejected", filial })}` });
-      if (g.counts.pending) alertList.push({ key: `pend-${g.model}`, tone: "warn", icon: FileWarning, title: `${g.counts.pending} ${MODEL_LABEL[g.model]} pendente(s)`, text: "Aguardando dados, revisão ou transmissão.", href: `/fiscal/${g.model}${qs({ status: "pending", filial })}` });
+      if (g.counts.rejected) alertList.push({ key: `rej-${g.model}`, tone: "bad", icon: FileWarning, title: `${g.counts.rejected} ${MODEL_LABEL[g.model]} rejeitada(s)/com erro`, text: "Corrija e retransmita o documento.", href: `/fiscal/${g.model}${fiscalQs("rejected")}` });
+      if (g.counts.pending) alertList.push({ key: `pend-${g.model}`, tone: "warn", icon: FileWarning, title: `${g.counts.pending} ${MODEL_LABEL[g.model]} pendente(s)`, text: "Aguardando dados, revisão ou transmissão.", href: `/fiscal/${g.model}${fiscalQs("pending")}` });
     }
   }
   for (const c of certs) alertList.push({ key: `cert-${c.id}`, tone: c.daysLeft < 0 ? "bad" : "warn", icon: CalendarClock, title: c.daysLeft < 0 ? "Certificado digital vencido" : `Certificado vence em ${c.daysLeft} dia(s)`, text: `Validade ${formatDate(c.validTo)}${c.branchId ? ` · ${branchNames.get(c.branchId) ?? ""}` : ""}. Renovação recomendada.`, href: "/fiscal/configuracoes" });
@@ -163,19 +168,19 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         {t && prev && (
           <>
             <Stat label="Vendas líquidas (faturamento)" value={formatMoney(t.netRevenue)} href={salesHref} hint={<Delta cur={t.netRevenue} prev={prev.netRevenue} />} />
-            <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { status: "completed" })}`} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
+            <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { situacao: "completed" })}`} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
             <Stat label="Ticket médio" value={t.ticket == null ? "Sem vendas" : formatMoney(t.ticket)} href={salesHref} hint={<Delta cur={t.ticket} prev={prev.ticket} />} />
-            <Stat label="Margem bruta" value={marginText(t.marginBps)} href={`/relatorios/gerenciais${reportQs(params)}`} hint={<>{`Resultado bruto ${formatMoney(t.grossProfit)} · `}<Delta cur={t.marginBps} prev={prev.marginBps} kind="points" /></>} tone={t.marginBps != null && t.marginBps < 0 ? "bad" : "default"} />
-            <Stat label="Devoluções no período" value={formatMoney(t.returns)} href={`/vendas/devolucoes${moduleQs(rp)}`} tone={t.returns > 0 ? "warn" : "default"} hint={`${t.returnsCount} devolução(ões) · custo revertido ${formatMoney(t.costReturned)}`} />
+            {canCost && <Stat label="Margem bruta" value={marginText(t.marginBps)} href={`/relatorios/gerenciais${reportQs(params)}`} hint={<>{`Resultado bruto ${formatMoney(t.grossProfit)} · `}<Delta cur={t.marginBps} prev={prev.marginBps} kind="points" /></>} tone={t.marginBps != null && t.marginBps < 0 ? "bad" : "default"} />}
+            <Stat label="Devoluções no período" value={formatMoney(t.returns)} href={`/vendas/devolucoes${moduleQs(rp)}`} tone={t.returns > 0 ? "warn" : "default"} hint={`${t.returnsCount} devolução(ões)${canCost ? ` · custo revertido ${formatMoney(t.costReturned)}` : ""}`} />
           </>
         )}
         {fin && <Stat label="Saldo disponível" value={formatMoney(fin.accountsTotal)} href="/financeiro/fluxo-caixa" hint={<span className={fin.receivableToday.amount ? "text-accent-700" : undefined}>{formatMoney(fin.receivableToday.amount)} a receber hoje ({fin.receivableToday.count} parcela(s))</span>} tone={fin.accountsTotal < 0 ? "bad" : "default"} />}
-        {canStock && <Stat label="Estoque crítico" value={`${alerts.length} ${alerts.length === 1 ? "item" : "itens"}`} href={`/compras/reposicao${qs({ filial, situacao: "abaixo-minimo" })}`} tone={outOfStock.length ? "bad" : alerts.length ? "warn" : "good"} hint={<span className={outOfStock.length ? "text-red-700" : undefined}>{outOfStock.length} sem estoque · demais no mínimo ou abaixo</span>} />}
-        {fiscal && <Stat label="Pendências fiscais" value={fiscal.totals.pending + fiscal.totals.processing + fiscal.totals.rejected} href={`/fiscal/nfce${qs({ status: fiscal.totals.rejected ? "rejected" : "pending", filial })}`} tone={fiscal.totals.rejected ? "bad" : fiscal.totals.pending ? "warn" : "good"} hint={`${fiscal.totals.rejected} rejeitado(s) · ${fiscal.totals.pending} pendente(s) · ${fiscal.totals.processing} processando`} />}
+        {canStock && <Stat label="Estoque crítico" value={`${alerts.length} ${alerts.length === 1 ? "item" : "itens"}`} href={`/estoque${qs({ filial, situacao: "below_min" })}`} tone={outOfStock.length ? "bad" : alerts.length ? "warn" : "good"} hint={<span className={outOfStock.length ? "text-red-700" : undefined}>{outOfStock.length} sem estoque · demais abaixo do mínimo</span>} />}
+        {fiscal && <Stat label="Pendências fiscais" value={fiscal.totals.pending + fiscal.totals.processing + fiscal.totals.rejected} href={`/fiscal/nfce${fiscalQs(fiscal.totals.rejected ? "rejected" : "pending")}`} tone={fiscal.totals.rejected ? "bad" : fiscal.totals.pending ? "warn" : "good"} hint={`${fiscal.totals.rejected} rejeitado(s) · ${fiscal.totals.pending} pendente(s) · ${fiscal.totals.processing} processando`} />}
       </section>
       {overview && overview.cancelled.count > 0 && (
         <p className="-mt-2 mb-4 text-xs text-slate-500">
-          <Link className="text-brand-700 hover:underline" href={`/vendas${moduleQs(rp, { status: "cancelled" })}`}>
+          <Link className="text-brand-700 hover:underline" href={`/vendas${moduleQs(rp, { situacao: "cancelled" })}`}>
             {overview.cancelled.count} venda(s) cancelada(s) no período ({formatMoney(overview.cancelled.total)})
           </Link>{" "}
           não entram no faturamento.
@@ -193,7 +198,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       )}
 
       {overview && (
-        <div className="mb-4 grid gap-4 xl:grid-cols-3">
+        <div className="mb-4 grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
           <Card
             className="xl:col-span-2"
             title={`Faturamento ${overview.series.granularity === "hour" ? "por hora" : "por dia"} — ${rp.period.preset === "7d" ? "últimos 7 dias" : rp.period.label}`}
@@ -239,7 +244,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                     <ul className="space-y-3">
                       {list.map((g) => {
                         const expectedBps = g.metric === "ticket" || !g.target ? null : Math.round(((g.expected ?? 0) * 10000) / g.target);
-                        const link = g.metric === "ticket" ? `/relatorios/gerenciais?de=${g.from}&ate=${g.to}${g.goal.branchId ? `&filial=${g.goal.branchId}` : "&filial=todas"}` : `/vendas?de=${g.from}&ate=${g.to}${g.goal.branchId ? `&filial=${g.goal.branchId}` : ""}`;
+                        const link = g.metric === "ticket" && canCost ? `/relatorios/gerenciais?de=${g.from}&ate=${g.to}${g.goal.branchId ? `&filial=${g.goal.branchId}` : "&filial=todas"}` : `/vendas?de=${g.from}&ate=${g.to}${g.goal.branchId ? `&filial=${g.goal.branchId}` : ""}`;
                         return (
                           <li key={g.goal.id}>
                             <Link href={link} className="focus-ring -mx-1 block rounded px-1 py-0.5 hover:bg-brand-50/60">
@@ -273,7 +278,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         </div>
       )}
 
-      <div className="mb-4 grid gap-4 xl:grid-cols-3">
+      <div className="mb-4 grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
         {canSales && (
           <Card className="xl:col-span-2" title="Últimas vendas" actions={<Link href={`/vendas${filialQs}`} className="text-xs font-medium text-brand-700 hover:underline">Ver todas</Link>} bodyClass="p-0">
             {latest.length === 0 ? (
@@ -329,7 +334,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             )}
           </Card>
         )}
+        {(canStock || canFin || canFiscal || canCash) && (
         <Card
+          className={canSales ? undefined : "xl:col-span-3"}
           title="Alertas importantes"
           description="Situações medidas agora que exigem ação."
           actions={
@@ -340,7 +347,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         >
           {alertList.length === 0 ? (
             <p className="flex items-center gap-2 text-sm text-slate-600">
-              <CheckCircle2 className="size-4 text-emerald-700" aria-hidden /> Nenhum alerta {rp.single ? "nesta filial" : "nas filiais"} no momento.
+              <CheckCircle2 className="size-4 text-emerald-700" aria-hidden /> Nenhum alerta {rp.single ? "nesta filial" : "nas filiais"} nas áreas que seu perfil acompanha.
             </p>
           ) : (
             <ul className="divide-y divide-line">
@@ -358,15 +365,16 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             </ul>
           )}
         </Card>
+        )}
       </div>
 
-      <div className="mb-4 grid gap-4 xl:grid-cols-3">
+      <div className="mb-4 grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
         {fiscal && (
           <Card
             title="Resumo fiscal"
             description="Autorizados no período e documentos que exigem acompanhamento (situação atual)."
             actions={
-              <Link href={`/fiscal/nfce${filialQs}`} className="text-xs font-medium text-brand-700 hover:underline">
+              <Link href={`/fiscal/nfce${qs({ branch: filial })}`} className="text-xs font-medium text-brand-700 hover:underline">
                 Central fiscal
               </Link>
             }
@@ -378,7 +386,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 return (
                   <li key={g.model} className="flex items-start justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
-                      <Link href={`/fiscal/${g.model}${qs({ status: "authorized", de: rp.period.from, ate: rp.period.to, filial })}`} className="text-sm font-medium text-brand-700 hover:underline">
+                      <Link href={`/fiscal/${g.model}${qs({ status: "authorized", from: rp.period.from, to: rp.period.to, branch: filial })}`} className="text-sm font-medium text-brand-700 hover:underline">
                         {MODEL_LABEL[g.model]} autorizadas
                       </Link>
                       <p className="text-xs text-slate-500">
@@ -388,8 +396,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                           issues.map((k, i) => (
                             <span key={k}>
                               {i > 0 && " · "}
-                              <Link href={`/fiscal/${g.model}${qs({ status: FISCAL_BUCKETS[k].link, filial })}`} className={k === "rejected" ? "text-red-700 hover:underline" : "text-amber-700 hover:underline"}>
-                                {g.counts[k]} {FISCAL_BUCKETS[k].label.toLowerCase()}
+                              <Link href={`/fiscal/${g.model}${fiscalQs(k)}`} className={k === "rejected" ? "text-red-700 hover:underline" : "text-amber-700 hover:underline"}>
+                                {g.counts[k]} {BUCKET_WORD[k][g.counts[k] === 1 ? 0 : 1]}
                               </Link>
                             </span>
                           ))
@@ -410,10 +418,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         {fin && (
           <Card title="Financeiro" description="Posição atual dos títulos e das contas." actions={<Link href="/financeiro/fluxo-caixa" className="text-xs font-medium text-brand-700 hover:underline">Fluxo de caixa</Link>}>
             <div className="grid grid-cols-2 gap-3">
-              <Stat label="Recebíveis vencidos" value={formatMoney(fin.receivableOverdue.amount)} hint={`${fin.receivableOverdue.count} parcela(s)`} tone={fin.receivableOverdue.amount ? "bad" : "default"} href={`/financeiro/receber${qs({ state: "overdue", filial })}`} />
-              <Stat label="A pagar hoje" value={formatMoney(fin.payableToday.amount)} hint={`${fin.payableToday.count} parcela(s)`} tone={fin.payableToday.amount ? "warn" : "default"} href={`/financeiro/pagar${qs({ state: "due_today", filial })}`} />
-              <Stat label="A pagar — próximos 7 dias" value={formatMoney(fin.payableNext7.amount)} hint={`${fin.payableNext7.count} parcela(s) até ${formatDate(fin.in7)}`} href={`/financeiro/pagar${qs({ de: addDay(fin.ref), ate: fin.in7, filial })}`} />
-              <Stat label="A pagar vencidas" value={formatMoney(fin.payableOverdue.amount)} hint={`${fin.payableOverdue.count} parcela(s)`} tone={fin.payableOverdue.amount ? "bad" : "default"} href={`/financeiro/pagar${qs({ state: "overdue", filial })}`} />
+              <Stat label="Recebíveis vencidos" value={formatMoney(fin.receivableOverdue.amount)} hint={`${fin.receivableOverdue.count} parcela(s)`} tone={fin.receivableOverdue.amount ? "bad" : "default"} href={`/financeiro/receber${qs({ state: "overdue", branch: filial })}`} />
+              <Stat label="A pagar hoje" value={formatMoney(fin.payableToday.amount)} hint={`${fin.payableToday.count} parcela(s)`} tone={fin.payableToday.amount ? "warn" : "default"} href={`/financeiro/pagar${qs({ state: "due_today", branch: filial })}`} />
+              <Stat label="A pagar — próximos 7 dias" value={formatMoney(fin.payableNext7.amount)} hint={`${fin.payableNext7.count} parcela(s) até ${formatDate(fin.in7)}`} href={`/financeiro/pagar${qs({ state: "upcoming", dueFrom: addDay(fin.ref), dueTo: fin.in7, branch: filial })}`} />
+              <Stat label="A pagar vencidas" value={formatMoney(fin.payableOverdue.amount)} hint={`${fin.payableOverdue.count} parcela(s)`} tone={fin.payableOverdue.amount ? "bad" : "default"} href={`/financeiro/pagar${qs({ state: "overdue", branch: filial })}`} />
             </div>
             <div className="mt-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Saldo das contas</p>
@@ -446,7 +454,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           </Card>
         )}
         {canStock && (
-          <Card title="Estoque crítico" description="Disponível no mínimo ou abaixo dele (mesmo critério das notificações)." actions={alerts.length > 0 ? <Badge tone={outOfStock.length ? "bad" : "warn"}>{alerts.length}</Badge> : <Badge tone="good">OK</Badge>}>
+          <Card title="Estoque crítico" description="Saldos com disponível abaixo do mínimo cadastrado (mesmo critério da listagem de Estoque)." actions={alerts.length > 0 ? <Badge tone={outOfStock.length ? "bad" : "warn"}>{alerts.length}</Badge> : <Badge tone="good">OK</Badge>}>
             {alerts.length === 0 ? (
               <p className="flex items-center gap-2 text-sm text-slate-600">
                 <CheckCircle2 className="size-4 text-emerald-700" aria-hidden /> Nenhum item abaixo do mínimo {rp.single ? "nesta filial" : "nas filiais"}.
@@ -455,13 +463,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
               <>
                 <ul className="divide-y divide-line">
                   {alerts.slice(0, 7).map((a) => (
-                    <li key={`${a.branchId}-${a.skuId}`} className="py-2 first:pt-0">
+                    <li key={`${a.warehouseId}-${a.skuId}`} className="py-2 first:pt-0">
                       <Link href={`/estoque/movimentos?sku=${a.skuId}&filial=${a.branchId}`} className="focus-ring flex items-start justify-between gap-3 rounded text-sm hover:text-brand-700">
                         <span className="min-w-0">
                           <span className="block truncate text-ink">{a.name}</span>
                           <span className="text-xs text-slate-500">
                             {a.sku}
                             {consolidated ? ` · ${branchNames.get(a.branchId) ?? ""}` : ""}
+                            {!a.warehouseDefault && a.warehouseName ? ` · ${a.warehouseName}` : ""}
                           </span>
                         </span>
                         <span className="tabular shrink-0 text-right text-xs">
@@ -489,7 +498,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           ...COMMON_DEFINITIONS,
           ["Metas", "Por filial (ou empresa), mês e métrica. Realizado do 1º dia do mês até hoje pelo mesmo serviço de métricas; o ritmo esperado é a meta × dias decorridos ÷ dias do mês (para ticket, a própria meta)."],
           ["Saldo disponível", "Soma do saldo atual das contas financeiras ativas do recorte (extrato interno), incluindo contas compartilhadas entre filiais. “A receber hoje” = parcelas a receber em aberto com vencimento hoje."],
-          ["Estoque crítico", "SKU cujo disponível (físico − reservado nos depósitos de venda) está no mínimo cadastrado ou abaixo dele, por filial; “sem estoque” = disponível ≤ 0."],
+          ["Estoque crítico", "Saldo (SKU × depósito) com disponível (físico − reservado) abaixo do mínimo cadastrado — mesmo critério da listagem de Estoque “Abaixo do mínimo”; “sem estoque” = disponível ≤ 0."],
           ["Financeiro", "Parcelas em aberto/parciais pelo saldo; vencidas = vencimento antes de hoje."],
           ["Resumo fiscal", "Autorizados: documentos com autorização no período selecionado (quantidade e valor). Pendentes: aguardando dados/revisão/transmissão (inclui rascunhos); processando: na fila ou aguardando retorno; rejeitados: rejeição, denegação ou erro — situação atual."],
           ["Alertas", "Produtos sem estoque/abaixo do mínimo, contas vencidas, documentos fiscais pendentes/rejeitados, certificado digital vencido ou a vencer em até 30 dias e caixa aberto desde dia anterior."],

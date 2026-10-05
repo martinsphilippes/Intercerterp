@@ -58,6 +58,9 @@ export async function certificateAlerts(ctx: Ctx, branchIds: string[]) {
 
 export interface StockAlert {
   branchId: string;
+  warehouseId: string;
+  warehouseName: string | null;
+  warehouseDefault: boolean;
   skuId: string;
   productId: string | null;
   sku: string;
@@ -67,27 +70,24 @@ export interface StockAlert {
   min: number;
 }
 
-/** SKUs com disponível ≤ mínimo por filial (mesmo critério das notificações de estoque mínimo). */
+/**
+ * Saldos com disponível no mínimo ou abaixo (disponível ≤ mínimo — mesmo critério e mesma granularidade — saldo por depósito —
+ * da listagem de Estoque com situação "Abaixo do mínimo", para o total abrir exatamente os mesmos registros).
+ */
 export async function stockAlerts(ctx: Ctx, branchIds: string[]): Promise<StockAlert[]> {
-  const warehouses = await listAll(ctx.store, "warehouses", { filters: [["eq", "companyId", ctx.companyId], ["eq", "branchId", branchIds]] });
-  const availableWh = new Set(warehouses.filter((w) => w.kind === "available").map((w) => w.id));
   const bals = await listAll(ctx.store, "stock_balances", { filters: [["eq", "companyId", ctx.companyId], ["eq", "branchId", branchIds]] });
-  const map = new Map<string, { branchId: string; skuId: string; productId: string | null; available: number; min: number }>();
-  for (const b of bals) {
-    const k = `${b.branchId}|${b.skuId}`;
-    const cur = map.get(k) ?? { branchId: b.branchId, skuId: b.skuId, productId: b.productId ?? null, available: 0, min: 0 };
-    if (availableWh.has(b.warehouseId)) cur.available += (b.physical ?? 0) - (b.reserved ?? 0);
-    cur.min += b.minQty ?? 0;
-    map.set(k, cur);
-  }
-  const alerts = [...map.values()].filter((x) => x.min > 0 && x.available <= x.min);
+  const alerts = bals
+    .map((b) => ({ branchId: b.branchId as string, warehouseId: b.warehouseId as string, skuId: b.skuId as string, productId: (b.productId ?? null) as string | null, available: (b.physical ?? 0) - (b.reserved ?? 0), min: b.minQty ?? 0 }))
+    .filter((x) => x.min > 0 && x.available <= x.min);
   const skuIds = [...new Set(alerts.map((a) => a.skuId))];
   const skus = new Map<string, Doc>();
   for (let i = 0; i < skuIds.length; i += 100) for (const s of await listAll(ctx.store, "skus", { filters: [["eq", "id", skuIds.slice(i, i + 100)]] })) skus.set(s.id, s);
+  const whs = new Map((await listAll(ctx.store, "warehouses", { filters: [["eq", "companyId", ctx.companyId], ["eq", "branchId", branchIds]] })).map((w) => [w.id, w]));
   return alerts
     .map((a) => {
       const s = skus.get(a.skuId);
-      return { ...a, sku: s?.sku ?? a.skuId, name: s?.name ?? s?.sku ?? a.skuId, unitCode: s?.unitCode ?? null };
+      const w = whs.get(a.warehouseId);
+      return { ...a, sku: s?.sku ?? a.skuId, name: s?.name ?? s?.sku ?? a.skuId, unitCode: s?.unitCode ?? null, warehouseName: w?.name ?? null, warehouseDefault: w?.kind === "available" };
     })
     .sort((a, b) => a.available / a.min - b.available / b.min || a.sku.localeCompare(b.sku));
 }

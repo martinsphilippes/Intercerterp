@@ -1,7 +1,6 @@
 import "server-only";
 import { defineExport } from "@/lib/exporters";
 import { sp } from "@/lib/list";
-import { BusinessError } from "@/lib/core/errors";
 import { variationBps, managerialReport, paymentBreakdown, branchOperations, type Row, type Totals } from "@/domain/reports";
 import { abcReport, abcProductLines, criterionValue } from "@/domain/abc";
 import { GOAL_METRICS, GOAL_STATUS_LABEL, goalsProgress } from "@/domain/goals";
@@ -105,7 +104,7 @@ defineExport("reports-branch-ops", {
   ],
   rows: async (s, params) => {
     const id = sp(params, "id");
-    if (!s.branches.some((b) => b.id === id)) throw new BusinessError("Filial inválida.");
+    if (!s.branches.some((b) => b.id === id)) return []; // filial inexistente ou sem acesso: recorte vazio
     const rp = resolveReportParams(s, { ...params, filial: id });
     const ops = await branchOperations(s.ctx.store, rp.scope);
     return [

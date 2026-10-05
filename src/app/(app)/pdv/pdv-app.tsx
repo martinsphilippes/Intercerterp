@@ -33,6 +33,10 @@ export interface PdvProps {
   customer: CustomerInfo | null;
   priceTables: Array<{ value: string; label: string }>;
   categories: Array<{ value: string; label: string }>;
+  brands: Array<{ value: string; label: string }>;
+  sellers: Array<{ value: string; label: string }>;
+  quickMethods: Array<{ id: string; name: string; kind: string }>;
+  fiscal: { label: string; tone: "sim" | "warn" | "good" | "neutral" };
   parked: Array<{ id: string; name: string | null; customerName: string | null; total: number; itemsCount: number; parkedAt: string; expired: boolean; operatorName: string; terminalName: string }>;
   allowNegative: boolean;
   exchange: { returnId: string; number: number; saleNumber: number; voucherCode: string | null; voucherBalance: number } | null;
@@ -113,6 +117,7 @@ export function PdvApp(props: PdvProps) {
     setSaveState({ state: "saving" });
     const res = await saveCartAction(c.id, {
       items: c.items, customerId: c.customerId, cpfOnInvoice: c.cpfOnInvoice, priceTableId: c.priceTableId, globalDiscount: c.globalDiscount, globalDiscountBps: c.globalDiscountBps, surcharge: c.surcharge, notes: c.notes,
+      sellerId: c.sellerId, emitFiscal: c.emitFiscal,
     });
     if (!res.ok) {
       setSaveState({ state: "error", error: res.error });
@@ -198,7 +203,7 @@ export function PdvApp(props: PdvProps) {
       } else {
         list.push({
           skuId: hit.skuId, qty, unitPrice: null, itemDiscount: 0, itemSurcharge: 0, sku: hit.sku, name: hit.name, unitCode: hit.unitCode, listPrice: hit.listPrice,
-          wholesalePrice: hit.wholesalePrice, wholesaleMinQty: hit.wholesaleMinQty, available: hit.available, service: hit.service, maxDiscountBps: hit.maxDiscountBps,
+          wholesalePrice: hit.wholesalePrice, wholesaleMinQty: hit.wholesaleMinQty, available: hit.available, service: hit.service, maxDiscountBps: hit.maxDiscountBps, attributes: hit.attributes,
         });
         setSelected(list.length - 1);
       }
@@ -250,13 +255,13 @@ export function PdvApp(props: PdvProps) {
   };
 
   // ── navegação
-  const goPayment = async () => {
+  const goPayment = async (methodId?: string) => {
     if (!items.length) return toast("error", "Adicione itens ao atendimento.");
     if (!props.session) return toast("error", "Caixa fechado neste terminal: abra o caixa para receber pagamentos.");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     const ok = await persist();
     if (!ok && dirty.current) return toast("error", "Não foi possível gravar o atendimento. Verifique a conexão e tente novamente.");
-    router.push(`/pdv/pagamento?carrinho=${cart.id}`);
+    router.push(`/pdv/pagamento?carrinho=${cart.id}${methodId ? `&meio=${methodId}` : ""}`);
   };
 
   const anyDialog = dialog !== null;
@@ -362,7 +367,11 @@ export function PdvApp(props: PdvProps) {
         <span className="flex items-center gap-2 font-semibold">
           <ShoppingCart className="size-5 text-accent-500" /> PDV
         </span>
-        <span className="hidden text-brand-200 md:inline">{props.companyName} · {props.branch.name}</span>
+        <span className="hidden text-brand-200 xl:inline">{props.companyName} · {props.branch.name}</span>
+        <span className="hidden flex-col leading-tight md:flex" title={`Atendimento ${cart.id}`}>
+          <span className="text-[11px] text-brand-200">{cart.exchangeReturnId ? "Troca em andamento" : "Venda em andamento"}</span>
+          <span className="font-mono text-xs">#{cart.id.slice(0, 8).toUpperCase()}</span>
+        </span>
         <label className="flex items-center gap-1.5">
           <Monitor className="size-4 text-brand-200" aria-hidden />
           <span className="sr-only">Terminal</span>
@@ -379,7 +388,7 @@ export function PdvApp(props: PdvProps) {
         </span>
         {props.session ? (
           <Link href={`/caixa/${props.session.id}`} className="flex items-center gap-1.5 rounded bg-emerald-600/20 px-2 py-0.5 text-emerald-100 hover:bg-emerald-600/30">
-            <Wallet className="size-4" /> Caixa nº {props.session.number} {props.session.status === "reopened" ? "reaberto" : "aberto"} · {props.session.operatorName}
+            <Wallet className="size-4" /> {props.terminal.code} · <span className="size-2 rounded-full bg-emerald-400" aria-hidden /> {props.session.status === "reopened" ? "Reaberto" : "Aberto"} (sessão nº {props.session.number} · {props.session.operatorName})
           </Link>
         ) : (
           <Link href={`/caixa/abertura?terminal=${props.terminal.id}`} className="flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-0.5 text-red-100 hover:bg-red-500/30">
@@ -398,7 +407,7 @@ export function PdvApp(props: PdvProps) {
             <Wallet className="size-4" /> Caixa
           </Link>
           <Link href="/vendas" className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800" title="Sair do PDV (histórico de vendas)">
-            <LogOut className="size-4" /> <span className="hidden sm:inline">Sair</span>
+            <LogOut className="size-4" /> <span className="hidden sm:inline">Sair do PDV</span>
           </Link>
         </div>
       </header>
@@ -429,7 +438,7 @@ export function PdvApp(props: PdvProps) {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_360px]">
         {/* Itens */}
         <section className="flex min-h-0 flex-col gap-3" aria-label="Itens do atendimento">
-          <ProductSearch ref={searchRef} priceTableId={cart.priceTableId} categories={props.categories} onAdd={addHit} />
+          <ProductSearch ref={searchRef} priceTableId={cart.priceTableId} categories={props.categories} brands={props.brands} branchName={props.branch.name} allowNegative={props.allowNegative} onAdd={addHit} />
           <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-white">
             {items.length === 0 ? (
               <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 p-8 text-center text-slate-500">
@@ -472,7 +481,7 @@ export function PdvApp(props: PdvProps) {
                         <td className="px-3 py-2">
                           <p className="font-medium text-ink">{l.name ?? l.sku}</p>
                           <p className="font-mono text-xs text-slate-500">
-                            {l.sku} · {l.unitCode}
+                            {[l.sku, ...Object.values(l.attributes ?? {}), l.unitCode].filter(Boolean).join(" • ")}
                             {wholesale && <Badge tone="accent" className="ml-2">atacado</Badge>}
                             {short && <Badge tone="warn" className="ml-2">sem saldo ({formatQty(l.available)})</Badge>}
                           </p>
@@ -515,13 +524,17 @@ export function PdvApp(props: PdvProps) {
               </table>
             )}
           </div>
+          <p className="text-xs text-slate-500" aria-live="polite">
+            {items.length} {items.length === 1 ? "produto" : "produtos"} • {formatQty(items.reduce((a, l) => a + l.qty, 0))} {items.length === 1 && items[0].unitCode ? items[0].unitCode : "unidades"} na venda
+            {selected >= 0 && items[selected] ? ` · selecionado: ${selected + 1}` : ""}
+          </p>
         </section>
 
         {/* Painel lateral: cliente, tabela, totais e ações */}
         <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto" aria-label="Resumo do atendimento">
           <button type="button" onClick={() => setDialog("customer")} className="focus-ring rounded-lg border border-line bg-white p-3 text-left hover:border-brand-300">
             <p className="flex items-center justify-between text-xs font-medium text-slate-500">
-              Cliente <kbd className="rounded border border-line px-1">F4</kbd>
+              Cliente da venda <span className="flex items-center gap-1"><Pencil className="size-3.5" /><kbd className="rounded border border-line px-1">F4</kbd></span>
             </p>
             {customer ? (
               <>
@@ -532,14 +545,25 @@ export function PdvApp(props: PdvProps) {
             ) : (
               <>
                 <p className="mt-1 font-semibold text-ink">Consumidor final</p>
-                <p className="text-xs text-slate-500">{cart.cpfOnInvoice ? `CPF/CNPJ na nota: ${formatDoc(cart.cpfOnInvoice)}` : "Sem CPF na nota · F4 para identificar"}</p>
+                <p className="text-xs text-slate-500">{cart.cpfOnInvoice ? `CPF/CNPJ na nota: ${formatDoc(cart.cpfOnInvoice)}` : "CPF não informado · F4 identificar cliente"}</p>
               </>
             )}
           </button>
-          <div className="rounded-lg border border-line bg-white p-3">
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-white p-3">
             <Field label="Tabela de preço">
               <Select value={cart.priceTableId ?? ""} onChange={(e) => void changeTable(e.target.value)} options={props.priceTables} aria-label="Tabela de preço" />
             </Field>
+            <Field label="Vendedor">
+              <Select value={cart.sellerId ?? ""} onChange={(e) => update((c) => ({ ...c, sellerId: e.target.value || null }))} options={props.sellers} placeholder="— operador —" aria-label="Vendedor" />
+            </Field>
+            <label className="col-span-2 flex items-center justify-between gap-2 text-sm">
+              <span className="flex items-center gap-2">
+                <input type="checkbox" className="size-4 accent-brand-700" checked={cart.emitFiscal !== false} onChange={(e) => update((c) => ({ ...c, emitFiscal: e.target.checked }))} />
+                Emitir NFC-e
+              </span>
+              <Badge tone={props.fiscal.tone}>{props.fiscal.label}</Badge>
+            </label>
+            {cart.emitFiscal === false && <p className="col-span-2 text-xs text-amber-800">Sem NFC-e, a venda fica como “Sem documento fiscal”. Emita o documento no módulo Fiscal quando exigido.</p>}
           </div>
           <div className="rounded-lg border border-line bg-white p-4" aria-live="polite">
             <dl className="space-y-1.5 text-sm">
@@ -555,13 +579,23 @@ export function PdvApp(props: PdvProps) {
             </div>
             {overLimit && <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">Desconto de {formatBps(discountBps)} acima do seu limite ({formatBps(props.operator.discountLimitBps)}). A conclusão exigirá um usuário com permissão.</p>}
           </div>
+          <div className="rounded-lg border border-line bg-white p-3">
+            <p className="mb-2 text-xs font-medium text-slate-500">Forma de pagamento (escolha na próxima etapa; combine meios se preciso)</p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {props.quickMethods.map((m) => (
+                <button key={m.id} type="button" disabled={!items.length || !props.session} onClick={() => void goPayment(m.id)} className="focus-ring rounded-md border border-line px-1 py-2 text-xs font-medium hover:border-accent-500 hover:bg-accent-50 disabled:opacity-50">
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          </div>
           <Button size="lg" variant="accent" className="h-14 text-lg" onClick={() => void goPayment()} disabled={!items.length || !props.session}>
-            <CreditCard className="size-5" /> Pagamento <kbd className="ml-1 rounded border border-white/40 px-1 text-xs">F10</kbd>
+            <CreditCard className="size-5" /> Finalizar venda <kbd className="ml-1 rounded border border-white/40 px-1 text-xs">F10</kbd>
           </Button>
           <div className="grid grid-cols-2 gap-2">
             <Button onClick={() => setDialog("discount")}><BadgePercent className="size-4" /> Desconto <kbd className="text-xs text-slate-400">F8</kbd></Button>
             <Button onClick={() => setDialog("park")} disabled={!items.length}><Save className="size-4" /> Pré-venda <kbd className="text-xs text-slate-400">F6</kbd></Button>
-            <Button onClick={() => setDialog("cancel")} disabled={!items.length} variant="ghost" className="text-red-700 hover:bg-red-50"><Ban className="size-4" /> Cancelar</Button>
+            <Button onClick={() => setDialog("cancel")} disabled={!items.length} variant="ghost" className="text-red-700 hover:bg-red-50"><Ban className="size-4" /> Cancelar venda</Button>
             <Button onClick={() => (items.length ? setDialog("new") : searchRef.current?.focus())} variant="ghost"><Plus className="size-4" /> Nova venda</Button>
           </div>
         </aside>
@@ -580,11 +614,16 @@ export function PdvApp(props: PdvProps) {
         current={customer}
         cpfOnInvoice={cart.cpfOnInvoice}
         canCreate={props.operator.canCreateCustomer}
+        total={totals.total}
         onSelect={(c) => {
           setCustomer(c);
           update((x) => ({ ...x, customerId: c.id, customerName: c.name, cpfOnInvoice: null }));
           setDialog(null);
           toast("success", `Cliente identificado: ${c.name}`);
+          if (c.priceTableId && c.priceTableId !== cart.priceTableId) {
+            void changeTable(c.priceTableId);
+            toast("info", `Tabela de preço do cliente aplicada: ${c.priceTableName ?? "própria"}.`);
+          }
         }}
         onConsumer={(cpf) => {
           setCustomer(null);

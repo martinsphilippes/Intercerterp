@@ -201,6 +201,7 @@ export interface TaxGroupInput {
   validTo?: string | null;
   active: boolean;
   notes?: string | null;
+  approxTaxBps?: number;
 }
 
 function checkTaxGroup(i: TaxGroupInput) {
@@ -209,7 +210,7 @@ function checkTaxGroup(i: TaxGroupInput) {
   if (i.cfopReturn) assert(/^[123]\d{3}$/.test(i.cfopReturn), "CFOP de devolução inválido (entrada: 1xxx/2xxx).");
   assert(/^\d{2,3}$/.test(i.cstCsosn ?? ""), "CST/CSOSN inválido.");
   assert(/^\d{2}$/.test(i.pisCst ?? "") && /^\d{2}$/.test(i.cofinsCst ?? ""), "CST de PIS/COFINS inválido.");
-  for (const v of [i.icmsRateBps, i.pisRateBps, i.cofinsRateBps, i.ipiRateBps ?? 0, i.fcpRateBps ?? 0, i.icmsBaseReductionBps ?? 0]) assert(Number.isInteger(v) && v >= 0 && v <= 10000, "Alíquotas devem estar entre 0% e 100%.");
+  for (const v of [i.icmsRateBps, i.pisRateBps, i.cofinsRateBps, i.ipiRateBps ?? 0, i.fcpRateBps ?? 0, i.icmsBaseReductionBps ?? 0, i.approxTaxBps ?? 0]) assert(Number.isInteger(v) && v >= 0 && v <= 10000, "Alíquotas devem estar entre 0% e 100%.");
   if (i.validFrom && i.validTo) assert(i.validFrom <= i.validTo, "Início da vigência deve ser anterior ao fim.");
 }
 
@@ -244,4 +245,17 @@ export async function deleteTaxGroup(ctx: Ctx, id: string) {
   if (u.products || u.configs) throw new BusinessError(`Grupo em uso por ${u.products} produto(s) e ${u.configs} configuração(ões). Inative-o ou encerre a vigência em vez de excluir.`);
   await ctx.store.delete("tax_groups", id);
   await audit(ctx, { module: "fiscal", action: "tax_group.delete", entityType: "tax_group", entityId: id, summary: `Grupo tributário "${g.name}" excluído` });
+}
+
+/** Conferência do cadastro do emitente (selo "Cadastro validado" só com todos os itens obrigatórios presentes). */
+export function issuerChecklist(company: Doc, branch: Doc | null) {
+  const cnpj = onlyDigits(branch?.cnpj ?? company.cnpj);
+  return [
+    { label: "CNPJ válido", ok: isValidCnpj(cnpj) },
+    { label: "Inscrição estadual (NF-e/NFC-e)", ok: Boolean(branch?.ie ?? company.ie) },
+    { label: "Inscrição municipal (NFS-e)", ok: Boolean(branch?.im ?? company.im) },
+    { label: "Regime tributário e CRT", ok: Boolean(REGIME_LABEL[company.regime] && CRT_LABEL[company.crt]) },
+    { label: "CNAE principal", ok: Boolean(company.cnae) },
+    { label: "UF e município (IBGE) da filial", ok: Boolean(branch ? /^[A-Z]{2}$/.test(branch.uf ?? "") && /^\d{7}$/.test(branch.cityCode ?? "") : /^\d{7}$/.test(company.address?.cityCode ?? "")) },
+  ];
 }

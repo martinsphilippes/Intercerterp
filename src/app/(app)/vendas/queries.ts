@@ -35,18 +35,25 @@ export async function querySales(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   if (p.f.cliente) filters.push(["eq", "customerId", p.f.cliente]);
   if (p.f.situacao) filters.push(["eq", "status", p.f.situacao]);
   if (p.f.pagamento) filters.push(["eq", "paymentStatus", p.f.pagamento]);
-  if (p.f.fiscal) filters.push(["eq", "fiscalStatus", p.f.fiscal]);
+  if (p.f.fiscal === "pending_any") filters.push(["eq", "fiscalStatus", ["pending", "queued", "processing", "error", "rejected", "contingency"]], ["eq", "status", "completed"]);
+  else if (p.f.fiscal) filters.push(["eq", "fiscalStatus", p.f.fiscal]);
+  if (p.f.vendedor) filters.push(["eq", "sellerId", p.f.vendedor]);
   if (p.f.origem) filters.push(["eq", "origin", p.f.origem]);
   if (p.f.terminal) filters.push(["eq", "terminalId", p.f.terminal]);
   if (p.f.sessao) filters.push(["eq", "cashSessionId", p.f.sessao]);
   if (p.f.devolucao === "1") filters.push(["gt", "returnedTotal", 0]);
   let sales = await listAll(ctx.store, "sales", { filters, orderBy: [{ field: "completedAt", dir: "desc" }] });
+  const docIds = sales.map((s) => s.fiscalDocumentId).filter(Boolean) as string[];
+  const docs = await inChunks(ctx, "fiscal_documents", "id", docIds);
+  const dmap = new Map(docs.map((d) => [d.id, d]));
   if (p.q) {
     const q = normalizeSearch(p.q);
     const digits = onlyDigits(p.q);
     const num = /^\d{1,9}$/.test(p.q.trim()) ? Number(p.q.trim()) : null;
     sales = sales.filter((s) => {
       if (num != null && s.number === num) return true;
+      const d = s.fiscalDocumentId ? dmap.get(s.fiscalDocumentId) : null;
+      if (d && ((num != null && d.number === num) || (digits.length >= 20 && String(d.accessKey ?? "").includes(digits)))) return true;
       const c = s.customerSnapshot;
       if (digits.length >= 5 && c?.doc && String(c.doc).startsWith(digits)) return true;
       return Boolean(c?.name && normalizeSearch(c.name).includes(q));
@@ -91,6 +98,12 @@ export async function querySales(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
     fiscalStatus: s.fiscalStatus as string,
     origin: s.origin as string,
     fiscalDocumentId: (s.fiscalDocumentId ?? null) as string | null,
+    fiscalModel: ((s.fiscalDocumentId && dmap.get(s.fiscalDocumentId)?.model) || null) as string | null,
+    fiscalNumber: ((s.fiscalDocumentId && dmap.get(s.fiscalDocumentId)?.number) || null) as number | null,
+    fiscalSeries: ((s.fiscalDocumentId && dmap.get(s.fiscalDocumentId)?.series) || null) as string | null,
+    fiscalSimulated: Boolean(s.fiscalDocumentId && dmap.get(s.fiscalDocumentId)?.isSimulated),
+    sellerId: (s.sellerId ?? null) as string | null,
+    sellerName: s.sellerId ? (users.get(s.sellerId) ?? null) : null,
     cancelReason: (s.cancelReason ?? null) as string | null,
   }));
 }

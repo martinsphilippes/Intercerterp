@@ -3,6 +3,7 @@ import { Eye, FileDown, Pencil, Printer, RefreshCw, Search, Send } from "lucide-
 import type { Doc } from "@/lib/db/types";
 import { Badge, SimBadge, StatusBadge } from "@/components/ui/badge";
 import { ActionButton } from "@/components/ui/action-form";
+import { IconAction } from "./icon-action";
 import { cn } from "@/components/ui/cn";
 import { qs, type SearchParams } from "@/lib/list";
 import { formatDateTime } from "@/lib/dates";
@@ -101,14 +102,26 @@ export function RowActions({ d, canIssue }: { d: Doc; canIssue: boolean }) {
           <FileDown className="size-4" />
         </a>
       )}
-      {canIssue && d.status === "processing" && <ActionButton action={queryAction.bind(null, d.id)} label="" size="sm" variant="ghost" className="size-7 px-0" icon={<RefreshCw className="size-4" />} title="Consultar retorno" />}
+      {canIssue && d.status === "processing" && (
+        <IconAction action={queryAction.bind(null, d.id)} title="Consultar retorno">
+          <RefreshCw className="size-4" />
+        </IconAction>
+      )}
       {canIssue && editable && (
         <Link href={editHref} className={iconBtn} title={model === "nfce" ? "Corrigir (abre o detalhe)" : "Editar/corrigir"} aria-label="Editar">
           <Pencil className="size-4" />
         </Link>
       )}
-      {canIssue && d.status === "draft" && <ActionButton action={transmitAction.bind(null, d.id)} label="" size="sm" variant="ghost" className="size-7 px-0" icon={<Send className="size-4" />} title="Transmitir" confirm="Transmitir o documento agora?" />}
-      {canIssue && ["rejected", "error", "pending", "queued"].includes(d.status) && d.originType !== "disable" && <ActionButton action={retransmitAction.bind(null, d.id)} label="" size="sm" variant="ghost" className="size-7 px-0" icon={<Send className="size-4" />} title="Retransmitir (mesma referência)" confirm="Retransmitir com a mesma referência?" />}
+      {canIssue && d.status === "draft" && (
+        <IconAction action={transmitAction.bind(null, d.id)} title="Transmitir" confirm="Transmitir o documento agora?">
+          <Send className="size-4" />
+        </IconAction>
+      )}
+      {canIssue && ["rejected", "error", "pending", "queued"].includes(d.status) && d.originType !== "disable" && (
+        <IconAction action={retransmitAction.bind(null, d.id)} title="Retransmitir (mesma referência)" confirm="Retransmitir com a mesma referência?">
+          <Send className="size-4" />
+        </IconAction>
+      )}
     </span>
   );
 }

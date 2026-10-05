@@ -5,7 +5,7 @@ import type { DemoRefs } from "../base";
 import { activePolicy, decideRequest, policyId, savePolicy, submitForApproval } from "../../approvals";
 import { createOrder, registerOrderSent } from "../../purchases";
 import { applySuggestion, createQuotation, quotationProposals, saveProposal } from "../../quotations";
-import { confirmReceipt, importNfeXml } from "../../receipts";
+import { confirmReceipt, importNfeXml, updateReceipt } from "../../receipts";
 import { buildSampleNfeXml } from "../../nfe-xml";
 
 /**
@@ -140,6 +140,7 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
     });
     const stockist = await refs.ctxFor("stockist", "matriz");
     const r = await importNfeXml(stockist, { xml, fileName: "NFe-4711-textil-paulista.xml", orderIds: [textil.id] });
+    await updateReceipt(stockist, r.id, { checkAll: true, items: [{ idx: 1, lot: "LT-2610-A" }, { idx: 2, lot: "LT-2610-A" }] });
     await confirmReceipt(stockist, r.id);
   }
   out.partial = (await store.getOrThrow("purchase_orders", textil.id)).status;

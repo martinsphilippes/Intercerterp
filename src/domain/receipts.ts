@@ -87,9 +87,9 @@ export const DEFAULT_EFFECTS: ReceiptEffects = { updateStock: true, updateCost: 
 export const effectsOf = (r: Record<string, any>): ReceiptEffects => ({ ...DEFAULT_EFFECTS, ...(r.effects ?? {}) });
 
 /** Situação do item na conferência: Confere / Divergência / Pendente / Não estocado. */
-export function receiptItemStatus(it: ReceiptItem, divergences: Divergence[]): "ok" | "divergence" | "pending" | "ignored" {
+export function receiptItemStatus(it: ReceiptItem, divergences: Divergence[], confirmed = false): "ok" | "divergence" | "pending" | "ignored" {
   if (it.ignore) return "ignored";
-  if (!it.skuId || !it.checked) return divergences.some((d) => d.idx === it.idx && d.kind !== "note") && it.checked ? "divergence" : "pending";
+  if (!it.skuId || (!it.checked && !confirmed)) return "pending";
   return divergences.some((d) => d.idx === it.idx) ? "divergence" : "ok";
 }
 

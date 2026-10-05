@@ -66,7 +66,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const inTransit = balances.reduce((a, b) => a + (b.inTransit ?? 0), 0);
   const since = addDays(date, -90);
   const sold = await listAll(ctx.store, "stock_movements", { filters: [["eq", "productId", id], ["eq", "type", "sale"], ["gte", "occurredAt", startOfLocalDay(since)]] });
-  const soldQty = -sold.reduce((a, m) => a + m.qty, 0);
+  const soldQty = Math.max(0, -sold.reduce((a, m) => a + m.qty, 0));
   const taxGroup = p.taxGroupId ? await ctx.store.get("tax_groups", p.taxGroupId) : null;
   const issues = fiscalIssues(p, taxGroup);
   const supplier = p.supplierId ? await ctx.store.get("suppliers", p.supplierId) : null;
@@ -135,7 +135,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       <LinkTabs basePath={base} active={tab} tabs={tabs} />
 
       {tab === "geral" && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           {canEdit ? (
             <ProductEditForm product={p} o={o} section="general" />
           ) : (
@@ -193,8 +193,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
 
       {tab === "precos" && (
         <div className="space-y-4">
-          <Card title="Custos por variação" description="Custo total = aquisição + custos adicionais nomeados. O custo médio vem das entradas de estoque (média ponderada).">
-            <div className="-m-4 overflow-x-auto">
+          <Card bodyClass="p-0" title="Custos por variação" description="Custo total = aquisição + custos adicionais nomeados. O custo médio vem das entradas de estoque (média ponderada).">
+            <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
                 <thead>
                   <tr><th>SKU</th><th className="text-right">Aquisição</th><th>Custos adicionais</th><th className="text-right">Custo total</th><th className="text-right">Custo médio em estoque</th><th /></tr>
@@ -220,6 +220,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             </div>
           </Card>
           <Card
+            bodyClass="p-0"
             title="Preços por tabela"
             description="Preço da filial prevalece sobre o geral; entre vigências válidas, vale a de início mais recente. Atacado aplica-se a partir da quantidade mínima."
             actions={canEdit && skuOpts.length > 0 && <PriceDialogButton productId={id} tables={tables.filter((t) => t.active).map((t) => ({ value: t.id, label: t.name }))} branches={branches.map((b) => ({ value: b.id, label: b.name }))} skus={skuOpts} defaultTableId={defTable} />}
@@ -227,7 +228,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             {prices.length === 0 ? (
               <EmptyState title="Sem preços cadastrados" description="Sem preço o item não pode ser vendido no PDV." />
             ) : (
-              <div className="-m-4 overflow-x-auto">
+              <div className="overflow-x-auto">
                 <table className="table-base w-full text-sm">
                   <thead>
                     <tr><th>Tabela</th><th>SKU</th><th>Filial</th><th className="text-right">Preço</th><th className="text-right">Atacado (a partir de)</th><th className="text-right">Desc. máx.</th><th>Vigência</th><th>Situação</th><th className="text-right">Margem</th><th className="text-right">Markup</th><th /></tr>
@@ -267,11 +268,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               </div>
             )}
           </Card>
-          <Card title="Histórico de preços e custos" description="Toda alteração de preço e custo, com valor anterior, novo valor, motivo e usuário.">
+          <Card bodyClass="p-0" title="Histórico de preços e custos" description="Toda alteração de preço e custo, com valor anterior, novo valor, motivo e usuário.">
             {history.length === 0 ? (
-              <p className="text-sm text-slate-500">Sem alterações registradas.</p>
+              <p className="p-4 text-sm text-slate-500">Sem alterações registradas.</p>
             ) : (
-              <div className="-m-4 overflow-x-auto">
+              <div className="overflow-x-auto">
                 <table className="table-base w-full text-sm">
                   <thead><tr><th>Data</th><th>SKU</th><th>Campo</th><th>Tabela</th><th className="text-right">Anterior</th><th className="text-right">Novo</th><th>Motivo</th><th>Usuário</th></tr></thead>
                   <tbody>
@@ -297,26 +298,26 @@ export default async function Page({ params, searchParams }: { params: Promise<{
 
       {tab === "estoque" && !isService && (
         <div className="space-y-4">
-          <Card title="Saldos por filial e depósito" description="Disponível = físico − reservado. Em trânsito pertence ao destino, mas não está disponível em nenhuma filial." actions={<Link className="text-sm text-brand-700 hover:underline" href={`/estoque/movimentos?produto=${id}&filial=all`}>Ver movimentos</Link>}>
+          <Card bodyClass="p-0" title="Saldos por filial e depósito" description="Disponível = físico − reservado. Em trânsito pertence ao destino, mas não está disponível em nenhuma filial." actions={<Link className="text-sm text-brand-700 hover:underline" href={`/estoque/movimentos?produto=${id}&filial=all`}>Ver movimentos</Link>}>
             {balances.length === 0 ? (
               <EmptyState title="Sem saldos" description="Lance o saldo inicial abaixo ou registre uma entrada." />
             ) : (
-              <div className="-m-4 overflow-x-auto">
+              <div className="overflow-x-auto">
                 <table className="table-base w-full text-sm">
                   <thead>
                     <tr><th>Filial · depósito</th><th>SKU</th><th className="text-right">Físico</th><th className="text-right">Reservado</th><th className="text-right">Disponível</th><th className="text-right">Em trânsito</th><th className="text-right">Mín.</th><th className="text-right">Máx./alvo</th><th className="text-right">Segurança</th><th className="text-right">Múltiplo</th><th>Local</th><th className="text-right">Custo médio</th><th className="text-right">Valor</th><th /></tr>
                   </thead>
                   <tbody>
                     {[...balances]
-                      .sort((a, b) => String(branchName.get(a.branchId)).localeCompare(String(branchName.get(b.branchId))) || String(skuById.get(a.skuId)?.sku).localeCompare(String(skuById.get(b.skuId)?.sku)))
+                      .sort((a, b) => Number(b.branchId === ctx.branchId) - Number(a.branchId === ctx.branchId) || String(branchName.get(a.branchId)).localeCompare(String(branchName.get(b.branchId))) || String(skuById.get(a.skuId)?.sku).localeCompare(String(skuById.get(b.skuId)?.sku)))
                       .map((b) => {
                         const wh = whById.get(b.warehouseId);
                         const av = b.physical - b.reserved;
                         const own = b.branchId === ctx.branchId;
                         return (
                           <tr key={b.id}>
-                            <td>{branchName.get(b.branchId)} · {wh?.name}{wh?.kind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</td>
-                            <td className="font-mono text-xs">{skuById.get(b.skuId)?.sku}</td>
+                            <td className="whitespace-nowrap text-xs">{branchName.get(b.branchId)}{b.branchId === ctx.branchId && <Badge tone="brand" className="ml-1">atual</Badge>}<span className="block text-slate-500">{wh?.name}{wh?.kind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</span></td>
+                            <td className="whitespace-nowrap font-mono text-xs">{skuById.get(b.skuId)?.sku}</td>
                             <td className="tabular text-right">{formatQty(b.physical)}</td>
                             <td className="tabular text-right">{formatQty(b.reserved)}</td>
                             <td className={`tabular text-right font-semibold ${b.minQty && av < b.minQty ? "text-amber-700" : ""}`}>{formatQty(av)}</td>
@@ -355,7 +356,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       )}
 
       {tab === "fiscal" && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="space-y-4">
             {issues.length > 0 && (
               <Notice tone="warn" title="Pendências para emissão de documento fiscal">
@@ -371,8 +372,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             )}
           </div>
           {!isService ? (
-            <Card title="Tributação efetiva por operação" description={taxGroup ? `Grupo: ${taxGroup.name}` : "Sem grupo tributário"}>
-              <table className="table-base -m-4 w-[calc(100%+2rem)] text-sm">
+            <Card bodyClass="p-0" title="Tributação efetiva por operação" description={taxGroup ? `Grupo: ${taxGroup.name}` : "Sem grupo tributário"}>
+              <table className="table-base w-full text-sm">
                 <thead><tr><th>Operação</th><th>CFOP</th><th>{o.regimeLabel.startsWith("Simples") ? "CSOSN" : "CST"}</th><th>Fonte</th></tr></thead>
                 <tbody>
                   {effectiveFiscal(p, taxGroup).map((r) => (
@@ -381,7 +382,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 </tbody>
               </table>
               {taxGroup && (
-                <p className="mt-6 text-xs text-slate-500">
+                <p className="p-4 text-xs text-slate-500">
                   ICMS {formatBps(taxGroup.icmsRateBps)} · PIS {taxGroup.pisCst ?? "—"} {formatBps(taxGroup.pisRateBps)} · COFINS {taxGroup.cofinsCst ?? "—"} {formatBps(taxGroup.cofinsRateBps)}. <Link className="text-brand-700 hover:underline" href="/produtos/cadastros?tab=grupos">Editar grupos tributários</Link>
                 </p>
               )}

@@ -7,7 +7,7 @@ import { addDays, dayRange, today } from "@/lib/dates";
 import { QTY, roundDiv } from "@/lib/money";
 import { MOVEMENT_LABEL, ORIGIN_LABEL, originHref, type MovementType } from "@/domain/stock";
 import { categoryDescendants } from "@/domain/products";
-import { pendingQty, type TransferItem } from "@/domain/transfers";
+import { pendingQty, transferCode, type TransferItem } from "@/domain/transfers";
 
 type P = Pick<ListParams, "q" | "f">;
 
@@ -117,8 +117,8 @@ const ORIGIN_COLLECTION: Record<string, { collection: string; label: (d: Doc) =>
   sale: { collection: "sales", label: (d) => `Venda nº ${d.number}` },
   sale_cancel: { collection: "sales", label: (d) => `Cancelamento venda nº ${d.number}` },
   return: { collection: "returns", label: (d) => `Devolução nº ${d.number}` },
-  transfer: { collection: "transfers", label: (d) => `Transferência nº ${d.number}` },
-  inventory: { collection: "inventories", label: (d) => `Inventário nº ${d.number}` },
+  transfer: { collection: "transfers", label: (d) => `Transferência ${transferCode(d.number)}` },
+  inventory: { collection: "inventories", label: (d) => `Inventário ${d.code ?? `nº ${d.number}`}` },
   receipt: { collection: "receipts", label: (d) => `Recebimento nº ${d.number}` },
   purchase_receipt: { collection: "receipts", label: (d) => `Recebimento nº ${d.number}` },
   purchase: { collection: "receipts", label: (d) => `Recebimento nº ${d.number}` },
