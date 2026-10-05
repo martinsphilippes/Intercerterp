@@ -6,9 +6,17 @@ import { useToast } from "./toast";
 import type { ActionResult } from "@/lib/server/action";
 import { buttonClass } from "./button";
 
+const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+
 /** Gera uma chave de idempotência estável enquanto o formulário estiver montado. */
 export function useIdemKey() {
-  return useMemo(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`), []);
+  return useMemo(newKey, []);
+}
+
+/** Chave estável até o sucesso; após sucesso gera nova (a próxima operação é outra). */
+function useRotatingKey(): [string, () => void] {
+  const [key, setKey] = useState(newKey);
+  return [key, () => setKey(newKey())];
 }
 
 /**
@@ -42,7 +50,7 @@ export function ActionForm({
   const toast = useToast();
   const router = useRouter();
   const ref = useRef<HTMLFormElement>(null);
-  const idem = useIdemKey();
+  const [idem, rotateIdem] = useRotatingKey();
   return (
     <form
       id={id}
@@ -63,6 +71,7 @@ export function ActionForm({
             toast("error", res.error);
             return;
           }
+          rotateIdem();
           if (successMessage || res.message) toast("success", res.message ?? successMessage!);
           if (resetOnSuccess) ref.current?.reset();
           onSuccess?.(res.data);

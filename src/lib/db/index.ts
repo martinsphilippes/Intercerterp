@@ -1,6 +1,7 @@
 import path from "node:path";
 import { AppwriteStore } from "./appwrite-store";
 import { MemoryStore } from "./memory-store";
+import { COLLECTIONS } from "./schema";
 import { ConflictError, Doc, Filter, ListOptions, Store } from "./types";
 
 export * from "./types";
@@ -16,7 +17,12 @@ export function configuredBackend(): Backend {
   return "local";
 }
 
-const g = globalThis as unknown as { __intercertStore?: Store };
+const g = globalThis as unknown as { __intercertStore?: Store; __intercertSchemaSig?: string };
+
+/** Assinatura do esquema: em desenvolvimento, mudança no schema.ts recria o Store (evita "campo desconhecido" após HMR). */
+function schemaSignature() {
+  return COLLECTIONS.map((c) => `${c.id}:${Object.keys(c.fields).length}:${(c.indexes ?? []).length}`).join("|");
+}
 
 export function appwriteConfig() {
   return {
@@ -28,6 +34,11 @@ export function appwriteConfig() {
 }
 
 export function getStore(): Store {
+  if (g.__intercertStore && process.env.NODE_ENV !== "production") {
+    const sig = schemaSignature();
+    if (g.__intercertSchemaSig && g.__intercertSchemaSig !== sig && g.__intercertStore.backend === "appwrite") g.__intercertStore = undefined;
+    g.__intercertSchemaSig = sig;
+  }
   if (g.__intercertStore) return g.__intercertStore;
   const backend = configuredBackend();
   let store: Store;

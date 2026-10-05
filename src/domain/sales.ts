@@ -170,6 +170,9 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
 
   const approver = input.discountApproval ? await verifySupervisor(ctx, input.discountApproval, "sale.discount_over_limit", "desconto acima do limite") : null;
   const prep = await prepareSale(ctx, input, { approver });
+  if (!prep.customer && !(await getSetting(ctx.store, ctx.companyId, prep.branchId, "sales.consumerFinalAllowed", true))) {
+    throw new BusinessError("Esta filial exige identificar o cliente em todas as vendas (parâmetro “consumidor final” desativado).", "customer_required");
+  }
   const { branchId, terminal, warehouse, lines, calc, customer } = prep;
   const session = await currentSession(ctx, terminal.id);
   assert(session, "Abra o caixa deste terminal antes de vender.", "cash_closed");
@@ -291,6 +294,14 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
 
   await retryOnConflict(async () => {
     if (await ctx.store.get("sales", saleId)) return; // outra requisição concluiu a mesma venda
+    // saldo de vale relido a cada tentativa (consumo concorrente do mesmo vale)
+    for (const p of pays) {
+      if (!p.voucher) continue;
+      const fresh = await ctx.store.getOrThrow("credit_vouchers", p.voucher.id);
+      const need = pays.filter((x) => x.voucher?.id === fresh.id).reduce((a, x) => a + x.amount, 0);
+      if (fresh.status !== "active" || fresh.balance < need) throw new BusinessError(`Saldo do vale ${fresh.code} insuficiente (${formatMoney(fresh.balance)}): consumido por outra operação.`, "voucher_balance");
+      p.voucher = fresh;
+    }
     await ctx.store.transaction(async (t) => {
       const cache = new Map<string, Doc>();
       await t.create(
@@ -438,8 +449,9 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
           payId,
         );
       }
-      created = true;
     });
+    // somente após o commit: no Appwrite o conflito (venda concorrente com a mesma chave) surge no commit
+    created = true;
   });
 
   // Efeitos de estoque e fiscais: tarefa durável garante conclusão mesmo após falha
@@ -578,8 +590,8 @@ export async function cancelSale(ctx: Ctx, saleId: string, reason: string, opts:
         await t.update("sale_payments", p.id, { status: p.methodKind === "debit" || p.methodKind === "credit" ? "cancelled" : "refunded" });
       }
       await t.update("sales", saleId, { status: "cancelled", paymentStatus: "refunded", cancelledAt: nowIso(), cancelReason: reason, cancelledBy: ctx.user.id });
-      done = true;
     });
+    done = true; // somente após o commit
   });
   for (const tt of titles) await cancelTitle(ctx, tt.id, `Cancelamento da venda nº ${sale.number}: ${reason}`);
   await postMovements(
@@ -680,6 +692,11 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
   try {
     await retryOnConflict(async () => {
       if (await ctx.store.get("returns", returnId)) return; // mesma devolução já registrada (repetição/concorrência)
+      // restante devolvível relido a cada tentativa: outra devolução concorrente pode ter consumido o saldo
+      for (const l of lines) {
+        const cur = await ctx.store.getOrThrow("sale_items", l.item.id);
+        if (l.qty > cur.qty - (cur.returnedQty ?? 0)) throw new BusinessError(`Quantidade devolvida de ${cur.sku} excede o restante devolvível (${(cur.qty - (cur.returnedQty ?? 0)) / QTY}) — outra devolução desta venda foi registrada ao mesmo tempo.`, "over_return");
+      }
       await ctx.store.transaction(async (t) => {
         const base = { companyId: ctx.companyId, branchId, createdBy: ctx.user.id };
         for (const l of lines) {
@@ -709,8 +726,8 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
         );
         await t.increment("sales", sale.id, "returnedTotal", itemsTotal);
         await t.increment("sales", sale.id, "returnedCost", costTotal);
-        created = true;
       });
+      created = true; // somente após o commit
     });
   } catch (e) {
     if (isConflict(e) && e.reason === "bounds") {

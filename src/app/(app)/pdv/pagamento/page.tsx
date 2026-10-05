@@ -51,7 +51,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     // desconto acima do limite do operador: recalcula como se autorizado e pede a autorização do supervisor na conclusão
     if (e?.code === "discount_limit") {
       needsApproval = true;
-      prep = await prepareSale(s.ctx, cartToSaleInput(cart, []), { approver: { ...s.user, isAdmin: true } }).catch(() => null);
+      prep = await prepareSale(s.ctx, cartToSaleInput(cart, []), { approver: { ...s.user, isAdmin: true } }).catch((e2: any) => {
+        problem = `${problem} ${e2?.message ?? ""}`.trim();
+        return null;
+      });
     }
   }
   if (!prep) {

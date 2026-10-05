@@ -32,6 +32,8 @@ export const DEFAULT_SETTINGS = {
   "sales.consumerFinalAllowed": true,
   "sales.presaleExpiryHours": 72,
   "cash.requireJustificationAbove": 0,
+  "cash.withdrawalApprovalAbove": 0,
+  "cash.blindClose": false,
   "abc.limitA": 8000,
   "abc.limitB": 9500,
   "replenishment.coverageDays": 14,
