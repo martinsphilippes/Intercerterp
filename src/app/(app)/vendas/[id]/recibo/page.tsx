@@ -8,6 +8,8 @@ import { nameMap } from "@/lib/server/lookups";
 import { LinkButton } from "@/components/ui/button";
 import { AutoPrint } from "../../sale-widgets";
 import { PrintStyles } from "../../print-styles";
+import { MODEL_NAME } from "../../labels";
+import { DOC_STATUS_LABEL } from "@/domain/fiscal/service";
 
 export const metadata = { title: "Recibo da venda" };
 
@@ -49,6 +51,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <p className="mt-1">Venda nº {sale.number} · {formatDateTime(sale.completedAt)}</p>
         <p>{branch?.name} · {sale.terminalId ? terminals.get(sale.terminalId) : ""} · Op.: {users.get(sale.operatorId) ?? "—"}</p>
         <p>Cliente: {c ? `${c.name}${c.doc ? " — " + formatDoc(c.doc) : ""}` : "Consumidor final"}</p>
+        {sale.origin === "exchange" && <p>Troca: vale da devolução aplicado no pagamento.</p>}
         {sale.status === "cancelled" && <p className="my-1 border border-black p-1 text-center font-bold">VENDA CANCELADA em {formatDateTime(sale.cancelledAt)}</p>}
         <table className="mt-2 w-full">
           <thead>
@@ -94,9 +97,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <footer className="mt-2 border-t border-dashed border-black pt-1 text-center">
           {doc ? (
             <p>
-              {doc.model.toUpperCase()} {doc.number ? `nº ${doc.number} série ${doc.series}` : ""} — {doc.status === "authorized" ? "autorizada" : `situação: ${doc.status}`}
+              {MODEL_NAME[doc.model] ?? doc.model} {doc.number ? `nº ${doc.number} série ${doc.series}` : ""} — {doc.status === "authorized" ? "autorizada" : `situação: ${DOC_STATUS_LABEL[doc.status] ?? doc.status}`}
               {doc.isSimulated ? " (SIMULAÇÃO, sem validade fiscal)" : ""}
-              {doc.accessKey && <><br />Chave: {doc.accessKey}</>}
+              {doc.accessKey && <span className="block break-all">Chave: {doc.accessKey.replace(/(\d{4})(?=\d)/g, "$1 ")}</span>}
             </p>
           ) : (
             <p>Sem documento fiscal vinculado.</p>

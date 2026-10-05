@@ -9,11 +9,11 @@ import { getSetting } from "@/lib/core/settings";
 import { sendEmail } from "@/lib/core/email";
 import { resolveOccurrence } from "@/lib/core/notify";
 import { addDays, nowIso, today } from "@/lib/dates";
-import { formatMoney, formatQty, lineTotal } from "@/lib/money";
+import { formatMoney, formatQty } from "@/lib/money";
 import { defaultWarehouse } from "./stock";
 import { assertSupplierUsable, supplierLabel, supplierSnapshot } from "./suppliers";
 import {
-  ORDER_STATUS_LABEL, EDITABLE, REVISABLE, assertTransition, buildInstallmentPlan, computeOrderTotals, isRelevantChange, netUnitCost,
+  ORDER_STATUS_LABEL, EDITABLE, REVISABLE, assertTransition, buildInstallmentPlan, computeOrderTotals, isRelevantChange,
   type InstallmentPlan, type OrderItemInput, type OrderStatus, type OrderTotals,
 } from "./purchase-calc";
 

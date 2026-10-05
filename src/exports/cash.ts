@@ -2,6 +2,7 @@ import "server-only";
 import { defineExport } from "@/lib/exporters";
 import { parseList } from "@/lib/list";
 import { querySessions, queryCashMovements } from "@/app/(app)/caixa/queries";
+import { STATUS } from "@/components/ui/badge";
 
 defineExport("cash_sessions", {
   module: "cash",
@@ -24,7 +25,7 @@ defineExport("cash_sessions", {
     { key: "totalDiff", label: "Diferença total", type: "money" },
     { key: "justification", label: "Justificativa" },
   ],
-  rows: (s, params) => querySessions(s.ctx, parseList(params)),
+  rows: async (s, params) => (await querySessions(s.ctx, parseList(params))).map((r) => ({ ...r, status: STATUS.cash[r.status]?.[0] ?? r.status })),
 });
 
 defineExport("cash_movements", {

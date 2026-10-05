@@ -435,11 +435,11 @@ export function PdvApp(props: PdvProps) {
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
         {/* Itens */}
         <section className="flex min-h-0 flex-col gap-3" aria-label="Itens do atendimento">
           <ProductSearch ref={searchRef} priceTableId={cart.priceTableId} categories={props.categories} brands={props.brands} branchName={props.branch.name} allowNegative={props.allowNegative} onAdd={addHit} />
-          <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-white">
+          <div className="min-h-[260px] flex-1 overflow-auto rounded-lg border border-line bg-white lg:min-h-0">
             {items.length === 0 ? (
               <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 p-8 text-center text-slate-500">
                 <ShoppingCart className="size-12 text-slate-300" />
@@ -531,8 +531,9 @@ export function PdvApp(props: PdvProps) {
         </section>
 
         {/* Painel lateral: cliente, tabela, totais e ações */}
-        <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto" aria-label="Resumo do atendimento">
-          <button type="button" onClick={() => setDialog("customer")} className="focus-ring rounded-lg border border-line bg-white p-3 text-left hover:border-brand-300">
+        <aside className="flex min-h-0 flex-col gap-3" aria-label="Resumo do atendimento">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+          <button type="button" onClick={() => setDialog("customer")} className="focus-ring w-full rounded-lg border border-line bg-white p-3 text-left hover:border-brand-300">
             <p className="flex items-center justify-between text-xs font-medium text-slate-500">
               Cliente da venda <span className="flex items-center gap-1"><Pencil className="size-3.5" /><kbd className="rounded border border-line px-1">F4</kbd></span>
             </p>
@@ -565,20 +566,6 @@ export function PdvApp(props: PdvProps) {
             </label>
             {cart.emitFiscal === false && <p className="col-span-2 text-xs text-amber-800">Sem NFC-e, a venda fica como “Sem documento fiscal”. Emita o documento no módulo Fiscal quando exigido.</p>}
           </div>
-          <div className="rounded-lg border border-line bg-white p-4" aria-live="polite">
-            <dl className="space-y-1.5 text-sm">
-              <div className="flex justify-between text-slate-600"><dt>Itens / quantidade</dt><dd className="tabular">{items.length} / {formatQty(items.reduce((a, l) => a + l.qty, 0))}</dd></div>
-              <div className="flex justify-between text-slate-600"><dt>Subtotal bruto</dt><dd className="tabular">{formatMoney(totals.subtotal)}</dd></div>
-              <div className="flex justify-between text-slate-600"><dt>Descontos nos itens</dt><dd className="tabular text-red-700">−{formatMoney(totals.itemDiscounts)}</dd></div>
-              <div className="flex justify-between text-slate-600"><dt>Desconto geral {cart.globalDiscountBps ? `(${formatBps(cart.globalDiscountBps)})` : ""}</dt><dd className="tabular text-red-700">−{formatMoney(totals.globalDiscount)}</dd></div>
-              <div className="flex justify-between text-slate-600"><dt>Acréscimos</dt><dd className="tabular text-emerald-700">+{formatMoney(totals.surchargeTotal)}</dd></div>
-            </dl>
-            <div className="mt-3 flex items-end justify-between border-t border-line pt-3">
-              <span className="text-sm font-medium text-slate-500">Total</span>
-              <span className="tabular text-4xl font-bold tracking-tight text-brand-800" data-testid="pdv-total">{formatMoney(totals.total)}</span>
-            </div>
-            {overLimit && <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">Desconto de {formatBps(discountBps)} acima do seu limite ({formatBps(props.operator.discountLimitBps)}). A conclusão exigirá um usuário com permissão.</p>}
-          </div>
           <div className="rounded-lg border border-line bg-white p-3">
             <p className="mb-2 text-xs font-medium text-slate-500">Forma de pagamento (escolha na próxima etapa; combine meios se preciso)</p>
             <div className="grid grid-cols-4 gap-1.5">
@@ -589,14 +576,30 @@ export function PdvApp(props: PdvProps) {
               ))}
             </div>
           </div>
-          <Button size="lg" variant="accent" className="h-14 text-lg" onClick={() => void goPayment()} disabled={!items.length || !props.session}>
-            <CreditCard className="size-5" /> Finalizar venda <kbd className="ml-1 rounded border border-white/40 px-1 text-xs">F10</kbd>
-          </Button>
-          <div className="grid grid-cols-2 gap-2">
-            <Button onClick={() => setDialog("discount")}><BadgePercent className="size-4" /> Desconto <kbd className="text-xs text-slate-400">F8</kbd></Button>
-            <Button onClick={() => setDialog("park")} disabled={!items.length}><Save className="size-4" /> Pré-venda <kbd className="text-xs text-slate-400">F6</kbd></Button>
-            <Button onClick={() => setDialog("cancel")} disabled={!items.length} variant="ghost" className="text-red-700 hover:bg-red-50"><Ban className="size-4" /> Cancelar venda</Button>
-            <Button onClick={() => (items.length ? setDialog("new") : searchRef.current?.focus())} variant="ghost"><Plus className="size-4" /> Nova venda</Button>
+          </div>
+          {/* Totais e ações principais: sempre visíveis (rodapé fixo do painel) */}
+          <div className="space-y-2">
+            <div className="rounded-lg border border-line bg-white p-3" aria-live="polite">
+              <dl className="grid grid-cols-3 gap-2 text-xs text-slate-600">
+                <div><dt>Subtotal ({items.length} • {formatQty(items.reduce((a, l) => a + l.qty, 0))} un.)</dt><dd className="tabular text-sm text-ink">{formatMoney(totals.subtotal)}</dd></div>
+                <div><dt>Descontos{cart.globalDiscountBps ? ` (${formatBps(cart.globalDiscountBps)})` : ""}</dt><dd className="tabular text-sm text-red-700" title={`Itens ${formatMoney(totals.itemDiscounts)} + geral ${formatMoney(totals.globalDiscount)}`}>−{formatMoney(totals.discountTotal)}</dd></div>
+                <div><dt>Acréscimos</dt><dd className="tabular text-sm text-emerald-700">+{formatMoney(totals.surchargeTotal)}</dd></div>
+              </dl>
+              <div className="mt-2 flex items-end justify-between border-t border-line pt-2">
+                <span className="text-sm font-medium text-slate-500">Total a pagar</span>
+                <span className="tabular text-4xl font-bold tracking-tight text-brand-800" data-testid="pdv-total">{formatMoney(totals.total)}</span>
+              </div>
+              {overLimit && <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">Desconto de {formatBps(discountBps)} acima do seu limite ({formatBps(props.operator.discountLimitBps)}). A conclusão exigirá a autorização de um usuário com permissão.</p>}
+            </div>
+            <Button size="lg" variant="accent" className="h-14 w-full text-lg" onClick={() => void goPayment()} disabled={!items.length || !props.session}>
+              <CreditCard className="size-5" /> Finalizar venda <kbd className="ml-1 rounded border border-white/40 px-1 text-xs">F10</kbd>
+            </Button>
+            <div className="grid grid-cols-4 gap-1.5">
+              <Button size="sm" onClick={() => setDialog("discount")} title="Desconto geral e acréscimo (F8)"><BadgePercent className="size-4" /> Desconto</Button>
+              <Button size="sm" onClick={() => setDialog("park")} disabled={!items.length} title="Salvar pré-venda (F6)"><Save className="size-4" /> Pré-venda</Button>
+              <Button size="sm" onClick={() => setDialog("cancel")} disabled={!items.length} variant="ghost" className="text-red-700 hover:bg-red-50" title="Cancelar venda (atendimento)"><Ban className="size-4" /> Cancelar</Button>
+              <Button size="sm" onClick={() => (items.length ? setDialog("new") : searchRef.current?.focus())} variant="ghost" title="Iniciar nova venda"><Plus className="size-4" /> Nova</Button>
+            </div>
           </div>
         </aside>
       </div>

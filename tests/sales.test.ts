@@ -345,4 +345,21 @@ describe("vendas (PDV)", () => {
     await closeSession(cashier, { sessionId: s.cashSessionId, counted: { cash: sm.expected.cash } });
     await expect(processReturn(cashier, { saleId: s.id, idemKey: "rr-c", reason: "x", compensation: "refund", refundMethod: "cash", items: [{ saleItemId: lines[0].id, qty: 1000, condition: "resellable" }] })).rejects.toThrow(/abra o caixa/i);
   });
+
+  it("produtos inativos, em rascunho ou com variação inativa não podem ser vendidos", async () => {
+    const pay = [{ methodId: refs.methods.dinheiro.id, amount: 4490 }];
+    const bone = refs.skus["bone-u"];
+    await store.update("products", bone.productId, { status: "draft" });
+    await expect(sale({ idemKey: "inact-1", items: [{ skuId: bone.id, qty: 1000 }], payments: pay })).rejects.toThrow(/rascunho/);
+    await store.update("products", bone.productId, { status: "inactive" });
+    await expect(sale({ idemKey: "inact-1", items: [{ skuId: bone.id, qty: 1000 }], payments: pay })).rejects.toThrow(/inativo/);
+    await store.update("products", bone.productId, { status: "active", active: false });
+    await expect(sale({ idemKey: "inact-1", items: [{ skuId: bone.id, qty: 1000 }], payments: pay })).rejects.toThrow(/inativo/);
+    await store.update("products", bone.productId, { active: true });
+    await store.update("skus", bone.id, { active: false });
+    await expect(sale({ idemKey: "inact-1", items: [{ skuId: bone.id, qty: 1000 }], payments: pay })).rejects.toThrow(/inativa/);
+    await store.update("skus", bone.id, { active: true });
+    const ok = await sale({ idemKey: "inact-1", items: [{ skuId: bone.id, qty: 1000 }], payments: pay });
+    expect(ok.status).toBe("completed");
+  });
 });

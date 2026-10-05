@@ -410,3 +410,44 @@ describe("recebimento: parcial, nova entrada, saldo, obrigação, XML repetido e
     void orderId;
   });
 });
+
+describe("regras complementares do PDF", () => {
+  it("IPI por linha e seguro entram no total; fornecedor bloqueado não recebe novo pedido nem cotação", async () => {
+    const t = computeOrderTotals({ items: [{ skuId: "a", qty: 40000, unitCost: 4200, ipi: 1000 }], headerDiscount: 0, freight: 65000, insurance: 1000, otherExpenses: 15000 });
+    expect(t.items[0].total).toBe(168000 + 1000);
+    expect(t.total).toBe(168000 + 1000 + 65000 + 1000 + 15000);
+    const { setSupplierStatus } = await import("@/domain/suppliers");
+    await setSupplierStatus(admin, thirdSupplierId, "blocked", "Documentação vencida");
+    await expect(createOrder(admin, { supplierId: thirdSupplierId, items: [{ skuId: refs.skus["bone-u"].id, qty: 1000, unitCost: 1000 }] })).rejects.toThrow(/bloqueado/);
+    await expect(createQuotation(admin, { title: "x", items: [{ skuId: refs.skus["bone-u"].id, qty: 1000 }], supplierIds: [thirdSupplierId] })).rejects.toThrow(/bloqueado/);
+    await setSupplierStatus(admin, thirdSupplierId, "active");
+  });
+
+  it("somente entregas no prazo: proposta com entrega após a data necessária não é viável", () => {
+    const items: QuoteItem[] = [{ skuId: "x", description: "X", qty: 10000, neededBy: "2026-10-10" }];
+    const proposals: QuoteProposal[] = [
+      { id: "p1", supplierId: "A", supplierName: "A", freight: 0, leadTimeDays: 10, validUntil: "2026-12-31", items: [{ skuId: "x", unitPrice: 900 }] },
+      { id: "p2", supplierId: "B", supplierName: "B", freight: 0, leadTimeDays: 3, validUntil: "2026-12-31", items: [{ skuId: "x", unitPrice: 1000 }] },
+    ];
+    expect(suggestSelection(items, proposals, "2026-10-05").assign.x).toBe("A");
+    expect(suggestSelection(items, proposals, "2026-10-05", { onTimeOnly: true }).assign.x).toBe("B");
+  });
+
+  it("efeitos da entrada desmarcados exigem justificativa; sem contas a pagar quando desmarcado", async () => {
+    const xml = buildSampleNfeXml({ number: 9100, issueDate: today(), emitter: { cnpj: "45997418000153", name: "Têxtil Paulista" }, recipient: { cnpj: MATRIZ_CNPJ, name: "Intercert" }, items: [{ cProd: "F-BONE", xProd: "BONE", qCom: 2000, vUnCom: 0 + 1500 }] });
+    const r = await importNfeXml(stockist, { xml, orderIds: [] });
+    await updateReceipt(stockist, r.id, { checkAll: true, effects: { createPayable: false } });
+    await expect(confirmReceipt(stockist, r.id)).rejects.toThrow(/justificativa/);
+    await updateReceipt(stockist, r.id, { notes: "Bonificação do fornecedor — sem cobrança." });
+    const c = await confirmReceipt(stockist, r.id);
+    expect(c.payableTitleId).toBeNull();
+    expect(await listAll(store, "titles", { filters: [["eq", "originId", r.id]] })).toHaveLength(0);
+    expect(await listAll(store, "stock_movements", { filters: [["eq", "originId", r.id]] })).toHaveLength(1);
+  });
+
+  it("curva ABC (acumulado anterior, mesma regra da Tela 45)", async () => {
+    const { abcClasses } = await import("@/domain/purchase-calc");
+    const m = abcClasses(new Map([["a", 7000], ["b", 2000], ["c", 600], ["d", 400], ["e", 0]]));
+    expect([m.get("a"), m.get("b"), m.get("c"), m.get("d"), m.get("e")]).toEqual(["A", "A", "B", "C", undefined]);
+  });
+});

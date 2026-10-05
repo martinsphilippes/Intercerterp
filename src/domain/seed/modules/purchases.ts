@@ -81,6 +81,23 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   if (qNow.status === "open" && !qNow.selection) await applySuggestion(admin, q.id);
   out.quotation = qNow.number;
 
+  // 3b) Segunda cotação aberta (permanece em comparação para demonstrar a matriz e a revisão)
+  const q2 = await createQuotation(admin, {
+    title: "Acessórios — reposição de verão",
+    items: [{ skuId: refs.skus["bone-u"].id, qty: 60000, neededBy: addDays(today(), 15) }, { skuId: refs.skus["cinto-u"].id, qty: 30000, neededBy: addDays(today(), 15) }, { skuId: refs.skus["meia-u"].id, qty: 96000, neededBy: addDays(today(), 9) }],
+    supplierIds: [refs.suppliers.textil.id, refs.suppliers.calcados.id, acess.id],
+    responseDue: addDays(today(), 2),
+    notes: "Compare: o menor preço unitário não garante a menor compra (frete e mínimo).",
+    idemKey: "demo-quotation-verao",
+  });
+  if ((await quotationProposals(store, q2.id)).length === 0 && q2.status === "open") {
+    await saveProposal(admin, q2.id, { supplierId: refs.suppliers.textil.id, freight: 4500, minOrderValue: 50000, validUntil: addDays(today(), 12), leadTimeDays: 7, paymentTermId: refs.terms["30-60"].id, items: [{ skuId: refs.skus["bone-u"].id, unitPrice: 1450 }, { skuId: refs.skus["cinto-u"].id, unitPrice: 2450 }, { skuId: refs.skus["meia-u"].id, unitPrice: 1080 }] });
+    await saveProposal(admin, q2.id, { supplierId: refs.suppliers.calcados.id, freight: 8000, minOrderValue: 100000, validUntil: addDays(today(), -1), leadTimeDays: 10, paymentTermId: refs.terms["28"].id, notes: "Validade expirou ontem — pedir renovação.", items: [{ skuId: refs.skus["cinto-u"].id, unitPrice: 2190 }, { skuId: refs.skus["meia-u"].id, unitPrice: 990 }] });
+    await saveProposal(admin, q2.id, { supplierId: acess.id, freight: 3000, minOrderValue: 30000, validUntil: addDays(today(), 6), leadTimeDays: 5, paymentTermId: refs.terms.avista.id, items: [{ skuId: refs.skus["bone-u"].id, unitPrice: 1390, discountBps: 300 }, { skuId: refs.skus["cinto-u"].id, unitPrice: 2290 }, { skuId: refs.skus["meia-u"].id, unitPrice: 1050, available: true, availableQty: 60000 }] });
+  }
+  const q2Now = await store.getOrThrow("quotations", q2.id);
+  if (q2Now.status === "open" && !q2Now.selection) await applySuggestion(admin, q2.id, { onTimeOnly: true });
+
   const ensureApproved = async (orderId: string) => {
     let o = await store.getOrThrow("purchase_orders", orderId);
     if (o.status === "draft") {

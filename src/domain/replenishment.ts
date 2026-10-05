@@ -7,7 +7,8 @@ import { audit } from "@/lib/core/audit";
 import { addDays, dayRange, diffDays, today } from "@/lib/dates";
 import { formatMoney, lineTotal, QTY } from "@/lib/money";
 import { availableMap } from "./stock";
-import { CONFIRMED, PENDING, abcClasses, computeReplenishment, type ReplenishmentResult } from "./purchase-calc";
+import { CONFIRMED, PENDING, computeReplenishment, type ReplenishmentResult } from "./purchase-calc";
+import { classifyAbc, getAbcLimits } from "./abc";
 import { createOrder, remainingQty } from "./purchases";
 import { preferredSupplierProduct, supplierLabel } from "./suppliers";
 
@@ -150,9 +151,15 @@ export async function computeBranchReplenishment(store: Store, companyId: string
     sold.set(si.skuId, (sold.get(si.skuId) ?? 0) + si.qty);
     revenue.set(si.skuId, (revenue.get(si.skuId) ?? 0) + (si.total ?? 0));
   }
-  const abc = abcClasses(revenue, Number(await getSetting(store, companyId, p.branchId, "abc.limitA", 8000)), Number(await getSetting(store, companyId, p.branchId, "abc.limitB", 9500)));
   const returned = new Map<string, number>();
-  for (const ri of await listAll(store, "return_items", { filters: [["eq", "companyId", companyId], ["eq", "branchId", p.branchId], ["gte", "completedAt", start], ["lt", "completedAt", end]] })) returned.set(ri.skuId, (returned.get(ri.skuId) ?? 0) + ri.qty);
+  for (const ri of await listAll(store, "return_items", { filters: [["eq", "companyId", companyId], ["eq", "branchId", p.branchId], ["gte", "completedAt", start], ["lt", "completedAt", end]] })) {
+    returned.set(ri.skuId, (returned.get(ri.skuId) ?? 0) + ri.qty);
+    revenue.set(ri.skuId, (revenue.get(ri.skuId) ?? 0) - (ri.total ?? 0));
+  }
+  // classe ABC pela receita líquida (vendas − devoluções) do período, com a MESMA regra da curva ABC (Tela 45)
+  const limits = await getAbcLimits(store, companyId, p.branchId);
+  const abcRows = [...revenue.entries()].map(([skuId, value]) => ({ skuId, value, qty: sold.get(skuId) ?? 0 }));
+  const abc = new Map(classifyAbc(abcRows, { value: (r) => r.value, qty: (r) => r.qty, sku: (r) => r.skuId }, limits).base.map((x) => [x.row.skuId, x.klass]));
 
   // pedidos em aberto da filial
   const openOrders = await listAll(store, "purchase_orders", { filters: [["eq", "companyId", companyId], ["eq", "branchId", p.branchId], ["eq", "status", [...CONFIRMED, ...PENDING]]] });

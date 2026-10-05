@@ -303,14 +303,14 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                         <tr key={x.id} className={isRev ? "bg-slate-50 text-slate-500" : undefined}>
                           <td>{formatDate(x.date)}</td>
                           <td>{inst?.number ?? "—"}</td>
-                          <td className="tabular text-right">{formatMoney(x.principal)}</td>
+                          <td className="tabular whitespace-nowrap text-right">{formatMoney(x.principal)}</td>
                           <td className="tabular whitespace-nowrap text-right text-xs">
-                            {[x.discount && `− ${formatMoney(Math.abs(x.discount))} desc.`, x.interest && `+ ${formatMoney(Math.abs(x.interest))} juros`, x.fine && `+ ${formatMoney(Math.abs(x.fine))} multa`, x.fee && `tarifa ${formatMoney(Math.abs(x.fee))}`].filter(Boolean).map((t) => (
+                            {[x.discount && `${x.discount > 0 ? "−" : "+"} ${formatMoney(Math.abs(x.discount))} desc.`, x.interest && `${x.interest > 0 ? "+" : "−"} ${formatMoney(Math.abs(x.interest))} juros`, x.fine && `${x.fine > 0 ? "+" : "−"} ${formatMoney(Math.abs(x.fine))} multa`, x.fee && `tarifa ${x.fee < 0 ? "estornada " : ""}${formatMoney(Math.abs(x.fee))}`].filter(Boolean).map((t) => (
                               <span key={String(t)} className="block">{t}</span>
                             ))}
                             {!x.discount && !x.interest && !x.fine && !x.fee && "—"}
                           </td>
-                          <td className="tabular text-right font-medium">{formatMoney(x.total)}</td>
+                          <td className="tabular whitespace-nowrap text-right font-medium">{formatMoney(x.total)}</td>
                           <td className="min-w-[140px] text-xs">
                             {(x.methodId && d.methods.get(x.methodId)) || x.methodKind || "—"}
                             <br />

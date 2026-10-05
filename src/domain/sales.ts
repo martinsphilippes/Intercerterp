@@ -92,10 +92,12 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   for (const id of skuIds) {
     const sku = await ctx.store.getOrThrow("skus", id);
     assert(sku.companyId === ctx.companyId, "Produto de outra empresa.");
-    assert(sku.active !== false, `SKU ${sku.sku} inativo.`);
+    assert(sku.active !== false, `Variação ${sku.sku} inativa no cadastro e não pode ser vendida.`, "sku_inactive");
     skus.set(id, sku);
     if (!products.has(sku.productId)) {
       const p = await ctx.store.getOrThrow("products", sku.productId);
+      assert(p.active !== false && p.status !== "inactive", `${p.name} está inativo no cadastro e não pode ser vendido.`, "product_inactive");
+      assert(p.status !== "draft", `${p.name} ainda é um rascunho no cadastro (complete e ative o produto antes de vender).`, "product_draft");
       assert(p.availablePdv !== false || p.type === "service", `${p.name} não está disponível no PDV.`);
       products.set(p.id, p);
     }

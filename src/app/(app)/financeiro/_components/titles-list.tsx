@@ -101,7 +101,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
         const saleNo = r.originId ? sales.get(r.originId) : undefined;
         return (
           <span className="block text-xs">
-            <span className="font-medium text-ink">{r.documentNumber ? `Doc. ${r.documentNumber}` : `Título nº ${r.titleNumber}`}</span>
+            <span className="font-medium text-ink">{r.documentNumber ? `Doc. ${r.documentNumber}` : `Título nº ${r.titleNumber}`} · parcela {r.installment}/{r.installments}</span>
             <span className="block text-slate-500">
               {href ? (
                 <Link className="text-brand-700 hover:underline" href={href}>
@@ -115,7 +115,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
         );
       },
     },
-    { key: "installment", label: "Parcela", cell: (r) => `${r.installment}/${r.installments}` },
+    { key: "installment", label: "Parcela", hidden: true, cell: (r) => `${r.installment}/${r.installments}` },
     { key: "issueDate", label: "Emissão", sortable: true, hidden: true, cell: (r) => formatDate(r.issueDate) },
     { key: "competenceDate", label: "Competência", sortable: true, hidden: true, cell: (r) => formatDate(r.competenceDate) },
     {

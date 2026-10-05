@@ -251,9 +251,38 @@ export class MemoryStore implements Store {
     });
   }
 
+  /**
+   * Modo "deferred" (MEMORY_TX_MODE=deferred) reproduz a semântica do Appwrite: as escritas da transação
+   * ficam pendentes e só são aplicadas no commit; leituras feitas fora do `tx` não as enxergam;
+   * conflitos de unicidade/limite aparecem no commit (desfazendo tudo).
+   */
+  readonly deferredTx = process.env.MEMORY_TX_MODE === "deferred";
+
   async transaction<R>(fn: (tx: Store) => Promise<R>): Promise<R> {
     const current = txStorage.getStore();
     if (current && current.store === this) return fn(this);
+    if (this.deferredTx) {
+      const view = new DeferredTx(this);
+      const result = await fn(view);
+      await this.mutex.run(async () => {
+        const state: TxState = { store: this, undo: [] };
+        try {
+          await txStorage.run(state, async () => {
+            for (const op of view.ops) {
+              if (op.kind === "create") await this.create(op.collection, op.data!, op.id);
+              else if (op.kind === "update") await this.update(op.collection, op.id, op.data!);
+              else if (op.kind === "delete") await this.delete(op.collection, op.id);
+              else await this.increment(op.collection, op.id, op.field!, op.by!, op.bounds);
+            }
+          });
+        } catch (e) {
+          for (const u of state.undo.reverse()) u();
+          if (e instanceof ConflictError && e.reason !== "bounds") throw new ConflictError(`Conflito na transação: ${e.message}`, e.collection, "tx_conflict");
+          throw e;
+        }
+      });
+      return result;
+    }
     return this.mutex.run(async () => {
       const state: TxState = { store: this, undo: [] };
       try {
@@ -270,5 +299,47 @@ export class MemoryStore implements Store {
     const out: Record<string, Row[]> = {};
     for (const [k, m] of this.data) out[k] = [...m.values()];
     return out;
+  }
+}
+
+type TxOp = { kind: "create" | "update" | "delete" | "increment"; collection: string; id: string; data?: Record<string, any>; field?: string; by?: number; bounds?: { min?: number; max?: number } };
+
+/** Visão de transação com escritas pendentes até o commit (semântica Appwrite). */
+class DeferredTx implements Store {
+  readonly backend = "memory" as const;
+  readonly ops: TxOp[] = [];
+  constructor(private readonly base: MemoryStore) {}
+  get<T = any>(collection: string, id: string) {
+    return this.base.get<T>(collection, id);
+  }
+  getOrThrow<T = any>(collection: string, id: string) {
+    return this.base.getOrThrow<T>(collection, id);
+  }
+  list<T = any>(collection: string, opts?: ListOptions) {
+    return this.base.list<T>(collection, opts);
+  }
+  async create<T = any>(collection: string, data: Record<string, any>, id?: string): Promise<Doc<T>> {
+    const docId = id ?? newId();
+    toStored(collection, data); // valida tipos já no staging
+    this.ops.push({ kind: "create", collection, id: docId, data });
+    const now = new Date().toISOString();
+    return { id: docId, createdAt: now, updatedAt: now, ...fromStored(collection, toStored(collection, data)) } as Doc<T>;
+  }
+  async update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
+    toStored(collection, patch);
+    this.ops.push({ kind: "update", collection, id, data: patch });
+    const cur = (await this.base.get(collection, id)) ?? ({ id } as any);
+    return { ...cur, ...patch } as Doc<T>;
+  }
+  async delete(collection: string, id: string) {
+    this.ops.push({ kind: "delete", collection, id });
+  }
+  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }) {
+    this.ops.push({ kind: "increment", collection, id, field, by, bounds });
+    const cur = (await this.base.get(collection, id)) ?? ({ id } as any);
+    return { ...cur, [field]: (cur[field] ?? 0) + by } as Doc;
+  }
+  transaction<R>(fn: (tx: Store) => Promise<R>): Promise<R> {
+    return fn(this);
   }
 }

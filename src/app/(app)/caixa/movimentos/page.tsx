@@ -130,7 +130,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           </div>
           <footer className="flex justify-between border-t border-line px-4 py-2 text-xs text-slate-500">
             <span>{rows.length} movimentação(ões) registrada(s)</span>
-            <span>Auditoria ativa · {terminalName}</span>
+            <span className="flex gap-3"><a className="text-brand-700 hover:underline" href={`/api/export/cash_movements?sessao=${session.id}${p.f.tipo ? `&tipo=${p.f.tipo}` : ""}`}>Exportar (CSV)</a> Auditoria ativa · {terminalName}</span>
           </footer>
         </section>
       </div>

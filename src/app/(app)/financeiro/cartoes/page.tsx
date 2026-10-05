@@ -51,7 +51,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const columns: Column<Row>[] = [
     { key: "expectedDate", label: "Previsão de liquidação", sortable: true, fixed: true, cell: (r) => <span className={r.status === "late" ? "font-medium text-red-700" : undefined}>{formatDate(r.expectedDate)}</span> },
     { key: "saleNumber", label: "Venda / título", sortable: true, cell: (r) => (<span className="whitespace-nowrap">{r.saleId ? <Link className="text-brand-700 hover:underline" href={`/vendas/${r.saleId}`}>Venda nº {r.saleNumber ?? "—"}</Link> : "—"}<Link className="block text-xs text-slate-500 hover:underline" href={`/financeiro/receber/${r.titleId}`}>ver título</Link></span>) },
-    { key: "saleDate", label: "Data da venda", sortable: true, cell: (r) => formatDate(r.saleDate) },
+    { key: "saleDate", label: "Data da venda", sortable: true, hidden: true, cell: (r) => formatDate(r.saleDate) },
     { key: "method", label: "Meio", cell: (r) => <span className="whitespace-nowrap">{r.method}{r.brand ? <span className="text-xs text-slate-500"> · {r.brand}</span> : null}</span> },
     { key: "nsu", label: "NSU", hidden: true, cell: (r) => r.nsu ?? "—" },
     { key: "installment", label: "Parcela", cell: (r) => r.installment },

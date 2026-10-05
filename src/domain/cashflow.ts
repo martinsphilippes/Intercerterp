@@ -56,11 +56,11 @@ export async function categoryDefaults(store: Store, companyId: string): Promise
 const SALE_ORIGINS = ["sale", "sale_card", "sale_payment", "sale_cancel"];
 const PURCHASE_ORIGINS = ["purchase", "purchase_order", "receipt", "purchase_receipt"];
 
-/** Categoria efetiva: a do lançamento/parcela → a do título → padrão por origem (vendas, compras, tarifas). */
+/** Categoria efetiva: a do lançamento/parcela → tarifas (lançamento de tarifa) → a do título → padrão por origem (vendas, compras). */
 export function resolveCategory(rec: Record<string, any>, title: Doc | null | undefined, d: CategoryDefaults): string | null {
   if (rec.categoryId) return rec.categoryId;
+  if (rec.kind === "fee") return d.fees; // tarifa/taxa nunca herda a categoria de receita do título
   if (title?.categoryId) return title.categoryId;
-  if (rec.kind === "fee") return d.fees;
   const origin = title?.originType ?? rec.originType ?? "";
   if (SALE_ORIGINS.includes(origin)) return d.sales;
   if (PURCHASE_ORIGINS.includes(origin)) return d.purchases;

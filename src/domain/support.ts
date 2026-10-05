@@ -177,14 +177,14 @@ export async function replyTicket(
     }
     if (t.userId) {
       await notify(ctx.store, {
-        companyId: t.companyId === "public" ? ctx.companyId : t.companyId, type: "ticket", title: `Resposta no chamado nº ${t.number}`, body: input.body.trim().slice(0, 300), link: `/ajuda/chamados/${id}`,
+        companyId: t.companyId === "public" ? ctx.companyId : t.companyId, branchId: t.branchId ?? null, type: "ticket", title: `Resposta no chamado nº ${t.number}`, body: input.body.trim().slice(0, 300), link: `/ajuda/chamados/${id}`,
         originType: "ticket", originId: id, occurrenceKey: `ticket:${id}:reply:${msg.id}`, informative: true, responsibleName: ctx.user.name, audience: { userIds: [t.userId] },
       }).catch(() => 0);
     }
   }
   if (isRequester && !agent) {
     await notify(ctx.store, {
-      companyId: ctx.companyId, type: "ticket", title: `Nova mensagem no chamado nº ${t.number}`, body: input.body.trim().slice(0, 300), link: `/ajuda/chamados/${id}`,
+      companyId: ctx.companyId, branchId: t.branchId ?? null, type: "ticket", title: `Nova mensagem no chamado nº ${t.number}`, body: input.body.trim().slice(0, 300), link: `/ajuda/chamados/${id}`,
       originType: "ticket", originId: id, occurrenceKey: `ticket:${id}:awaiting-support`, responsibleName: "Equipe de suporte", audience: t.assigneeId ? { userIds: [t.assigneeId] } : { action: "support.manage" },
     }).catch(() => 0);
   }

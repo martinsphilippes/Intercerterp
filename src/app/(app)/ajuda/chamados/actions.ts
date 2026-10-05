@@ -22,7 +22,7 @@ export async function replyTicketAction(id: string, fd: FormData) {
   return runAction({ module: "support", revalidate: [`/ajuda/chamados/${id}`] }, async (s) => {
     const r = await replyTicket(s.ctx, id, { body: fstr(fd, "body"), internal: fstr(fd, "internal") === "on", status: fopt(fd, "status"), attachments: await attachmentsFromForm(fd), idemKey: fstr(fd, "_idem") || undefined });
     const d = r.delivery;
-    return { ok: true as const, message: d ? (d.delivered ? `Resposta registrada e enviada por e-mail (${d.channel}).` : `Resposta registrada. E-mail não enviado: ${d.message ?? d.channel}.`) : "Mensagem registrada." };
+    return { ok: true as const, message: d ? (d.delivered ? `Resposta registrada e enviada por e-mail (${d.channel}).` : `Resposta registrada. E-mail não enviado: ${String(d.message ?? d.channel).replace(/\.$/, "")}.`) : "Mensagem registrada." };
   });
 }
 

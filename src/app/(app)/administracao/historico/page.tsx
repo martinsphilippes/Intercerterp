@@ -8,7 +8,7 @@ import { Badge, StatusBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { Stat } from "@/components/ui/card";
 import { paginate, parseList, qs, type SearchParams } from "@/lib/list";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 import { MODULES } from "@/lib/permissions";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { queryAudit, formatStamp } from "./queries";

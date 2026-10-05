@@ -169,6 +169,9 @@ export function UserForm({
 
           {error && <Notice tone="bad">{error}</Notice>}
           <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap justify-end gap-2 border-t border-line bg-canvas/95 px-1 py-3 backdrop-blur">
+            <a href={u.id ? `/administracao/usuarios/${u.id}` : "/administracao/usuarios"} className="focus-ring inline-flex h-9 items-center rounded-md border border-line bg-white px-4 text-sm font-medium hover:bg-slate-50">
+              Descartar
+            </a>
             <SubmitButton pending={pending}>{u.id ? "Salvar alterações" : mode === "invite" ? "Criar e convidar" : "Criar acesso"}</SubmitButton>
           </div>
         </>

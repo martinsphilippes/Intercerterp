@@ -19,8 +19,8 @@ export function Comparison({ quotationId, items, proposals, supplierOrder, initi
   const [pending, start] = useTransition();
   const toast = useToast();
   const router = useRouter();
-  const opts = { onTimeOnly };
-  const ev = useMemo(() => evaluateSelection(items, proposals, assign, refDate, opts), [items, proposals, assign, refDate, onTimeOnly]);
+  const opts = useMemo(() => ({ onTimeOnly }), [onTimeOnly]);
+  const ev = useMemo(() => evaluateSelection(items, proposals, assign, refDate, opts), [items, proposals, assign, refDate, opts]);
   const bySupplier = new Map(proposals.map((p) => [p.supplierId, p]));
   const persist = (next: Record<string, string>) => {
     setAssign(next);

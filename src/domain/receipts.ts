@@ -640,9 +640,17 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
       const phId = detId("ph", "receipt", id, it.skuId!);
       if (!(await ctx.store.get("price_history", phId))) {
         await ctx.store.update("skus", sku.id, { costAcquisition: newCost, costTotal: newCost + (sku.costAdditional ?? 0) });
-        await ctx.store.create("price_history", { companyId: ctx.companyId, branchId: r.branchId, createdBy: ctx.user.id, skuId: sku.id, productId: sku.productId, priceTableId: null, field: "costAcquisition", oldValue: sku.costAcquisition ?? 0, newValue: newCost, reason: `Recebimento nº ${r.number}${r.nfeNumber ? ` (NF-e ${r.nfeNumber})` : ""} — custo com frete/despesas rateados` }, phId).catch((e) => {
-          if (!isConflict(e)) throw e;
-        });
+        const reason = `Recebimento nº ${r.number}${r.nfeNumber ? ` (NF-e ${r.nfeNumber})` : ""} — custo com frete/despesas rateados`;
+        // histórico com ids determinísticos (retentativa da confirmação não duplica)
+        for (const [field, oldValue, newValue, hid] of [
+          ["costAcquisition", sku.costAcquisition ?? 0, newCost, phId],
+          ["costTotal", sku.costTotal ?? 0, newCost + (sku.costAdditional ?? 0), detId("ph", "receipt", id, it.skuId!, "costTotal")],
+        ] as const) {
+          if (oldValue === newValue) continue;
+          await ctx.store.create("price_history", { companyId: ctx.companyId, branchId: r.branchId, createdBy: ctx.user.id, skuId: sku.id, productId: sku.productId, priceTableId: null, field, oldValue, newValue, reason }, hid).catch((e) => {
+            if (!isConflict(e)) throw e;
+          });
+        }
       }
     }
   }

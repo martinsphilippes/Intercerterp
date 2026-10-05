@@ -53,8 +53,14 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
     await logAttempt("failure", `Tentativa de login inválida (usuário inexistente: ${login.slice(0, 60)})`);
     return { ok: false, error: "Usuário ou senha inválidos." };
   }
-  if (user.status === "inactive" || user.status === "suspended") return { ok: false, error: user.status === "suspended" ? `Acesso suspenso${user.suspendedReason ? `: ${user.suspendedReason}` : ""}. Procure o administrador.` : "Usuário inativo. Procure o administrador." };
-  if (user.status === "invited") return { ok: false, error: "Convite pendente: use o link de primeiro acesso enviado ao seu e-mail." };
+  if (user.status === "inactive" || user.status === "suspended") {
+    await logAttempt("failure", `Login recusado para ${user.name}: usuário ${user.status === "suspended" ? "suspenso" : "inativo"}`, user);
+    return { ok: false, error: user.status === "suspended" ? `Acesso suspenso${user.suspendedReason ? `: ${user.suspendedReason}` : ""}. Procure o administrador.` : "Usuário inativo. Procure o administrador." };
+  }
+  if (user.status === "invited") {
+    await logAttempt("failure", `Login recusado para ${user.name}: convite pendente`, user);
+    return { ok: false, error: "Convite pendente: use o link de primeiro acesso enviado ao seu e-mail." };
+  }
   let session;
   try {
     session = await getAuth().login(user.email, password, persistent);
@@ -160,22 +166,17 @@ export async function completeRecoveryAction(fd: FormData): Promise<ActionResult
   return { ok: true, message: "Senha redefinida. Entre com a nova senha.", redirect: "/login" };
 }
 
-/** Primeiro acesso por convite: define senha e ativa o usuário. */
+/** Primeiro acesso por convite: define senha e ativa o usuário (auditado no domínio). */
 export async function acceptInviteAction(fd: FormData): Promise<ActionResult> {
   const token = String(fd.get("token") ?? "");
   const password = String(fd.get("password") ?? "");
-  if (password.length < 8) return { ok: false, error: "A senha deve ter ao menos 8 caracteres." };
   if (password !== String(fd.get("confirm") ?? "")) return { ok: false, error: "As senhas não conferem." };
-  const store = getStore();
-  const { sha256 } = await import("@/lib/db");
-  const users = await listAll(store, "users", { filters: [["eq", "inviteTokenHash", sha256(token)]] });
-  const u = users[0];
-  if (!u || u.status !== "invited" || (u.inviteExpiresAt && u.inviteExpiresAt < nowIso())) return { ok: false, error: "Convite inválido ou expirado." };
-  const auth = getAuth();
-  const authId = u.authId ?? (await auth.createUser(u.email, password, u.name));
-  if (u.authId) await auth.setPassword(u.authId, password);
-  if (auth.kind === "local") await auth.createUser(u.email, password, u.name);
-  await store.update("users", u.id, { authId, status: "active", inviteTokenHash: null, inviteExpiresAt: null, firstAccessAt: nowIso() });
+  try {
+    const { acceptInvite } = await import("@/domain/users");
+    await acceptInvite(getStore(), token, password);
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "Convite inválido ou expirado." };
+  }
   return { ok: true, message: "Acesso ativado. Entre com seu e-mail e a nova senha.", redirect: "/login" };
 }
 

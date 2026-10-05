@@ -18,7 +18,11 @@ export async function runAction<T>(
 ): Promise<ActionResult<T>> {
   try {
     const s = await requireSession();
-    if (opts.module && !can(s.user, opts.module, opts.op ?? "view")) return { ok: false, error: "Você não tem permissão para esta ação.", code: "forbidden" };
+    if (opts.module && !can(s.user, opts.module, opts.op ?? "view")) {
+      const { audit } = await import("../core/audit");
+      await audit(s.ctx, { module: opts.module, action: `${opts.module}.denied`, entityType: "permission", entityId: `${opts.module}:${opts.op ?? "view"}`, summary: `Ação negada: sem permissão "${opts.op ?? "view"}" em ${opts.module}`, result: "failure" });
+      return { ok: false, error: "Você não tem permissão para esta ação.", code: "forbidden" };
+    }
     if (opts.requireBranch && !s.branch) return { ok: false, error: "Selecione uma filial específica (o contexto consolidado é somente consulta).", code: "branch_required" };
     const out = await fn(s);
     for (const p of opts.revalidate ?? []) revalidatePath(p);
@@ -26,7 +30,18 @@ export async function runAction<T>(
     return { ok: true, data: out as T };
   } catch (e: any) {
     if (e?.digest?.startsWith?.("NEXT_REDIRECT")) throw e;
-    if (e instanceof BusinessError) return { ok: false, error: e.message, code: e.code };
+    if (e instanceof BusinessError) {
+      if (e.code === "forbidden") {
+        try {
+          const s2 = await requireSession();
+          const { audit } = await import("../core/audit");
+          await audit(s2.ctx, { module: opts.module ?? "admin", action: `${opts.module ?? "action"}.denied`, entityType: "permission", entityId: opts.module ?? null, summary: `Ação negada: ${e.message}`, result: "failure" });
+        } catch {
+          /* sem sessão */
+        }
+      }
+      return { ok: false, error: e.message, code: e.code };
+    }
     if (e instanceof ConflictError) return { ok: false, error: "O registro foi alterado por outra operação ao mesmo tempo ou já existe. Atualize e tente novamente.", code: "conflict" };
     if (e instanceof NotFoundError) return { ok: false, error: "Registro não encontrado.", code: "not_found" };
     console.error("[action] erro inesperado", e);

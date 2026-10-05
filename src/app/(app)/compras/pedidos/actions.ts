@@ -37,13 +37,14 @@ export async function saveOrderAction(fd: FormData) {
     if (!input.supplierId) return { ok: false as const, error: "Selecione o fornecedor." };
     if (id) {
       const r = await updateOrder(s.ctx, id, input);
-      if (intent === "submit" && ["draft", "adjust"].includes(r.order.status)) await submitForApproval(s.ctx, [id]);
-      const msg = r.revised ? (r.needsReview ? `Revisão ${r.order.revision} registrada — o pedido voltou para análise conforme a política.` : `Revisão ${r.order.revision} registrada — dispensada de nova análise pela política.`) : intent === "submit" ? "Pedido salvo e enviado para análise." : "Pedido salvo.";
+      const req = intent === "submit" && ["draft", "adjust"].includes(r.order.status) ? await submitForApproval(s.ctx, [id]) : null;
+      const msg = r.revised ? (r.needsReview ? `Revisão ${r.order.revision} registrada — o pedido voltou para análise conforme a política.` : `Revisão ${r.order.revision} registrada — dispensada de nova análise pela política.`) : req ? (req.status === "approved" ? "Pedido salvo e autoaprovado pela política (abaixo do limite)." : `Pedido salvo e enviado para análise (solicitação nº ${req.number}).`) : "Pedido salvo.";
       return { ok: true as const, message: msg, redirect: `/compras/pedidos/${id}` };
     }
     const o = await createOrder(s.ctx, { ...input, origin: "manual", idemKey: `ui:${fstr(fd, "_idem")}` });
-    if (intent === "submit") await submitForApproval(s.ctx, [o.id]);
-    return { ok: true as const, data: { id: o.id }, message: intent === "submit" ? `Pedido nº ${o.number} criado e enviado para análise.` : `Pedido nº ${o.number} salvo em rascunho.`, redirect: `/compras/pedidos/${o.id}` };
+    const req = intent === "submit" && o.status === "draft" ? await submitForApproval(s.ctx, [o.id]) : null;
+    const msg = req ? (req.status === "approved" ? `Pedido nº ${o.number} criado e autoaprovado pela política (abaixo do limite). Registre o envio ao fornecedor.` : `Pedido nº ${o.number} criado e enviado para análise (solicitação nº ${req.number}).`) : `Pedido nº ${o.number} salvo em rascunho.`;
+    return { ok: true as const, data: { id: o.id }, message: msg, redirect: `/compras/pedidos/${o.id}` };
   });
 }
 

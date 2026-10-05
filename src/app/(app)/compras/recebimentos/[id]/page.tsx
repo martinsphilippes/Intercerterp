@@ -149,6 +149,36 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </div>
       </Card>
 
+      {draft && (
+        <div className="mb-5 grid gap-4 lg:grid-cols-2">
+          <Card title="Totais da NF-e">
+            <DefinitionList
+              cols={3}
+              items={[
+                { label: "Produtos", value: formatMoney(tot ? tot.vProd - tot.vDesc : r.productsTotal) },
+                { label: "Frete", value: formatMoney(r.freight) },
+                { label: "IPI", value: formatMoney(tot?.vIPI ?? 0) },
+                { label: "ICMS destacado (informativo)", value: formatMoney(tot?.vICMS ?? 0) },
+                { label: "Outras despesas/seguro/ST", value: formatMoney(Math.max(0, (r.otherExpenses ?? 0) - (tot?.vIPI ?? 0))) },
+                { label: "Total da NF-e", value: <strong>{formatMoney(r.invoicedTotal)}</strong> },
+              ]}
+            />
+          </Card>
+          <Card title="Impactos previstos da entrada" description="Conforme o último salvamento da conferência.">
+            <DefinitionList
+              cols={2}
+              items={[
+                { label: "Estoque", value: eff.updateStock ? `+${formatQty(stockUnits)} unidades em ${wh?.name ?? "—"}` : "Não será atualizado" },
+                { label: "Novo custo médio", value: eff.updateCost ? `Atualizado em ${costProducts} produto(s)` : "Custo não será atualizado" },
+                { label: "Contas a pagar", value: eff.createPayable ? `${installments.length} parcela(s) · ${formatMoney(installments.reduce((a, x) => a + x.amount, 0))}` : "Não será gerado" },
+                { label: "Vencimentos", value: installments.map((x) => formatDate(x.dueDate)).join(" e ") || "—" },
+                { label: "Crédito de ICMS", value: tot?.vICMS ? `${formatMoney(tot.vICMS)} destacado — apuração conforme regime no módulo Fiscal` : "Sem ICMS destacado" },
+                { label: "Valor devido", value: formatMoney(r.dueTotal) },
+              ]}
+            />
+          </Card>
+        </div>
+      )}
       {draft && conf && canReceive && <Conference key={r.updatedAt} {...conf} />}
       {draft && !canReceive && <Notice tone="warn">Somente usuários com “Receber mercadorias” na filial do recebimento podem conferir e concluir.</Notice>}
 

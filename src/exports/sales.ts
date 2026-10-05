@@ -3,6 +3,11 @@ import { defineExport } from "@/lib/exporters";
 import { parseList } from "@/lib/list";
 import { addDays, monthStart, today } from "@/lib/dates";
 import { querySales, queryReturns } from "@/app/(app)/vendas/queries";
+import { STATUS } from "@/components/ui/badge";
+import { COMPENSATION_LABEL, REFUND_METHOD_LABEL } from "@/domain/sales";
+
+const label = (kind: string, v: string | null | undefined) => (v ? (STATUS[kind]?.[v]?.[0] ?? STATUS.generic[v]?.[0] ?? v) : "");
+const ORIGIN: Record<string, string> = { pdv: "PDV", exchange: "Troca" };
 
 /** Mesmo atalho de período da tela (periodo=hoje|ontem|7d|30d|mes|mesant). */
 function withPeriod(params: Record<string, any>) {
@@ -45,7 +50,8 @@ defineExport("sales", {
     { key: "fiscalNumber", label: "Nº documento fiscal", type: "number" },
     { key: "cancelReason", label: "Motivo do cancelamento" },
   ],
-  rows: (s, params) => querySales(s.ctx, withPeriod(params)),
+  rows: async (s, params) =>
+    (await querySales(s.ctx, withPeriod(params))).map((r) => ({ ...r, status: label("sale", r.status), paymentStatus: label("payment", r.paymentStatus), fiscalStatus: label("fiscal", r.fiscalStatus), origin: ORIGIN[r.origin] ?? r.origin })),
 });
 
 defineExport("returns", {
@@ -69,5 +75,6 @@ defineExport("returns", {
     { key: "difference", label: "Diferença da troca", type: "money" },
     { key: "userName", label: "Registrado por" },
   ],
-  rows: (s, params) => queryReturns(s.ctx, withPeriod(params)),
+  rows: async (s, params) =>
+    (await queryReturns(s.ctx, withPeriod(params))).map((r) => ({ ...r, kind: r.kind === "exchange" ? "Troca" : "Devolução", compensation: COMPENSATION_LABEL[r.compensation] ?? r.compensation, refundMethod: r.refundMethod ? (REFUND_METHOD_LABEL[r.refundMethod] ?? r.refundMethod) : "", status: label("generic", r.status) })),
 });
