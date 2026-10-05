@@ -1,12 +1,14 @@
 import { detId, isConflict, listAll, retryOnConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { addDays, addMonths, today } from "@/lib/dates";
-import { splitInstallments } from "@/lib/money";
+import { addDays, addMonths, diffDays, formatDate, today } from "@/lib/dates";
+import { allocate, formatMoney, pct, roundDiv, splitInstallments } from "@/lib/money";
 import { BusinessError, assert } from "@/lib/core/errors";
-import type { Ctx } from "@/lib/core/ctx";
-import { audit } from "@/lib/core/audit";
+import { requireBranch, type Ctx } from "@/lib/core/ctx";
+import { audit, diff } from "@/lib/core/audit";
 import { nextNumber } from "@/lib/core/numbering";
-import { resolveOccurrence } from "@/lib/core/notify";
+import { reopenOccurrence, resolveOccurrence } from "@/lib/core/notify";
+import { getSetting } from "@/lib/core/settings";
+import { enqueue } from "@/lib/core/jobs";
 
 /**
  * Financeiro:
@@ -178,6 +180,8 @@ export interface EntryInput {
   originId?: string | null;
   idemKey: string;
   branchId?: string | null;
+  /** já nasce conciliado (lançamento de diferença/tarifa criado pela própria conciliação) */
+  reconciliationId?: string | null;
 }
 
 /**
@@ -211,7 +215,8 @@ export async function postEntry(ctx: Ctx, t: Store, e: EntryInput, cache = new M
       transferId: e.transferId ?? null,
       categoryId: e.categoryId ?? null,
       costCenterId: e.costCenterId ?? null,
-      reconciled: false,
+      reconciled: Boolean(e.reconciliationId),
+      reconciliationId: e.reconciliationId ?? null,
       reversalOf: e.reversalOf ?? null,
       operationId: e.operationId ?? null,
       originType: e.originType ?? null,
@@ -267,7 +272,14 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
   assert(interest >= 0 && fine >= 0 && discount >= 0 && fee >= 0, "Acréscimos e descontos não podem ser negativos.");
   assert(discount <= input.principal, "Desconto maior que o principal.");
 
+  let reused = false;
   const run = async (t: Store) => {
+    // repetição concorrente com a mesma chave: devolve a baixa já gravada
+    const done = await ctx.store.get("settlements", sid);
+    if (done) {
+      reused = true;
+      return done;
+    }
     const inst = await ctx.store.getOrThrow("installments", input.installmentId);
     const title = await ctx.store.getOrThrow("titles", inst.titleId);
     assert(title.companyId === ctx.companyId, "Título de outra empresa.");
@@ -362,7 +374,7 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
   };
 
   const settlement = tx ? await run(tx) : await retryOnConflict(() => ctx.store.transaction(run));
-  if (!tx) {
+  if (!tx && !reused) {
     await refreshTitleStatus(ctx.store, settlement.titleId);
     await audit(ctx, {
       module: "finance",
@@ -375,7 +387,10 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
       operationId: input.operationId,
     });
     const inst = await ctx.store.get("installments", input.installmentId);
-    if (inst?.status === "paid") await resolveOccurrence(ctx.store, `overdue:${inst.id}`);
+    if (inst?.status === "paid") {
+      await resolveOccurrence(ctx.store, `overdue:${inst.id}`);
+      await resolveOccurrence(ctx.store, `payable_due:${inst.id}`);
+    }
   }
   return settlement;
 }
@@ -384,9 +399,11 @@ export async function refreshTitleStatus(store: Store, titleId: string) {
   const title = await store.getOrThrow("titles", titleId);
   if (title.status === "cancelled") return title;
   const insts = await listAll(store, "installments", { filters: [["eq", "titleId", titleId]] });
-  const balance = insts.reduce((a, i) => a + (i.status === "cancelled" ? 0 : i.balance), 0);
-  const total = insts.reduce((a, i) => a + (i.status === "cancelled" ? 0 : i.amount), 0);
-  const status = balance === 0 ? "paid" : balance < total ? "partial" : "open";
+  const live = insts.filter((i) => i.status !== "cancelled" && i.status !== "renegotiated");
+  const balance = live.reduce((a, i) => a + i.balance, 0);
+  const total = live.reduce((a, i) => a + i.amount, 0);
+  const renegotiated = insts.some((i) => i.status === "renegotiated");
+  const status = balance === 0 ? (renegotiated && !live.some((i) => i.paid > 0) ? "renegotiated" : "paid") : balance < total || renegotiated ? "partial" : "open";
   if (title.status !== status || title.balance !== balance) return store.update("titles", titleId, { status, balance });
   return title;
 }
@@ -399,6 +416,8 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
   assert(s.kind === "settlement", "Somente baixas podem ser estornadas.");
   const entry = s.accountEntryId ? await ctx.store.get("account_entries", s.accountEntryId) : null;
   if (entry?.reconciled) throw new BusinessError("A baixa está conciliada com o extrato. Desfaça a conciliação antes de estornar.", "reconciled");
+  const feeEntryCheck = s.fee > 0 ? await ctx.store.get("account_entries", settlementFeeEntryId(s)) : null;
+  if (feeEntryCheck?.reconciled) throw new BusinessError("A tarifa desta baixa está conciliada com o extrato. Desfaça a conciliação antes de estornar.", "reconciled");
   const run = async (t: Store) => {
     const inst = await ctx.store.getOrThrow("installments", s.installmentId);
     const seq = inst.seq + 1;
@@ -422,9 +441,8 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
         branchId: entry.branchId,
       }, cache);
     }
-    if (s.fee > 0 && s.notes?.includes("tarifa:")) {
-      const feeEntryId = s.notes.split("tarifa:")[1]?.split(" ")[0];
-      const feeEntry = feeEntryId ? await ctx.store.get("account_entries", feeEntryId) : null;
+    if (s.fee > 0) {
+      const feeEntry = await ctx.store.get("account_entries", settlementFeeEntryId(s));
       if (feeEntry && !feeEntry.reconciled) {
         await postEntry(ctx, t, {
           accountId: feeEntry.accountId, date: today(), amount: -feeEntry.amount, kind: "reversal", description: `Estorno: ${feeEntry.description}`,
@@ -459,7 +477,9 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
   if (tx) await run(tx);
   else await retryOnConflict(() => ctx.store.transaction(run));
   await refreshTitleStatus(ctx.store, s.titleId);
-  await audit(ctx, { module: "finance", action: "settlement.reverse", entityType: "title", entityId: s.titleId, summary: `Estorno de baixa (${(s.total / 100).toFixed(2)})`, reason, related: [`settlement:${s.id}`] });
+  await audit(ctx, { module: "finance", action: "settlement.reverse", entityType: "title", entityId: s.titleId, summary: `Estorno de baixa (${(s.total / 100).toFixed(2)})`, reason, related: [`settlement:${s.id}`, `installment:${s.installmentId}`] });
+  const inst = await ctx.store.get("installments", s.installmentId);
+  if (inst && inst.status !== "paid" && inst.dueDate < today()) await reopenOccurrence(ctx.store, `overdue:${inst.id}`);
   return ctx.store.getOrThrow("settlements", s.id);
 }
 
@@ -474,7 +494,10 @@ export async function cancelTitle(ctx: Ctx, id: string, reason: string) {
     for (const i of insts) await t.update("installments", i.id, { status: "cancelled", balance: 0 });
     await t.update("titles", id, { status: "cancelled", balance: 0, notes: [title.notes, `Cancelado: ${reason}`].filter(Boolean).join("\n") });
   });
-  for (const i of insts) await resolveOccurrence(ctx.store, `overdue:${i.id}`);
+  for (const i of insts) {
+    await resolveOccurrence(ctx.store, `overdue:${i.id}`);
+    await resolveOccurrence(ctx.store, `payable_due:${i.id}`);
+  }
   await audit(ctx, { module: "finance", action: "title.cancel", entityType: "title", entityId: id, summary: `Título nº ${title.number} cancelado`, reason });
   return ctx.store.getOrThrow("titles", id);
 }
@@ -525,7 +548,660 @@ export async function accountBalanceAt(store: Store, accountId: string, date: st
 export function dueState(inst: { status: string; dueDate: string; balance: number }, ref = today()) {
   if (inst.status === "paid") return "paid";
   if (inst.status === "cancelled") return "cancelled";
+  if (inst.status === "renegotiated") return "renegotiated";
   if (inst.dueDate < ref) return "overdue";
   if (inst.dueDate === ref) return "due_today";
   return "upcoming";
+}
+
+// ═════════════════════════════ Extensões do módulo Financeiro (telas 22–25 e cadastros)
+
+/** Id do lançamento de tarifa gerado por uma baixa (determinístico pela chave da baixa). */
+export function settlementFeeEntryId(s: Record<string, any>) {
+  return detId("entry", `settle-fee:${s.idemKey}`);
+}
+
+// ───────────────────────────── Juros e multa por atraso (sugestão editável)
+
+export interface LateChargeParams {
+  /** multa única sobre o principal em atraso (bps; 200 = 2%) */
+  fineBps: number;
+  /** juros simples ao mês, pro rata die base 30 (bps; 100 = 1% a.m.) */
+  interestMonthlyBps: number;
+  /** dias de tolerância após o vencimento sem encargos */
+  graceDays: number;
+}
+
+export const LATE_DEFAULTS: LateChargeParams = { fineBps: 200, interestMonthlyBps: 100, graceDays: 0 };
+
+export async function lateChargeParams(store: Store, companyId: string, branchId?: string | null): Promise<LateChargeParams> {
+  const v = await getSetting<Partial<LateChargeParams> | null>(store, companyId, branchId ?? null, "finance.late", null);
+  return { ...LATE_DEFAULTS, ...(v ?? {}) };
+}
+
+/**
+ * Sugestão de encargos: atraso = dias entre vencimento e pagamento (acima da tolerância).
+ * multa = principal × multa%; juros = principal × juros%a.m. × dias / 30 (arredondamento half-up em centavos).
+ */
+export function suggestLateCharges(dueDate: string, payDate: string, principal: number, p: LateChargeParams) {
+  const daysLate = Math.max(0, diffDays(dueDate, payDate));
+  if (daysLate <= p.graceDays || principal <= 0) return { daysLate, fine: 0, interest: 0 };
+  return { daysLate, fine: pct(principal, p.fineBps), interest: roundDiv(principal * p.interestMonthlyBps * daysLate, 10000 * 30) };
+}
+
+// ───────────────────────────── Títulos manuais
+
+export interface ManualTitleInput {
+  kind: TitleKind;
+  partyType: "customer" | "supplier" | "other";
+  partyId?: string | null;
+  partyName?: string | null;
+  description: string;
+  documentNumber?: string | null;
+  issueDate: string;
+  competenceDate: string;
+  categoryId?: string | null;
+  costCenterId?: string | null;
+  installments: InstallmentInput[];
+  notes?: string | null;
+  approved?: boolean;
+  idemKey: string;
+}
+
+const isDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+async function assertOwned(ctx: Ctx, collection: string, id: string | null | undefined, label: string) {
+  if (!id) return null;
+  const d = await ctx.store.get(collection, id);
+  assert(d && d.companyId === ctx.companyId, `${label} inválido(a).`);
+  return d;
+}
+
+/** Lançamento manual de título a receber/pagar (despesas, serviços avulsos, acordos). */
+export async function createManualTitle(ctx: Ctx, input: ManualTitleInput) {
+  const branchId = requireBranch(ctx);
+  assert(input.description?.trim(), "Informe a descrição do título.");
+  assert(isDate(input.issueDate) && isDate(input.competenceDate), "Informe emissão e competência válidas.");
+  for (const i of input.installments) assert(isDate(i.dueDate), "Todas as parcelas precisam de vencimento.");
+  let partyName = input.partyName?.trim() || null;
+  if (input.partyType === "customer") {
+    const c = await assertOwned(ctx, "customers", input.partyId, "Cliente");
+    assert(c, "Selecione o cliente.");
+    partyName = c.name;
+  } else if (input.partyType === "supplier") {
+    const s = await assertOwned(ctx, "suppliers", input.partyId, "Fornecedor");
+    assert(s, "Selecione o fornecedor.");
+    partyName = s.tradeName || s.name;
+  } else assert(partyName, input.kind === "receivable" ? "Informe o pagador." : "Informe o favorecido.");
+  const cat = await assertOwned(ctx, "fin_categories", input.categoryId, "Categoria");
+  if (cat) assert(cat.type === (input.kind === "receivable" ? "revenue" : "expense"), input.kind === "receivable" ? "Use uma categoria de receita." : "Use uma categoria de despesa.");
+  await assertOwned(ctx, "cost_centers", input.costCenterId, "Centro de custo");
+  const title = await createTitle(ctx, {
+    kind: input.kind,
+    partyType: input.partyType,
+    partyId: input.partyType === "other" ? null : input.partyId,
+    partyName,
+    description: input.description.trim(),
+    documentNumber: input.documentNumber?.trim() || null,
+    originType: "manual",
+    issueDate: input.issueDate,
+    competenceDate: input.competenceDate,
+    categoryId: input.categoryId || null,
+    costCenterId: input.costCenterId || null,
+    installments: input.installments,
+    approvalStatus: input.kind === "payable" ? (input.approved ? "approved" : "pending") : null,
+    notes: input.notes ?? null,
+    idemKey: `manual:${input.idemKey}`,
+    branchId,
+  });
+  if (input.kind === "payable" && input.approved && !title.approvedAt) {
+    await ctx.store.update("titles", title.id, { approvedBy: ctx.user.id, approvedAt: new Date().toISOString() });
+    await audit(ctx, { module: "finance", action: "payable.approve", entityType: "title", entityId: title.id, summary: `Obrigação nº ${title.number} autorizada no lançamento` });
+  }
+  return title;
+}
+
+export interface TitleUpdate {
+  description?: string;
+  documentNumber?: string | null;
+  competenceDate?: string;
+  categoryId?: string | null;
+  costCenterId?: string | null;
+  notes?: string | null;
+}
+
+/** Edita dados descritivos do título (valores e parcelas pagas são imutáveis; use estorno/cancelamento). */
+export async function updateTitle(ctx: Ctx, id: string, patch: TitleUpdate) {
+  const title = await ctx.store.getOrThrow("titles", id);
+  assert(title.companyId === ctx.companyId, "Título de outra empresa.");
+  assert(title.status !== "cancelled", "Título cancelado não pode ser alterado.");
+  if (patch.description !== undefined) assert(patch.description.trim(), "Informe a descrição.");
+  if (patch.competenceDate !== undefined) assert(isDate(patch.competenceDate), "Competência inválida.");
+  const cat = await assertOwned(ctx, "fin_categories", patch.categoryId, "Categoria");
+  if (cat) assert(cat.type === (title.kind === "receivable" ? "revenue" : "expense"), title.kind === "receivable" ? "Use uma categoria de receita." : "Use uma categoria de despesa.");
+  await assertOwned(ctx, "cost_centers", patch.costCenterId, "Centro de custo");
+  const next: Record<string, any> = {};
+  for (const [k, v] of Object.entries(patch)) if (v !== undefined) next[k] = typeof v === "string" ? v.trim() || null : v;
+  if (next.description === null) delete next.description;
+  const d = diff(title, next);
+  if (!Object.keys(d.after).length) return title;
+  const updated = await ctx.store.update("titles", id, next);
+  // dados denormalizados nas parcelas (filtros e fluxo previsto)
+  const instPatch: Record<string, any> = {};
+  for (const k of ["categoryId", "costCenterId", "competenceDate", "description"]) if (k in d.after) instPatch[k] = next[k];
+  if (Object.keys(instPatch).length) {
+    for (const i of await listAll(ctx.store, "installments", { filters: [["eq", "titleId", id]] })) await ctx.store.update("installments", i.id, instPatch);
+  }
+  await audit(ctx, { module: "finance", action: "title.update", entityType: "title", entityId: id, summary: `Título nº ${title.number} alterado`, before: d.before, after: d.after });
+  return updated;
+}
+
+/** Altera vencimento/nosso número de parcela em aberto. */
+export async function updateInstallment(ctx: Ctx, id: string, patch: { dueDate?: string; ourNumber?: string | null }, reason?: string | null) {
+  const inst = await ctx.store.getOrThrow("installments", id);
+  assert(inst.companyId === ctx.companyId, "Parcela de outra empresa.");
+  assert(["open", "partial"].includes(inst.status), "Somente parcelas em aberto podem ser alteradas.");
+  const next: Record<string, any> = {};
+  if (patch.dueDate !== undefined && patch.dueDate !== inst.dueDate) {
+    assert(isDate(patch.dueDate), "Vencimento inválido.");
+    assert(reason?.trim(), "Informe o motivo da alteração do vencimento.");
+    next.dueDate = patch.dueDate;
+  }
+  if (patch.ourNumber !== undefined && (patch.ourNumber || null) !== (inst.ourNumber || null)) next.ourNumber = patch.ourNumber?.trim() || null;
+  if (!Object.keys(next).length) return inst;
+  const updated = await ctx.store.update("installments", id, next);
+  if (next.dueDate && next.dueDate >= today()) await resolveOccurrence(ctx.store, `overdue:${id}`);
+  await audit(ctx, {
+    module: "finance", action: "installment.update", entityType: "title", entityId: inst.titleId, summary: `Parcela ${inst.number} alterada${next.dueDate ? ` — vencimento ${formatDate(inst.dueDate)} → ${formatDate(next.dueDate)}` : ""}${"ourNumber" in next ? ` — nosso número ${next.ourNumber ?? "removido"}` : ""}`,
+    before: { dueDate: inst.dueDate, ourNumber: inst.ourNumber }, after: next, reason: reason ?? null, related: [`installment:${id}`],
+  });
+  return updated;
+}
+
+/** Revoga a autorização de pagamento (somente sem baixas ativas). */
+export async function revokePayableApproval(ctx: Ctx, id: string, reason: string) {
+  assert(reason?.trim(), "Informe o motivo.");
+  const title = await ctx.store.getOrThrow("titles", id);
+  assert(title.kind === "payable" && title.companyId === ctx.companyId, "Título inválido.");
+  if (title.approvalStatus !== "approved") return title;
+  const active = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
+  assert(!active.length, "Há pagamentos registrados. Estorne-os antes de revogar a autorização.");
+  const updated = await ctx.store.update("titles", id, { approvalStatus: "pending", approvedBy: null, approvedAt: null });
+  await audit(ctx, { module: "finance", action: "payable.revoke", entityType: "title", entityId: id, summary: `Autorização da obrigação nº ${title.number} revogada`, reason });
+  return updated;
+}
+
+export interface TitleAttachment {
+  fileId: string;
+  name: string;
+  mime?: string | null;
+  sizeBytes?: number | null;
+  kind?: string | null;
+  settlementId?: string | null;
+  uploadedAt: string;
+  uploadedBy: string;
+  uploadedByName?: string | null;
+}
+
+/** Registra anexo/comprovante (arquivo já salvo em `files`) no título. */
+export async function addTitleAttachment(ctx: Ctx, titleId: string, att: Omit<TitleAttachment, "uploadedAt" | "uploadedBy" | "uploadedByName">) {
+  const title = await ctx.store.getOrThrow("titles", titleId);
+  assert(title.companyId === ctx.companyId, "Título de outra empresa.");
+  const list: TitleAttachment[] = Array.isArray(title.attachments) ? title.attachments : [];
+  if (list.some((a) => a.fileId === att.fileId)) return title;
+  const next = [...list, { ...att, uploadedAt: new Date().toISOString(), uploadedBy: ctx.user.id, uploadedByName: ctx.user.name }];
+  const updated = await ctx.store.update("titles", titleId, { attachments: next });
+  await audit(ctx, { module: "finance", action: "title.attach", entityType: "title", entityId: titleId, summary: `Anexo "${att.name}" adicionado${att.settlementId ? " (comprovante de baixa)" : ""}`, related: att.settlementId ? [`settlement:${att.settlementId}`] : [] });
+  return updated;
+}
+
+// ───────────────────────────── Contas financeiras
+
+export type AccountKind = "cash" | "bank" | "wallet";
+export const ACCOUNT_KIND_LABEL: Record<string, string> = { cash: "Caixa", bank: "Banco", wallet: "Carteira digital" };
+
+export interface AccountInput {
+  name: string;
+  kind: AccountKind;
+  branchId?: string | null;
+  bankCode?: string | null;
+  agency?: string | null;
+  accountNumber?: string | null;
+  pixKey?: string | null;
+  initialBalance: number;
+  initialBalanceDate: string;
+  active?: boolean;
+}
+
+export async function saveAccount(ctx: Ctx, id: string | null, input: AccountInput, reason?: string | null) {
+  assert(input.name?.trim(), "Informe o nome da conta.");
+  assert(["cash", "bank", "wallet"].includes(input.kind), "Tipo de conta inválido.");
+  assert(isDate(input.initialBalanceDate), "Informe a data de referência do saldo inicial.");
+  assert(Number.isInteger(input.initialBalance), "Saldo inicial inválido.");
+  if (input.branchId) await assertOwned(ctx, "branches", input.branchId, "Filial");
+  const data = {
+    name: input.name.trim(), kind: input.kind, branchId: input.branchId || null, bankCode: input.bankCode?.trim() || null, agency: input.agency?.trim() || null,
+    accountNumber: input.accountNumber?.trim() || null, pixKey: input.pixKey?.trim() || null, active: input.active !== false,
+  };
+  if (!id) {
+    const acc = await ctx.store.create("financial_accounts", { ...data, companyId: ctx.companyId, createdBy: ctx.user.id, initialBalance: input.initialBalance, initialBalanceDate: input.initialBalanceDate, balance: input.initialBalance, seq: 0 });
+    await audit(ctx, { module: "finance", action: "account.create", entityType: "financial_account", entityId: acc.id, summary: `Conta "${acc.name}" criada (saldo inicial ${formatMoney(input.initialBalance)} em ${formatDate(input.initialBalanceDate)})` });
+    return acc;
+  }
+  const acc = await ctx.store.getOrThrow("financial_accounts", id);
+  assert(acc.companyId === ctx.companyId, "Conta de outra empresa.");
+  if (data.active === false && acc.active !== false) assert(acc.kind !== "cash" || !(await isCashAccountInUse(ctx, acc)), "Conta de caixa em uso por sessão aberta.");
+  const d = diff(acc, data);
+  if (Object.keys(d.after).length) {
+    await ctx.store.update("financial_accounts", id, data);
+    await audit(ctx, { module: "finance", action: "account.update", entityType: "financial_account", entityId: id, summary: `Conta "${data.name}" alterada`, before: d.before, after: d.after });
+  }
+  if (input.initialBalance !== (acc.initialBalance ?? 0) || input.initialBalanceDate !== acc.initialBalanceDate) {
+    await changeInitialBalance(ctx, id, { initialBalance: input.initialBalance, initialBalanceDate: input.initialBalanceDate, reason: reason ?? "" });
+  }
+  return ctx.store.getOrThrow("financial_accounts", id);
+}
+
+async function isCashAccountInUse(ctx: Ctx, acc: Doc) {
+  if (!acc.branchId) return false;
+  const open = await ctx.store.list("cash_sessions", { filters: [["eq", "branchId", acc.branchId], ["eq", "status", ["open", "reopened"]]], limit: 1, total: false });
+  return open.items.length > 0;
+}
+
+/**
+ * Altera o saldo inicial (e/ou sua data) de forma segura:
+ *  - grava um marcador no extrato interno (kind "initial", valor 0) com a MESMA sequência por conta usada
+ *    pelos lançamentos — alterações concorrentes com novos lançamentos geram conflito e são reaplicadas;
+ *  - saldo atual = novo saldo inicial + Σ lançamentos (diferença aplicada atomicamente na transação);
+ *  - "saldo após" de cada lançamento é recalculado (tarefa durável, idempotente).
+ * A data de referência não pode ser posterior ao primeiro lançamento da conta.
+ */
+export async function changeInitialBalance(ctx: Ctx, accountId: string, input: { initialBalance: number; initialBalanceDate: string; reason: string }) {
+  assert(input.reason?.trim(), "Informe o motivo da alteração do saldo inicial.");
+  assert(isDate(input.initialBalanceDate), "Data de referência inválida.");
+  const first = await ctx.store.list("account_entries", { filters: [["eq", "accountId", accountId], ["ne", "kind", "initial"]], orderBy: [{ field: "date", dir: "asc" }], limit: 1, total: false });
+  if (first.items[0]) assert(input.initialBalanceDate <= first.items[0].date, `A data do saldo inicial deve ser anterior ou igual ao primeiro lançamento (${formatDate(first.items[0].date)}).`);
+  const res = await retryOnConflict(() =>
+    ctx.store.transaction(async (t) => {
+      const acc = await ctx.store.getOrThrow("financial_accounts", accountId);
+      assert(acc.companyId === ctx.companyId, "Conta de outra empresa.");
+      const before = { initialBalance: acc.initialBalance ?? 0, initialBalanceDate: acc.initialBalanceDate };
+      if (before.initialBalance === input.initialBalance && before.initialBalanceDate === input.initialBalanceDate) return { acc, changed: false, before };
+      const delta = input.initialBalance - before.initialBalance;
+      const seq = (acc.seq ?? 0) + 1;
+      const balance = (acc.balance ?? 0) + delta;
+      const key = `initial:${accountId}:${seq}`;
+      await t.create(
+        "account_entries",
+        {
+          companyId: ctx.companyId, branchId: acc.branchId ?? ctx.branchId, createdBy: ctx.user.id, accountId, seq, date: today(), amount: 0, balanceAfter: balance, kind: "initial",
+          description: `Saldo inicial alterado: ${formatMoney(before.initialBalance)} em ${formatDate(before.initialBalanceDate)} → ${formatMoney(input.initialBalance)} em ${formatDate(input.initialBalanceDate)} (${input.reason.trim()})`,
+          reconciled: false, originType: "initial_balance", originId: accountId, idemKey: key,
+        },
+        detId("entry", key),
+      );
+      await t.update("financial_accounts", accountId, { initialBalance: input.initialBalance, initialBalanceDate: input.initialBalanceDate, balance, seq });
+      return { acc: { ...acc, balance, seq }, changed: true, before };
+    }),
+  );
+  if (!res.changed) return res.acc;
+  await audit(ctx, {
+    module: "finance", action: "account.initial_balance", entityType: "financial_account", entityId: accountId,
+    summary: `Saldo inicial alterado para ${formatMoney(input.initialBalance)} em ${formatDate(input.initialBalanceDate)}`, before: res.before,
+    after: { initialBalance: input.initialBalance, initialBalanceDate: input.initialBalanceDate }, reason: input.reason,
+  });
+  await enqueue(ctx.store, { type: "finance.account.rebuild", payload: { accountId }, dedupeKey: `acc-rebuild:${accountId}:${res.acc.seq}`, companyId: ctx.companyId, createdBy: ctx.user.id });
+  await rebuildRunningBalances(ctx.store, accountId).catch((e) => console.error("[finance] recálculo será concluído pela tarefa", e));
+  return ctx.store.getOrThrow("financial_accounts", accountId);
+}
+
+/**
+ * Recalcula o "saldo após" de cada lançamento (cache de exibição) = saldo inicial + soma acumulada por sequência.
+ * Idempotente; não altera valores nem o saldo da conta. Retorna divergência se o saldo da conta não fechar.
+ */
+export async function rebuildRunningBalances(store: Store, accountId: string) {
+  const acc = await store.getOrThrow("financial_accounts", accountId);
+  const entries = await listAll(store, "account_entries", { filters: [["eq", "accountId", accountId]], orderBy: [{ field: "seq", dir: "asc" }] });
+  let running = acc.initialBalance ?? 0;
+  let fixed = 0;
+  for (const e of entries) {
+    if (e.seq > (acc.seq ?? 0)) break; // lançamentos posteriores à leitura já nasceram corretos
+    running += e.amount;
+    if (e.balanceAfter !== running) {
+      await store.update("account_entries", e.id, { balanceAfter: running });
+      fixed++;
+    }
+  }
+  const lastSeqRead = entries.filter((e) => e.seq <= (acc.seq ?? 0)).length;
+  return { fixed, entries: lastSeqRead, expected: running, accountBalance: acc.balance ?? 0, divergence: (acc.balance ?? 0) - running };
+}
+
+// ───────────────────────────── Lançamentos avulsos (tarifa, ajuste) e estorno
+
+export interface AccountEntryInput {
+  accountId: string;
+  date: string;
+  /** + entrada / − saída */
+  amount: number;
+  kind: "fee" | "adjustment";
+  description: string;
+  categoryId?: string | null;
+  costCenterId?: string | null;
+  idemKey: string;
+}
+
+export async function createAccountEntry(ctx: Ctx, input: AccountEntryInput) {
+  const branchId = requireBranch(ctx);
+  assert(isDate(input.date), "Data inválida.");
+  assert(input.date <= today(), "Lançamento não pode ter data futura.");
+  assert(input.amount !== 0, "Informe o valor.");
+  assert(input.description?.trim(), "Informe a descrição.");
+  if (input.kind === "fee") assert(input.amount < 0, "Tarifa é sempre uma saída.");
+  const acc = await assertOwned(ctx, "financial_accounts", input.accountId, "Conta");
+  await assertOwned(ctx, "fin_categories", input.categoryId, "Categoria");
+  await assertOwned(ctx, "cost_centers", input.costCenterId, "Centro de custo");
+  const entry = await retryOnConflict(() =>
+    ctx.store.transaction((t) =>
+      postEntry(ctx, t, {
+        accountId: input.accountId, date: input.date, amount: input.amount, kind: input.kind, description: input.description.trim(), categoryId: input.categoryId || null,
+        costCenterId: input.costCenterId || null, originType: "manual", idemKey: `manual-entry:${input.idemKey}`, branchId: acc?.branchId ?? branchId,
+      }),
+    ),
+  );
+  await audit(ctx, { module: "finance", action: "entry.create", entityType: "account_entry", entityId: entry.id, summary: `Lançamento avulso: ${input.description} (${formatMoney(input.amount)})`, after: { amount: input.amount, kind: input.kind }, related: [`financial_account:${input.accountId}`] });
+  return entry;
+}
+
+/** Estorna lançamento avulso (tarifa/ajuste) com lançamento inverso vinculado. Baixas usam reverseSettlement. */
+export async function reverseEntry(ctx: Ctx, entryId: string, reason: string) {
+  assert(reason?.trim(), "Informe o motivo do estorno.");
+  const e = await ctx.store.getOrThrow("account_entries", entryId);
+  assert(e.companyId === ctx.companyId, "Lançamento de outra empresa.");
+  if (e.reversedBy) return ctx.store.getOrThrow("account_entries", e.reversedBy);
+  assert(["fee", "adjustment"].includes(e.kind) && !e.settlementId, "Somente lançamentos avulsos podem ser estornados aqui. Baixas são estornadas no título.");
+  assert(!e.reconciled, "Lançamento conciliado: desfaça a conciliação antes de estornar.");
+  const rev = await retryOnConflict(() =>
+    ctx.store.transaction(async (t) => {
+      const r = await postEntry(ctx, t, {
+        accountId: e.accountId, date: today(), amount: -e.amount, kind: "reversal", description: `Estorno: ${e.description}`, reversalOf: e.id, categoryId: e.categoryId,
+        costCenterId: e.costCenterId, originType: "entry_reversal", originId: e.id, idemKey: `reverse-entry:${e.id}`, branchId: e.branchId,
+      });
+      await t.update("account_entries", e.id, { reversedBy: r.id });
+      return r;
+    }),
+  );
+  await audit(ctx, { module: "finance", action: "entry.reverse", entityType: "account_entry", entityId: e.id, summary: `Estorno do lançamento "${e.description}" (${formatMoney(-e.amount)})`, reason, related: [`financial_account:${e.accountId}`] });
+  return rev;
+}
+
+// ───────────────────────────── Cadastros auxiliares
+
+export const METHOD_KINDS: Array<{ value: string; label: string }> = [
+  { value: "cash", label: "Dinheiro" },
+  { value: "pix", label: "Pix" },
+  { value: "debit", label: "Cartão de débito" },
+  { value: "credit", label: "Cartão de crédito" },
+  { value: "crediario", label: "Crediário próprio" },
+  { value: "boleto", label: "Boleto" },
+  { value: "store_credit", label: "Vale-crédito" },
+  { value: "voucher", label: "Voucher/benefício" },
+  { value: "transfer", label: "Transferência/TED" },
+  { value: "other", label: "Outro" },
+];
+
+export interface PaymentMethodInput {
+  name: string;
+  kind: string;
+  accountId?: string | null;
+  feeBps: number;
+  settlementDays: number;
+  allowsChange: boolean;
+  requiresCustomer: boolean;
+  availablePdv: boolean;
+  maxInstallments: number;
+  sortOrder?: number;
+  active?: boolean;
+}
+
+/** Meios que lançam direto numa conta precisam da conta de destino. */
+const DIRECT_KINDS = ["pix", "other", "voucher", "transfer"];
+
+export async function savePaymentMethod(ctx: Ctx, id: string | null, input: PaymentMethodInput) {
+  assert(input.name?.trim(), "Informe o nome do meio de pagamento.");
+  assert(METHOD_KINDS.some((k) => k.value === input.kind), "Tipo de meio inválido.");
+  assert(input.feeBps >= 0 && input.feeBps <= 10000, "Taxa deve estar entre 0% e 100%.");
+  assert(input.settlementDays >= 0 && input.settlementDays <= 400, "Prazo de liquidação inválido.");
+  assert(input.maxInstallments >= 1 && input.maxInstallments <= 48, "Parcelas máximas entre 1 e 48.");
+  if (DIRECT_KINDS.includes(input.kind)) assert(input.accountId, "Informe a conta de destino (o valor é lançado direto nela).");
+  if (input.allowsChange) assert(input.kind === "cash", "Somente dinheiro admite troco.");
+  if (["crediario", "boleto"].includes(input.kind)) assert(input.requiresCustomer, "Crediário e boleto exigem cliente identificado.");
+  await assertOwned(ctx, "financial_accounts", input.accountId, "Conta de destino");
+  const data = {
+    name: input.name.trim(), kind: input.kind, accountId: input.accountId || null, feeBps: input.feeBps, settlementDays: input.settlementDays, allowsChange: input.allowsChange,
+    requiresCustomer: input.requiresCustomer, availablePdv: input.availablePdv, maxInstallments: input.kind === "credit" || input.kind === "crediario" ? input.maxInstallments : 1, active: input.active !== false,
+    sortOrder: input.sortOrder ?? 99,
+  };
+  return saveSimple(ctx, "payment_methods", id, data, "Meio de pagamento");
+}
+
+export interface PaymentTermInput {
+  name: string;
+  installments: number;
+  firstDueDays: number;
+  intervalDays: number;
+  interestBps: number;
+  kind: "both" | "sale" | "purchase";
+  active?: boolean;
+}
+
+export async function savePaymentTerm(ctx: Ctx, id: string | null, input: PaymentTermInput) {
+  assert(input.name?.trim(), "Informe o nome da condição.");
+  assert(input.installments >= 1 && input.installments <= 60, "Parcelas entre 1 e 60.");
+  assert(input.firstDueDays >= 0 && input.firstDueDays <= 365, "1º vencimento entre 0 e 365 dias.");
+  assert(input.intervalDays >= 1 && input.intervalDays <= 365, "Intervalo entre 1 e 365 dias.");
+  assert(input.interestBps >= 0 && input.interestBps <= 10000, "Juros inválidos.");
+  return saveSimple(ctx, "payment_terms", id, { name: input.name.trim(), installments: input.installments, firstDueDays: input.firstDueDays, intervalDays: input.intervalDays, interestBps: input.interestBps, kind: input.kind, active: input.active !== false }, "Condição de parcelamento");
+}
+
+export const DRE_GROUPS = ["Receita bruta", "Deduções", "CMV", "Despesas operacionais", "Despesas com pessoal", "Despesas administrativas", "Despesas financeiras", "Receitas financeiras", "Outras receitas", "Outras despesas", "Investimentos"];
+
+export async function saveFinCategory(ctx: Ctx, id: string | null, input: { name: string; type: "revenue" | "expense"; parentId?: string | null; dreGroup?: string | null; active?: boolean }) {
+  assert(input.name?.trim(), "Informe o nome da categoria.");
+  assert(["revenue", "expense"].includes(input.type), "Tipo inválido.");
+  if (input.parentId) {
+    assert(input.parentId !== id, "A categoria não pode ser pai de si mesma.");
+    const parent = await assertOwned(ctx, "fin_categories", input.parentId, "Categoria pai");
+    assert(parent!.type === input.type, "A categoria pai deve ser do mesmo tipo.");
+  }
+  if (id && input.type) {
+    const cur = await ctx.store.get("fin_categories", id);
+    if (cur && cur.type !== input.type) {
+      const used = await ctx.store.list("titles", { filters: [["eq", "categoryId", id]], limit: 1, total: false });
+      assert(!used.items.length, "Categoria já utilizada em títulos: o tipo (receita/despesa) não pode ser alterado.");
+    }
+  }
+  return saveSimple(ctx, "fin_categories", id, { name: input.name.trim(), type: input.type, parentId: input.parentId || null, dreGroup: input.dreGroup || null, active: input.active !== false }, "Categoria financeira");
+}
+
+export async function saveCostCenter(ctx: Ctx, id: string | null, input: { name: string; code?: string | null; active?: boolean }) {
+  assert(input.name?.trim(), "Informe o nome do centro de custo.");
+  if (input.code?.trim()) {
+    const dup = await ctx.store.list("cost_centers", { filters: [["eq", "companyId", ctx.companyId], ["eq", "code", input.code.trim()]], limit: 2, total: false });
+    assert(!dup.items.some((d) => d.id !== id), `Código ${input.code} já usado em outro centro de custo.`);
+  }
+  return saveSimple(ctx, "cost_centers", id, { name: input.name.trim(), code: input.code?.trim() || null, active: input.active !== false }, "Centro de custo");
+}
+
+async function saveSimple(ctx: Ctx, collection: string, id: string | null, data: Record<string, any>, label: string) {
+  if (!id) {
+    const doc = await ctx.store.create(collection, { ...data, companyId: ctx.companyId, createdBy: ctx.user.id });
+    await audit(ctx, { module: "finance", action: `${collection}.create`, entityType: collection, entityId: doc.id, summary: `${label} "${data.name}" criado(a)`, after: data });
+    return doc;
+  }
+  const cur = await ctx.store.getOrThrow(collection, id);
+  assert(cur.companyId === ctx.companyId, "Registro de outra empresa.");
+  const d = diff(cur, data);
+  if (!Object.keys(d.after).length) return cur;
+  const doc = await ctx.store.update(collection, id, data);
+  await audit(ctx, { module: "finance", action: `${collection}.update`, entityType: collection, entityId: id, summary: `${label} "${data.name}" alterado(a)`, before: d.before, after: d.after });
+  return doc;
+}
+
+const ACTIVE_COLLECTIONS = ["financial_accounts", "payment_methods", "payment_terms", "fin_categories", "cost_centers"] as const;
+
+export async function setRecordActive(ctx: Ctx, collection: (typeof ACTIVE_COLLECTIONS)[number], id: string, active: boolean) {
+  assert(ACTIVE_COLLECTIONS.includes(collection), "Cadastro inválido.");
+  const cur = await ctx.store.getOrThrow(collection, id);
+  assert(cur.companyId === ctx.companyId, "Registro de outra empresa.");
+  if (cur.active === active) return cur;
+  if (collection === "financial_accounts" && !active) assert(cur.kind !== "cash" || !(await isCashAccountInUse(ctx, cur)), "Conta de caixa em uso por sessão aberta.");
+  const doc = await ctx.store.update(collection, id, { active });
+  await audit(ctx, { module: "finance", action: `${collection}.${active ? "activate" : "deactivate"}`, entityType: collection, entityId: id, summary: `"${cur.name}" ${active ? "reativado(a)" : "inativado(a)"}` });
+  return doc;
+}
+
+// ───────────────────────────── Recebíveis de cartão: taxa prevista
+
+/**
+ * Taxa prevista por parcela do recebível = taxa da venda (sale_payments.feeAmount) rateada pelas parcelas
+ * (maior resto); sem pagamento de venda vinculado, aplica a taxa do meio sobre o valor.
+ */
+export async function cardFeeByInstallment(store: Store, titles: Doc[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ids = titles.map((t) => t.id);
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const pays = await listAll(store, "sale_payments", { filters: [["eq", "titleId", chunk]] });
+    const insts = await listAll(store, "installments", { filters: [["eq", "titleId", chunk]], orderBy: [{ field: "number", dir: "asc" }] });
+    const byTitle = new Map<string, Doc[]>();
+    for (const x of insts) byTitle.set(x.titleId, [...(byTitle.get(x.titleId) ?? []), x]);
+    for (const t of titles.filter((x) => chunk.includes(x.id))) {
+      const list = byTitle.get(t.id) ?? [];
+      const pay = pays.find((p) => p.titleId === t.id);
+      const fee = pay?.feeAmount ?? 0;
+      const parts = allocate(fee, list.map((x) => x.amount));
+      list.forEach((x, k) => out.set(x.id, parts[k] ?? 0));
+    }
+  }
+  return out;
+}
+
+/** Localiza a parcela a receber de um evento de cobrança: nosso número cadastrado ou "seu número" = nºtítulo/nºparcela. */
+export async function findInstallmentByCollectionRef(store: Store, companyId: string, ref: { ourNumber?: string | null; yourNumber?: string | null }) {
+  if (ref.ourNumber) {
+    const variants = [ref.ourNumber, ref.ourNumber.replace(/^0+/, "")].filter(Boolean);
+    const hit = await store.list("installments", { filters: [["eq", "companyId", companyId], ["eq", "kind", "receivable"], ["eq", "ourNumber", variants]], limit: 1, total: false });
+    if (hit.items[0]) return hit.items[0];
+  }
+  const m = (ref.yourNumber ?? "").trim().match(/^0*(\d+)\s*[/\-.]\s*0*(\d+)$/);
+  if (m) {
+    const title = await store.list("titles", { filters: [["eq", "companyId", companyId], ["eq", "kind", "receivable"], ["eq", "number", Number(m[1])]], limit: 1, total: false });
+    if (title.items[0]) {
+      const inst = await store.list("installments", { filters: [["eq", "titleId", title.items[0].id], ["eq", "number", Number(m[2])]], limit: 1, total: false });
+      if (inst.items[0]) return inst.items[0];
+    }
+  }
+  return null;
+}
+
+/** "Seu número" padrão para boletos do ERP: nº do título/nº da parcela (ex.: 123/2). */
+export const collectionYourNumber = (titleNumber: number, instNumber: number) => `${titleNumber}/${instNumber}`;
+
+// ───────────────────────────── Renegociação de crediário (Tela 22 — ação "Negociar")
+
+export interface RenegotiateInput {
+  titleId: string;
+  installmentIds: string[];
+  /** encargos incorporados (juros/multa negociados) */
+  charges: number;
+  discount: number;
+  installments: InstallmentInput[];
+  reason: string;
+  idemKey: string;
+}
+
+/**
+ * Renegocia parcelas em aberto de um título a receber: as parcelas escolhidas saem do saldo (status "renegociada",
+ * sem movimento em conta) e um NOVO título (origem "renegotiation", vinculado ao original) recebe o valor
+ * acordado = Σ saldos + encargos − desconto, no novo cronograma. Tudo numa única transação.
+ */
+export async function renegotiate(ctx: Ctx, input: RenegotiateInput) {
+  const branchId = requireBranch(ctx);
+  assert(input.reason?.trim(), "Informe o motivo/condições da renegociação.");
+  assert(input.installmentIds.length > 0, "Selecione as parcelas a renegociar.");
+  assert(input.charges >= 0 && input.discount >= 0, "Encargos e desconto não podem ser negativos.");
+  const title = await ctx.store.getOrThrow("titles", input.titleId);
+  assert(title.companyId === ctx.companyId && title.kind === "receivable", "Somente títulos a receber podem ser renegociados.");
+  const newId = titleId(`reneg:${input.idemKey}`);
+  const existing = await ctx.store.get("titles", newId);
+  if (existing) return existing;
+  const insts = await Promise.all(input.installmentIds.map((id) => ctx.store.getOrThrow("installments", id)));
+  for (const i of insts) {
+    assert(i.titleId === title.id, "Parcela de outro título.");
+    assert(["open", "partial"].includes(i.status), `Parcela ${i.number} não está em aberto.`);
+  }
+  const base = insts.reduce((a, i) => a + i.balance, 0);
+  const total = base + input.charges - input.discount;
+  assert(total > 0, "Valor renegociado deve ser positivo.");
+  const sum = input.installments.reduce((a, i) => a + i.amount, 0);
+  assert(sum === total, `As novas parcelas somam ${formatMoney(sum)}, mas o valor renegociado é ${formatMoney(total)}.`);
+  for (const i of input.installments) assert(isDate(i.dueDate) && i.amount > 0, "Novas parcelas precisam de vencimento e valor.");
+  const created = await retryOnConflict(() =>
+    ctx.store.transaction(async (t) => {
+      for (const i of insts) {
+        const cur = await ctx.store.getOrThrow("installments", i.id);
+        assert(cur.balance === i.balance && ["open", "partial"].includes(cur.status), "A parcela foi alterada por outra operação. Atualize e tente novamente.");
+        await t.update("installments", i.id, { status: "renegotiated", balance: 0, seq: cur.seq + 1 });
+      }
+      await t.increment("titles", title.id, "balance", -base, { min: 0 });
+      return createTitle(
+        ctx,
+        {
+          kind: "receivable", partyType: title.partyType, partyId: title.partyId, partyName: title.partyName, description: `Renegociação do título nº ${title.number} — ${title.description}`,
+          documentNumber: title.documentNumber, originType: "renegotiation", originId: title.id, issueDate: today(), competenceDate: title.competenceDate, categoryId: title.categoryId,
+          costCenterId: title.costCenterId, installments: input.installments.map((i) => ({ ...i, methodKind: insts[0].methodKind ?? null })),
+          notes: `Parcelas renegociadas: ${insts.map((i) => i.number).join(", ")} (saldo ${formatMoney(base)} + encargos ${formatMoney(input.charges)} − desconto ${formatMoney(input.discount)}). ${input.reason.trim()}`,
+          idemKey: `reneg:${input.idemKey}`, branchId: title.branchId ?? branchId,
+        },
+        t,
+      );
+    }),
+  );
+  await refreshTitleStatus(ctx.store, title.id);
+  for (const i of insts) await resolveOccurrence(ctx.store, `overdue:${i.id}`);
+  await audit(ctx, { module: "finance", action: "title.renegotiate", entityType: "title", entityId: title.id, summary: `Parcelas ${insts.map((i) => i.number).join(", ")} renegociadas → título nº ${created.number} (${formatMoney(total)} em ${input.installments.length} parcela(s))`, reason: input.reason, related: [`title:${created.id}`, ...insts.map((i) => `installment:${i.id}`)] });
+  await audit(ctx, { module: "finance", action: "title.create", entityType: "title", entityId: created.id, summary: `Título nº ${created.number} criado por renegociação do título nº ${title.number}`, related: [`title:${title.id}`] });
+  return created;
+}
+
+// ───────────────────────────── Aviso de cobrança por e-mail (Tela 22 — "Enviar cobrança")
+
+/** Envia aviso de cobrança ao e-mail do cliente pelo canal configurado; registra o resultado real (entregue ou não). */
+export async function sendCollectionNotice(ctx: Ctx, installmentId: string, opts: { to?: string | null; message?: string | null } = {}) {
+  const inst = await ctx.store.getOrThrow("installments", installmentId);
+  assert(inst.companyId === ctx.companyId && inst.kind === "receivable", "Parcela inválida.");
+  assert(["open", "partial"].includes(inst.status), "A parcela não está em aberto.");
+  const title = await ctx.store.getOrThrow("titles", inst.titleId);
+  const customer = title.partyType === "customer" && title.partyId ? await ctx.store.get("customers", title.partyId) : null;
+  const to = (opts.to ?? customer?.email ?? "").trim();
+  assert(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to), "Cliente sem e-mail válido. Informe o destinatário.");
+  const company = await ctx.store.getOrThrow("companies", ctx.companyId);
+  const late = await lateChargeParams(ctx.store, ctx.companyId, title.branchId);
+  const ch = suggestLateCharges(inst.dueDate, today(), inst.balance, late);
+  const updated = inst.balance + ch.fine + ch.interest;
+  const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+  const html = `<p>Olá, ${esc(title.partyName ?? "cliente")}.</p>
+<p>Consta em aberto a parcela <b>${inst.number}/${title.installmentsCount}</b> de <b>${esc(title.description)}</b>${title.documentNumber ? ` (doc. ${esc(title.documentNumber)})` : ""}, com vencimento em <b>${formatDate(inst.dueDate)}</b>.</p>
+<p>Saldo: <b>${formatMoney(inst.balance)}</b>${ch.daysLate > 0 ? ` — ${ch.daysLate} dia(s) em atraso; valor atualizado com multa e juros: <b>${formatMoney(updated)}</b>` : ""}.</p>
+${opts.message ? `<p>${esc(opts.message)}</p>` : ""}
+<p>Em caso de dúvida ou se o pagamento já foi feito, responda este e-mail ou procure a loja.</p>
+<p>${esc(company.tradeName || company.name)}</p>`;
+  const { sendEmail } = await import("@/lib/core/email");
+  const res = await sendEmail(ctx.companyId, { to, subject: `Aviso de cobrança — parcela ${inst.number}/${title.installmentsCount} — ${company.tradeName || company.name}`, html });
+  await audit(ctx, {
+    module: "finance", action: "title.collection_notice", entityType: "title", entityId: title.id, result: res.delivered ? "success" : "failure",
+    summary: res.delivered ? `Aviso de cobrança da parcela ${inst.number} enviado para ${to} (${res.channel})` : `Aviso de cobrança da parcela ${inst.number} NÃO enviado: ${res.message ?? res.channel}`,
+    related: [`installment:${inst.id}`],
+  });
+  return res;
 }

@@ -1,0 +1,195 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Pencil } from "lucide-react";
+import { requireSession } from "@/lib/server/session";
+import { listAll } from "@/lib/db";
+import { PageHeader } from "@/components/ui/page-header";
+import { Card, DefinitionList, Stat } from "@/components/ui/card";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { LinkButton } from "@/components/ui/button";
+import { LinkTabs } from "@/components/ui/tabs";
+import { ActionButton } from "@/components/ui/action-form";
+import { Timeline } from "@/components/ui/timeline";
+import { EmptyState } from "@/components/ui/empty";
+import { formatDoc, formatPhone } from "@/lib/core/text";
+import { formatDateTime } from "@/lib/dates";
+import { can } from "@/lib/permissions";
+import { TIMEZONES, UFS, branchSummary } from "@/domain/companies";
+import { setBranchStatusAction } from "../../actions";
+import { BranchForm } from "../../forms";
+
+export const metadata = { title: "Filial" };
+
+export default async function Page({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
+  const s = await requireSession("admin");
+  const { id } = await params;
+  const { tab = "cadastro" } = await searchParams;
+  const b = await s.ctx.store.get("branches", id);
+  if (!b || !s.companies.some((c) => c.id === b.companyId)) notFound();
+  const company = await s.ctx.store.getOrThrow("companies", b.companyId);
+  const sum = await branchSummary(s.ctx.store, b);
+  const tables = await listAll(s.ctx.store, "price_tables", { filters: [["eq", "companyId", b.companyId]] });
+  const fiscal = await listAll(s.ctx.store, "fiscal_configs", { filters: [["eq", "branchId", id]] });
+  const base = `/administracao/empresas/filiais/${id}`;
+  const edit = can(s.user, "admin", "edit");
+  const a = b.address ?? {};
+  const wh = sum.warehouses.find((w) => w.id === b.defaultWarehouseId);
+  const table = tables.find((t) => t.id === b.defaultPriceTableId);
+  return (
+    <>
+      <PageHeader
+        title={b.name}
+        crumbs={[{ label: "Administração" }, { label: "Empresas", href: "/administracao/empresas" }, { label: company.tradeName || company.name, href: `/administracao/empresas/${company.id}?tab=filiais` }, { label: b.name }]}
+        badges={
+          <>
+            <StatusBadge kind="generic" status={b.status ?? "active"} />
+            {id === s.ctx.branchId && <Badge tone="brand">Filial em uso</Badge>}
+          </>
+        }
+        description={[`Código ${b.code}`, b.cnpj && formatDoc(b.cnpj)].filter(Boolean).join(" · ")}
+        actions={
+          <>
+            {edit && (
+              <LinkButton href={`${base}?tab=editar`} variant="primary">
+                <Pencil className="size-4" /> Editar
+              </LinkButton>
+            )}
+            {edit && (b.status ?? "active") === "active" && id !== s.ctx.branchId && <ActionButton action={setBranchStatusAction.bind(null, id, "inactive")} label="Inativar" askReason="Motivo da inativação da filial:" />}
+            {edit && b.status === "inactive" && <ActionButton action={setBranchStatusAction.bind(null, id, "active")} label="Reativar" />}
+          </>
+        }
+      />
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Depósitos" value={sum.warehouses.length} href={`${base}?tab=depositos`} />
+        <Stat label="Terminais" value={sum.terminals.length} hint={`${sum.terminals.filter((t) => t.status !== "inactive").length} ativos`} href={`/administracao/terminais?branch=${id}`} />
+        <Stat label="Caixas abertos agora" value={sum.openSessions.length} tone={sum.openSessions.length ? "warn" : "default"} href={`${base}?tab=terminais`} />
+        <Stat label="Usuários com acesso" value={sum.users.length} href={`${base}?tab=usuarios`} />
+      </div>
+      <LinkTabs
+        basePath={base}
+        active={tab}
+        tabs={[
+          { key: "cadastro", label: "Cadastro" },
+          ...(edit ? [{ key: "editar", label: "Editar" }] : []),
+          { key: "depositos", label: "Depósitos", count: sum.warehouses.length },
+          { key: "terminais", label: "Terminais", count: sum.terminals.length },
+          { key: "usuarios", label: "Usuários", count: sum.users.length },
+          { key: "historico", label: "Histórico" },
+        ]}
+      />
+      {tab === "cadastro" && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card title="Identificação e contatos">
+            <DefinitionList
+              items={[
+                { label: "Código", value: b.code },
+                { label: "Nome", value: b.name },
+                { label: "CNPJ", value: b.cnpj ? formatDoc(b.cnpj) : "—" },
+                { label: "Inscrição estadual", value: b.ie },
+                { label: "Inscrição municipal", value: b.im },
+                { label: "Telefone", value: formatPhone(b.phone) || "—" },
+                { label: "E-mail", value: b.email },
+                { label: "Endereço", value: a.street ? `${a.street}, ${a.number || "s/n"} — ${a.district ?? ""}, ${a.cityName ?? b.cityName ?? ""}/${a.uf ?? b.uf ?? ""} ${a.zip ?? ""}` : `${b.cityName ?? "—"}/${b.uf ?? ""}` },
+                { label: "Município (IBGE)", value: b.cityCode },
+              ]}
+            />
+          </Card>
+          <Card title="Parametrização da unidade" description="Alimenta o PDV, a precificação e os recortes de período.">
+            <DefinitionList
+              cols={1}
+              items={[
+                { label: "Tabela de preço padrão", value: table?.name ?? "Tabela padrão da empresa" },
+                { label: "Depósito padrão (vendas)", value: wh?.name ?? "—" },
+                { label: "Fuso horário", value: b.timezone ?? "America/Sao_Paulo" },
+                { label: "Situação fiscal", value: fiscal.length ? <Link className="text-brand-700 hover:underline" href="/fiscal/configuracoes">{fiscal[0].provider === "simulated" ? "Configurada (simulação)" : `Configurada (${fiscal[0].provider})`}</Link> : <Link className="text-amber-700 hover:underline" href="/fiscal/configuracoes">Pendente</Link> },
+                { label: "Cadastrada em", value: formatDateTime(b.createdAt) },
+              ]}
+            />
+            <p className="mt-3 text-xs text-slate-500">Parâmetros comerciais por filial (venda sem saldo, pré-venda, alertas): <Link className="text-brand-700 hover:underline" href={`/administracao/parametros?escopo=${id}`}>Parâmetros da filial</Link>.</p>
+          </Card>
+        </div>
+      )}
+      {tab === "editar" && edit && (
+        <BranchForm
+          branch={b}
+          companyId={b.companyId}
+          warehouses={sum.warehouses.filter((w) => w.status !== "inactive").map((w) => ({ value: w.id, label: `${w.name} (${w.kind === "damaged" ? "avarias" : "disponível"})` }))}
+          priceTables={tables.filter((t) => t.active !== false).map((t) => ({ value: t.id, label: t.name }))}
+          timezones={TIMEZONES}
+          ufs={UFS}
+        />
+      )}
+      {tab === "depositos" && (
+        <Card bodyClass="p-0">
+          <table className="table-base w-full text-sm">
+            <thead>
+              <tr><th>Código</th><th>Depósito</th><th>Tipo</th><th>Padrão</th><th>Situação</th></tr>
+            </thead>
+            <tbody>
+              {sum.warehouses.map((w) => (
+                <tr key={w.id}>
+                  <td>{w.code}</td>
+                  <td>{w.name}</td>
+                  <td>{w.kind === "damaged" ? "Avarias" : w.kind === "available" ? "Disponível para venda" : w.kind}</td>
+                  <td>{w.id === b.defaultWarehouseId ? <Badge tone="brand">Padrão</Badge> : "—"}</td>
+                  <td><StatusBadge kind="generic" status={w.status ?? "active"} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+      {tab === "terminais" && (
+        <Card bodyClass="p-0" actions={can(s.user, "admin", "create") && <LinkButton size="sm" href="/administracao/terminais/novo">Novo terminal</LinkButton>} title="Terminais do PDV">
+          {sum.terminals.length === 0 ? (
+            <EmptyState title="Nenhum terminal nesta filial" />
+          ) : (
+            <table className="table-base w-full text-sm">
+              <thead>
+                <tr><th>Código</th><th>Terminal</th><th>Série NFC-e</th><th>Caixa</th><th>Situação</th></tr>
+              </thead>
+              <tbody>
+                {sum.terminals.map((t) => {
+                  const open = sum.openSessions.find((x) => x.terminalId === t.id);
+                  return (
+                    <tr key={t.id}>
+                      <td>{t.code}</td>
+                      <td><Link className="text-brand-700 hover:underline" href={`/administracao/terminais/${t.id}`}>{t.name}</Link></td>
+                      <td>{t.nfceSeries ?? "—"}</td>
+                      <td>{open ? <Link className="text-brand-700 hover:underline" href={`/caixa/${open.id}`}>Aberto desde {formatDateTime(open.openedAt)}</Link> : "Fechado"}</td>
+                      <td><StatusBadge kind="generic" status={t.status} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
+      {tab === "usuarios" && (
+        <Card bodyClass="p-0" description="Administradores, usuários sem restrição de filial na empresa e usuários com esta filial marcada.">
+          <table className="table-base w-full text-sm">
+            <thead>
+              <tr><th>Usuário</th><th>E-mail</th><th>Acesso</th><th>Situação</th></tr>
+            </thead>
+            <tbody>
+              {sum.users.map((u) => (
+                <tr key={u.id}>
+                  <td><Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/${u.id}`}>{u.name}</Link></td>
+                  <td>{u.email}</td>
+                  <td>{u.isAdmin ? "Administrador" : (u.branchIds ?? []).length ? "Filial marcada" : "Todas as filiais da empresa"}</td>
+                  <td><StatusBadge kind="user" status={u.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+      {tab === "historico" && (
+        <Card title="Linha do tempo">
+          <Timeline store={s.ctx.store} refs={[`branch:${id}`]} />
+        </Card>
+      )}
+    </>
+  );
+}

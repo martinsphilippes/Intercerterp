@@ -103,13 +103,28 @@ export async function checkIntent(ctx: Ctx, intentId: string) {
 /** Somente para o provedor de simulação: altera o estado de forma explícita e rotulada. */
 export async function simulateIntent(ctx: Ctx, intentId: string, status: "confirmed" | "failed") {
   const intent = await ctx.store.getOrThrow("payment_intents", intentId);
+  assert(intent.companyId === ctx.companyId, "Cobrança de outra empresa.");
   assert(intent.isSimulated, "Somente cobranças de simulação podem ser confirmadas manualmente.");
-  simulatedPix().setStatus(intent.reference, status);
-  return refresh(ctx, intent);
+  assert(!intent.saleId, "Cobrança já vinculada a uma venda.");
+  assert(["pending", "unknown"].includes(intent.status), `Cobrança ${intent.status === "confirmed" ? "já confirmada" : "encerrada"} — não pode ser alterada.`);
+  const sim = simulatedPix();
+  // o estado do provedor de simulação é volátil (memória do servidor): reconstitui a cobrança se necessário
+  if (!(await sim.findByReference(intent.reference))) await sim.createPix({ reference: intent.reference, amount: intent.amount, description: "Cobrança de simulação reconstituída" });
+  sim.setStatus(intent.reference, status);
+  const updated = await refresh(ctx, intent);
+  await logIntegration(ctx.store, { companyId: ctx.companyId, branchId: ctx.branchId, kind: "pix", action: "simulate", status: "info", message: `SIMULAÇÃO: cobrança ${intent.reference} marcada como ${status === "confirmed" ? "confirmada" : "falha"} por ${ctx.user.name}` });
+  return updated;
+}
+
+/** Cobranças Pix do atendimento (mais recente primeiro). */
+export async function cartIntents(ctx: Ctx, cartId: string) {
+  const rows = await listAll(ctx.store, "payment_intents", { filters: [["eq", "cartId", cartId], ["eq", "companyId", ctx.companyId]] });
+  return rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
 export async function cancelIntent(ctx: Ctx, intentId: string) {
   const intent = await ctx.store.getOrThrow("payment_intents", intentId);
+  assert(intent.companyId === ctx.companyId, "Cobrança de outra empresa.");
   if (intent.saleId) throw new BusinessError("Cobrança já vinculada a uma venda.");
   return ctx.store.update("payment_intents", intentId, { status: intent.status === "confirmed" ? "confirmed" : "cancelled" });
 }

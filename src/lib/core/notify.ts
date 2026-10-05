@@ -37,9 +37,23 @@ async function resolveAudience(store: Store, input: NotifyInput): Promise<string
     .map((u) => u.id);
 }
 
+/** Preferências por tipo (Central de notificações): user_prefs "notifications" = { muted: [tipos] }. */
+export const NOTIFICATION_PREFS_KEY = "notifications";
+
+/** Remove destinatários que silenciaram o tipo (prioridade crítica sempre é entregue). */
+async function withoutMuted(store: Store, input: NotifyInput, userIds: string[]): Promise<string[]> {
+  if (input.priority === "critical") return userIds;
+  const out: string[] = [];
+  for (const uid of userIds) {
+    const p = await store.get("user_prefs", detId("pref", uid, NOTIFICATION_PREFS_KEY)).catch(() => null);
+    if (!(Array.isArray(p?.value?.muted) && p!.value.muted.includes(input.type))) out.push(uid);
+  }
+  return out;
+}
+
 /** Cria notificações por destinatário, deduplicadas pela ocorrência. */
 export async function notify(store: Store, input: NotifyInput) {
-  const userIds = await resolveAudience(store, input);
+  const userIds = await withoutMuted(store, input, await resolveAudience(store, input));
   const occ = input.occurrenceKey ?? `${input.type}:${input.originType ?? ""}:${input.originId ?? ""}:${Date.now()}`;
   let created = 0;
   for (const userId of userIds) {

@@ -56,7 +56,9 @@ export async function enqueue(store: Store, input: EnqueueInput) {
 
 /** Reenfileira uma tarefa existente (retentativa manual). */
 export async function requeue(store: Store, jobId: string) {
-  return store.update("jobs", jobId, { status: "pending", runAt: nowIso(), lastError: null, maxAttempts: 8, attempts: 0 });
+  // mantém a contagem de tentativas: a reivindicação usa (job, tentativa) — zerar colidiria com reivindicações anteriores
+  const job = await store.getOrThrow("jobs", jobId);
+  return store.update("jobs", jobId, { status: "pending", runAt: nowIso(), lastError: null, maxAttempts: (job.attempts ?? 0) + 8, finishedAt: null });
 }
 
 function backoffMs(attempt: number) {

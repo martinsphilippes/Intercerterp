@@ -39,6 +39,7 @@ export async function audit(ctx: Ctx, input: AuditInput) {
       branchId: input.branchId ?? ctx.branchId,
       userId: ctx.user.id,
       userName: ctx.user.name,
+      userRole: ctx.user.isAdmin ? "Administrador" : (ctx.user.roleName ?? null),
       module: input.module,
       action: input.action,
       entityType: input.entityType,

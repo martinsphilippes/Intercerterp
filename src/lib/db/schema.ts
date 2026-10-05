@@ -83,7 +83,7 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       companyId: id(true), code: s(20), name: s(200, true), cnpj: s(20), ie: s(30), im: s(30), uf: s(2),
       cityCode: s(10), cityName: s(120), address: json, phone: s(40), email: s(200), status: s(20),
-      fiscalStatus: s(30), defaultWarehouseId: id(), defaultPriceTableId: id(), timezone: s(60), isDemo: bool, createdBy: id(),
+      fiscalStatus: s(30), defaultWarehouseId: id(), defaultPriceTableId: id(), timezone: s(60), isDemo: bool, createdBy: id(), managerUserId: id(),
     },
     indexes: [k("i_company", "companyId")],
   },
@@ -95,6 +95,7 @@ export const COLLECTIONS: CollectionDef[] = [
       companyIds: strings, branchIds: strings, discountLimitBps: int, passwordHash: s(300), inviteTokenHash: s(128),
       inviteExpiresAt: dt, resetTokenHash: s(128), resetExpiresAt: dt, lastAccessAt: dt, firstAccessAt: dt,
       suspendedReason: s(300), phone: s(40), isDemo: bool, createdBy: id(),
+      inviteSentAt: dt, inviteDelivery: s(300), invitedBy: id(), suspendedAt: dt,
     },
     indexes: [u("u_email", "email"), k("i_login", "login"), k("i_auth", "authId")],
   },
@@ -120,7 +121,7 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, code: s(20, true), name: s(120, true), status: s(20), nfceSeries: int, printerMode: s(20),
       printerName: s(120), connectorUrl: s(300), paperWidth: int, scannerMode: s(20), tefProvider: s(40),
-      tefConfig: json, allowNegativeStock: bool, defaultWarehouseId: id(), lastPrinterTestAt: dt, lastPrinterTestResult: s(300),
+      tefConfig: json, allowNegativeStock: bool, defaultWarehouseId: id(), lastPrinterTestAt: dt, lastPrinterTestResult: s(300), drawerOnCash: bool,
     },
     indexes: [k("i_branch", "branchId"), u("u_code", "companyId", "code")],
   },
@@ -170,6 +171,7 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, personType: s(2, true), doc: s(20), code: s(30), name: s(200, true), tradeName: s(200), email: s(200),
       phone: s(40), ie: s(30), im: s(30), addresses: json, contacts: json, paymentTermId: id(), paymentTermsText: s(200),
       leadTimeDays: int, minOrderValue: money, freightPolicy: s(200), notes: txt, status: s(20), searchText: s(1000),
+      category: s(60), statusReason: s(300),
     },
     indexes: [k("i_company", "companyId"), u("u_doc", "companyId", "doc")],
   },
@@ -241,6 +243,15 @@ export const COLLECTIONS: CollectionDef[] = [
     },
     indexes: [k("i_supplier", "supplierId"), k("i_sku", "skuId"), u("u_pair", "supplierId", "skuId")],
   },
+  {
+    id: "product_imports",
+    label: "Importações de produtos",
+    fields: {
+      ...ctx, number: int, fileName: s(250), mode: s(20), matchBy: s(20), mapping: json, status: s(20), totals: json,
+      results: json, idemKey: s(120), finishedAt: dt,
+    },
+    indexes: [k("i_company", "companyId"), u("u_idem", "idemKey")],
+  },
 
   // ───────────────────────────── Estoque
   {
@@ -255,6 +266,7 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, warehouseId: id(true), skuId: id(true), productId: id(), physical: qty, reserved: qty, inTransit: qty,
       avgCost: money, minQty: qty, maxQty: qty, safetyQty: qty, reorderMultiple: qty, seq: int, lastMovementAt: dt,
+      location: s(60),
     },
     indexes: [u("u_wh_sku", "warehouseId", "skuId"), k("i_sku", "skuId"), k("i_branch", "branchId")],
   },
@@ -265,6 +277,7 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, balanceId: id(true), warehouseId: id(true), skuId: id(true), productId: id(), type: s(30, true), qty: qty,
       balanceBefore: qty, balanceAfter: qty, unitCost: money, totalCost: money, avgCostAfter: money, seq: int,
       originType: s(40), originId: id(), operationId: id(), reason: s(300), occurredAt: dt, idemKey: s(120, true),
+      lot: s(60), lotExpiry: date, documentRef: s(120), notes: s(500),
     },
     indexes: [u("u_seq", "balanceId", "seq"), u("u_idem", "idemKey"), k("i_sku", "skuId"), k("i_origin", "originType", "originId"), k("i_branch_date", "branchId", "occurredAt")],
   },
@@ -281,6 +294,8 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, number: int, fromBranchId: id(true), toBranchId: id(true), fromWarehouseId: id(), toWarehouseId: id(),
       status: s(20), items: json, responsibleId: id(), notes: txt, separatedAt: dt, shippedAt: dt, receivedAt: dt,
       cancelledAt: dt, divergences: json, documentRef: s(200),
+      receipts: json, returnedAt: dt, shippedBy: id(), receivedBy: id(), totalCost: money, cancelReason: s(500),
+      expectedAt: date,
     },
     indexes: [k("i_from", "fromBranchId"), k("i_to", "toBranchId")],
   },
@@ -290,6 +305,7 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, number: int, warehouseId: id(true), scope: s(20), categoryId: id(), location: s(120), status: s(20),
       baseAt: dt, startedAt: dt, completedAt: dt, completedBy: id(), method: s(40), summary: json, notes: txt,
+      closingAt: dt, cancelledAt: dt, cancelReason: s(500), itemsCount: int, code: s(30), responsibleId: id(),
     },
     indexes: [k("i_branch", "branchId")],
   },
@@ -300,6 +316,7 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, inventoryId: id(true), skuId: id(true), productId: id(), baseQty: qty, countedQty: qty, recountQty: qty,
       counted: bool, movementsDuringCount: qty, expectedQty: qty, difference: qty, unitCost: money, differenceValue: money,
       note: s(500), countedBy: id(), countedAt: dt, adjustmentMovementId: id(),
+      baseSeq: int, countSeq: int, recountAt: dt, recountBy: id(), finalQty: qty, location: s(60),
     },
     indexes: [k("i_inventory", "inventoryId"), u("u_inv_sku", "inventoryId", "skuId")],
   },
@@ -321,6 +338,7 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, sessionId: id(true), number: int, type: s(30, true), method: s(30), amount: money, reason: s(300),
       recipient: s(200), accountId: id(), saleId: id(), returnId: id(), occurredAt: dt, idemKey: s(120), notes: s(500),
+      transferId: id(), sessionVersion: int, responsibleId: id(), approvedBy: id(),
     },
     indexes: [k("i_session", "sessionId"), u("u_idem", "idemKey")],
   },
@@ -330,8 +348,10 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, terminalId: id(), operatorId: id(), status: s(20), name: s(120), customerId: id(), priceTableId: id(),
       items: json, globalDiscount: money, globalDiscountBps: int, surcharge: money, notes: s(500), saleId: id(), expiresAt: dt,
+      payments: json, exchangeReturnId: id(), cpfOnInvoice: s(20), sellerId: id(), parkedAt: dt, cancelReason: s(300),
+      customerName: s(200), total: money, itemsCount: int, revision: int, emitFiscal: bool,
     },
-    indexes: [k("i_terminal", "terminalId", "status")],
+    indexes: [k("i_terminal", "terminalId", "status"), k("i_branch_status", "branchId", "status")],
   },
   {
     id: "sales",
@@ -342,7 +362,7 @@ export const COLLECTIONS: CollectionDef[] = [
       priceTableId: id(), itemsCount: int, subtotal: money, discountTotal: money, surchargeTotal: money, total: money,
       costTotal: money, paidTotal: money, changeAmount: money, returnedTotal: money, returnedCost: money, idemKey: s(120),
       cartId: id(), exchangeReturnId: id(), completedAt: dt, cancelledAt: dt, cancelReason: s(500), cancelledBy: id(),
-      notes: txt, operationId: id(), effectsStatus: s(20),
+      notes: txt, operationId: id(), effectsStatus: s(20), discountApprovedBy: id(),
     },
     indexes: [u("u_idem", "idemKey"), k("i_branch_date", "branchId", "completedAt"), k("i_customer", "customerId"), k("i_session", "cashSessionId"), k("i_number", "companyId", "number")],
   },
@@ -394,7 +414,7 @@ export const COLLECTIONS: CollectionDef[] = [
     label: "Itens devolvidos",
     fields: {
       ...ctx, returnId: id(true), saleId: id(), saleItemId: id(true), skuId: id(true), qty: qty, condition: s(20),
-      warehouseId: id(), unitPrice: money, total: money, unitCost: money, costTotal: money, completedAt: dt,
+      warehouseId: id(), unitPrice: money, total: money, unitCost: money, costTotal: money, completedAt: dt, reason: s(300),
     },
     indexes: [k("i_return", "returnId"), k("i_sale_item", "saleItemId"), k("i_sku", "skuId")],
   },
@@ -475,7 +495,7 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, titleId: id(true), kind: s(20, true), number: int, dueDate: date, competenceDate: date, amount: money,
       interest: money, fine: money, discount: money, paid: money, balance: money, status: s(20), seq: int,
       partyId: id(), partyName: s(200), categoryId: id(), costCenterId: id(), lastSettlementAt: date, methodKind: s(30),
-      description: s(300),
+      description: s(300), ourNumber: s(40),
     },
     indexes: [k("i_title", "titleId"), k("i_due", "companyId", "kind", "dueDate"), k("i_party", "partyId")],
   },
@@ -512,17 +532,26 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, accountId: id(true), importId: id(), uniqueKey: s(200, true), externalId: s(120), date: date, amount: money,
       description: s(300), docNumber: s(60), kind: s(30), cnabOccurrence: s(10), cnabOccurrenceText: s(200),
       ourNumber: s(40), yourNumber: s(40), status: s(20), reconciliationId: id(), installmentId: id(), feeAmount: money,
+      lineNo: int, bankCode: s(10), dueDate: date, creditDate: date, paidAmount: money, interestAmount: money, discountAmount: money,
+      payerName: s(200), settlementId: id(), notes: s(500),
     },
-    indexes: [u("u_key", "uniqueKey"), k("i_account_date", "accountId", "date")],
+    indexes: [u("u_key", "uniqueKey"), k("i_account_date", "accountId", "date"), k("i_import", "importId")],
   },
   {
     id: "reconciliations",
     label: "Conciliações",
     fields: {
       ...ctx, accountId: id(true), status: s(20), bankTxIds: strings, entryIds: strings, allocations: json, difference: money,
-      feeEntryId: id(), undoneAt: dt, undoneBy: id(), notes: s(500),
+      feeEntryId: id(), undoneAt: dt, undoneBy: id(), notes: s(500), kind: s(20), undoReason: s(300),
     },
     indexes: [k("i_account", "accountId")],
+  },
+  {
+    // trava de concorrência: um extrato/lançamento só participa de UMA conciliação ativa (id determinístico por alvo)
+    id: "reconciliation_links",
+    label: "Vínculos de conciliação",
+    fields: { ...ctx, accountId: id(true), reconciliationId: id(true), targetType: s(20, true), targetId: id(true), amount: money },
+    indexes: [k("i_recon", "reconciliationId"), k("i_target", "targetId")],
   },
 
   // ───────────────────────────── Compras
@@ -541,6 +570,7 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, quotationId: id(true), supplierId: id(true), items: json, freight: money, leadTimeDays: int, paymentTermId: id(),
       paymentTermsText: s(200), minOrderValue: money, validUntil: date, notes: s(500), status: s(20), receivedAt: dt,
+      version: int, source: s(20),
     },
     indexes: [k("i_quotation", "quotationId"), u("u_pair", "quotationId", "supplierId")],
   },
@@ -553,6 +583,8 @@ export const COLLECTIONS: CollectionDef[] = [
       paymentTermId: id(), paymentTermsText: s(200), installmentsPlan: json, notes: txt, origin: s(30), originId: id(),
       quotationId: id(), requestId: id(), approvedAt: dt, approvedRevision: int, sentAt: dt, sentMethod: s(30),
       receivedValue: money, cancelledAt: dt, rejectReason: s(500), idemKey: s(120),
+      proposalRef: json, originData: json, sentInfo: json, searchText: s(1000),
+      purpose: s(200), buyerId: id(), paymentMethodId: id(), costCenterId: id(), insurance: money, ipiTotal: money,
     },
     indexes: [k("i_supplier", "supplierId"), k("i_status", "companyId", "status"), u("u_idem", "idemKey")],
   },
@@ -561,7 +593,7 @@ export const COLLECTIONS: CollectionDef[] = [
     label: "Itens de pedido de compra",
     fields: {
       ...ctx, orderId: id(true), seq: int, skuId: id(true), productId: id(), description: s(250), unitCode: s(10), qty: qty,
-      unitCost: money, discount: money, total: money, receivedQty: qty, supplierCode: s(60),
+      unitCost: money, discount: money, total: money, receivedQty: qty, supplierCode: s(60), ipi: money,
     },
     indexes: [k("i_order", "orderId"), k("i_sku", "skuId")],
   },
@@ -577,7 +609,7 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, number: int, requesterId: id(), origin: s(30), originId: id(), orderIds: strings, total: money, freight: money,
       status: s(20), currentStep: int, steps: json, policySnapshot: json, validUntil: date, revision: int, notes: txt,
-      decidedAt: dt,
+      decidedAt: dt, quotationId: id(), warnings: json,
     },
     indexes: [k("i_status", "companyId", "status")],
   },
@@ -604,6 +636,8 @@ export const COLLECTIONS: CollectionDef[] = [
       nfeSeries: s(5), nfeIssueDate: dt, xmlFileId: id(), xmlHash: s(80), status: s(20), items: json, productsTotal: money,
       freight: money, otherExpenses: money, discount: money, total: money, invoicedTotal: money, paymentTermId: id(),
       installments: json, payableTitleId: id(), confirmedAt: dt, divergences: json, notes: txt, scopeKey: s(200),
+      dueTotal: money, emitter: json, differenceAction: s(30), searchText: s(1000), confirmedBy: id(),
+      entryCfop: s(10), categoryId: id(), costCenterId: id(), paymentMethodId: id(), effects: json,
     },
     indexes: [u("u_scope", "scopeKey"), k("i_supplier", "supplierId")],
   },
@@ -618,6 +652,8 @@ export const COLLECTIONS: CollectionDef[] = [
       rpsNextNumber: int, nfseStandard: s(20), cscId: s(20), cscTokenRef: s(120), contingency: bool, contingencyReason: s(300),
       defaultPresence: s(2), defaultTaxGroupId: id(), certificate: json, lastTestAt: dt, lastTestResult: s(500),
       connectionStatus: s(30), validFrom: date, extra: json,
+      nfeCancelHours: int, nfceCancelMinutes: int, defaultNature: s(120), simulateOutage: bool, contingencySince: dt,
+      autoEmail: bool, checkAvailability: bool, approxTaxBps: int,
     },
     indexes: [u("u_scope", "scopeKey")],
   },
@@ -628,6 +664,7 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, name: s(120, true), regime: s(20), cfopInternal: s(10), cfopInterstate: s(10), cfopReturn: s(10), cstCsosn: s(5),
       icmsRateBps: int, icmsBaseReductionBps: int, fcpRateBps: int, pisCst: s(5), pisRateBps: int, cofinsCst: s(5),
       cofinsRateBps: int, ipiCst: s(5), ipiRateBps: int, validFrom: date, validTo: date, active: bool, notes: s(500),
+      approxTaxBps: int,
     },
     indexes: [k("i_company", "companyId")],
   },
@@ -642,6 +679,8 @@ export const COLLECTIONS: CollectionDef[] = [
       qrCodeUrl: txt, issuedAt: dt, authorizedAt: dt, cancelledAt: dt, attempts: int, lastAttemptAt: dt, isSimulated: bool,
       contingency: bool, total: money, recipientName: s(200), recipientDoc: s(20), terminalId: id(), operatorId: id(),
       rpsNumber: int, rpsSeries: s(10), verificationCode: s(60), correctionCount: int, nextCheckAt: dt,
+      partyType: s(20), partyId: id(), effects: json, titleId: id(), cancelReason: s(500), cancelRequestedAt: dt,
+      competenceDate: date, presence: s(2), lastEmailTo: s(200), exitAt: dt,
     },
     indexes: [u("u_ref", "ref"), k("i_model_date", "companyId", "model", "issuedAt"), k("i_origin", "originType", "originId")],
   },
@@ -654,8 +693,17 @@ export const COLLECTIONS: CollectionDef[] = [
   {
     id: "fiscal_obligations",
     label: "Obrigações fiscais",
-    fields: { ...ctx, kind: s(30), name: s(120), period: s(7), dueDate: date, status: s(20), proofFileId: id(), deliveredAt: dt, notes: s(500), responsibleId: id(), recurrence: s(20) },
+    fields: {
+      ...ctx, kind: s(30), name: s(120), period: s(7), dueDate: date, status: s(20), proofFileId: id(), deliveredAt: dt, notes: s(500), responsibleId: id(), recurrence: s(20),
+      templateKey: s(60), scopeKey: s(200), receiptNumber: s(120), amount: money, exportFileId: id(), completedBy: id(),
+    },
     indexes: [k("i_company", "companyId", "dueDate")],
+  },
+  {
+    id: "fiscal_sim_state",
+    label: "Simulação fiscal (estado do provedor simulado)",
+    fields: { companyId: id(), ref: s(120, true), model: s(10), status: s(20), data: json },
+    indexes: [u("u_ref", "ref")],
   },
 
   // ───────────────────────────── Integrações, operação e suporte
@@ -710,14 +758,14 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       companyId: id(), branchId: id(), userId: id(), userName: s(200), module: s(40), action: s(60), entityType: s(40),
       entityId: id(), summary: s(500), before: json, after: json, reason: s(500), result: s(20), ip: s(60),
-      occurredAt: dt, operationId: id(), related: strings,
+      occurredAt: dt, operationId: id(), related: strings, userRole: s(120),
     },
     indexes: [k("i_company_date", "companyId", "occurredAt"), k("i_entity", "entityType", "entityId")],
   },
   {
     id: "tickets",
     label: "Chamados",
-    fields: { ...ctx, number: int, userId: id(), category: s(40), priority: s(20), subject: s(200), status: s(20), context: json, assigneeId: id(), externalRef: s(120), externalStatus: s(40), lastMessageAt: dt },
+    fields: { ...ctx, number: int, userId: id(), category: s(40), priority: s(20), subject: s(200), status: s(20), context: json, assigneeId: id(), externalRef: s(120), externalStatus: s(40), lastMessageAt: dt, resolvedAt: dt },
     indexes: [k("i_company", "companyId")],
   },
   {
@@ -729,14 +777,14 @@ export const COLLECTIONS: CollectionDef[] = [
   {
     id: "help_articles",
     label: "Artigos de ajuda",
-    fields: { companyId: id(), area: s(60), title: s(200, true), slug: s(120, true), body: txt, tags: strings, contextRoutes: strings, published: bool },
+    fields: { companyId: id(), area: s(60), title: s(200, true), slug: s(120, true), body: txt, tags: strings, contextRoutes: strings, published: bool, summary: s(300) },
     indexes: [u("u_slug", "slug")],
   },
   {
     id: "backups",
     label: "Backups",
     fields: {
-      ...ctx, kind: s(20), scope: json, status: s(20), fileId: id(), sizeBytes: int, checksum: s(100), counts: json,
+      ...ctx, number: int, kind: s(20), scope: json, status: s(20), fileId: id(), sizeBytes: int, checksum: s(100), counts: json,
       startedAt: dt, finishedAt: dt, verifiedAt: dt, verifyResult: json, error: txt, retentionUntil: date,
     },
     indexes: [k("i_company", "companyId")],

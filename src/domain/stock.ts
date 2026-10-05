@@ -2,8 +2,9 @@ import { detId, isConflict, listAll, retryOnConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { nowIso } from "@/lib/dates";
 import { roundDiv, QTY } from "@/lib/money";
-import { BusinessError } from "@/lib/core/errors";
-import type { Ctx } from "@/lib/core/ctx";
+import { BusinessError, assert } from "@/lib/core/errors";
+import { requireAction, requireBranch, type Ctx } from "@/lib/core/ctx";
+import { audit } from "@/lib/core/audit";
 
 /**
  * Estoque por movimentos.
@@ -63,9 +64,65 @@ export interface MovementInput {
   idemKey: string;
   allowNegative?: boolean;
   occurredAt?: string;
+  /** rastreabilidade informativa (lote/validade/documento) — o saldo não é controlado por lote */
+  lot?: string | null;
+  lotExpiry?: string | null;
+  documentRef?: string | null;
+  notes?: string | null;
 }
 
 export const balanceId = (warehouseId: string, skuId: string) => detId("bal", warehouseId, skuId);
+
+/** Entradas que trazem custo próprio e recalculam o custo médio ponderado do saldo. */
+export const COST_ENTRY_TYPES: MovementType[] = ["purchase", "initial", "manual_in", "adjust_in", "transfer_in", "transfer_return", "damage_in"];
+
+/** Tipos de ajuste manual (Tela 17) — exigem a permissão especial `stock.adjust` e motivo. */
+export const MANUAL_TYPES = ["adjust_in", "adjust_out", "loss", "manual_in", "manual_out"] as const;
+export type ManualType = (typeof MANUAL_TYPES)[number];
+
+/** Rótulos das origens de movimento e links para o registro que originou o efeito. */
+export const ORIGIN_LABEL: Record<string, string> = {
+  sale: "Venda",
+  sale_cancel: "Cancelamento de venda",
+  return: "Devolução/troca",
+  purchase: "Compra",
+  receipt: "Recebimento de compra",
+  purchase_receipt: "Recebimento de compra",
+  purchase_order: "Pedido de compra",
+  transfer: "Transferência",
+  inventory: "Inventário",
+  manual: "Ajuste manual",
+  product: "Cadastro de produto",
+  import: "Importação de produtos",
+  seed: "Carga inicial (demonstração)",
+};
+
+export function originHref(originType: string | null | undefined, originId: string | null | undefined): string | null {
+  if (!originType || !originId) return null;
+  switch (originType) {
+    case "sale":
+    case "sale_cancel":
+      return `/vendas/${originId}`;
+    case "return":
+      return `/vendas/devolucoes/${originId}`;
+    case "receipt":
+    case "purchase_receipt":
+    case "purchase":
+      return `/compras/recebimentos/${originId}`;
+    case "purchase_order":
+      return `/compras/pedidos/${originId}`;
+    case "transfer":
+      return `/estoque/transferencias/${originId}`;
+    case "inventory":
+      return `/estoque/inventarios/${originId}`;
+    case "product":
+      return `/produtos/${originId}?tab=estoque`;
+    case "import":
+      return `/produtos/importar/${originId}`;
+    default:
+      return null;
+  }
+}
 
 export async function ensureBalance(store: Store, ctx: { companyId: string }, warehouseId: string, skuId: string): Promise<Doc> {
   const id = balanceId(warehouseId, skuId);
@@ -112,7 +169,7 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
       }
       let avg = bal.avgCost as number;
       let unitCost: number;
-      if (m.qty > 0 && m.unitCost != null && ["purchase", "initial", "manual_in", "adjust_in", "transfer_in"].includes(m.type)) {
+      if (m.qty > 0 && m.unitCost != null && COST_ENTRY_TYPES.includes(m.type)) {
         unitCost = m.unitCost;
         const basis = Math.max(before, 0);
         avg = basis + m.qty > 0 ? roundDiv(basis * avg + m.qty * unitCost, basis + m.qty) : unitCost;
@@ -145,6 +202,10 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
           reason: m.reason ?? null,
           occurredAt,
           idemKey: m.idemKey,
+          lot: m.lot ?? null,
+          lotExpiry: m.lotExpiry ?? null,
+          documentRef: m.documentRef ?? null,
+          notes: m.notes ?? null,
         },
         movId,
       );
@@ -180,24 +241,105 @@ export async function reserve(ctx: Ctx, input: { warehouseId: string; skuId: str
   });
 }
 
-/** Libera (ou consome) reservas ativas de uma origem. */
-export async function releaseReservations(ctx: Ctx, originType: string, originId: string, status: "released" | "consumed" = "released", skuId?: string) {
+/**
+ * Libera (ou consome) reservas ativas de uma origem.
+ * Se `tx` for informado, participa da transação do chamador (ex.: expedição de transferência).
+ */
+export async function releaseReservations(ctx: Ctx, originType: string, originId: string, status: "released" | "consumed" = "released", skuId?: string, tx?: Store) {
   const store = ctx.store;
   const filters: any[] = [["eq", "originType", originType], ["eq", "originId", originId], ["eq", "status", "active"]];
   if (skuId) filters.push(["eq", "skuId", skuId]);
   const items = await listAll(store, "stock_reservations", { filters });
   for (const r of items) {
-    await store.transaction(async (t) => {
+    const apply = async (t: Store) => {
       await t.update("stock_reservations", r.id, { status });
       await t.increment("stock_balances", balanceId(r.warehouseId, r.skuId), "reserved", -r.qty);
-    });
+    };
+    if (tx) await apply(tx);
+    else await store.transaction(apply);
   }
   return items.length;
 }
 
-export async function adjustInTransit(ctx: Ctx, warehouseId: string, skuId: string, delta: number) {
+/**
+ * Ajusta o saldo em trânsito (não físico, nunca disponível). Com `tx`, participa da transação do chamador;
+ * `bounds.min` (ex.: 0) impede que a baixa deixe o trânsito negativo (ConflictError "bounds").
+ */
+export async function adjustInTransit(ctx: Ctx, warehouseId: string, skuId: string, delta: number, tx?: Store, bounds?: { min?: number; max?: number }) {
   const bal = await ensureBalance(ctx.store, ctx, warehouseId, skuId);
-  await ctx.store.increment("stock_balances", bal.id, "inTransit", delta);
+  await (tx ?? ctx.store).increment("stock_balances", bal.id, "inTransit", delta, bounds);
+}
+
+/**
+ * Executa um efeito composto UMA única vez por chave (marcador determinístico em `operations` criado
+ * na mesma transação dos efeitos). Repetições e chamadas concorrentes encontram o marcador e não reaplicam.
+ * Retorna true quando aplicou agora, false quando já estava aplicado.
+ */
+export async function applyOnce(ctx: Ctx, key: string, meta: { entityType: string; entityId: string }, fn: (tx: Store) => Promise<void>): Promise<boolean> {
+  const markerId = detId("once", key);
+  return retryOnConflict(async () => {
+    if (await ctx.store.get("operations", markerId)) return false;
+    return ctx.store.transaction(async (t) => {
+      await t.create("operations", { companyId: ctx.companyId, type: "stock.once", status: "done", entityType: meta.entityType, entityId: meta.entityId, result: { key }, createdBy: ctx.user.id }, markerId);
+      await fn(t);
+      return true;
+    });
+  });
+}
+
+/**
+ * Ajuste manual de estoque (entrada, saída, perda) — Tela 17. Sempre por movimento rastreável:
+ * exige `stock.adjust`, filial definida, depósito da filial e motivo. Idempotente pela chave do formulário.
+ */
+export async function adjustStock(
+  ctx: Ctx,
+  input: { warehouseId: string; skuId: string; type: ManualType; qty: number; unitCost?: number | null; reason: string; idemKey: string; occurredAt?: string; lot?: string | null; lotExpiry?: string | null; documentRef?: string | null; notes?: string | null },
+) {
+  requireAction(ctx, "stock.adjust");
+  const branchId = requireBranch(ctx);
+  assert((MANUAL_TYPES as readonly string[]).includes(input.type), "Tipo de ajuste inválido.");
+  assert(Number.isInteger(input.qty) && input.qty > 0, "Informe uma quantidade maior que zero.");
+  assert(input.reason?.trim(), "Informe o motivo do ajuste (fica registrado no histórico).");
+  const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
+  assert(wh.companyId === ctx.companyId && wh.branchId === branchId, "O depósito não pertence à filial selecionada.");
+  const sku = await ctx.store.getOrThrow("skus", input.skuId);
+  assert(sku.companyId === ctx.companyId, "SKU de outra empresa.");
+  const product = await ctx.store.get("products", sku.productId);
+  assert(product?.type !== "service", "Serviços não têm estoque.");
+  const sign = input.type === "adjust_in" || input.type === "manual_in" ? 1 : -1;
+  if (input.occurredAt) assert(input.occurredAt <= new Date(Date.now() + 60000).toISOString(), "A data do ajuste não pode ser futura.");
+  const [mov] = await postMovements(ctx, [
+    {
+      warehouseId: wh.id,
+      skuId: sku.id,
+      qty: sign * input.qty,
+      type: input.type,
+      unitCost: sign > 0 ? (input.unitCost ?? null) : null,
+      originType: "manual",
+      originId: detId("adj", input.idemKey),
+      reason: input.reason.trim(),
+      idemKey: `manual:${input.idemKey}`,
+      occurredAt: input.occurredAt,
+      lot: input.lot?.trim() || null,
+      lotExpiry: input.lotExpiry || null,
+      documentRef: input.documentRef?.trim() || null,
+      notes: input.notes?.trim().slice(0, 500) || null,
+    },
+  ]);
+  const movement = mov ?? (await ctx.store.get("stock_movements", detId("mov", `manual:${input.idemKey}`)));
+  if (mov) {
+    await audit(ctx, {
+      module: "stock",
+      action: `stock.${input.type}`,
+      entityType: "stock_movement",
+      entityId: mov.id,
+      summary: `${MOVEMENT_LABEL[input.type]}: ${sign > 0 ? "+" : "−"}${input.qty / QTY} ${sku.unitCode ?? ""} de ${sku.sku} em ${wh.name}`,
+      reason: input.reason.trim(),
+      after: { qty: mov.qty, balanceBefore: mov.balanceBefore, balanceAfter: mov.balanceAfter, unitCost: mov.unitCost },
+      related: [`sku:${sku.id}`, `product:${sku.productId}`],
+    });
+  }
+  return movement;
 }
 
 export async function defaultWarehouse(store: Store, branchId: string): Promise<Doc> {

@@ -1,79 +1,116 @@
 import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { nowIso } from "@/lib/dates";
-import type { Ctx } from "@/lib/core/ctx";
+import { assert } from "@/lib/core/errors";
+import { requireAction, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 
 /**
  * Central de integrações (Tela 40). Estados medidos:
- *  not_configured → configured_untested → operational | unavailable | error
+ *  not_configured → configured_untested → operational | unavailable | error  (simulated = provedor de simulação respondendo)
  * Credenciais nunca são gravadas no banco: guardamos apenas o NOME da variável de ambiente (secretRefs).
+ * Configuração preenchida não equivale a conexão operacional: o estado só muda com um teste real.
  */
 
 export type IntegrationKind = "pix" | "card_tef" | "fiscal_nfe" | "fiscal_nfse" | "bank" | "accounting" | "email";
 
-export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; description: string; providers: Array<{ id: string; label: string; secrets: string[]; config: string[] }>; consumer: string }> = {
+export interface CatalogProvider {
+  id: string;
+  label: string;
+  secrets: string[];
+  config: string[];
+  /** variável de ambiente sugerida por segredo */
+  defaultRefs?: Record<string, string>;
+  /** o que o teste faz (ou por que não há teste) */
+  test: string;
+  simulated?: boolean;
+}
+
+export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; description: string; providers: CatalogProvider[]; consumer: string; consumers: Array<{ label: string; href: string }> }> = {
   pix: {
     label: "Pix",
     description: "Cobranças Pix com QR Code dinâmico e confirmação pelo provedor.",
     providers: [
-      { id: "mercadopago", label: "Mercado Pago", secrets: ["accessToken"], config: ["baseUrl"] },
-      { id: "simulated", label: "Simulação (sem valor financeiro)", secrets: [], config: [] },
+      { id: "mercadopago", label: "Mercado Pago", secrets: ["accessToken"], config: ["baseUrl"], defaultRefs: { accessToken: "MERCADOPAGO_ACCESS_TOKEN" }, test: "Consulta autenticada à API do provedor (provider.test)." },
+      { id: "simulated", label: "Simulação (sem valor financeiro)", secrets: [], config: [], test: "Verifica o provedor de simulação (sem instituição real).", simulated: true },
     ],
     consumer: "PDV → Pagamento da venda",
+    consumers: [{ label: "PDV — pagamento Pix", href: "/pdv" }, { label: "Histórico de vendas", href: "/vendas" }],
   },
   card_tef: {
     label: "Cartões / TEF",
     description: "Cartões de débito e crédito. Sem TEF integrado, o PDV registra NSU/autorização da maquininha como pagamento manual.",
     providers: [
-      { id: "manual_pos", label: "Maquininha (registro manual de NSU)", secrets: [], config: ["acquirer", "debitFeeBps", "creditFeeBps", "debitDays", "creditDays"] },
-      { id: "tef_connector", label: "TEF via conector local", secrets: ["connectorToken"], config: ["connectorUrl"] },
+      { id: "manual_pos", label: "Maquininha (registro manual de NSU)", secrets: [], config: ["acquirer", "debitFeeBps", "creditFeeBps", "debitDays", "creditDays"], test: "Sem teste: não há conexão remota — o operador registra NSU/autorização manualmente." },
+      { id: "tef_connector", label: "TEF via conector local", secrets: ["connectorToken"], config: ["connectorUrl"], defaultRefs: { connectorToken: "TEF_CONNECTOR_TOKEN" }, test: "Chamada GET {connectorUrl}/status do conector local." },
     ],
     consumer: "PDV → Pagamento da venda; Financeiro → Liquidação de cartões",
+    consumers: [{ label: "PDV — cartões", href: "/pdv" }, { label: "Recebíveis de cartão", href: "/financeiro/cartoes" }],
   },
   fiscal_nfe: {
     label: "NF-e / NFC-e",
-    description: "Emissão, consulta, cancelamento, CC-e e inutilização de NF-e e NFC-e.",
+    description: "Emissão, consulta, cancelamento, CC-e e inutilização de NF-e e NFC-e (configuração fiscal por filial).",
     providers: [
-      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [] },
-      { id: "simulated", label: "Simulação (documento sem validade fiscal)", secrets: [], config: [] },
+      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [], defaultRefs: { token: "FOCUSNFE_TOKEN" }, test: "Consulta autenticada à API Focus NFe (testFiscalConnection)." },
+      { id: "simulated", label: "Simulação (documento sem validade fiscal)", secrets: [], config: [], test: "Verifica o provedor de simulação (sem SEFAZ).", simulated: true },
     ],
     consumer: "Fiscal → NF-e / NFC-e; PDV → Venda concluída",
+    consumers: [{ label: "Fiscal — NF-e", href: "/fiscal/nfe" }, { label: "Fiscal — NFC-e (PDV)", href: "/fiscal/nfce" }, { label: "Configurações fiscais", href: "/fiscal/configuracoes" }],
   },
   fiscal_nfse: {
     label: "NFS-e",
-    description: "Emissão de notas de serviço pelo padrão nacional ou municipal do provedor.",
+    description: "Emissão de notas de serviço pelo padrão nacional ou municipal do provedor (configuração fiscal por filial).",
     providers: [
-      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [] },
-      { id: "simulated", label: "Simulação (documento sem validade fiscal)", secrets: [], config: [] },
+      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [], defaultRefs: { token: "FOCUSNFE_TOKEN" }, test: "Consulta autenticada à API Focus NFe (testFiscalConnection)." },
+      { id: "simulated", label: "Simulação (documento sem validade fiscal)", secrets: [], config: [], test: "Verifica o provedor de simulação (sem prefeitura).", simulated: true },
     ],
     consumer: "Fiscal → NFS-e",
+    consumers: [{ label: "Fiscal — NFS-e", href: "/fiscal/nfse" }],
   },
   bank: {
     label: "Conexão bancária",
     description: "Importação de extratos OFX/CSV e retornos CNAB 240/400. Conexão automática requer API do banco.",
     providers: [
-      { id: "file_import", label: "Importação de arquivos (OFX, CSV, CNAB)", secrets: [], config: [] },
-      { id: "open_finance", label: "API bancária / Open Finance", secrets: ["clientId", "clientSecret"], config: ["baseUrl"] },
+      { id: "file_import", label: "Importação de arquivos (OFX, CSV, CNAB)", secrets: [], config: [], test: "Sem teste: não há conexão remota — os arquivos são importados manualmente na conciliação." },
+      { id: "open_finance", label: "API bancária / Open Finance", secrets: ["clientId", "clientSecret"], config: ["baseUrl"], defaultRefs: { clientId: "BANK_CLIENT_ID", clientSecret: "BANK_CLIENT_SECRET" }, test: "Conector de API bancária não implementado nesta versão." },
     ],
     consumer: "Financeiro → Conciliação bancária",
+    consumers: [{ label: "Conciliação bancária", href: "/financeiro/conciliacao" }],
   },
   accounting: {
     label: "Área da contabilidade",
-    description: "Pacote de XMLs e resumo contábil do período para o escritório contábil.",
-    providers: [{ id: "export_package", label: "Pacote de exportação (ZIP) + e-mail", secrets: [], config: ["accountantEmail", "accountantName"] }],
+    description: "Pacote de XMLs e relatórios CSV do período enviado ao escritório contábil pelo canal de e-mail.",
+    providers: [{ id: "export_package", label: "Pacote de exportação (ZIP) + e-mail", secrets: [], config: ["accountantEmail", "accountantName"], test: "Envia mensagem de teste pelo canal de e-mail ao usuário logado (comprova a entrega do canal)." }],
     consumer: "Fiscal → Relatórios fiscais",
+    consumers: [{ label: "Relatórios fiscais — exportação", href: "/fiscal/relatorios?tab=exportacao" }],
   },
   email: {
     label: "E-mail",
     description: "Envio de documentos, convites e recuperação de senha.",
     providers: [
-      { id: "appwrite_messaging", label: "Appwrite Messaging", secrets: [], config: ["providerId"] },
-      { id: "resend", label: "Resend (API)", secrets: ["apiKey"], config: ["from"] },
+      { id: "appwrite_messaging", label: "Appwrite Messaging", secrets: [], config: ["providerId"], test: "Envio real de mensagem de teste ao usuário logado." },
+      { id: "resend", label: "Resend (API)", secrets: ["apiKey"], config: ["from"], defaultRefs: { apiKey: "RESEND_API_KEY" }, test: "Envio real de mensagem de teste ao usuário logado." },
     ],
     consumer: "Documentos, convites, suporte",
+    consumers: [{ label: "NFC-e/NF-e por e-mail", href: "/fiscal/nfce" }, { label: "Pacote à contabilidade", href: "/fiscal/relatorios?tab=exportacao" }],
   },
 };
+
+export const CONFIG_LABEL: Record<string, string> = {
+  baseUrl: "URL base da API",
+  acquirer: "Adquirente",
+  debitFeeBps: "Taxa débito (bps)",
+  creditFeeBps: "Taxa crédito (bps)",
+  debitDays: "Prazo débito (dias)",
+  creditDays: "Prazo crédito (dias)",
+  connectorUrl: "URL do conector TEF",
+  accountantEmail: "E-mail da contabilidade",
+  accountantName: "Contato na contabilidade",
+  providerId: "ID do provedor de e-mail no Appwrite",
+  from: "Remetente (From)",
+};
+
+export const SECRET_LABEL: Record<string, string> = { accessToken: "Access token", connectorToken: "Token do conector", token: "Token da API", clientId: "Client ID", clientSecret: "Client secret", apiKey: "Chave da API" };
 
 export const STATUS_LABEL: Record<string, string> = {
   not_configured: "Não configurada",
@@ -81,9 +118,11 @@ export const STATUS_LABEL: Record<string, string> = {
   operational: "Operacional",
   unavailable: "Indisponível",
   error: "Erro",
+  simulated: "Simulação",
 };
 
 const scopeKey = (companyId: string, branchId: string | null | undefined, kind: string) => `${companyId}|${branchId ?? "*"}|${kind}`;
+export const integrationId = (companyId: string, branchId: string | null | undefined, kind: string) => detId("integration", scopeKey(companyId, branchId, kind));
 
 /** Integração efetiva para a filial (específica ou da empresa). */
 export async function getIntegration(store: Store, companyId: string, branchId: string | null | undefined, kind: IntegrationKind): Promise<Doc | null> {
@@ -95,10 +134,29 @@ export async function getIntegration(store: Store, companyId: string, branchId: 
   return c && c.enabled !== false ? c : null;
 }
 
+const ENV_NAME = /^[A-Z][A-Z0-9_]{1,80}$/;
+
 export async function saveIntegration(
   ctx: Ctx,
   input: { kind: IntegrationKind; branchId: string | null; provider: string; environment?: string; config?: Record<string, any>; secretRefs?: Record<string, string>; enabled?: boolean },
 ) {
+  requireAction(ctx, "admin.integrations");
+  const cat = INTEGRATION_CATALOG[input.kind];
+  assert(cat, "Tipo de integração desconhecido.");
+  const prov = cat.providers.find((p) => p.id === input.provider);
+  assert(prov, "Provedor não suportado para esta integração.");
+  const refs: Record<string, string> = {};
+  for (const s of prov.secrets) {
+    const v = (input.secretRefs?.[s] ?? prov.defaultRefs?.[s] ?? "").trim();
+    if (!v) continue;
+    assert(ENV_NAME.test(v), `"${SECRET_LABEL[s] ?? s}": informe o NOME da variável de ambiente (ex.: ${prov.defaultRefs?.[s] ?? "MINHA_CHAVE"}), nunca o valor da credencial.`);
+    refs[s] = v;
+  }
+  const config: Record<string, any> = {};
+  for (const k of prov.config) if (input.config?.[k] !== undefined && input.config[k] !== "") config[k] = input.config[k];
+  if (config.accountantEmail) assert(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(config.accountantEmail)), "E-mail da contabilidade inválido.");
+  if (config.baseUrl) assert(/^https:\/\//.test(String(config.baseUrl)), "A URL base deve usar https://.");
+  if (config.connectorUrl) assert(/^https?:\/\//.test(String(config.connectorUrl)), "URL do conector inválida.");
   const sk = scopeKey(ctx.companyId, input.branchId, input.kind);
   const id = detId("integration", sk);
   const data = {
@@ -108,11 +166,11 @@ export async function saveIntegration(
     kind: input.kind,
     provider: input.provider,
     environment: input.environment ?? "homologacao",
-    config: input.config ?? {},
-    secretRefs: input.secretRefs ?? {},
+    config,
+    secretRefs: refs,
     enabled: input.enabled ?? true,
     status: "configured_untested",
-    lastTestMessage: null,
+    lastTestMessage: "Configuração salva — execute o teste para medir a conexão.",
   };
   const existing = await ctx.store.get("integrations", id);
   let doc: Doc;
@@ -125,7 +183,7 @@ export async function saveIntegration(
       doc = await ctx.store.update("integrations", id, data);
     }
   }
-  await audit(ctx, { module: "admin", action: "integration.save", entityType: "integration", entityId: id, summary: `Integração ${INTEGRATION_CATALOG[input.kind].label} configurada (${input.provider})`, before: existing ? { provider: existing.provider, environment: existing.environment, config: existing.config } : null, after: { provider: input.provider, environment: input.environment, config: input.config, secretRefs: input.secretRefs } });
+  await audit(ctx, { module: "admin", action: "integration.save", entityType: "integration", entityId: id, summary: `Integração ${cat.label} configurada (${prov.label}${input.branchId ? ", filial" : ", empresa"})`, before: existing ? { provider: existing.provider, environment: existing.environment, config: existing.config, secretRefs: existing.secretRefs } : null, after: { provider: input.provider, environment: input.environment, config, secretRefs: refs }, branchId: input.branchId });
   return doc;
 }
 
@@ -153,7 +211,7 @@ export async function setIntegrationStatus(store: Store, id: string, status: str
   return store.update("integrations", id, { status, lastTestAt: nowIso(), lastTestMessage: message.slice(0, 1000) });
 }
 
-/** Secretos faltantes (nomes de variáveis sem valor no ambiente). */
+/** Segredos faltantes (nomes de variáveis sem valor no ambiente). */
 export function missingSecrets(integration: Doc): string[] {
   const refs: Record<string, string> = integration.secretRefs ?? {};
   return Object.entries(refs)
@@ -161,6 +219,232 @@ export function missingSecrets(integration: Doc): string[] {
     .map(([k, envName]) => `${k} (${envName})`);
 }
 
+/** Situação das referências de credencial: nome da variável e se está definida no servidor (sem revelar valor). */
+export function secretStatus(kind: IntegrationKind, provider: string | null | undefined, refs: Record<string, string> | null | undefined) {
+  const prov = INTEGRATION_CATALOG[kind]?.providers.find((p) => p.id === provider);
+  if (!prov) return [];
+  return prov.secrets.map((s) => {
+    const envName = refs?.[s] || prov.defaultRefs?.[s] || "";
+    return { key: s, label: SECRET_LABEL[s] ?? s, envName, defined: Boolean(envName && process.env[envName]) };
+  });
+}
+
 export async function listIntegrations(store: Store, companyId: string) {
   return listAll(store, "integrations", { filters: [["eq", "companyId", companyId]] });
+}
+
+// ───────────────────────────── Teste real por tipo
+
+export interface TestOutcome {
+  status: "operational" | "simulated" | "configured_untested" | "unavailable" | "error" | "not_configured";
+  ok: boolean;
+  message: string;
+}
+
+async function fetchStatus(url: string, token?: string): Promise<TestOutcome> {
+  try {
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(8000) });
+    if (res.status === 401 || res.status === 403) return { status: "error", ok: false, message: `Conector recusou a credencial (HTTP ${res.status}).` };
+    if (!res.ok) return { status: "unavailable", ok: false, message: `Conector respondeu HTTP ${res.status}.` };
+    return { status: "operational", ok: true, message: `Conector respondeu HTTP ${res.status}.` };
+  } catch (e: any) {
+    return { status: "unavailable", ok: false, message: `Conector inacessível: ${e?.cause?.code ?? e.message}` };
+  }
+}
+
+/** Executa o teste real da integração e grava o estado medido + histórico. */
+export async function testIntegration(ctx: Ctx, kind: IntegrationKind, branchId: string | null): Promise<TestOutcome> {
+  requireAction(ctx, "admin.integrations");
+  const t0 = Date.now();
+  let out: TestOutcome;
+  let integ: Doc | null = null;
+  if (kind === "fiscal_nfe" || kind === "fiscal_nfse") {
+    const { testFiscalConnection, getFiscalConfig } = await import("./fiscal/service");
+    const cfg = await getFiscalConfig(ctx.store, ctx.companyId, branchId);
+    if (!cfg) out = { status: "not_configured", ok: false, message: "Configuração fiscal não cadastrada para esta filial/empresa." };
+    else {
+      const r = await testFiscalConnection(ctx, cfg.branchId ?? null);
+      out = { status: r.status as TestOutcome["status"], ok: r.ok, message: r.message };
+    }
+    integ = await mirrorFiscalIntegration(ctx, kind, branchId, out);
+    await audit(ctx, { module: "admin", action: "integration.test", entityType: "integration", entityId: integ?.id ?? null, summary: `Teste ${INTEGRATION_CATALOG[kind].label}: ${STATUS_LABEL[out.status]} — ${out.message}`.slice(0, 480), result: out.ok ? "success" : "failure" });
+    return out;
+  }
+  integ = await getIntegration(ctx.store, ctx.companyId, branchId, kind);
+  if (!integ) return { status: "not_configured", ok: false, message: "Integração não configurada." };
+  const missing = missingSecrets(integ);
+  try {
+    if (missing.length) out = { status: "error", ok: false, message: `Credencial ausente no servidor: ${missing.join(", ")}. Defina a variável de ambiente e teste novamente.` };
+    else if (kind === "pix") {
+      const { pixProviderFrom } = await import("./payments/providers");
+      const p = pixProviderFrom(integ);
+      if (!p) out = { status: "error", ok: false, message: "Provedor Pix não pôde ser iniciado (credencial ausente)." };
+      else {
+        const r = await p.test();
+        out = { status: r.ok ? (p.simulated ? "simulated" : "operational") : "error", ok: r.ok, message: r.message };
+      }
+    } else if (kind === "card_tef") {
+      if (integ.provider === "tef_connector") {
+        const url = String(integ.config?.connectorUrl ?? "").replace(/\/$/, "");
+        out = url ? await fetchStatus(`${url}/status`, process.env[integ.secretRefs?.connectorToken ?? ""]) : { status: "error", ok: false, message: "URL do conector não informada." };
+      } else out = { status: "configured_untested", ok: true, message: "Maquininha com registro manual de NSU: não há conexão remota a testar. Os pagamentos dependem da conferência do operador e da conciliação de recebíveis." };
+    } else if (kind === "bank") {
+      out =
+        integ.provider === "file_import"
+          ? { status: "configured_untested", ok: true, message: "Importação manual de arquivos (OFX/CSV/CNAB): não há conexão remota a testar. Use Financeiro → Conciliação para importar." }
+          : { status: "unavailable", ok: false, message: "Conector de API bancária/Open Finance não implementado nesta versão — use a importação de arquivos." };
+    } else if (kind === "email" || kind === "accounting") {
+      const to = ctx.user.email;
+      if (!to) out = { status: "error", ok: false, message: "Usuário logado sem e-mail para receber o teste." };
+      else if (kind === "accounting" && !integ.config?.accountantEmail) out = { status: "error", ok: false, message: "Informe o e-mail da contabilidade." };
+      else {
+        const { sendEmail } = await import("@/lib/core/email");
+        const r = await sendEmail(ctx.companyId, { to, subject: `Teste de integração — ${INTEGRATION_CATALOG[kind].label}`, html: `<p>Mensagem de teste enviada pela Central de integrações em ${new Date().toLocaleString("pt-BR")} por ${ctx.user.name}.</p>${kind === "accounting" ? `<p>Destino configurado para os pacotes: ${integ.config?.accountantEmail}</p>` : ""}` });
+        out = r.delivered ? { status: "operational", ok: true, message: `Mensagem de teste entregue ao canal ${r.channel} para ${to}.` } : { status: r.channel === "not_configured" ? "error" : "error", ok: false, message: `Envio de teste falhou (${r.channel}): ${r.message ?? "sem detalhes"}` };
+      }
+    } else out = { status: "configured_untested", ok: true, message: "Sem teste disponível para este tipo." };
+  } catch (e: any) {
+    out = { status: "error", ok: false, message: `Falha no teste: ${e.message}` };
+  }
+  await setIntegrationStatus(ctx.store, integ.id, out.status, out.message);
+  await logIntegration(ctx.store, { companyId: ctx.companyId, branchId: integ.branchId, integrationId: integ.id, kind, action: "test", status: out.ok && out.status !== "configured_untested" ? "success" : out.status === "configured_untested" ? "info" : "failure", message: out.message, durationMs: Date.now() - t0 });
+  await audit(ctx, { module: "admin", action: "integration.test", entityType: "integration", entityId: integ.id, summary: `Teste ${INTEGRATION_CATALOG[kind].label}: ${STATUS_LABEL[out.status]} — ${out.message}`.slice(0, 480), result: out.ok ? "success" : "failure" });
+  return out;
+}
+
+/** Mantém o registro de integração fiscal alinhado à configuração fiscal (fiscal_configs é a fonte). */
+async function mirrorFiscalIntegration(ctx: Ctx, kind: "fiscal_nfe" | "fiscal_nfse", branchId: string | null, out: TestOutcome) {
+  const { getFiscalConfig } = await import("./fiscal/service");
+  const cfg = await getFiscalConfig(ctx.store, ctx.companyId, branchId);
+  if (!cfg) return null;
+  const sk = scopeKey(ctx.companyId, cfg.branchId ?? null, kind);
+  const id = detId("integration", sk);
+  const data = { companyId: ctx.companyId, branchId: cfg.branchId ?? null, scopeKey: sk, kind, provider: cfg.provider, environment: cfg.environment, config: { nfseStandard: cfg.nfseStandard ?? null, fiscalConfigId: cfg.id }, secretRefs: cfg.provider === "focusnfe" ? { token: cfg.tokenRef || "FOCUSNFE_TOKEN" } : {}, enabled: true, status: out.status, lastTestAt: nowIso(), lastTestMessage: out.message.slice(0, 1000) };
+  if (await ctx.store.get("integrations", id)) await ctx.store.update("integrations", id, data);
+  else await ctx.store.create("integrations", { ...data, createdBy: ctx.user.id }, id).catch((e) => (isConflict(e) ? ctx.store.update("integrations", id, data) : Promise.reject(e)));
+  await logIntegration(ctx.store, { companyId: ctx.companyId, branchId: cfg.branchId ?? null, integrationId: id, kind, action: "test", status: out.ok ? "success" : "failure", message: out.message });
+  return ctx.store.get("integrations", id);
+}
+
+/** Visão 10 — configuração da integração fiscal (gravada em fiscal_configs da filial/empresa). */
+export async function saveFiscalIntegration(ctx: Ctx, branchId: string | null, input: { kind: "fiscal_nfe" | "fiscal_nfse"; provider: string; environment: string; tokenRef: string; nfseStandard?: string | null; cscId?: string | null; cscTokenRef?: string | null }) {
+  requireAction(ctx, "admin.integrations");
+  assert(["focusnfe", "simulated"].includes(input.provider), "Provedor fiscal não suportado.");
+  assert(["homologacao", "producao"].includes(input.environment), "Ambiente inválido.");
+  if (input.provider === "focusnfe") assert(ENV_NAME.test(input.tokenRef || ""), "Informe o NOME da variável de ambiente do token (ex.: FOCUSNFE_TOKEN), nunca o token.");
+  if (input.cscTokenRef) assert(ENV_NAME.test(input.cscTokenRef), "Informe o NOME da variável do CSC (ex.: NFCE_CSC).");
+  const { saveFiscalConfig, getFiscalConfig } = await import("./fiscal/service");
+  const cur = await getFiscalConfig(ctx.store, ctx.companyId, branchId);
+  const patch: Record<string, any> = { provider: input.provider, environment: input.environment, tokenRef: input.tokenRef || "FOCUSNFE_TOKEN" };
+  if (input.kind === "fiscal_nfse" && input.nfseStandard) patch.nfseStandard = input.nfseStandard;
+  if (input.kind === "fiscal_nfe") {
+    if (input.cscId !== undefined) patch.cscId = input.cscId || null;
+    if (input.cscTokenRef !== undefined) patch.cscTokenRef = input.cscTokenRef || null;
+  }
+  // configuração nova da filial herda as demais opções da empresa
+  const base = cur && (cur.branchId ?? null) !== branchId ? { nfeEnabled: cur.nfeEnabled, nfceEnabled: cur.nfceEnabled, nfseEnabled: cur.nfseEnabled, nfeSeries: cur.nfeSeries, nfceSeries: cur.nfceSeries, nfseSeries: cur.nfseSeries, nfseStandard: cur.nfseStandard, defaultPresence: cur.defaultPresence, defaultTaxGroupId: cur.defaultTaxGroupId } : {};
+  const doc = await saveFiscalConfig(ctx, branchId, { ...base, ...patch });
+  const out: TestOutcome = { status: "configured_untested", ok: false, message: "Configuração salva — execute o teste para medir a conexão." };
+  const sk = scopeKey(ctx.companyId, branchId, input.kind);
+  const id = detId("integration", sk);
+  const data = { companyId: ctx.companyId, branchId, scopeKey: sk, kind: input.kind, provider: input.provider, environment: input.environment, config: { nfseStandard: doc.nfseStandard ?? null, fiscalConfigId: doc.id }, secretRefs: input.provider === "focusnfe" ? { token: patch.tokenRef } : {}, enabled: true, status: out.status, lastTestMessage: out.message };
+  if (await ctx.store.get("integrations", id)) await ctx.store.update("integrations", id, data);
+  else await ctx.store.create("integrations", { ...data, createdBy: ctx.user.id }, id).catch((e) => (isConflict(e) ? ctx.store.update("integrations", id, data) : Promise.reject(e)));
+  await audit(ctx, { module: "admin", action: "integration.save", entityType: "integration", entityId: id, summary: `Integração ${INTEGRATION_CATALOG[input.kind].label} configurada (${input.provider}, ${input.environment})`, after: patch, branchId });
+  return doc;
+}
+
+// ───────────────────────────── Pendências (tarefas) e histórico
+
+const JOB_PREFIX: Record<IntegrationKind, string[]> = {
+  pix: ["pix.", "payment.", "payments."],
+  card_tef: ["card.", "tef."],
+  fiscal_nfe: ["fiscal.transmit", "fiscal.query", "fiscal.cancel"],
+  fiscal_nfse: ["fiscal.transmit", "fiscal.query", "fiscal.cancel"],
+  bank: ["bank."],
+  accounting: ["fiscal.accounting"],
+  email: ["email.", "mail.", "notify.email"],
+};
+
+/** Tarefas com problema (retentativa/falha definitiva) ligadas ao tipo de integração. */
+export async function integrationJobs(ctx: Ctx, kind: IntegrationKind, statuses = ["retry", "dead", "pending", "running"]) {
+  const jobs = await listAll(ctx.store, "jobs", { filters: [["eq", "companyId", ctx.companyId], ["eq", "status", statuses]], orderBy: [{ field: "runAt", dir: "desc" }] }, 500);
+  const prefixes = JOB_PREFIX[kind] ?? [];
+  let out = jobs.filter((j) => prefixes.some((p) => j.type.startsWith(p)));
+  if (kind === "fiscal_nfe" || kind === "fiscal_nfse") {
+    const res: Doc[] = [];
+    for (const j of out) {
+      const d = j.payload?.documentId ? await ctx.store.get("fiscal_documents", j.payload.documentId) : null;
+      const isNfse = d?.model === "nfse";
+      if ((kind === "fiscal_nfse") === isNfse) res.push({ ...j, document: d ? { id: d.id, model: d.model, number: d.number, ref: d.ref, status: d.status } : null } as Doc);
+    }
+    out = res;
+  }
+  return out;
+}
+
+export async function requeueJob(ctx: Ctx, jobId: string) {
+  requireAction(ctx, "admin.integrations");
+  const job = await ctx.store.getOrThrow("jobs", jobId);
+  assert(job.companyId === ctx.companyId, "Tarefa de outra empresa.");
+  assert(["retry", "dead", "pending"].includes(job.status), "Somente tarefas pendentes, em retentativa ou com falha podem ser reprocessadas.");
+  const { requeue } = await import("@/lib/core/jobs");
+  await requeue(ctx.store, jobId);
+  await audit(ctx, { module: "admin", action: "job.requeue", entityType: "job", entityId: jobId, summary: `Tarefa ${job.type} reenfileirada manualmente (antes: ${job.status}, ${job.attempts ?? 0} tentativa(s))` });
+  const { runDueJobs } = await import("./jobs-registry");
+  return runDueJobs(ctx.store, { jobIds: [jobId], limit: 1 });
+}
+
+/** "Executar tarefas pendentes agora": antecipa retentativas e roda as tarefas vencidas da empresa. */
+export async function runCompanyJobs(ctx: Ctx, opts: { includeRetry?: boolean } = {}) {
+  requireAction(ctx, "admin.integrations");
+  const now = nowIso();
+  const due = await listAll(ctx.store, "jobs", { filters: [["eq", "companyId", ctx.companyId], ["eq", "status", ["pending", "retry"]]] }, 200);
+  const ids: string[] = [];
+  for (const j of due) {
+    if (j.runAt > now) {
+      if (!opts.includeRetry) continue;
+      await ctx.store.update("jobs", j.id, { runAt: now });
+    }
+    ids.push(j.id);
+  }
+  if (!ids.length) return { ran: 0, results: [] as Array<{ id: string; type: string; status: string; error?: string }> };
+  const { runDueJobs } = await import("./jobs-registry");
+  const results = await runDueJobs(ctx.store, { jobIds: ids.slice(0, 50), limit: 50 });
+  await audit(ctx, { module: "admin", action: "jobs.run", entityType: "job", entityId: null, summary: `Execução manual de tarefas: ${results.length} executada(s) — ${results.filter((r) => r.status === "done").length} concluída(s), ${results.filter((r) => r.status !== "done").length} com falha/retentativa` });
+  return { ran: results.length, results };
+}
+
+export async function integrationLogs(ctx: Ctx, kind: IntegrationKind, limit = 100) {
+  const kinds = kind === "fiscal_nfe" ? ["fiscal_nfe"] : [kind];
+  return (await listAll(ctx.store, "integration_logs", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", kinds]], orderBy: [{ field: "occurredAt", dir: "desc" }] }, limit)).slice(0, limit);
+}
+
+/** Uso real recente (consumidor): execuções por ação nos últimos 30 dias. */
+export async function usageSummary(ctx: Ctx, kind: IntegrationKind) {
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const logs = await listAll(ctx.store, "integration_logs", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", kind], ["gte", "occurredAt", since]] }, 5000);
+  const by = new Map<string, { action: string; success: number; failure: number; info: number; last: string }>();
+  for (const l of logs) {
+    const r = by.get(l.action) ?? { action: l.action, success: 0, failure: 0, info: 0, last: "" };
+    r[l.status as "success" | "failure" | "info"] = (r[l.status as "success"] ?? 0) + 1;
+    if (l.occurredAt > r.last) r.last = l.occurredAt;
+    by.set(l.action, r);
+  }
+  return [...by.values()].sort((a, b) => b.last.localeCompare(a.last));
+}
+
+/** Diagnóstico acionável a partir do estado medido e da mensagem do último teste. */
+export function diagnose(status: string, message: string | null | undefined, secrets: Array<{ envName: string; defined: boolean; label: string }>): string {
+  const missing = secrets.filter((s) => !s.defined);
+  if (status === "not_configured") return "Escolha o provedor, informe os nomes das variáveis de credencial e salve; depois execute o teste.";
+  if (missing.length) return `Defina no servidor (ex.: Vercel → Settings → Environment Variables, ou .env.local) a(s) variável(is) ${missing.map((m) => m.envName || m.label).join(", ")} e teste novamente. O valor nunca é gravado no banco.`;
+  const m = message ?? "";
+  if (/HTTP 401|HTTP 403|recus/i.test(m)) return "O provedor recusou a credencial: gere um novo token no painel do provedor, atualize a variável de ambiente e reinicie/reimplante o servidor.";
+  if (/inacess|ENOTFOUND|ECONNREFUSED|timeout|abort|fetch failed/i.test(m)) return "Sem acesso de rede ao provedor/conector: verifique URL, firewall/proxy e disponibilidade do serviço.";
+  if (status === "configured_untested") return "Configuração salva, mas sem medição: clique em “Testar conexão”. Configuração preenchida não equivale a conexão operacional.";
+  if (status === "unavailable") return "Serviço indisponível ou não suportado nesta versão — use a alternativa indicada.";
+  if (status === "error") return "Corrija a causa indicada na mensagem e teste novamente; tarefas com falha podem ser reprocessadas abaixo.";
+  if (status === "simulated") return "Provedor de SIMULAÇÃO: funciona para demonstração/treinamento, sem validade fiscal/financeira. Para operar, configure o provedor real.";
+  return "Integração respondeu ao último teste.";
 }
