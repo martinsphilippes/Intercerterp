@@ -16,7 +16,7 @@ import { secretRefProblem } from "../integrations";
  * numeração, grupos tributários com vigência.
  */
 
-export const REGIME_LABEL: Record<string, string> = { simples: "Simples Nacional", mei: "MEI", presumido: "Lucro Presumido", real: "Lucro Real" };
+export const REGIME_LABEL: Record<string, string> = { simples: "Simples Nacional", simples_excesso: "Simples Nacional — excesso de sublimite", mei: "MEI", presumido: "Lucro Presumido", real: "Lucro Real" };
 export const CRT_LABEL: Record<string, string> = { "1": "1 — Simples Nacional", "2": "2 — Simples Nacional (excesso de sublimite)", "3": "3 — Regime normal", "4": "4 — MEI" };
 
 // ───────────────────────────── Emitente

@@ -1,7 +1,7 @@
 import { detId, isConflict, listAll } from "../db";
 import type { Doc, Store } from "../db/types";
 import { unscoped } from "../db/scoped-store";
-import { DEFAULT_ROLES, SPECIAL_ACTIONS } from "../permissions";
+import { ROLE_TEMPLATES, SPECIAL_ACTIONS } from "../permissions";
 import { sanitize } from "../core/audit";
 import { nowIso } from "../dates";
 
@@ -27,7 +27,7 @@ const rank = (a: string) => (ORDER.indexOf(a) === -1 ? ORDER.length : ORDER.inde
 /** O que falta aplicar ao perfil (null = nada a fazer). */
 export function templateSyncPlan(role: Record<string, any> | null | undefined): { missing: string[]; templateActions: string[] } | null {
   if (!role?.system || !role.key) return null;
-  const tpl = DEFAULT_ROLES.find((t) => t.key === role.key);
+  const tpl = ROLE_TEMPLATES.find((t) => t.key === role.key);
   if (!tpl) return null;
   const tplActions = [...tpl.actions] as string[];
   // sem registro (campo ausente, nulo ou lista vazia — colunas de lista podem voltar vazias): perfil anterior à sincronização

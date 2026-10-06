@@ -149,6 +149,8 @@ export interface PackageResult {
   missingXml: Array<{ id: string; label: string }>;
   docs: number;
   period: { from: string; to: string };
+  /** entrega registrada na caixa de entrada do escritório vinculado */
+  deliveredToFirm?: { deliveryId: string; firmCompanyId: string } | null;
 }
 
 /** Gera o ZIP do período e grava no armazenamento (Arquivos), retornando o resumo real do conteúdo. */
@@ -224,7 +226,15 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
   const fileName = `contabilidade-${f.from}-a-${f.to}${f.branchId || ctx.branchId ? "-filial" : ""}.zip`;
   const file = await saveFile(ctx, { bucket: "documents", name: fileName, mime: "application/zip", data: buf, entityType: "fiscal_export", entityId: `${f.from}:${f.to}`, kind: "accounting_package", branchId: f.branchId ?? ctx.branchId });
   await audit(ctx, { module: "fiscal", action: "export.package", entityType: "file", entityId: file.id, summary: `Pacote contábil ${formatDate(f.from)}–${formatDate(f.to)} gerado: ${xmlCount} XML, ${docs.length} documentos${missingXml.length ? `, ${missingXml.length} XML ausente(s)` : ""}`, after: { xmlCount, simulatedXml, missing: missingXml.length } });
-  return { fileId: file.id, fileName, sizeBytes: buf.length, xmlCount, simulatedXml, missingXml, docs: docs.length, period: { from: f.from, to: f.to } };
+  const result: PackageResult = { fileId: file.id, fileName, sizeBytes: buf.length, xmlCount, simulatedXml, missingXml, docs: docs.length, period: { from: f.from, to: f.to } };
+  // empresa vinculada a um escritório contábil no Intercert: o pacote entra na caixa de entrada dele automaticamente
+  const { deliverPackageToFirm } = await import("../accounting/deliveries");
+  const delivery = await deliverPackageToFirm(ctx, { ...result, missingXml: missingXml.length, branchId: f.branchId ?? ctx.branchId }).catch((e) => {
+    console.error("[accounting] falha ao entregar o pacote ao escritório vinculado", e);
+    return null;
+  });
+  if (delivery) result.deliveredToFirm = { deliveryId: delivery.id, firmCompanyId: delivery.companyId };
+  return result;
 }
 
 /** Envia o pacote pelo canal da integração "contabilidade" (e-mail) e registra o resultado real. */
@@ -234,12 +244,25 @@ export async function sendAccountingPackage(ctx: Ctx, f: FiscalReportFilter, opt
   const integ = await getIntegration(ctx.store, ctx.companyId, null, "accounting");
   const to = (opts.to || integ?.config?.accountantEmail || "").trim();
   assert(!to || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to), "Informe um e-mail válido para o envio do pacote.");
-  if (!integ || !to) {
+  const linkedFirm = (integ?.config?.linkedFirmName as string | undefined) || null;
+  if (!integ || (!to && !linkedFirm)) {
     const message = !integ ? "Integração Área da contabilidade não configurada (Administração → Integrações)." : "E-mail da contabilidade não informado na integração.";
     await logIntegration(ctx.store, { companyId: ctx.companyId, integrationId: integ?.id ?? null, kind: "accounting", action: "send_package", status: "failure", message });
     return { delivered: false, message, package: null as PackageResult | null };
   }
   const pkg = await buildAccountingPackage(ctx, f);
+  if (!to) {
+    // só o escritório vinculado: a entrega é a caixa de entrada dele (registrada em buildAccountingPackage)
+    const ok = Boolean(pkg.deliveredToFirm);
+    const message = ok ? `Pacote ${pkg.fileName} entregue na caixa de entrada do escritório ${linkedFirm}` : `Pacote ${pkg.fileName} gerado, mas o vínculo com o escritório ${linkedFirm} não está mais ativo`;
+    await logIntegration(ctx.store, { companyId: ctx.companyId, integrationId: integ.id, kind: "accounting", action: opts.reason === "scheduled" ? "scheduled_package" : "send_package", status: ok ? "success" : "failure", message, payload: { fileId: pkg.fileId, from: f.from, to: f.to, xmlCount: pkg.xmlCount, missing: pkg.missingXml.length, firm: linkedFirm } });
+    await audit(ctx, { module: "fiscal", action: "export.send", entityType: "file", entityId: pkg.fileId, summary: message, result: ok ? "success" : "failure" });
+    if (ok && (f.branchId ?? ctx.branchId) == null) {
+      const { markXmlDelivery } = await import("./obligations");
+      await markXmlDelivery(ctx, f, pkg.fileId, `escritório ${linkedFirm}`).catch(() => undefined);
+    }
+    return { delivered: ok, message, package: pkg };
+  }
   const { data } = await readFile(ctx, pkg.fileId);
   const company = await ctx.store.getOrThrow("companies", ctx.companyId);
   const { sendEmail } = await import("@/lib/core/email");

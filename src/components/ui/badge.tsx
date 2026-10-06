@@ -56,6 +56,9 @@ export const STATUS: Record<string, Record<string, [string, Tone]>> = {
   priority: { critical: ["Crítica", "bad"], high: ["Alta", "accent"], normal: ["Normal", "neutral"], low: ["Baixa", "neutral"] },
   audit: { success: ["Sucesso", "good"], failure: ["Falha", "bad"] },
   branch: { active: ["Ativa", "good"], implementation: ["Em implantação", "accent"], inactive: ["Inativa", "neutral"] },
+  accounting_client: { onboarding: ["Em implantação", "accent"], active: ["Ativo", "good"], offboarding: ["Em encerramento", "warn"], closed: ["Encerrado", "neutral"] },
+  link: { none: ["Sem vínculo", "neutral"], pending: ["Código emitido — aguardando a empresa", "warn"], active: ["Vinculado ao ERP", "good"], revoked: ["Vínculo desfeito", "bad"] },
+  delivery: { received: ["Recebida — a conferir", "warn"], reviewed: ["Conferida", "good"] },
   generic: { active: ["Ativo", "good"], inactive: ["Inativo", "neutral"], draft: ["Rascunho", "neutral"], completed: ["Concluído", "good"], cancelled: ["Cancelado", "neutral"], pending: ["Pendente", "warn"], processing: ["Processando", "info"], reconciled: ["Conciliado", "good"], ignored: ["Ignorado", "neutral"] },
 };
 

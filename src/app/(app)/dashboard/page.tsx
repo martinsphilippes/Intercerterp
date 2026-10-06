@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import Link from "@/components/ui/link";
 import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, BarChart3, CalendarClock, CheckCircle2, Clock, DollarSign, FileWarning, PackageSearch, PieChart, Plus, Receipt, ScanBarcode, ShoppingCart, Target, TrendingDown, Wallet } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
@@ -49,6 +50,8 @@ interface Alert {
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const s = await requireSession("dashboard");
+  // escritório contábil: o painel é o da carteira
+  if (s.company.kind === "accounting") redirect("/contabil");
   const params = await searchParams;
   const rp = resolveReportParams(s, params, "mes");
   const canSales = can(s.user, "sales") || can(s.user, "reports");

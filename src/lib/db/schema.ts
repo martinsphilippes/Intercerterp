@@ -74,6 +74,8 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       name: s(200, true), tradeName: s(200), cnpj: s(20), ie: s(30), im: s(30), regime: s(20), crt: s(2),
       cnae: s(20), email: s(200), phone: s(40), address: json, status: s(20), isDemo: bool, notes: txt, createdBy: id(),
+      // tipo: "retail" (empresa operacional — padrão quando ausente) ou "accounting" (escritório contábil com carteira de clientes)
+      kind: s(20),
     },
     indexes: [u("u_cnpj", "cnpj")],
   },
@@ -808,6 +810,79 @@ export const COLLECTIONS: CollectionDef[] = [
     id: "restore_jobs",
     label: "Restaurações",
     fields: { ...ctx, backupId: id(true), target: s(30), status: s(20), preview: json, result: json, startedAt: dt, finishedAt: dt, error: txt },
+  },
+  // ───────────────────────────── Gestão contábil (escritório → carteira de clientes)
+  {
+    id: "accounting_clients",
+    label: "Clientes contábeis",
+    fields: {
+      ...ctx, code: s(30), personType: s(2, true), doc: s(20), name: s(200, true), tradeName: s(200), email: s(200), phone: s(40),
+      ie: s(30), im: s(30), regime: s(20), crt: s(2), cnae: s(20), cnaes: strings, legalNature: s(120), size: s(40),
+      openedAt: date, rfbStatus: s(60), rfbCheckedAt: dt, docLookup: json, address: json, cityName: s(120), uf: s(2),
+      status: s(20, true), onboardedAt: date, serviceStartAt: date, endedAt: date, endReason: s(300),
+      services: strings, groupId: id(), responsibleUserId: id(), employeesCount: int, monthlyDocs: int, monthlyEntries: int,
+      systems: json, commPrefs: json, tags: strings, notes: txt, searchText: s(1000),
+      // vínculo com a empresa que usa o ERP (consentido pelo administrador dela)
+      linkedCompanyId: id(), linkStatus: s(20), linkCodeHash: s(128), linkCodeExpiresAt: dt, linkedAt: dt, linkedBy: id(), linkRequestedBy: id(),
+    },
+    indexes: [k("i_company", "companyId"), u("u_doc", "companyId", "doc"), k("i_linked", "linkedCompanyId"), k("i_code", "linkCodeHash"), k("i_status", "companyId", "status")],
+  },
+  {
+    id: "accounting_client_people",
+    label: "Pessoas do cliente contábil",
+    fields: {
+      ...ctx, clientId: id(true), kind: s(30, true), name: s(200, true), doc: s(20), qualification: s(120), shareBps: int,
+      email: s(200), phone: s(40), department: s(40), isPrimary: bool, startAt: date, endAt: date, notes: s(500), active: bool,
+    },
+    indexes: [k("i_client", "clientId")],
+  },
+  {
+    id: "accounting_client_establishments",
+    label: "Estabelecimentos do cliente contábil",
+    fields: {
+      ...ctx, clientId: id(true), kind: s(20, true), name: s(200), cnpj: s(20), ie: s(30), im: s(30), uf: s(2), cityName: s(120),
+      cityCode: s(10), address: json, status: s(20), linkedBranchId: id(), notes: s(500),
+    },
+    indexes: [k("i_client", "clientId")],
+  },
+  {
+    id: "accounting_client_regimes",
+    label: "Histórico de regime tributário",
+    fields: { ...ctx, clientId: id(true), regime: s(20, true), crt: s(2), validFrom: date, validTo: date, reason: s(300), source: s(120) },
+    indexes: [k("i_client", "clientId", "validFrom")],
+  },
+  {
+    id: "accounting_client_groups",
+    label: "Grupos de clientes",
+    fields: { ...ctx, name: s(200, true), kind: s(30), notes: s(500), active: bool },
+    indexes: [k("i_company", "companyId")],
+  },
+  {
+    id: "departments",
+    label: "Departamentos",
+    fields: { ...ctx, key: s(40), name: s(120, true), kind: s(30), managerUserId: id(), active: bool, sortOrder: int },
+    indexes: [k("i_company", "companyId"), u("u_key", "companyId", "key")],
+  },
+  {
+    id: "department_members",
+    label: "Membros de departamento",
+    fields: { ...ctx, departmentId: id(true), userId: id(true), role: s(20), active: bool },
+    indexes: [u("u_member", "departmentId", "userId"), k("i_user", "companyId", "userId")],
+  },
+  {
+    id: "accounting_client_assignments",
+    label: "Responsáveis por cliente",
+    fields: { ...ctx, clientId: id(true), departmentId: id(), userId: id(true), role: s(20), validFrom: date, validTo: date, active: bool },
+    indexes: [k("i_client", "clientId"), k("i_user", "companyId", "userId")],
+  },
+  {
+    id: "accounting_deliveries",
+    label: "Entregas recebidas pelo escritório",
+    fields: {
+      ...ctx, clientId: id(true), sourceCompanyId: id(true), kind: s(40, true), period: s(20), periodFrom: date, periodTo: date,
+      fileId: id(), fileName: s(250), sizeBytes: int, payload: json, status: s(20), receivedAt: dt, reviewedAt: dt, reviewedBy: id(), notes: s(500),
+    },
+    indexes: [k("i_company", "companyId", "status"), k("i_client", "clientId"), k("i_file", "fileId")],
   },
   {
     id: "files",

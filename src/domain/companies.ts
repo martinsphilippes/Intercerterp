@@ -28,6 +28,8 @@ export interface AddressInput {
 }
 
 export interface CompanyInput {
+  /** "retail" (padrão) ou "accounting" (escritório contábil) */
+  kind?: string | null;
   name: string;
   tradeName?: string | null;
   cnpj?: string | null;
@@ -57,6 +59,11 @@ export interface BranchInput {
   managerUserId?: string | null;
 }
 
+export const COMPANY_KINDS = [
+  { value: "retail", label: "Empresa operacional (comércio, serviços)" },
+  { value: "accounting", label: "Escritório contábil (carteira de clientes)" },
+];
+
 export const REGIMES = [
   { value: "simples", label: "Simples Nacional", crt: "1" },
   { value: "simples_excesso", label: "Simples Nacional — excesso de sublimite", crt: "2" },
@@ -76,7 +83,7 @@ export const TIMEZONES = ["America/Sao_Paulo", "America/Bahia", "America/Fortale
 
 export const UFS = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"];
 
-function cleanAddress(a?: AddressInput) {
+export function cleanAddress(a?: AddressInput) {
   const x = a ?? {};
   return {
     zip: onlyDigits(x.zip) || "",
@@ -90,7 +97,7 @@ function cleanAddress(a?: AddressInput) {
   };
 }
 
-function validateAddress(a: ReturnType<typeof cleanAddress>) {
+export function validateAddress(a: ReturnType<typeof cleanAddress>) {
   if (a.uf) assert(UFS.includes(a.uf), "UF inválida.");
   if (a.cityCode) assert(/^\d{7}$/.test(a.cityCode), "Código IBGE do município deve ter 7 dígitos.");
   if (a.zip) assert(/^\d{8}$/.test(a.zip), "CEP deve ter 8 dígitos.");
@@ -107,7 +114,10 @@ function companyData(input: CompanyInput) {
   assert(REGIMES.some((r) => r.value === regime), "Regime tributário inválido.");
   const crt = input.crt || REGIMES.find((r) => r.value === regime)!.crt;
   assert(CRT_OPTIONS.some((c) => c.value === crt), "CRT inválido.");
+  const kind = input.kind || "retail";
+  assert(COMPANY_KINDS.some((k) => k.value === kind), "Tipo de empresa inválido.");
   return {
+    kind,
     name: input.name.trim(),
     tradeName: input.tradeName?.trim() || input.name.trim(),
     cnpj,
@@ -137,7 +147,7 @@ export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName
   const { company, branch, roles } = await createCompanyWithDefaults(unscoped(ctx.store), {
     key: newId(),
     name: data.name, tradeName: data.tradeName, cnpj: data.cnpj ?? undefined, regime: data.regime, uf: data.address.uf, cityName: data.address.cityName,
-    cityCode: data.address.cityCode, branchName: input.branchName?.trim() || "Matriz", createdBy: ctx.user.id,
+    cityCode: data.address.cityCode, branchName: input.branchName?.trim() || "Matriz", createdBy: ctx.user.id, kind: data.kind as "retail" | "accounting",
   });
   const store = unscoped(ctx.store);
   const updated = await store.update("companies", company.id, { ...data, status: "active" });
@@ -184,7 +194,8 @@ export async function branchAdminCtx(ctx: Ctx, branchId: string, op: Crud = "vie
 export async function updateCompany(ctx: Ctx, id: string, input: CompanyInput) {
   const c = await companyAdminCtx(ctx, id, "edit");
   const before = await c.store.getOrThrow("companies", id);
-  const data = companyData(input);
+  // o tipo (operacional × escritório) é definido na criação e não muda: a parametrização e o menu dependem dele
+  const data = { ...companyData({ ...input, kind: before.kind ?? "retail" }), kind: before.kind ?? "retail" };
   if (data.cnpj && data.cnpj !== before.cnpj) {
     const dup = await findOne(c.store, "companies", [["eq", "cnpj", data.cnpj]]);
     if (dup && dup.id !== id) throw new BusinessError(`CNPJ já usado pela empresa ${dup.name}.`, "duplicate");

@@ -15,7 +15,13 @@ export const MODULES = [
   { key: "reports", label: "Relatórios" },
   { key: "admin", label: "Administração" },
   { key: "support", label: "Ajuda e suporte" },
+  { key: "accounting", label: "Gestão contábil (carteira de clientes)" },
 ] as const;
+
+/** Módulos exclusivos de empresas do tipo escritório contábil (ocultos nas empresas operacionais). */
+export const ACCOUNTING_MODULES: ModuleKey[] = ["accounting"];
+/** Módulos sem sentido num escritório contábil (ocultos; o escritório usa financeiro, fiscal de serviços e administração). */
+export const RETAIL_ONLY_MODULES: ModuleKey[] = ["pdv", "sales", "cash", "products", "stock", "customers", "suppliers", "purchases", "reports"];
 
 export type ModuleKey = (typeof MODULES)[number]["key"];
 export type Crud = "view" | "create" | "edit" | "delete";
@@ -44,6 +50,9 @@ export const SPECIAL_ACTIONS = [
   { key: "admin.backup", label: "Backup e restauração" },
   { key: "support.manage", label: "Atender chamados" },
   { key: "customer.credit_limit", label: "Conceder/alterar limite de crédito (crediário)" },
+  { key: "accounting.all_clients", label: "Ver toda a carteira de clientes (não só os seus)" },
+  { key: "accounting.link", label: "Vincular/desvincular empresas do ERP a clientes" },
+  { key: "accounting.manage_team", label: "Gerir departamentos e responsáveis da carteira" },
 ] as const;
 
 export type SpecialAction = (typeof SPECIAL_ACTIONS)[number]["key"];
@@ -61,13 +70,18 @@ export interface RoleTemplate {
   discountLimitBps: number;
 }
 
+const RETAIL_MODULES = MODULES.filter((m) => !ACCOUNTING_MODULES.includes(m.key));
+const RETAIL_ACTIONS = SPECIAL_ACTIONS.filter((a) => !a.key.startsWith("accounting."));
+const FIRM_MODULES = MODULES.filter((m) => !RETAIL_ONLY_MODULES.includes(m.key));
+
+/** Perfis padrão das EMPRESAS OPERACIONAIS (varejo). */
 export const DEFAULT_ROLES: RoleTemplate[] = [
   {
     key: "admin",
     name: "Administrador",
     description: "Acesso integral a todos os módulos e configurações.",
-    permissions: Object.fromEntries(MODULES.map((m) => [m.key, all()])),
-    actions: SPECIAL_ACTIONS.map((a) => a.key),
+    permissions: Object.fromEntries(RETAIL_MODULES.map((m) => [m.key, all()])),
+    actions: RETAIL_ACTIONS.map((a) => a.key),
     discountLimitBps: 10000,
   },
   {
@@ -114,6 +128,53 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     discountLimitBps: 0,
   },
 ];
+
+/**
+ * Perfis padrão dos ESCRITÓRIOS CONTÁBEIS. Chaves próprias (prefixo firm_) para não colidir com os perfis de varejo na
+ * sincronização de modelos. Sem "Ver toda a carteira", o usuário enxerga só os clientes em que é responsável.
+ */
+export const FIRM_ROLES: RoleTemplate[] = [
+  {
+    key: "firm_admin",
+    name: "Sócio / Administrador do escritório",
+    description: "Acesso integral: carteira, equipe, financeiro do escritório, fiscal de serviços e administração.",
+    permissions: Object.fromEntries(FIRM_MODULES.map((m) => [m.key, all()])),
+    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
+    discountLimitBps: 10000,
+  },
+  {
+    key: "firm_manager",
+    name: "Gestor de departamento",
+    description: "Toda a carteira, responsáveis e equipe; financeiro em consulta.",
+    permissions: { dashboard: all(), accounting: all(), finance: ro(), fiscal: ro(), admin: ro(), support: rw() },
+    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "data.export"],
+    discountLimitBps: 0,
+  },
+  {
+    key: "firm_analyst",
+    name: "Analista",
+    description: "Clientes da própria carteira (em que é responsável ou substituto); sem exclusão nem vínculos.",
+    permissions: { dashboard: ro(), accounting: rw(), support: rw() },
+    actions: [],
+    discountLimitBps: 0,
+  },
+  {
+    key: "firm_finance",
+    name: "Financeiro do escritório",
+    description: "Contas a pagar e a receber do escritório, conciliação e NFS-e; carteira em consulta.",
+    permissions: { dashboard: ro(), accounting: ro(), finance: all(), fiscal: rw(), support: rw() },
+    actions: ["accounting.all_clients", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "fiscal.issue", "data.export"],
+    discountLimitBps: 0,
+  },
+];
+
+/** Todos os modelos de perfil (varejo + escritório), para sincronização e perfis equivalentes entre empresas. */
+export const ROLE_TEMPLATES: RoleTemplate[] = [...DEFAULT_ROLES, ...FIRM_ROLES];
+
+/** Modelos de perfil conforme o tipo da empresa. */
+export function roleTemplatesFor(kind: string | null | undefined): RoleTemplate[] {
+  return kind === "accounting" ? FIRM_ROLES : DEFAULT_ROLES;
+}
 
 export interface PermissionSubject {
   isAdmin: boolean;

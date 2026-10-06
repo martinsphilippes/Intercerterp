@@ -89,7 +89,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
   },
   accounting: {
     label: "Área da contabilidade",
-    description: "Pacote de XMLs e relatórios CSV do período enviado ao escritório contábil pelo canal de e-mail.",
+    description: "Pacote de XMLs e relatórios CSV do período para o escritório contábil: por e-mail e/ou direto na caixa de entrada do escritório, quando ele usa o Intercert (vínculo por código).",
     providers: [{ id: "export_package", label: "Pacote de exportação (ZIP) + e-mail", secrets: [], config: ["accountantEmail", "accountantName"], test: "Envia mensagem de teste pelo canal de e-mail ao usuário logado (comprova a entrega do canal)." }],
     consumer: "Fiscal → Relatórios fiscais",
     consumers: [{ label: "Relatórios fiscais — exportação", href: "/fiscal/relatorios?tab=exportacao" }],
@@ -115,6 +115,7 @@ export const CONFIG_LABEL: Record<string, string> = {
   connectorUrl: "URL do conector TEF",
   accountantEmail: "E-mail da contabilidade",
   accountantName: "Contato na contabilidade",
+  linkedFirmName: "Escritório vinculado (Intercert)",
   providerId: "ID do provedor de e-mail no Appwrite",
   from: "Remetente (From)",
 };
@@ -284,6 +285,10 @@ export async function saveIntegration(
     lastTestMessage: "Configuração salva — execute o teste para medir a conexão.",
   };
   const existing = await ctx.store.get("integrations", id);
+  // vínculo com o escritório contábil (aceito por código) não é campo do formulário: preservado ao salvar a configuração
+  if (input.kind === "accounting" && existing?.config?.linkedClientId) {
+    for (const k of ["linkedFirmCompanyId", "linkedClientId", "linkedFirmName", "linkedAt"]) if (existing.config[k] != null) config[k] = existing.config[k];
+  }
   let doc: Doc;
   if (existing) doc = await ctx.store.update("integrations", id, data);
   else {
@@ -439,7 +444,8 @@ export async function testIntegration(ctx: Ctx, kind: IntegrationKind, branchId:
     } else if (kind === "email" || kind === "accounting") {
       const to = ctx.user.email;
       if (!to) out = { status: "error", ok: false, message: "Usuário logado sem e-mail para receber o teste." };
-      else if (kind === "accounting" && !integ.config?.accountantEmail) out = { status: "error", ok: false, message: "Informe o e-mail da contabilidade." };
+      else if (kind === "accounting" && !integ.config?.accountantEmail && integ.config?.linkedFirmName) out = { status: "operational", ok: true, message: `Vinculada ao escritório ${integ.config.linkedFirmName}: os pacotes entram na caixa de entrada dele (sem e-mail).` };
+      else if (kind === "accounting" && !integ.config?.accountantEmail) out = { status: "error", ok: false, message: "Informe o e-mail da contabilidade ou aceite o código de vínculo do escritório." };
       else {
         const { sendEmail } = await import("@/lib/core/email");
         const r = await sendEmail(ctx.companyId, { to, subject: `Teste de integração — ${INTEGRATION_CATALOG[kind].label}`, html: `<p>Mensagem de teste enviada pela Central de integrações em ${new Date().toLocaleString("pt-BR")} por ${ctx.user.name}.</p>${kind === "accounting" ? `<p>Destino configurado para os pacotes: ${integ.config?.accountantEmail}</p>` : ""}` });

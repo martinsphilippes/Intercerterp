@@ -17,6 +17,8 @@ const SECTORS: Record<string, { sector: string; order: number }> = {
   estoque: { sector: "Estoque", order: 5 },
   financeiro: { sector: "Financeiro", order: 6 },
   fiscal: { sector: "Fiscal", order: 7 },
+  contador: { sector: "Escritório contábil — sócio", order: 8 },
+  analista: { sector: "Escritório contábil — analista", order: 9 },
 };
 
 /** Somente usuários da empresa de demonstração, ativos e com acesso criado — nunca contas reais. */

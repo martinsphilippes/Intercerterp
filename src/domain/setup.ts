@@ -1,6 +1,6 @@
 import { detId, isConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { DEFAULT_ROLES } from "@/lib/permissions";
+import { roleTemplatesFor } from "@/lib/permissions";
 import { DEFAULT_TZ, today } from "@/lib/dates";
 import { onlyDigits } from "@/lib/core/text";
 import { setSetting } from "@/lib/core/settings";
@@ -12,8 +12,10 @@ import { setSetting } from "@/lib/core/settings";
  */
 export async function createCompanyWithDefaults(
   store: Store,
-  input: { name: string; tradeName?: string; cnpj?: string; regime?: string; uf?: string; cityName?: string; cityCode?: string; branchName?: string; createdBy?: string; key?: string },
+  input: { name: string; tradeName?: string; cnpj?: string; regime?: string; uf?: string; cityName?: string; cityCode?: string; branchName?: string; createdBy?: string; key?: string; kind?: "retail" | "accounting" },
 ): Promise<{ company: Doc; branch: Doc; roles: Record<string, Doc> }> {
+  const kind = input.kind ?? "retail";
+  const firm = kind === "accounting";
   // chave dos ids: única por empresa nova (key) — CNPJ/nome só na instalação (retomável)
   const key = input.key ?? (onlyDigits(input.cnpj) || input.name);
   const put = async (collection: string, k: string, data: Record<string, any>) => {
@@ -35,7 +37,7 @@ export async function createCompanyWithDefaults(
   };
   const company = await put("companies", "company", {
     name: input.name, tradeName: input.tradeName ?? input.name, cnpj: onlyDigits(input.cnpj) || null, regime: input.regime ?? "simples", crt: input.regime === "simples" || !input.regime ? "1" : "3",
-    status: "active", isDemo: false, createdBy: input.createdBy ?? null, address: { uf: input.uf ?? "", cityName: input.cityName ?? "", cityCode: input.cityCode ?? "" },
+    status: "active", isDemo: false, createdBy: input.createdBy ?? null, address: { uf: input.uf ?? "", cityName: input.cityName ?? "", cityCode: input.cityCode ?? "" }, kind,
   });
   // nunca devolver/atualizar uma empresa de terceiros por colisão de identificador
   if ((onlyDigits(input.cnpj) || null) !== (company.cnpj ?? null) || (!input.cnpj && company.name !== input.name)) {
@@ -48,15 +50,41 @@ export async function createCompanyWithDefaults(
     ...base, code: "01", name: input.branchName ?? "Matriz", cnpj: onlyDigits(input.cnpj) || null, uf: input.uf ?? null, cityName: input.cityName ?? null, cityCode: input.cityCode ?? null,
     status: "active", fiscalStatus: "pending", defaultWarehouseId: whId, timezone: DEFAULT_TZ,
   });
+  const roles: Record<string, Doc> = {};
+  for (const r of roleTemplatesFor(kind)) roles[r.key] = await put("roles", r.key, { ...base, key: r.key, name: r.name, description: r.description, permissions: r.permissions, actions: r.actions, templateActions: r.actions, discountLimitBps: r.discountLimitBps, system: true, active: true });
+  const cash = await put("financial_accounts", "caixa", { ...base, branchId: branch.id, name: "Caixa — Matriz", kind: "cash", initialBalance: 0, initialBalanceDate: today(), balance: 0, seq: 0, active: true });
+  const bank = await put("financial_accounts", "banco", { ...base, name: "Conta bancária principal", kind: "bank", initialBalance: 0, initialBalanceDate: today(), balance: 0, seq: 0, active: true });
+  if (firm) {
+    // escritório contábil: sem depósitos, tabela de preço, unidades nem meios de PDV — só o que o financeiro próprio usa
+    for (const [i, m] of [
+      { k: "pix", name: "Pix", kind: "pix", accountId: bank.id },
+      { k: "boleto", name: "Boleto", kind: "boleto", requiresCustomer: true, accountId: bank.id },
+      { k: "transferencia", name: "Transferência bancária", kind: "other", accountId: bank.id },
+      { k: "dinheiro", name: "Dinheiro", kind: "cash", accountId: cash.id, allowsChange: true },
+    ].entries()) {
+      await put("payment_methods", m.k, { ...base, name: m.name, kind: m.kind, accountId: m.accountId ?? null, feeBps: 0, settlementDays: 0, allowsChange: Boolean(m.allowsChange), requiresCustomer: Boolean(m.requiresCustomer), maxInstallments: 1, active: true, sortOrder: i, availablePdv: false });
+    }
+    for (const t of [["avista", "À vista", 1, 0], ["dia-10", "Vencimento dia 10", 1, 10], ["30", "30 dias", 1, 30]] as const) {
+      await put("payment_terms", t[0], { ...base, name: t[1], installments: t[2], firstDueDays: t[3], intervalDays: 30, interestBps: 0, active: true, kind: "both" });
+    }
+    const cats: Record<string, Doc> = {};
+    for (const c of [["honorarios", "Receita de honorários", "revenue"], ["servicos", "Receita de serviços avulsos", "revenue"], ["pessoal", "Pessoal e encargos", "expense"], ["despesas", "Despesas operacionais", "expense"], ["sistemas", "Sistemas e assinaturas", "expense"], ["tarifas", "Tarifas e taxas", "expense"], ["impostos", "Impostos", "expense"]] as const) {
+      cats[c[0]] = await put("fin_categories", c[0], { ...base, name: c[1], type: c[2], active: true });
+    }
+    await put("cost_centers", "geral", { ...base, name: "Geral", code: "100", active: true });
+    await setSetting(store, company.id, null, "finance.category.sales", cats.honorarios.id);
+    await setSetting(store, company.id, null, "finance.category.fees", cats.tarifas.id);
+    // departamentos padrão da carteira (editáveis em Departamentos e equipe)
+    for (const [i, d] of [["fiscal", "Fiscal", "fiscal"], ["contabil", "Contábil", "accounting"], ["pessoal", "Departamento pessoal", "payroll"], ["societario", "Societário e legalização", "corporate"], ["financeiro", "Financeiro (BPO)", "financial_bpo"]].entries()) {
+      await put("departments", d[0], { ...base, key: d[0], name: d[1], kind: d[2], active: true, sortOrder: i });
+    }
+    return { company, branch, roles };
+  }
   await put("warehouses", "main", { ...base, branchId: branch.id, code: "PRINC", name: "Depósito principal", kind: "available", isDefault: true, status: "active" });
   await put("warehouses", "damaged", { ...base, branchId: branch.id, code: "AVARIA", name: "Avarias", kind: "damaged", isDefault: false, status: "active" });
-  const roles: Record<string, Doc> = {};
-  for (const r of DEFAULT_ROLES) roles[r.key] = await put("roles", r.key, { ...base, key: r.key, name: r.name, description: r.description, permissions: r.permissions, actions: r.actions, templateActions: r.actions, discountLimitBps: r.discountLimitBps, system: true, active: true });
   const table = await put("price_tables", "varejo", { ...base, name: "Varejo", kind: "retail", active: true, isDefault: true });
   await store.update("branches", branch.id, { defaultPriceTableId: table.id });
   for (const u of [["UN", "Unidade"], ["PC", "Peça"], ["CX", "Caixa"], ["KG", "Quilograma"], ["M", "Metro"], ["H", "Hora"]]) await put("units", u[0], { ...base, code: u[0], name: u[1], decimals: u[0] === "KG" ? 3 : 0, status: "active" });
-  const cash = await put("financial_accounts", "caixa", { ...base, branchId: branch.id, name: "Caixa — Matriz", kind: "cash", initialBalance: 0, initialBalanceDate: today(), balance: 0, seq: 0, active: true });
-  const bank = await put("financial_accounts", "banco", { ...base, name: "Conta bancária principal", kind: "bank", initialBalance: 0, initialBalanceDate: today(), balance: 0, seq: 0, active: true });
   const methods = [
     { k: "dinheiro", name: "Dinheiro", kind: "cash", accountId: cash.id, allowsChange: true },
     { k: "debito", name: "Cartão de débito", kind: "debit", settlementDays: 1 },

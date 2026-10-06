@@ -20,7 +20,7 @@ export async function saveCompanyAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/empresas"] }, async (s) => {
     const input = {
-      name: fstr(fd, "name"), tradeName: fopt(fd, "tradeName"), cnpj: fopt(fd, "cnpj"), ie: fopt(fd, "ie"), im: fopt(fd, "im"), regime: fopt(fd, "regime"), crt: fopt(fd, "crt"),
+      name: fstr(fd, "name"), tradeName: fopt(fd, "tradeName"), cnpj: fopt(fd, "cnpj"), ie: fopt(fd, "ie"), im: fopt(fd, "im"), regime: fopt(fd, "regime"), crt: fopt(fd, "crt"), kind: fopt(fd, "kind"),
       cnae: fopt(fd, "cnae"), email: fopt(fd, "email"), phone: fopt(fd, "phone"), address: address(fd), notes: fopt(fd, "notes"),
     };
     if (id) {

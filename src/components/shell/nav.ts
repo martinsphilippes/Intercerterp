@@ -94,3 +94,59 @@ export const NAV: NavGroup[] = [
     ],
   },
 ];
+
+/** Navegação do ESCRITÓRIO CONTÁBIL: carteira, caixa de entrada, equipe, financeiro próprio, fiscal de serviços e administração. */
+export const NAV_ACCOUNTING: NavGroup[] = [
+  { label: "Gestão", items: [{ href: "/contabil", label: "Painel da carteira", module: "accounting", icon: "LayoutDashboard" }] },
+  {
+    label: "Carteira",
+    items: [
+      { href: "/contabil/clientes", label: "Clientes contábeis", module: "accounting", icon: "Users" },
+      { href: "/contabil/grupos", label: "Grupos de clientes", module: "accounting", icon: "Building2" },
+      { href: "/contabil/entregas", label: "Caixa de entrada (entregas)", module: "accounting", icon: "PackageCheck" },
+      { href: "/contabil/equipe", label: "Departamentos e equipe", module: "accounting", icon: "ShieldCheck" },
+    ],
+  },
+  {
+    label: "Financeiro do escritório",
+    items: [
+      { href: "/financeiro/receber", label: "Contas a receber", module: "finance", icon: "ArrowDownCircle" },
+      { href: "/financeiro/pagar", label: "Contas a pagar", module: "finance", icon: "ArrowUpCircle" },
+      { href: "/financeiro/fluxo-caixa", label: "Fluxo de caixa", module: "finance", icon: "LineChart" },
+      { href: "/financeiro/conciliacao", label: "Conciliação bancária", module: "finance", icon: "Landmark" },
+      { href: "/financeiro/cadastros", label: "Cadastros financeiros", module: "finance", icon: "Settings2" },
+    ],
+  },
+  {
+    label: "Fiscal (serviços do escritório)",
+    items: [
+      { href: "/fiscal/nfse", label: "NFS-e", module: "fiscal", icon: "FileSignature" },
+      { href: "/fiscal/relatorios", label: "Relatórios fiscais", module: "fiscal", icon: "FileBarChart" },
+      { href: "/fiscal/configuracoes", label: "Configurações fiscais", module: "fiscal", icon: "Cog" },
+    ],
+  },
+  {
+    label: "Administração",
+    items: [
+      { href: "/administracao/usuarios", label: "Usuários e permissões", module: "admin", icon: "ShieldCheck" },
+      { href: "/administracao/empresas", label: "Empresas e unidades", module: "admin", icon: "Building2" },
+      { href: "/administracao/integracoes", label: "Central de integrações", module: "admin", icon: "Plug" },
+      { href: "/administracao/backups", label: "Backup e restauração", module: "admin", icon: "DatabaseBackup" },
+      { href: "/administracao/historico", label: "Histórico e auditoria", module: "admin", icon: "History" },
+      { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
+    ],
+  },
+  {
+    label: "Suporte",
+    items: [
+      { href: "/notificacoes", label: "Notificações", module: "dashboard", icon: "Bell" },
+      { href: "/ajuda", label: "Ajuda e suporte", module: "support", icon: "LifeBuoy" },
+    ],
+  },
+];
+
+/** Menu conforme o tipo da empresa ativa. */
+export function navFor(kind: string | null | undefined): NavGroup[] {
+  return kind === "accounting" ? NAV_ACCOUNTING : NAV;
+}
+
