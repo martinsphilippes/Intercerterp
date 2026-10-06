@@ -1,3 +1,4 @@
+import { buttonClass } from "@/components/ui/button";
 import Link from "next/link";
 import { Landmark, Upload } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
@@ -172,7 +173,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
               Até
               <input type="date" name="to" defaultValue={to} className="focus-ring h-9 rounded-md border border-line px-2 text-sm" />
             </label>
-            <button type="submit" className="h-9 rounded-md bg-brand-700 px-3 text-sm font-medium text-white hover:bg-brand-800">
+            <button type="submit" className={buttonClass("primary")}>
               Aplicar
             </button>
           </form>

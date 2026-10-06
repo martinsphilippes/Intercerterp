@@ -3,6 +3,7 @@ import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { missingDeploymentConfig } from "@/lib/server/deploy-config";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
+import { NavigationProgress } from "@/components/ui/nav-progress";
 
 export const metadata: Metadata = {
   title: { default: "Intercert ERP", template: "%s · Intercert ERP" },
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR">
       <body className="min-h-screen">
+        <NavigationProgress />
         <ToastProvider>{children}</ToastProvider>
         <RegisterServiceWorker />
       </body>

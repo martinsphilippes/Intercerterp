@@ -6,6 +6,11 @@ import { Building2, Store, Layers, ChevronRight, ArrowLeft, Search } from "lucid
 import { switchUnitAction } from "@/app/actions/session";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { Spinner } from "@/components/ui/button";
+import { startNavigationProgress } from "@/components/ui/nav-progress";
+
+/** Cartão clicável com relevo e afundamento ao pressionar. */
+const CARD = "focus-ring flex items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white p-3 text-left shadow-[0_1px_2px_rgb(15_23_42/0.08)] transition-[background-color,border-color,box-shadow,transform] duration-100 hover:border-brand-400 hover:bg-brand-50/40 hover:shadow-md active:translate-y-px active:shadow-inner disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white disabled:hover:shadow-none disabled:active:translate-y-0";
 
 interface C { id: string; name: string; legal: string; cnpj: string; status: string; isDemo: boolean }
 interface B { id: string; companyId: string; name: string; code: string; city: string; uf: string; status: string; fiscalStatus: string }
@@ -23,6 +28,7 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
   const [companyId, setCompanyId] = useState<string | null>(companies.length === 1 ? companies[0].id : null);
   const [q, setQ] = useState("");
   const [pending, start] = useTransition();
+  const [chosen, setChosen] = useState<string | null>(null);
   const router = useRouter();
   const toast = useToast();
   const norm = (s: string) => (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -33,12 +39,18 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
   }, [q, companies]);
   const company = companies.find((c) => c.id === companyId) ?? null;
   const units = branches.filter((b) => b.companyId === companyId && (!q || !company || norm(b.name).includes(norm(q)) || norm(b.city).includes(norm(q))));
-  const choose = (c: string, b: string) =>
+  const choose = (c: string, b: string) => {
+    setChosen(b);
+    startNavigationProgress();
     start(async () => {
       const r = await switchUnitAction(c, b);
-      if (!r.ok) return toast("error", r.error ?? "Falha");
+      if (!r.ok) {
+        setChosen(null);
+        return toast("error", r.error ?? "Falha");
+      }
       router.push("/dashboard");
     });
+  };
   return (
     <div className="mt-5">
       <div className="relative mb-3">
@@ -51,7 +63,7 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
             const count = branches.filter((b) => b.companyId === c.id && b.status !== "inactive").length;
             const inactive = c.status === "inactive";
             return (
-              <button key={c.id} disabled={inactive} title={inactive ? "Empresa inativa: não pode ser selecionada. Um administrador pode reativá-la em Administração → Empresas." : undefined} onClick={() => { setCompanyId(c.id); setQ(""); }} className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white">
+              <button key={c.id} disabled={inactive} title={inactive ? "Empresa inativa: não pode ser selecionada. Um administrador pode reativá-la em Administração → Empresas." : undefined} onClick={() => { setCompanyId(c.id); setQ(""); }} className={CARD}>
                 <span className="flex items-center gap-3">
                   <Building2 className="size-5 text-brand-700" />
                   <span>
@@ -82,9 +94,9 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
             {units.map((b) => {
               const f = fiscalLabel[b.fiscalStatus] ?? ["Fiscal não configurado", "neutral"];
               return (
-                <button key={b.id} disabled={pending || b.status === "inactive"} title={b.status === "inactive" ? "Filial inativa: não pode ser selecionada nem operar. Consulte pelo consolidado da empresa." : undefined} onClick={() => choose(company.id, b.id)} className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50/40 disabled:opacity-60">
+                <button key={b.id} disabled={pending || b.status === "inactive"} title={b.status === "inactive" ? "Filial inativa: não pode ser selecionada nem operar. Consulte pelo consolidado da empresa." : undefined} onClick={() => choose(company.id, b.id)} aria-busy={chosen === b.id || undefined} className={`${CARD} ${chosen === b.id ? "border-brand-500 bg-brand-50 disabled:opacity-100 disabled:bg-brand-50" : ""}`}>
                   <span className="flex items-center gap-3">
-                    <Store className="size-5 text-slate-400" />
+                    {chosen === b.id ? <Spinner className="size-5 text-brand-700" /> : <Store className="size-5 text-slate-400" />}
                     <span>
                       <span className="block text-sm font-medium">{b.name}</span>
                       <span className="block text-xs text-slate-500">{b.code} · {b.city}/{b.uf}</span>
@@ -98,8 +110,8 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
               );
             })}
             {units.length === 0 && <p className="py-4 text-center text-sm text-slate-500">Nenhuma unidade autorizada para você nesta empresa.</p>}
-            {canConsolidate && <button disabled={pending} onClick={() => choose(company.id, "all")} className="focus-ring flex items-center gap-3 rounded-lg border border-dashed border-line p-3 text-left text-sm hover:border-brand-300">
-              <Layers className="size-5 text-slate-400" />
+            {canConsolidate && <button disabled={pending} onClick={() => choose(company.id, "all")} aria-busy={chosen === "all" || undefined} className={`${CARD} justify-start border-dashed text-sm ${chosen === "all" ? "border-brand-500 bg-brand-50 disabled:opacity-100 disabled:bg-brand-50" : ""}`}>
+              {chosen === "all" ? <Spinner className="size-5 text-brand-700" /> : <Layers className="size-5 text-slate-400" />}
               <span>
                 <span className="block font-medium">Consolidado da empresa</span>
                 <span className="block text-xs text-slate-500">Todas as unidades autorizadas — consulta e relatórios (operações exigem uma filial).</span>

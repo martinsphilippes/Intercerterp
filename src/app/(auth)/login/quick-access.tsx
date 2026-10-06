@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Copy, Check, LogIn, Zap } from "lucide-react";
 import { ActionForm } from "@/components/ui/action-form";
+import { buttonClass, Spinner } from "@/components/ui/button";
 import { loginAction } from "@/app/actions/session";
 
 export interface QuickUser {
@@ -51,13 +52,8 @@ export function QuickAccess({ users, password }: { users: QuickUser[]; password:
                     </p>
                     <p className="text-[11px] text-slate-400">{u.scope}</p>
                   </div>
-                  <button
-                    type="submit"
-                    disabled={pending}
-                    className="focus-ring inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-800 disabled:bg-brand-300"
-                    aria-label={`Entrar como ${u.sector} (${u.login})`}
-                  >
-                    <LogIn className="size-3.5" aria-hidden />
+                  <button type="submit" disabled={pending} aria-busy={pending || undefined} className={buttonClass("primary", "sm", "shrink-0 min-w-24")} aria-label={`Entrar como ${u.sector} (${u.login})`}>
+                    {pending ? <Spinner /> : <LogIn className="size-3.5" aria-hidden />}
                     {pending ? "Entrando…" : "Entrar"}
                   </button>
                 </>

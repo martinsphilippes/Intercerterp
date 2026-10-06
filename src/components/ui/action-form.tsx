@@ -4,7 +4,8 @@ import { useRef, useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "./toast";
 import type { ActionResult } from "@/lib/server/action";
-import { buttonClass } from "./button";
+import { buttonClass, Spinner } from "./button";
+import { startNavigationProgress } from "./nav-progress";
 
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
@@ -76,8 +77,10 @@ export function ActionForm({
           if (resetOnSuccess) ref.current?.reset();
           onSuccess?.(res.data);
           const target = res.redirect ?? (typeof redirectTo === "function" ? redirectTo(res.data) : redirectTo);
-          if (target) router.push(target);
-          else router.refresh();
+          if (target) {
+            startNavigationProgress();
+            router.push(target);
+          } else router.refresh();
         });
       }}
     >
@@ -147,12 +150,14 @@ export function ActionButton({
           const res = await action(fd);
           if (!res.ok) return toast("error", res.error);
           toast("success", res.message ?? successMessage ?? "Concluído.");
-          if (res.redirect ?? redirectTo) router.push((res.redirect ?? redirectTo)!);
-          else router.refresh();
+          if (res.redirect ?? redirectTo) {
+            startNavigationProgress();
+            router.push((res.redirect ?? redirectTo)!);
+          } else router.refresh();
         });
       }}
     >
-      {pending ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden /> : icon}
+      {pending ? <Spinner /> : icon}
       {label}
     </button>
   );
@@ -161,7 +166,7 @@ export function ActionButton({
 export function SubmitButton({ pending, children, variant = "primary", className, name, value, size = "md" }: { pending: boolean; children: React.ReactNode; variant?: "primary" | "accent" | "danger" | "secondary" | "ghost" | "outline"; className?: string; name?: string; value?: string; size?: "sm" | "md" | "lg" }) {
   return (
     <button type="submit" name={name} value={value} disabled={pending} aria-busy={pending || undefined} className={buttonClass(variant, size, className)}>
-      {pending && <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />}
+      {pending && <Spinner />}
       {children}
     </button>
   );
