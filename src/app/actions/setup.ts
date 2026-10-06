@@ -56,7 +56,8 @@ export async function setupInstallationAction(fd: FormData): Promise<ActionResul
   if (mode === "demo") {
     const { seedDemo } = await import("@/domain/seed");
     await seedDemo(store, { historyDays: Number(process.env.DEMO_HISTORY_DAYS ?? 14) });
-    return { ok: true, message: "Demonstração carregada. Entre com admin / Intercert@2026.", redirect: "/login" };
+    const pwd = process.env.DEMO_PASSWORD ? "a senha definida em DEMO_PASSWORD" : "Intercert@2026";
+    return { ok: true, message: `Demonstração carregada. Entre com admin / ${pwd}.`, redirect: "/login" };
   }
   const name = String(fd.get("companyName") ?? "").trim();
   const cnpj = onlyDigits(String(fd.get("cnpj") ?? ""));

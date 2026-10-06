@@ -59,6 +59,23 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  if (step === "check-login") {
+    // teste de ponta a ponta da autenticação (mesmo provedor da tela de login); a sessão criada é encerrada em seguida
+    const who = String(req.nextUrl.searchParams.get("login") ?? "").trim().toLowerCase();
+    const pass = String(req.nextUrl.searchParams.get("password") ?? "");
+    const u = (await findOne(store, "users", [["eq", "login", who]])) ?? (await findOne(store, "users", [["eq", "email", who]]));
+    if (!u?.authId) return NextResponse.json({ ok: false, error: "Usuário não encontrado." }, { status: 404 });
+    const { getAuth } = await import("@/lib/auth/provider");
+    try {
+      const s = await getAuth().login(u.email, pass, false);
+      const verified = (await getAuth().verify(s.secret)) === u.authId;
+      await getAuth().logout(s.secret);
+      return NextResponse.json({ ok: verified, step, login: u.login, verified });
+    } catch (e) {
+      return NextResponse.json({ ok: false, step, error: (e as Error).message }, { status: 401 });
+    }
+  }
+
   if (step === "owner") {
     const email = String(req.nextUrl.searchParams.get("email") ?? "").trim().toLowerCase();
     const name = String(req.nextUrl.searchParams.get("name") ?? "Administrador").trim();
@@ -82,5 +99,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, step, completed: true });
   }
 
-  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | status | owner | finish)." }, { status: 400 });
+  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | status | check-login | owner | finish)." }, { status: 400 });
 }
