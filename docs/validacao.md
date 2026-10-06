@@ -19,8 +19,8 @@ Data da validação: 06/10/2026. Este documento registra **o que foi executado e
 | Verificação de tipos (`npx tsc --noEmit`) | 0 erros |
 | Lint (`next lint`) | 0 avisos, 0 erros |
 | Build de produção (`next build`) | concluído (81 páginas geradas) |
-| Testes — modo imediato (`npm test`) | __TESTS__ |
-| Testes — modo Appwrite (`MEMORY_TX_MODE=deferred npm test`) | __TESTS__ |
+| Testes — modo imediato (`npm test`) | **37 arquivos, 374 testes — todos aprovados** |
+| Testes — modo Appwrite (`MEMORY_TX_MODE=deferred npm test`) | **37 arquivos, 374 testes — todos aprovados** |
 | Provisionamento Appwrite (`npm run appwrite:setup`) | idempotente; aplicado nas bases `intercert` e `intercert_demo` |
 | Varredura de navegação (`scripts/dev/crawl.mjs`, login real, fuso de Brasília) | **230 páginas, 140 padrões de rota, 0 problemas** (sem HTTP ≥ 400, sem erro de página/console, sem tela de erro, sem erro de hidratação) |
 | Evidências (`scripts/dev/evidence.mjs`) | **62 capturas** (48 telas + 14 visões) em `docs/evidencias/`, sem erro registrado |
@@ -63,9 +63,10 @@ Observações:
 | Correções 1 | Núcleo (isolamento por empresa no acesso a dados, consolidado restrito, tarefas travadas, arquivos, login, CSV) + 7 frentes por módulo | todos tratados, com testes de regressão para críticos e altos |
 | Verificação independente | Revisores céticos tentaram contornar cada correção e procuraram regressões, com testes temporários | 14 correções parciais e 30 novos achados (2 altos — um deles pré-existente: credenciais do sistema exfiltráveis pela configuração do Pix) |
 | Correções 2 | 7 frentes por módulo | todos tratados, com testes de regressão |
-| Revisão final | Revisão das mudanças da 2ª rodada com dupla verificação de cada achado | __FINAL__ |
+| Revisão final | Revisão das mudanças da 2ª rodada (4 revisores) com dupla verificação de cada achado médio ou maior | **15 confirmados** (0 críticos, 0 altos, 7 médios, 8 baixos) |
+| Correções 3 | 4 frentes; regra conservadora revisada pelo coordenador na restrição de filiais (sem ampliação silenciosa de acesso) | todos tratados, com testes de regressão; limite geral de reagendamento de tarefas no núcleo |
 
-Detalhes das regras resultantes: `docs/regras-assumidas.md` (seção 18).
+Detalhes das regras resultantes: `docs/regras-assumidas.md` (seções 18 e 19). Riscos residuais conhecidos: `docs/pendencias-externas.md`.
 
 ## 5. O que a validação **não** cobre
 

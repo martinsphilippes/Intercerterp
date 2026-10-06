@@ -194,9 +194,12 @@ await go("/fiscal/nfse");
 await shot("32-nfse");
 await go("/fiscal/nfse/nova");
 await shot("v07-nfse-formulario");
-await go("/fiscal/nfce");
+// NFC-e abre no dia de hoje: para a evidência, os últimos 30 dias
+const d0 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+const d1 = new Date().toISOString().slice(0, 10);
+await go(`/fiscal/nfce?from=${d0}&to=${d1}`);
 await shot("33-nfce");
-const nfce = await firstLink("/fiscal/nfce", /^\/fiscal\/nfce\/[A-Za-z0-9_-]{8,}$/);
+const nfce = await firstLink(`/fiscal/nfce?from=${d0}&to=${d1}`, /^\/fiscal\/nfce\/[A-Za-z0-9_-]{8,}$/);
 if (nfce) {
   await go(nfce);
   await shot("v08-nfce-detalhe");
