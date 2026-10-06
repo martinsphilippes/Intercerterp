@@ -40,7 +40,16 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   }
   const ctxFor = async (key: string): Promise<Ctx> => ({ store: scopeStore(store, firm.id), companyId: firm.id, branchId: branch.id, user: await toCtxUser(store, users[key], firm.id) });
   const owner = await ctxFor("contador");
-  if (await getSetting(store, firm.id, null, "demo.accounting.done", false)) return { skipped: true, firmId: firm.id };
+  // pacote parcial do mês corrente (onde estão as notas da demonstração, emitidas no dia da carga): marcador próprio
+  // para também chegar a instalações cuja demonstração do escritório já existia
+  const partialPackage = async () => {
+    if (await getSetting(store, firm.id, null, "demo.accounting.partial", false)) return null;
+    const lojaAdmin = await refs.ctxFor("admin", "matriz");
+    const partial = await sendAccountingPackage({ ...lojaAdmin, branchId: null }, { from: monthStart(today()), to: today(), branchId: null, includeSimulated: true }, { reason: "manual" }).catch(() => null);
+    await setSetting(store, firm.id, null, "demo.accounting.partial", true);
+    return partial?.package?.xmlCount ?? null;
+  };
+  if (await getSetting(store, firm.id, null, "demo.accounting.done", false)) return { skipped: true, firmId: firm.id, partialXml: await partialPackage() };
 
   const deps = Object.fromEntries((await listAll(store, "departments", { filters: [["eq", "companyId", firm.id]] })).map((d) => [d.key, d]));
   await setDepartmentMember(owner, deps.fiscal.id, users.analista.id, "member");
@@ -83,10 +92,12 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   const pf = await createClient(owner, { personType: "PF", doc: "11144477735", name: "Marcos Autônomo", status: "active", onboardedAt: addMonths(today(), -8), serviceStartAt: addMonths(today(), -8), services: ["irpf"], responsibleUserId: users.analista.id, commPrefs: { channel: "whatsapp" }, idemKey: "demo-pf" });
   await assignResponsible(owner, pf.id, { userId: users.analista.id, role: "titular" });
 
-  // pacote do mês anterior da loja entregue na caixa de entrada do escritório
+  // pacotes da loja entregues na caixa de entrada do escritório: o fechamento do mês anterior (conclui a obrigação
+  // "entrega de XML") e a parcial do mês corrente
   const prev = addMonths(monthStart(today()), -1);
   const sent = await sendAccountingPackage({ ...lojaAdmin, branchId: null }, { from: prev, to: monthEnd(prev), branchId: null, includeSimulated: true }, { reason: "manual" }).catch(() => null);
+  const partialXml = await partialPackage();
 
   await setSetting(store, firm.id, null, "demo.accounting.done", true);
-  return { firmId: firm.id, clients: 4, delivered: Boolean(sent?.package?.deliveredToFirm), deliveryId: sent?.package?.deliveredToFirm?.deliveryId ?? null };
+  return { firmId: firm.id, clients: 4, delivered: Boolean(sent?.package?.deliveredToFirm), deliveryId: sent?.package?.deliveredToFirm?.deliveryId ?? null, partialXml };
 }

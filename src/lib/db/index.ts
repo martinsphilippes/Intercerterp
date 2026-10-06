@@ -3,7 +3,7 @@ import { AppwriteStore } from "./appwrite-store";
 import { MemoryStore } from "./memory-store";
 import { ReadCachedStore } from "./read-cache";
 import { COLLECTIONS } from "./schema";
-import { ConflictError, Doc, Filter, ListOptions, Store } from "./types";
+import { ConflictError, Doc, Filter, ListOptions, NotFoundError, Store } from "./types";
 
 export * from "./types";
 export { detId, newId, sha256 } from "./ids";
@@ -113,6 +113,12 @@ export async function retryOnConflict<R>(fn: () => Promise<R>, attempts = 6): Pr
   throw last;
 }
 
+// comparação estrutural além do instanceof: em desenvolvimento o store é um singleton em globalThis criado por outro
+// grafo de módulos, e a classe lançada lá não é a mesma referência importada aqui
 export function isConflict(e: unknown): e is ConflictError {
-  return e instanceof ConflictError;
+  return e instanceof ConflictError || (typeof e === "object" && e !== null && (e as { name?: unknown }).name === "ConflictError");
+}
+
+export function isNotFound(e: unknown): e is NotFoundError {
+  return e instanceof NotFoundError || (typeof e === "object" && e !== null && (e as { name?: unknown }).name === "NotFoundError");
 }

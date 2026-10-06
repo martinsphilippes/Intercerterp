@@ -1,7 +1,7 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 import { BusinessError } from "../core/errors";
-import { ConflictError, NotFoundError } from "../db/types";
+import { isConflict, isNotFound } from "../db";
 import { requireSession, type SessionInfo } from "./session";
 import type { Crud, ModuleKey } from "../permissions";
 import { can } from "../permissions";
@@ -45,8 +45,8 @@ export async function runAction<T>(
       }
       return { ok: false, error: e.message, code: e.code };
     }
-    if (e instanceof ConflictError) return { ok: false, error: "O registro foi alterado por outra operação ao mesmo tempo ou já existe. Atualize e tente novamente.", code: "conflict" };
-    if (e instanceof NotFoundError) return { ok: false, error: "Registro não encontrado.", code: "not_found" };
+    if (isConflict(e)) return { ok: false, error: "O registro foi alterado por outra operação ao mesmo tempo ou já existe. Atualize e tente novamente.", code: "conflict" };
+    if (isNotFound(e)) return { ok: false, error: "Registro não encontrado.", code: "not_found" };
     console.error("[action] erro inesperado", e);
     return { ok: false, error: `Erro inesperado: ${e?.message ?? e}`, code: "unexpected" };
   }

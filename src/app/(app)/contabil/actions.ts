@@ -6,7 +6,7 @@ import {
   addPerson, updatePerson, removePerson, addEstablishment, updateEstablishment, removeEstablishment, type PersonInput, type EstablishmentInput,
   saveDepartment, setDepartmentMember, assignResponsible, endAssignment, saveGroup,
   issueLinkCode, cancelLinkCode, revokeAccountingLink, acceptAccountingLink,
-  reviewDelivery,
+  reviewDelivery, CLIENT_STATUS,
 } from "@/domain/accounting";
 
 const PATHS = ["/contabil", "/contabil/clientes", "/contabil/entregas", "/contabil/equipe", "/contabil/grupos"];
@@ -59,7 +59,8 @@ export async function saveClientAction(fd: FormData) {
 }
 
 export async function lookupClientCnpjAction(cnpj: string) {
-  return runAction({ module: "accounting", op: "create" }, async () => {
+  // consulta pública (BrasilAPI): basta ver o módulo — quem só edita também pode reconsultar o CNPJ na edição
+  return runAction({ module: "accounting", op: "view" }, async () => {
     const r = await lookupClientCnpj(cnpj);
     if (!r.ok) return { ok: false as const, error: r.message };
     return { ok: true as const, data: { source: r.source, consultedAt: r.consultedAt, lookup: r.lookup, ...r.data } };
@@ -70,7 +71,7 @@ export async function setClientStatusAction(fd: FormData) {
   return runAction({ module: "accounting", op: "edit", revalidate: PATHS }, async (s) => {
     const id = fstr(fd, "id");
     const c = await setClientStatus(s.ctx, id, fstr(fd, "status"), { reason: fopt(fd, "reason"), date: fopt(fd, "date") });
-    return { ok: true as const, message: `Situação alterada para ${c.status}.` };
+    return { ok: true as const, message: `Situação alterada para ${CLIENT_STATUS.find((x) => x.value === c.status)?.label ?? c.status}.` };
   });
 }
 

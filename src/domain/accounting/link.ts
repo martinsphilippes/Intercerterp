@@ -163,7 +163,7 @@ export async function linkedSnapshot(ctx: Ctx, clientId: string, months = 3): Pr
     listAll(r, "fiscal_configs", { filters: [["eq", "companyId", companyId]] }),
     listAll(r, "files", { filters: [["eq", "companyId", companyId], ["eq", "kind", "accounting_package"]], orderBy: [{ field: "createdAt", dir: "desc" }] }, 24),
   ]);
-  const { displayStatus } = await import("../fiscal/obligations");
+  const { displayStatus, OBLIGATION_KIND_LABEL } = await import("../fiscal/obligations");
   const { certificateDaysLeft } = await import("../fiscal/config");
   const monthsOut: LinkedSnapshot["months"] = [];
   for (let i = months - 1; i >= 0; i--) {
@@ -184,7 +184,7 @@ export async function linkedSnapshot(ctx: Ctx, clientId: string, months = 3): Pr
     branches: branches.map((b) => ({ id: b.id, name: b.name, fiscalStatus: b.fiscalStatus ?? null })),
     months: monthsOut,
     obligations: obligations
-      .map((o) => ({ id: o.id, title: o.title ?? o.kind, kind: o.kind, period: o.period, dueDate: o.dueDate, status: displayStatus(o) }))
+      .map((o) => ({ id: o.id, title: o.name ?? OBLIGATION_KIND_LABEL[o.kind] ?? o.kind, kind: o.kind, period: o.period, dueDate: o.dueDate, status: displayStatus(o) }))
       .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))),
     certificates: configs.filter((c) => c.certificate?.validTo).map((c) => ({ branchId: c.branchId ?? null, branchName: c.branchId ? (branchName.get(c.branchId) ?? "Filial") : "Empresa", validTo: c.certificate.validTo ?? null, daysLeft: certificateDaysLeft(c.certificate) })),
     packages: packages.map((f) => ({ fileId: f.id, name: f.name, period: f.entityId, createdAt: f.createdAt })),

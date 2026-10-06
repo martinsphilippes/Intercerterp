@@ -2,6 +2,7 @@
  * Rastreador de navegação: faz login, percorre os links internos (BFS) e registra status HTTP,
  * erros de página, erros de console e telas de erro/404. Uso:
  *   BASE=http://localhost:3000 LOGIN=admin OUT=/tmp/crawl.json node scripts/dev/crawl.mjs
+ *   (START=/contabil para começar pela área do escritório contábil)
  */
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
@@ -35,7 +36,7 @@ const pattern = (p) =>
     .map((seg) => (/^[a-f0-9]{16,40}$/i.test(seg) || /^\d+$/.test(seg) ? "[id]" : seg))
     .join("/");
 
-const queue = ["/dashboard"];
+const queue = [process.env.START || "/dashboard"];
 const seen = new Set(queue);
 const perPat = new Map();
 const results = [];

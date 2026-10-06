@@ -10,3 +10,4 @@ import "./purchases";
 import "./fiscal";
 import "./admin";
 import "./reports";
+import "./accounting";

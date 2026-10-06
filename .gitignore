@@ -8,7 +8,7 @@ next-env.d.ts
 playwright-report
 test-results
 .vercel
-.next-dev/
+.next-*/
 
 # testes temporários das revisões automatizadas (apagados ao final de cada revisão)
 tests/_final_*

@@ -16,6 +16,7 @@ import { CONFIG_LABEL, cscRefProblem, INTEGRATION_CATALOG, integrationJobs, inte
 import { REGIME_LABEL } from "@/domain/fiscal/config";
 import { integrationOverview } from "../queries";
 import { IntegrationForm } from "./integration-form";
+import { AccountingLink } from "../accounting-link";
 import { requeueJobAction, saveFiscalIntegrationAction, testIntegrationAction, unlinkCredentialAction } from "../actions";
 
 export const metadata = { title: "Integração" };
@@ -167,6 +168,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               <DefinitionList cols={1} items={[{ label: "Último teste", value: o.lastTestAt ? formatDateTime(o.lastTestAt) : "Nunca" }, { label: "Última chamada", value: logs[0] ? `${formatDateTime(logs[0].occurredAt)} — ${logs[0].action} (${logs[0].status === "success" ? "sucesso" : logs[0].status === "failure" ? "falha" : "informativo"})` : "—" }]} />
             </Card>
           </div>
+          {kind === "accounting" && <div className="lg:col-span-2"><AccountingLink companyId={s.company.id} store={s.ctx.store} canEdit={canEdit} /></div>}
         </div>
       )}
       {tab === "pendencias" && (

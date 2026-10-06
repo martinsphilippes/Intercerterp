@@ -175,7 +175,11 @@ export async function updateClient(ctx: Ctx, id: string, input: ClientInput): Pr
   await assertRefs(ctx, data);
   await assertUniqueDoc(ctx, data.doc, id);
   // regime só pelo histórico (changeClientRegime) e situação só por setClientStatus: a edição do cadastro não os altera
-  const patch = { ...data, regime: before.regime ?? data.regime, crt: before.crt ?? data.crt, onboardedAt: before.onboardedAt ?? data.onboardedAt, status: before.status, endedAt: before.endedAt ?? null, endReason: before.endReason ?? null };
+  const patch = {
+    ...data, regime: before.regime ?? data.regime, crt: before.crt ?? data.crt, onboardedAt: before.onboardedAt ?? data.onboardedAt, status: before.status, endedAt: before.endedAt ?? null, endReason: before.endReason ?? null,
+    // reconsulta do CNPJ na edição atualiza a fonte e a data da consulta junto com a situação na Receita
+    ...(input.docLookup ? { docLookup: input.docLookup, rfbCheckedAt: input.docLookup.consultedAt ?? null } : {}),
+  };
   if (before.linkStatus === "active" && before.doc && data.doc !== before.doc) throw new BusinessError("Cliente vinculado a uma empresa do ERP: o CNPJ não pode ser alterado enquanto o vínculo estiver ativo.", "linked");
   let after: Doc;
   try {
@@ -196,7 +200,8 @@ export async function setClientStatus(ctx: Ctx, id: string, status: string, inpu
   assert(CLIENT_STATUS.some((s) => s.value === status), "Situação inválida.");
   if (status === before.status) return before;
   const allowed: Record<string, string[]> = { onboarding: ["active", "closed"], active: ["offboarding", "closed"], offboarding: ["closed", "active"], closed: ["active"] };
-  if (!allowed[before.status]?.includes(status)) throw new BusinessError(`Não é possível passar de "${before.status}" para "${status}".`, "invalid_transition");
+  const label = (v: string) => CLIENT_STATUS.find((s) => s.value === v)?.label ?? v;
+  if (!allowed[before.status]?.includes(status)) throw new BusinessError(`Não é possível passar de "${label(before.status)}" para "${label(status)}".`, "invalid_transition");
   if (status === "closed") assert(input.reason?.trim(), "Informe o motivo do encerramento.");
   if (status === "closed" && before.linkStatus === "active") throw new BusinessError("Desfaça o vínculo com a empresa do ERP antes de encerrar o cliente.", "linked");
   const date = input.date || today();

@@ -25,11 +25,13 @@ Uma empresa pode ser criada como **escritório contábil** (Administração → 
 
 **Vínculo com empresas que usam o ERP:** o escritório emite um código de vínculo para o cliente; o administrador da empresa informa o código em Administração → Integrações → Área da contabilidade. Com o vínculo ativo, o escritório consulta a situação fiscal da empresa (somente leitura) e o pacote mensal de XMLs chega sozinho na caixa de entrada do escritório. Regras em `docs/regras-assumidas.md` §21; o que falta para o escopo completo está em `docs/analise-gestao-contabil.md`.
 
-Na demonstração: escritório "Contábil Horizonte (DEMO)" com os usuários `contador` (sócio) e `analista` (carteira restrita), 4 clientes e a loja de demonstração já vinculada.
+Telas do escritório: painel da carteira (`/contabil`), clientes (lista com filtros e exportação, cadastro com consulta de CNPJ, ficha 360° em abas: resumo, pessoas, estabelecimentos, regime, responsáveis, fiscal, entregas, histórico), grupos, departamentos e equipe, caixa de entrada (conferência, exportação e download auditado). Cobertura por tela: `docs/matriz-gestao-contabil.md`.
+
+Na demonstração: escritório "Contábil Horizonte (DEMO)" com os usuários `contador` (sócio) e `analista` (carteira restrita), 4 clientes, a loja de demonstração já vinculada e dois pacotes recebidos (fechamento do mês anterior e parcial do mês corrente).
 
 ## Instalação automatizada (sem a tela de primeiro acesso)
 
-`GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação) e `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema).
+`GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `demo-update` (reaplica cenários de demonstração novos numa instalação já concluída, idempotente), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação) e `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema).
 
 ## Início rápido (desenvolvimento local, sem Appwrite)
 

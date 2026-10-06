@@ -35,8 +35,7 @@ export async function queryPortfolio(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   if (p.f.status) filters.push(["eq", "status", p.f.status]);
   if (p.f.personType) filters.push(["eq", "personType", p.f.personType]);
   if (p.f.regime) filters.push(["eq", "regime", p.f.regime]);
-  if (p.f.grupo) filters.push(["eq", "groupId", p.f.grupo]);
-  if (p.f.responsavel) filters.push(["eq", "responsibleUserId", p.f.responsavel]);
+  if (p.f.grupo && p.f.grupo !== "none") filters.push(["eq", "groupId", p.f.grupo]);
   if (p.f.vinculo) filters.push(["eq", "linkStatus", p.f.vinculo]);
   if (p.q) {
     const d = onlyDigits(p.q);
@@ -56,6 +55,13 @@ export async function queryPortfolio(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   }
   const byClient = new Map<string, number>();
   for (const a of assignments) if (a.active !== false) byClient.set(a.clientId, (byClient.get(a.clientId) ?? 0) + 1);
+  if (p.f.grupo === "none") rows = rows.filter((c) => !c.groupId);
+  // "responsável" = responsável geral OU atribuição ativa (titular/substituto); "none" = nenhum dos dois (mesma régua do painel)
+  if (p.f.responsavel === "none") rows = rows.filter((c) => !c.responsibleUserId && !byClient.get(c.id));
+  else if (p.f.responsavel) {
+    const mine = new Set(assignments.filter((a) => a.active !== false && a.userId === p.f.responsavel).map((a) => a.clientId));
+    rows = rows.filter((c) => c.responsibleUserId === p.f.responsavel || mine.has(c.id));
+  }
   return rows.map((c) => ({
     ...c,
     statusLabel: STATUS_LABEL[c.status] ?? c.status,
