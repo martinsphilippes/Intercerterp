@@ -88,8 +88,10 @@ const CONTINUATIONS = [
 const esc = (s) => String(s ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
 const evidence = (name) => {
   if (!name) return "—";
-  const file = `docs/evidencias/${name}.png`;
-  return fs.existsSync(path.join(root, file)) ? `[${name}](evidencias/${name}.png)` : `${name} (pendente)`;
+  for (const ext of ["jpg", "png"]) {
+    if (fs.existsSync(path.join(root, `docs/evidencias/${name}.${ext}`))) return `[${name}](evidencias/${name}.${ext})`;
+  }
+  return `${name} (pendente)`;
 };
 
 let md = `# Matriz de cobertura — 48 telas, 14 visões complementares e continuações

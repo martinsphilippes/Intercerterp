@@ -10,7 +10,7 @@ const base = process.env.BASE || "http://localhost:3000";
 const perPattern = Number(process.env.PER_PATTERN || 2);
 const maxPages = Number(process.env.MAX_PAGES || 500);
 const browser = await chromium.launch().catch(() => chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }));
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "pt-BR" });
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "pt-BR", timezoneId: process.env.TZ_ID || "America/Sao_Paulo" });
 const page = await ctx.newPage();
 let pageErrors = [];
 let consoleErrors = [];

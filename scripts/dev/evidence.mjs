@@ -17,13 +17,20 @@ const page = await context.newPage();
 const problems = [];
 page.on("pageerror", (e) => problems.push(`pageerror ${page.url()}: ${e.message}`));
 
+/** Fecha avisos (toasts) para que não cubram a tela capturada. */
+async function closeToasts() {
+  for (const b of await page.locator('[aria-live="polite"] button[aria-label="Fechar"]').all()) await b.click().catch(() => {});
+}
+
 async function shot(name, opts = {}) {
   if (only && !only.test(name)) return;
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.waitForTimeout(opts.wait ?? 300);
+  await closeToasts();
   const errText = await page.locator("text=/Unhandled Runtime Error|Application error|This page could not be found/").count();
   if (errText) problems.push(`erro visível em ${name} (${page.url()})`);
-  await page.screenshot({ path: path.join(out, `${name}.png`), fullPage: opts.full ?? true });
+  // JPEG (qualidade 80): legível e leve para versionar no repositório
+  await page.screenshot({ path: path.join(out, `${name}.jpg`), fullPage: opts.full ?? true, type: "jpeg", quality: 80 });
   console.log("ok", name, page.url().replace(base, ""));
 }
 
@@ -59,22 +66,22 @@ await page.waitForURL((u) => !u.pathname.startsWith("/selecionar-unidade"), { ti
 await go("/dashboard");
 await shot("03-dashboard");
 
-// 04–07 — PDV
-await go("/pdv");
+// 04–07 — PDV: novo atendimento, itens com estoque (o primeiro resultado com "em estoque")
+await go("/pdv?nova=1");
 await page.waitForLoadState("networkidle").catch(() => {});
 const search = page.getByLabel(/Buscar produto por descrição/);
+async function addFirstInStock(term, capture) {
+  await search.fill(term);
+  await page.waitForTimeout(1500);
+  if (capture) await shot("05-pdv-busca", { full: false });
+  const opt = page.locator('[role="option"]').filter({ hasText: "em estoque" }).first();
+  if (await opt.count()) await opt.click().catch(() => {});
+  await page.waitForTimeout(800);
+  await page.keyboard.press("Escape");
+}
 if (await search.count()) {
-  await search.fill("camiseta");
-  await page.waitForTimeout(1200);
-  await shot("05-pdv-busca", { full: false });
-  await search.press("Enter");
-  await page.waitForTimeout(800);
-  await page.keyboard.press("Escape");
-  await search.fill("tenis");
-  await page.waitForTimeout(1200);
-  await search.press("Enter");
-  await page.waitForTimeout(800);
-  await page.keyboard.press("Escape");
+  await addFirstInStock("camiseta", true);
+  await addFirstInStock("cal", false);
 }
 await shot("04-pdv", { full: false });
 await page.keyboard.press("F4");
