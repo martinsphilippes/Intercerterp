@@ -25,7 +25,27 @@ export async function provisionAppwrite(
       throw e;
     }
   };
-  await ignore409(db.create({ databaseId: cfg.databaseId, name: "Intercert ERP" }));
+  // Verifica antes de criar: em planos com limite de bancos (ex.: Appwrite Cloud gratuito, 1 banco), criar de novo um banco
+  // já existente devolve "limite de bancos atingido" em vez de 409 — o provisionamento é retomável e não pode falhar aí.
+  let dbExists = false;
+  try {
+    await db.get({ databaseId: cfg.databaseId });
+    dbExists = true;
+  } catch (e) {
+    if (!(e instanceof AppwriteException && e.code === 404)) throw e;
+  }
+  if (!dbExists) {
+    try {
+      await ignore409(db.create({ databaseId: cfg.databaseId, name: "Intercert ERP" }));
+    } catch (e: any) {
+      if (e instanceof AppwriteException && /maximum number of databases/i.test(e.message)) {
+        throw new Error(
+          `O plano do Appwrite não permite criar outro banco de dados e o banco "${cfg.databaseId}" não existe neste projeto. Use o ID do banco já existente em APPWRITE_DATABASE_ID (Appwrite Console → Databases) ou faça upgrade do plano.`,
+        );
+      }
+      throw e;
+    }
+  }
   log(`banco ${cfg.databaseId} ok`);
   const BIG = 9007199254740991;
   for (const c of COLLECTIONS) {
