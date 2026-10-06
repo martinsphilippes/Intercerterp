@@ -233,7 +233,59 @@ Resultado da revisão independente (achados confirmados corrigidos com testes de
 #### Publicação
 - Publicação na Vercel sem as variáveis do Appwrite mostra a página “configuração pendente” (nenhum dado é gravado); a demonstração em memória só existe se pedida explicitamente (`DATA_BACKEND=memory`).
 
+#### Vendas e caixa (rodada 2)
+- Na devolução, “já pago” = principal − desconto das baixas; a parte coberta por desconto concedido não é reembolsada.
+- Cancelamento da venda: estoque e cancelamento fiscal acontecem sempre; títulos sem baixa são cancelados (com as renegociações em cascata); títulos com baixa são mantidos como pendência da venda e o financeiro é notificado. A recusa antes da confirmação também vale para renegociações com baixa.
+- Conferência cega: qualquer mudança no previsto depois da contagem exige nova contagem (a anterior fica no histórico); até a contagem, recebimentos de venda em dinheiro e totais vendidos ficam ocultos para quem não é supervisor (telas e CSV).
+- Venda a prazo cuja cadeia de títulos fica sem saldo após devolução passa a “paga”.
+- Cobrança Pix integrada vencida, sem provedor configurado, pode ser encerrada localmente (“expirada”) com registro do risco.
+
+#### Fiscal e integrações (rodada 2)
+- O endereço da API de cada provedor é fixo no código (URL base não é configurável).
+- A variável de credencial deve ter o formato `[A-Z][A-Z0-9_]{2,63}`, não pode ser variável do sistema (Appwrite, sessão, rotinas, hospedagem) e deve começar com o prefixo do provedor; vínculos gravados fora dessa regra contam como “não configurado” (o segredo nunca é lido). “Remover vínculo” deixa a integração sem credencial.
+- A obrigação “Entrega de XML” só é concluída por pacote do mês inteiro, de todas as filiais; listar/baixar pacotes exige “Exportar dados”.
+- Registro de inutilização não é descartado, consultado nem retransmitido: repete-se o pedido da mesma faixa (idempotente).
+- A NF-e de uma operação é emitida pela filial da operação; o depósito dos efeitos é sempre da filial emitente.
+- Envio ao provedor interrompido por falha libera a reivindicação e a tarefa é reagendada.
+
+#### Painel e relatórios (rodada 2)
+- Quebra por meio de pagamento: devolução de venda a prazo dividida em “Devolução — abatimento do título a prazo” (sem saída de caixa) e na forma de compensação (o restante); devoluções antigas sem abatimento registrado ficam inteiras na forma de compensação. Pagamentos − devoluções = receita líquida.
+- Devolução com efeitos pendentes entra na receita, CMV e quantidade pelas linhas do próprio documento (data de registro); quando os itens são gravados, substituem essas linhas sem contagem dupla.
+- CSV: número negativo já formatado (sinal, R$, dígitos, separadores, %) não é tratado como fórmula; fórmulas continuam neutralizadas.
+
+#### Administração (rodada 2)
+- Alcance do gestor de usuários = empresas em que ele tem Administração/editar e “Gerenciar usuários” no perfil daquela empresa; vínculos e filiais fora do alcance são preservados; incluir filial fora do alcance é recusado.
+- Senha, situação, convite, e-mail, login e limite de desconto valem em todas as empresas do usuário: quem não é administrador só os altera se administra usuários em todas as empresas do alvo.
+- Rotas `/api` e downloads exigem contexto de trabalho completo (empresa + filial ativa, ou consolidado); sem isso, 409 “Selecione a empresa e a filial…”.
+- Download do pacote contábil exige “Exportar dados” além da consulta ao fiscal.
+- Ações sobre outra empresa/filial exigem a permissão na empresa em uso e na empresa-alvo.
+- Vincular usuário sem perfil equivalente é permitido com aviso e marca “sem perfil nesta empresa”.
+
+#### Compras (rodada 2)
+- Encargos sem XML só passam a “informados” quando o usuário altera um valor em relação ao exibido ao carregar o formulário; “Recalcular encargos pelo pedido” volta ao cálculo automático.
+- Frete único do pedido: se o recebimento que assumiu o frete for cancelado, o primeiro recebimento sem XML confirmado (sem entrega anterior e sem outro recebimento ativo que o assumiu/seja de XML) assume o frete; a conclusão é interrompida uma vez para revisão.
+- Frete já cobrado em outro recebimento + valores informados > 0: a confirmação exige zerar, recalcular pelo pedido ou marcar “nova cobrança do fornecedor” com justificativa.
+- Valor da linha sem XML = líquido exato da linha do pedido proporcional ao recebido (arredondamento acumulado; parciais somam exatamente o total).
+- Cancelamento e registro de envio de pedido de uma solicitação disputam a mesma vaga de decisão da aprovação (só um vence; o perdedor relê).
+- Cotação: rascunho reaproveitado é sempre ressincronizado (itens, condição, data).
+
+##### Risco residual (compras)
+- Confirmação de recebimento (aprovado → parcial) e revisão de pedido (→ em análise) ainda não disputam a vaga da decisão; uma revogação concorrente pode sobrescrever o estado do pedido (janela estreita).
+
+#### Financeiro (rodada 2)
+- Título com parcela renegociada em título de renegociação vigente não é cancelado: desfaça antes a renegociação. Cancelamento em cascata (somente renegociações sem recebimento) é usado apenas ao extinguir a dívida de origem (cancelamento da venda).
+- Desfazer renegociação cujo título original está cancelado apenas cancela o título novo.
+- Competência: abatimento por devolução reduz a receita na data do abatimento, na categoria do título, em linha própria “Devoluções (abatimento)”; abatimento de título cancelado não conta.
+- “Recebido” = principal das baixas ativas; o abatido por devolução aparece à parte (não é desconto); exportação de contas a receber tem coluna “Abatido (devolução)”.
+- Juros da condição valem só em títulos manuais; vendas e compras não os aplicam e o cadastro avisa explicitamente.
+- Conflitos de concorrência (renegociação × cancelamento) respondem com mensagem de negócio (“alterado/cancelado por outra operação”).
+
+#### Estoque (rodada 2)
+- A reserva de estoque é serializada com os movimentos pela sequência do saldo; saídas manuais, ajustes de saída e perdas conferem no commit (limite atômico) que o reservado não passa do físico resultante. Vendas continuam podendo consumir o reservado.
+- Cada reserva é encerrada (liberada ou consumida) uma única vez (marcador determinístico).
+- Expedição × cancelamento simultâneos: o cancelamento prevalece; o que saiu volta à origem e a transferência nunca fica “em trânsito” sobre um cancelamento. Repetir o cancelamento conclui o que ficou pendente.
+- /produtos e a exportação de produtos mostram só as filiais permitidas ao usuário.
+
+
 #### Riscos residuais conhecidos
-- Reserva de estoque e saída manual simultâneas no mesmo saldo podem passar juntas (a reserva não usa a sequência do saldo; o limite atômico cobre reservas concorrentes entre si).
-- Títulos a receber criados fora da venda (manuais, renegociação) não disputam a trava de crédito do cliente; o limite do crediário é garantido entre vendas.
-- Juros da condição de parcelamento são aplicados em títulos manuais; vendas a prazo não aplicam juros (decisão pendente: como tratar juros de itens devolvidos).
+- Ver `docs/pendencias-externas.md` (seção “Riscos residuais conhecidos”).
