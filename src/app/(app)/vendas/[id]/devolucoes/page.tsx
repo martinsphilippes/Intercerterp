@@ -54,7 +54,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // venda a prazo: o valor devolvido abate primeiro o saldo em aberto do título; só o que já foi pago volta ao cliente
   const previous = await listAll(store, "returns", { filters: [["eq", "saleId", id]] });
   const plan = await returnCompensationPlan(s.ctx, sale, 0, previous);
-  const deferred = plan.titles.length ? { open: plan.open, paidAvailable: plan.paidAvailable } : null;
+  const deferred = plan.titles.length ? { open: plan.open, paidAvailable: plan.paidAvailable, forgivenAvailable: plan.forgivenAvailable } : null;
   const pixMethod = (await listAll(store, "payment_methods", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "kind", "pix"]] }))[0];
   return (
     <>

@@ -736,11 +736,15 @@ export async function cancelSale(ctx: Ctx, saleId: string, reason: string, opts:
   assert(sale.status === "completed", "Somente vendas concluídas podem ser canceladas.");
   assert((sale.returnedTotal ?? 0) === 0, "Venda com devoluções registradas não pode ser cancelada integralmente; use devolução dos itens restantes.");
   const payments = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", saleId]] });
-  // Títulos com baixas impedem cancelamento automático
-  const titles = await listAll(ctx.store, "titles", { filters: [["eq", "originId", saleId], ["eq", "originType", ["sale", "sale_card"]]] });
+  // Títulos com baixas impedem cancelamento automático (inclui os títulos de renegociação gerados a partir do título da venda)
+  const titles = await saleTitleChain(ctx.store, saleId);
+  const titleNumber = new Map(titles.map((t) => [t.id, t.number]));
   for (const tt of titles) {
-    const st = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", tt.id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
-    if (st.length) throw new BusinessError(`O título nº ${tt.number} já possui baixa. Estorne a baixa (Financeiro) antes de cancelar a venda.`, "has_settlements");
+    if (tt.status === "cancelled") continue;
+    const st = await activeSettlementsOf(ctx.store, tt.id);
+    if (!st.length) continue;
+    const of = tt.originType === "renegotiation" ? ` (renegociação do título nº ${titleNumber.get(tt.originId) ?? "—"} desta venda)` : "";
+    throw new BusinessError(`O título nº ${tt.number}${of} já possui baixa. Estorne a baixa (Financeiro) antes de cancelar a venda.`, "has_settlements");
   }
   const hasCash = payments.some((p) => p.methodKind === "cash");
   const session = hasCash ? await resolveCashSession(ctx, sale.branchId, [opts.terminalId, sale.terminalId]) : null;
@@ -808,6 +812,85 @@ export async function cancelSale(ctx: Ctx, saleId: string, reason: string, opts:
   return after;
 }
 
+/** Baixas ativas (recebimentos) de um título. */
+function activeSettlementsOf(store: Store, titleId: string) {
+  return listAll(store, "settlements", { filters: [["eq", "titleId", titleId], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
+}
+
+/**
+ * Títulos da venda (a prazo e/ou recebíveis de cartão) e os gerados por renegociação a partir deles
+ * (originType "renegotiation", originId = título renegociado, em cadeia), na ordem de geração: originais primeiro.
+ */
+export async function saleTitleChain(store: Store, saleId: string, originTypes: string[] = ["sale", "sale_card"]) {
+  const out = await listAll(store, "titles", { filters: [["eq", "originId", saleId], ["eq", "originType", originTypes]] });
+  const seen = new Set(out.map((t) => t.id));
+  let frontier = out.map((t) => t.id);
+  for (let depth = 0; frontier.length && depth < 20; depth++) {
+    const next: Doc[] = [];
+    for (let i = 0; i < frontier.length; i += 100) next.push(...(await listAll(store, "titles", { filters: [["eq", "originType", "renegotiation"], ["eq", "originId", frontier.slice(i, i + 100)]] })));
+    const fresh = next.filter((t) => !seen.has(t.id));
+    for (const t of fresh) seen.add(t.id);
+    out.push(...fresh);
+    frontier = fresh.map((t) => t.id);
+  }
+  return out;
+}
+
+export interface CancelPendingTitle {
+  titleId: string;
+  number: number;
+  message: string;
+}
+
+/**
+ * Títulos da venda cancelada: cancelados quando não há recebimento. Título com baixa ativa (registrada entre o
+ * cancelamento e estes efeitos) é MANTIDO — o dinheiro já entrou e o estorno/devolução é decisão do Financeiro —
+ * e vira pendência notificada ao Financeiro (sem retentativa automática). Renegociações são tratadas antes do
+ * título de origem; a origem de uma renegociação mantida também é mantida.
+ */
+async function cancelSaleTitles(ctx: Ctx, sale: Doc, why: string): Promise<CancelPendingTitle[]> {
+  const chain = await saleTitleChain(ctx.store, sale.id);
+  const byId = new Map(chain.map((t) => [t.id, t]));
+  const pending: CancelPendingTitle[] = [];
+  const kept = new Set<string>();
+  for (const tt of [...chain].reverse()) {
+    const cur = await ctx.store.getOrThrow("titles", tt.id);
+    if (cur.status === "cancelled") continue;
+    const keep = (message: string) => {
+      kept.add(cur.id);
+      pending.push({ titleId: cur.id, number: cur.number, message });
+    };
+    const keptChild = chain.find((c) => c.originType === "renegotiation" && c.originId === cur.id && kept.has(c.id));
+    if (keptChild) {
+      keep(`renegociado no título nº ${keptChild.number}, que foi mantido`);
+      continue;
+    }
+    const active = await activeSettlementsOf(ctx.store, cur.id);
+    if (active.length) {
+      keep(`${active.length} baixa(s) ativa(s) — ${formatMoney(active.reduce((a, s) => a + (s.total ?? 0), 0))} recebidos`);
+      continue;
+    }
+    try {
+      await cancelTitle(ctx, cur.id, why);
+    } catch (e) {
+      // regra do Financeiro (baixa concorrente, renegociação etc.): pendência, não falha técnica a repetir
+      if (!(e instanceof BusinessError)) throw e;
+      keep(e.message);
+    }
+  }
+  if (pending.length) {
+    const list = pending.map((p) => `nº ${p.number}${byId.get(p.titleId)?.originType === "renegotiation" ? " (renegociação)" : ""}: ${p.message}`).join("; ");
+    await notify(ctx.store, {
+      companyId: ctx.companyId, branchId: sale.branchId, type: "info", priority: "high",
+      title: `Venda nº ${sale.number} cancelada — título(s) com recebimento mantido(s)`,
+      body: `A venda foi cancelada (estoque e documento fiscal tratados), mas estes títulos não foram cancelados: ${list}. Estorne as baixas, devolva ao cliente o que for devido e cancele os títulos no Financeiro.`,
+      link: pending.length === 1 ? `/financeiro/receber/${pending[0].titleId}` : `/vendas/${sale.id}?tab=pagamentos`,
+      originType: "sale", originId: sale.id, occurrenceKey: `sale-cancel-titles:${sale.id}`, audience: { module: "finance" },
+    }).catch(() => undefined);
+  }
+  return pending;
+}
+
 async function completeCancelPostCommit(ctx: Ctx, sale: Doc) {
   if (sale.cancelEffectsStatus === "done") return sale;
   try {
@@ -819,8 +902,9 @@ async function completeCancelPostCommit(ctx: Ctx, sale: Doc) {
 }
 
 /**
- * Efeitos do cancelamento (idempotentes, repetidos pela tarefa durável até concluir): títulos cancelados,
- * estoque devolvido, estorno do Pix integrado no provedor e cancelamento fiscal.
+ * Efeitos do cancelamento (idempotentes, repetidos pela tarefa durável até concluir): estoque devolvido, títulos
+ * cancelados (os que receberam baixa depois do cancelamento são mantidos e repassados ao Financeiro — não travam
+ * os demais efeitos), estorno do Pix integrado no provedor e cancelamento fiscal.
  */
 export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
   const sale = await ctx.store.getOrThrow("sales", saleId);
@@ -828,13 +912,12 @@ export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
   const why = `Cancelamento da venda nº ${sale.number}: ${sale.cancelReason ?? ""}`;
   // a saída de estoque da venda precisa existir antes do retorno (venda cancelada antes dos efeitos)
   if (sale.effectsStatus !== "done") await applySaleEffects(ctx, saleId, false);
-  const titles = await listAll(ctx.store, "titles", { filters: [["eq", "originId", saleId], ["eq", "originType", ["sale", "sale_card"]]] });
-  for (const tt of titles) if (tt.status !== "cancelled") await cancelTitle(ctx, tt.id, why);
   const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", saleId]], orderBy: [{ field: "seq" }] });
   const movements: MovementInput[] = items
     .filter((i) => i.warehouseId)
     .map((i) => ({ warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel" as const, unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}` }));
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
+  const pendingTitles = await cancelSaleTitles(ctx, sale, why);
   // Pix integrado: só vira "estornado" com a confirmação do provedor
   const pays = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", saleId]] });
   const stillPending: Doc[] = [];
@@ -878,7 +961,15 @@ export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
     throw new Error(`Estorno Pix pendente no provedor (${stillPending.length} pagamento(s)).`);
   }
   await resolveOccurrence(ctx.store, `pix-refund:${saleId}`);
-  await ctx.store.update("sales", saleId, { cancelEffectsStatus: "done" });
+  // concluído; títulos mantidos ficam registrados como pendência do Financeiro (aviso na venda + notificação)
+  await ctx.store.update("sales", saleId, { cancelEffectsStatus: "done", cancelPending: pendingTitles.length ? pendingTitles : null });
+  if (pendingTitles.length) {
+    await audit(ctx, {
+      module: "sales", action: "sale.cancel_effects", entityType: "sale", entityId: saleId,
+      summary: `Efeitos do cancelamento da venda nº ${sale.number} concluídos com pendência no Financeiro: título(s) ${pendingTitles.map((p) => `nº ${p.number} (${p.message})`).join("; ")} mantido(s) para estorno`,
+      related: pendingTitles.map((p) => `title:${p.titleId}`),
+    });
+  }
   return ctx.store.getOrThrow("sales", saleId);
 }
 
@@ -950,19 +1041,28 @@ export async function returnableItems(store: Store, saleId: string) {
 /**
  * Venda a prazo: o valor devolvido primeiro abate o saldo em aberto do título da venda (da última parcela para a
  * primeira); só o excedente — limitado ao que o cliente efetivamente pagou e ainda não recebeu de volta — vira
- * reembolso ou vale.
+ * reembolso ou vale. "Efetivamente pago" nas baixas = principal − desconto concedido (juros/multa não são preço
+ * da mercadoria). O desconto concedido no recebimento quitou dívida sem entrada de dinheiro: a parte devolvida
+ * coberta por ele não é reembolsada (`absorbed`).
  */
 export async function returnCompensationPlan(ctx: Ctx, sale: Doc, itemsTotal: number, previousReturns: Doc[]) {
   const titles = (await listAll(ctx.store, "titles", { filters: [["eq", "originType", "sale"], ["eq", "originId", sale.id]] })).filter((t) => t.kind === "receivable" && t.status !== "cancelled");
   const titleIds = titles.map((t) => t.id);
   const insts = titleIds.length ? (await listAll(ctx.store, "installments", { filters: [["eq", "titleId", titleIds]] })).filter((i) => ["open", "partial"].includes(i.status) && i.balance > 0) : [];
   const open = insts.reduce((a, i) => a + i.balance, 0);
-  const settled = titleIds.length ? (await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", titleIds], ["eq", "kind", "settlement"], ["eq", "status", "active"]] })).reduce((a, s) => a + (s.principal ?? 0), 0) : 0;
+  const settlements = titleIds.length ? await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", titleIds], ["eq", "kind", "settlement"], ["eq", "status", "active"]] }) : [];
+  const forgiven = settlements.reduce((a, s) => a + (s.discount ?? 0), 0);
+  const settled = settlements.reduce((a, s) => a + (s.principal ?? 0) - (s.discount ?? 0), 0);
   const paid = (sale.paidTotal ?? 0) + settled;
   const compensatedBefore = previousReturns.reduce((a, r) => a + (r.compensatedAmount ?? r.itemsTotal ?? 0), 0);
+  // parte de devoluções anteriores coberta por desconto concedido (nem abatida nem compensada)
+  const absorbedBefore = previousReturns.reduce((a, r) => a + Math.max(0, (r.itemsTotal ?? 0) - (r.abatedAmount ?? 0) - (r.compensatedAmount ?? r.itemsTotal ?? 0)), 0);
   const paidAvailable = Math.max(0, paid - compensatedBefore);
+  const forgivenAvailable = Math.max(0, forgiven - absorbedBefore);
   const abate = Math.min(itemsTotal, open);
-  const compensate = itemsTotal - abate;
+  let compensate = itemsTotal - abate;
+  const absorbed = compensate > paidAvailable ? Math.min(compensate - paidAvailable, forgivenAvailable) : 0;
+  compensate -= absorbed;
   if (compensate > paidAvailable) {
     throw new BusinessError(
       `O valor a devolver ao cliente (${formatMoney(compensate)}) excede o que ele efetivamente pagou e ainda não recebeu de volta (${formatMoney(paidAvailable)}): o título a prazo desta venda foi alterado no Financeiro (renegociado ou cancelado). Regularize o título antes de registrar a devolução.`,
@@ -978,7 +1078,7 @@ export async function returnCompensationPlan(ctx: Ctx, sale: Doc, itemsTotal: nu
     plan.push({ inst, take });
     rest -= take;
   }
-  return { abate, compensate, plan, open, paid, paidAvailable, titles };
+  return { abate, compensate, absorbed, plan, open, paid, paidAvailable, forgivenAvailable, titles };
 }
 
 export async function processReturn(ctx: Ctx, input: ReturnInput) {
@@ -1131,7 +1231,7 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
   const compensationText = fin.compensate > 0 ? `${COMPENSATION_LABEL[input.compensation]}${input.compensation === "refund" && input.refundMethod ? " — " + REFUND_METHOD_LABEL[input.refundMethod] : ""} ${formatMoney(fin.compensate)}` : "sem reembolso/vale";
   await audit(ctx, {
     module: "sales", action: "sale.return", entityType: "return", entityId: returnId,
-    summary: `Devolução nº ${number} da venda nº ${sale.number} — ${formatMoney(itemsTotal)}${fin.abate > 0 ? ` (abatido do título a prazo ${formatMoney(fin.abate)}; ${compensationText})` : ` (${compensationText})`}`,
+    summary: `Devolução nº ${number} da venda nº ${sale.number} — ${formatMoney(itemsTotal)}${fin.abate > 0 ? ` (abatido do título a prazo ${formatMoney(fin.abate)}; ${compensationText})` : ` (${compensationText})`}${fin.absorbed > 0 ? ` — ${formatMoney(fin.absorbed)} cobertos por desconto concedido no recebimento, não reembolsados` : ""}`,
     reason: input.reason, related: [`sale:${sale.id}`, voucherId ? `credit_voucher:${voucherId}` : "", session ? `cash_session:${session.id}` : "", sale.customerId ? `customer:${sale.customerId}` : "", ...fin.titles.map((t) => `title:${t.id}`)].filter(Boolean),
   });
   return ret;
@@ -1188,6 +1288,12 @@ export async function applyReturnEffects(ctx: Ctx, returnId: string) {
       // nada pago de fato e saldo zerado pela devolução: o título deixa de existir como dívida (cancelado)
       const paidSettlements = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", tt.id], ["eq", "kind", "settlement"], ["eq", "status", "active"]] });
       if (refreshed.balance === 0 && refreshed.status !== "cancelled" && paidSettlements.length === 0) await cancelTitle(ctx, tt.id, `Devolução integral da venda nº ${sale.number} (devolução nº ${ret.number})`);
+    }
+    // nada mais a receber do cliente (título zerado/cancelado pela devolução, inclusive renegociações): sai de "a receber"
+    if (sale.paymentStatus === "pending") {
+      const chain = (await saleTitleChain(ctx.store, sale.id, ["sale"])).filter((t) => t.kind === "receivable");
+      const fresh = await Promise.all(chain.map((t) => ctx.store.getOrThrow("titles", t.id)));
+      if (fresh.every((t) => t.status === "cancelled" || (t.balance ?? 0) === 0)) await ctx.store.update("sales", sale.id, { paymentStatus: "paid" });
     }
   }
   const compensated = ret.compensatedAmount ?? ret.itemsTotal;

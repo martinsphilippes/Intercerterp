@@ -18,6 +18,7 @@ import { can, canDo } from "@/lib/permissions";
 import { getFiscalConfig, measuredStatus, PRESENCE_LABEL } from "@/domain/fiscal/service";
 import { certificateDaysLeft, CRT_LABEL, issuerChecklist, numberingStatus, REGIME_LABEL, taxGroupUsage } from "@/domain/fiscal/config";
 import { deleteTaxGroupAction, saveConfigAction, saveIssuerAction, saveTaxGroupAction, setNumberAction, testConnectionAction, uploadCertificateAction } from "../actions";
+import { cscRefProblem, fiscalTokenRefProblem, secretRefProblem } from "@/domain/integrations";
 
 export const metadata = { title: "Configurações fiscais" };
 
@@ -52,8 +53,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   const scopeNote = branch ? (own ? `Configuração própria da filial ${branch.name}.` : `Filial ${branch.name} usando a configuração da empresa — ao salvar, a filial passa a ter configuração própria (herdando os valores atuais).`) : "Contexto consolidado: configuração padrão da empresa (vale para filiais sem configuração própria).";
   const taxGroups = await listAll(s.ctx.store, "tax_groups", { filters: [["eq", "companyId", s.ctx.companyId]], orderBy: [{ field: "name" }] });
   const tgOptions = taxGroups.map((g) => ({ value: g.id, label: g.name }));
-  const tokenDefined = cfg?.tokenRef ? Boolean(process.env[cfg.tokenRef]) : false;
-  const cscDefined = cfg?.cscTokenRef ? Boolean(process.env[cfg.cscTokenRef]) : false;
+  // nomes não permitidos (segredos do sistema, gravados antes da validação) nunca são consultados no ambiente
+  const tokenDefined = cfg?.tokenRef && !fiscalTokenRefProblem(cfg.tokenRef) ? Boolean(process.env[cfg.tokenRef]) : false;
+  const cscDefined = cfg?.cscTokenRef && !cscRefProblem(cfg.cscTokenRef) ? Boolean(process.env[cfg.cscTokenRef]) : false;
+  const certPassDefined = cfg?.certificate?.passwordRef && !secretRefProblem(cfg.certificate.passwordRef, { label: "Senha", example: "CERT_A1_SENHA" }) ? Boolean(process.env[cfg.certificate.passwordRef]) : false;
   return (
     <>
       <PageHeader
@@ -132,7 +135,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   { label: "Validade", value: <span>{formatDate(cfg.certificate.validFrom)} a {formatDate(cfg.certificate.validTo)} <Badge tone={days! < 0 ? "bad" : days! <= 30 ? "warn" : "good"}>{days! < 0 ? "vencido" : `${days} dia(s) restantes`}</Badge></span> },
                   // .pfx contém a chave privada: download e nome da variável da senha só para quem configura o fiscal
                   { label: "Arquivo", value: canCfgCert ? <a className="text-brand-700 underline" href={`/api/files/${cfg.certificate.fileId}`}>{cfg.certificate.fileName}</a> : <span>{cfg.certificate.fileName}{cfg.certificate.sha256 ? <span className="block font-mono text-xs text-slate-500">SHA-256 {String(cfg.certificate.sha256).slice(0, 16)}…</span> : null}</span> },
-                  { label: "Senha (referência)", value: <span>{canCfgCert ? <>variável <code>{cfg.certificate.passwordRef}</code> — </> : null}{process.env[cfg.certificate.passwordRef] ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida</Badge>}</span> },
+                  { label: "Senha (referência)", value: <span>{canCfgCert ? <>variável <code>{cfg.certificate.passwordRef}</code> — </> : null}{certPassDefined ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida</Badge>}</span> },
                   { label: "Carregado em", value: `${formatDateTime(cfg.certificate.uploadedAt)} por ${cfg.certificate.uploadedBy}` },
                   (cfg.certificate.warnings ?? []).length > 0 && { label: "Alertas", value: <span className="text-amber-800">{cfg.certificate.warnings.join(" ")}</span> },
                 ]}

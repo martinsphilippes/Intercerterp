@@ -118,6 +118,7 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
             cancelReason={win.reason}
             defaultEmail={doc.lastEmailTo ?? doc.recipient?.email ?? null}
             editHref={doc.originType === "disable" ? null : editHref}
+            originType={doc.originType ?? null}
           />
         }
       />

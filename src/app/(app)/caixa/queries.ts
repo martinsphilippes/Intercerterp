@@ -40,10 +40,12 @@ export async function querySessions(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
     const done = own.filter((x) => x.status === "completed");
     const open = ["open", "reopened"].includes(s.status);
     let expectedCash = s.expected?.cash ?? null;
+    let hidden = false;
     if (open) {
       // conferência cega: o previsto de sessão aberta só aparece depois da contagem (ou para supervisor)
       if (!blindByBranch.has(s.branchId)) blindByBranch.set(s.branchId, await blindCloseEnabled(ctx, s.branchId));
-      expectedCash = (await expectedVisible(ctx, s, blindByBranch.get(s.branchId))) ? (await sessionSummary(ctx, s.id)).expected.cash : null;
+      hidden = !(await expectedVisible(ctx, s, blindByBranch.get(s.branchId)));
+      expectedCash = hidden ? null : (await sessionSummary(ctx, s.id)).expected.cash;
     }
     const diffs: Record<string, number> = open ? {} : (s.differences ?? {});
     const totalDiff = Object.values(diffs).reduce((a: number, b: any) => a + Number(b), 0);
@@ -60,7 +62,8 @@ export async function querySessions(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
       version: (s.version ?? 1) as number,
       openingFund: (s.openingFund ?? 0) as number,
       salesCount: done.length,
-      salesTotal: done.reduce((a, x) => a + x.total, 0),
+      // total vendido de sessão em conferência cega fica oculto (em vendas só em dinheiro ele revelaria o previsto)
+      salesTotal: (hidden ? null : done.reduce((a, x) => a + x.total, 0)) as number | null,
       cancelledCount: own.filter((x) => x.status === "cancelled").length,
       expectedCash: expectedCash as number | null,
       countedCash: (open ? null : (s.counted?.cash ?? null)) as number | null,
@@ -88,7 +91,16 @@ export async function queryCashMovements(ctx: Ctx, p: Pick<ListParams, "q" | "f"
   }
   const types = p.f.tipo === "vendas" ? ["sale"] : p.f.tipo ? [p.f.tipo] : ["opening", "supply", "withdrawal", "refund", "closing_adjust"];
   filters.push(["eq", "type", types]);
-  const rows = await listAll(ctx.store, "cash_movements", { filters, orderBy: [{ field: "occurredAt", dir: p.f.ordem === "antigos" ? "asc" : "desc" }] });
+  let rows = await listAll(ctx.store, "cash_movements", { filters, orderBy: [{ field: "occurredAt", dir: p.f.ordem === "antigos" ? "asc" : "desc" }] });
+  // conferência cega: recebimentos de venda em dinheiro de sessão ainda não contada não são listados (tela e CSV)
+  if (rows.some((m) => m.type === "sale")) {
+    const hidden = new Set<string>();
+    for (const sid of new Set(rows.filter((m) => m.type === "sale").map((m) => m.sessionId as string))) {
+      const sess = await ctx.store.get("cash_sessions", sid);
+      if (sess && !(await expectedVisible(ctx, sess))) hidden.add(sid);
+    }
+    if (hidden.size) rows = rows.filter((m) => !(m.type === "sale" && hidden.has(m.sessionId)));
+  }
   const [users, accounts, sessions] = await Promise.all([nameMap(ctx, "users"), nameMap(ctx, "financial_accounts"), nameMap(ctx, "cash_sessions", (s) => `nº ${s.number}`)]);
   return rows.map((m) => ({
     id: m.id,

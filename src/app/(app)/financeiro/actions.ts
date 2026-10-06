@@ -11,7 +11,7 @@ import { today, addDays } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import {
   addTitleAttachment, approvePayable, assertUsableAccount, cancelTitle, changeInitialBalance, createAccountEntry, createManualTitle, rebuildRunningBalances, reverseEntry, reverseSettlement,
-  revokePayableApproval, saveAccount, saveCostCenter, saveFinCategory, savePaymentMethod, savePaymentTerm, setRecordActive, settleInstallment, transferBetweenAccounts,
+  revokePayableApproval, saveAccount, saveCostCenter, saveFinCategory, savePaymentMethod, savePaymentTerm, paymentTermInterestNotice, setRecordActive, settleInstallment, transferBetweenAccounts,
   undoRenegotiation, updateInstallment, updateTitle, type InstallmentInput,
 } from "@/domain/finance";
 import { importBankFile, ignoreBankTx, previewBankImport, reconcile, restoreBankTx, settleFromBankTx, undoReconciliation } from "@/domain/reconciliation";
@@ -180,8 +180,10 @@ export async function cancelTitleAction(titleId: string, fd: FormData) {
 
 async function undoRenegotiationResult(ctx: Ctx, t: { id: string; number: number; originId?: string | null }, reason: string) {
   requireAction(ctx, "finance.settle");
+  const before = t.originId ? await ctx.store.get("titles", t.originId) : null;
   await undoRenegotiation(ctx, t.id, reason);
   const orig = t.originId ? await ctx.store.get("titles", t.originId) : null;
+  if (before?.status === "cancelled") return { ok: true as const, message: `Título nº ${t.number} cancelado. O título original nº ${before.number} já estava cancelado: nada voltou ao saldo.` };
   return { ok: true as const, message: `Renegociação desfeita: título nº ${t.number} cancelado e parcelas devolvidas ao título nº ${orig?.number ?? "original"}.`, redirect: orig ? `/financeiro/receber/${orig.id}` : undefined };
 }
 
@@ -292,8 +294,9 @@ export async function savePaymentMethodAction(fd: FormData) {
 export async function savePaymentTermAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
-    await savePaymentTerm(s.ctx, id, { name: fstr(fd, "name"), installments: fint(fd, "installments", 1), firstDueDays: fint(fd, "firstDueDays"), intervalDays: fint(fd, "intervalDays", 30), interestBps: fint(fd, "interestBps"), kind: (fstr(fd, "kind") as any) || "both", active: fbool(fd, "active") });
-    return { ok: true as const, message: "Condição de parcelamento salva." };
+    const term = await savePaymentTerm(s.ctx, id, { name: fstr(fd, "name"), installments: fint(fd, "installments", 1), firstDueDays: fint(fd, "firstDueDays"), intervalDays: fint(fd, "intervalDays", 30), interestBps: fint(fd, "interestBps"), kind: (fstr(fd, "kind") as any) || "both", active: fbool(fd, "active") });
+    const notice = paymentTermInterestNotice(term);
+    return { ok: true as const, message: notice ? `Condição de parcelamento salva. ${notice}` : "Condição de parcelamento salva." };
   });
 }
 

@@ -226,71 +226,119 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
       );
       const updated = { ...bal, physical: after, avgCost: avg, seq, lastMovementAt: occurredAt };
       await t.update("stock_balances", bid, { physical: after, avgCost: avg, seq, lastMovementAt: occurredAt });
+      if (m.qty < 0 && m.respectReserved && !m.allowNegative) {
+        // Reserva gravada depois da leitura acima (ex.: separação simultânea): o limite atômico confere, no
+        // commit, que o reservado vigente não passa do físico resultante (+1/−1: efeito líquido nulo).
+        await t.increment("stock_balances", bid, "reserved", 1, { max: after + 1 });
+        await t.increment("stock_balances", bid, "reserved", -1);
+      }
       cache.set(bid, updated);
       created.push(mov);
     }
     return created;
   };
   if (tx) return run(tx);
-  return retryOnConflict(() => store.transaction(run));
+  const guarded = inputs.some((m) => m.qty < 0 && m.respectReserved && !m.allowNegative);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await retryOnConflict(() => store.transaction(run));
+    } catch (e) {
+      if (!guarded || !isConflict(e) || e.reason !== "bounds") throw e;
+      // o reservado mudou entre a leitura e o commit: relê (a conferência do disponível recusa com a mensagem completa)
+      if (attempt >= 2) throw new BusinessError("Saída excede o disponível: uma reserva (transferência separada) foi registrada para este item ao mesmo tempo. Atualize a página e confira o disponível.", "reserved_stock");
+    }
+  }
 }
 
 /**
  * Reserva quantidade (reduz disponível). Idempotente por idemKey: a mesma chave ativa (ou já consumida)
  * não reserva de novo. Uma chave cuja reserva foi LIBERADA não é reaproveitada (a reserva não volta a
  * valer sem conferir o disponível) — o chamador usa nova chave a cada tentativa.
- * O incremento de `reserved` é limitado ao físico lido: duas reservas simultâneas não passam do físico.
+ * O incremento de `reserved` é limitado ao físico lido (duas reservas simultâneas não passam do físico) e a
+ * reserva é serializada com os movimentos pela sequência do saldo: se algum movimento (ex.: saída manual)
+ * mudou o físico entre a leitura e o commit, a transação falha e a reserva é refeita sobre o saldo relido.
  */
 export async function reserve(ctx: Ctx, input: { warehouseId: string; skuId: string; qty: number; originType: string; originId: string; idemKey: string; allowNegative?: boolean }) {
   const store = ctx.store;
-  const bal = await ensureBalance(store, ctx, input.warehouseId, input.skuId);
   const rid = detId("rsv", input.idemKey);
-  const existing = await store.get("stock_reservations", rid);
-  if (existing) {
-    if (existing.status === "released") throw new BusinessError("A reserva desta tentativa já foi liberada; repita a separação.", "reservation_released");
-    return;
-  }
-  const available = bal.physical - bal.reserved;
-  const insufficient = async () => {
-    const sku = await store.get("skus", input.skuId);
-    return new BusinessError(`Disponível insuficiente para reservar ${sku?.sku ?? ""}: ${available / QTY}.`, "insufficient_stock");
-  };
-  if (!input.allowNegative && available < input.qty) throw await insufficient();
-  try {
-    await store.transaction(async (t) => {
-      await t.create(
-        "stock_reservations",
-        { companyId: ctx.companyId, branchId: bal.branchId, createdBy: ctx.user.id, warehouseId: input.warehouseId, skuId: input.skuId, qty: input.qty, originType: input.originType, originId: input.originId, status: "active", idemKey: input.idemKey },
-        rid,
-      );
-      await t.increment("stock_balances", bal.id, "reserved", input.qty, input.allowNegative ? undefined : { max: Math.max(bal.physical, 0) });
-    });
-  } catch (e) {
-    if (isConflict(e) && e.reason === "bounds") throw await insufficient();
-    // repetição simultânea da mesma chave: a outra chamada já reservou
-    if (isConflict(e) && (await store.get("stock_reservations", rid))?.status === "active") return;
-    throw e;
+  for (let attempt = 0; ; attempt++) {
+    const bal = await ensureBalance(store, ctx, input.warehouseId, input.skuId);
+    const existing = await store.get("stock_reservations", rid);
+    if (existing) {
+      if (existing.status === "released") throw new BusinessError("A reserva desta tentativa já foi liberada; repita a separação.", "reservation_released");
+      return;
+    }
+    const available = bal.physical - bal.reserved;
+    const insufficient = async () => {
+      const sku = await store.get("skus", input.skuId);
+      return new BusinessError(`Disponível insuficiente para reservar ${sku?.sku ?? ""}: ${available / QTY}.`, "insufficient_stock");
+    };
+    if (!input.allowNegative && available < input.qty) throw await insufficient();
+    try {
+      await store.transaction(async (t) => {
+        await t.create(
+          "stock_reservations",
+          { companyId: ctx.companyId, branchId: bal.branchId, createdBy: ctx.user.id, warehouseId: input.warehouseId, skuId: input.skuId, qty: input.qty, originType: input.originType, originId: input.originId, status: "active", idemKey: input.idemKey },
+          rid,
+        );
+        if (input.allowNegative) {
+          await t.increment("stock_balances", bal.id, "reserved", input.qty);
+          return;
+        }
+        await t.increment("stock_balances", bal.id, "reserved", input.qty, { max: Math.max(bal.physical, 0) });
+        // o físico lido ainda vale no commit: nenhum movimento entrou no saldo desde a leitura (+1/−1: seq inalterada)
+        await t.increment("stock_balances", bal.id, "seq", 1, { max: ((bal.seq as number) ?? 0) + 1 });
+        await t.increment("stock_balances", bal.id, "seq", -1);
+      });
+      return;
+    } catch (e) {
+      if (isConflict(e) && e.reason === "bounds") {
+        // reserva ou movimento concorrente: relê o saldo (a conferência do disponível decide)
+        if (attempt < 4) {
+          await new Promise((r) => setTimeout(r, 5 + Math.random() * 15 * (attempt + 1)));
+          continue;
+        }
+        throw await insufficient();
+      }
+      // repetição simultânea da mesma chave: a outra chamada já reservou
+      if (isConflict(e) && (await store.get("stock_reservations", rid))?.status === "active") return;
+      throw e;
+    }
   }
 }
 
 /**
- * Libera (ou consome) reservas ativas de uma origem.
+ * Libera (ou consome) reservas ativas de uma origem. Devolve quantas reservas foram encerradas agora.
  * Se `tx` for informado, participa da transação do chamador (ex.: expedição de transferência).
+ * Cada reserva é encerrada UMA vez (marcador determinístico na mesma transação): liberação e consumo
+ * simultâneos da mesma reserva (ex.: cancelar × expedir) não baixam o reservado duas vezes.
  */
 export async function releaseReservations(ctx: Ctx, originType: string, originId: string, status: "released" | "consumed" = "released", skuId?: string, tx?: Store) {
   const store = ctx.store;
   const filters: any[] = [["eq", "originType", originType], ["eq", "originId", originId], ["eq", "status", "active"]];
   if (skuId) filters.push(["eq", "skuId", skuId]);
   const items = await listAll(store, "stock_reservations", { filters });
+  let ended = 0;
   for (const r of items) {
+    const markerId = detId("rsv-end", r.id);
     const apply = async (t: Store) => {
+      await t.create("operations", { companyId: ctx.companyId, type: "stock.reservation_end", status: "done", entityType: "stock_reservation", entityId: r.id, result: { status }, createdBy: ctx.user.id }, markerId);
       await t.update("stock_reservations", r.id, { status });
       await t.increment("stock_balances", balanceId(r.warehouseId, r.skuId), "reserved", -r.qty);
     };
-    if (tx) await apply(tx);
-    else await store.transaction(apply);
+    if (tx) {
+      await apply(tx);
+      ended++;
+      continue;
+    }
+    const done = await retryOnConflict(async () => {
+      if (await store.get("operations", markerId)) return false; // encerrada por outra operação
+      await store.transaction(apply);
+      return true;
+    });
+    if (done) ended++;
   }
-  return items.length;
+  return ended;
 }
 
 /**

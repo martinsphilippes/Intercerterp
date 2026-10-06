@@ -81,7 +81,7 @@ describe("administração de outra empresa autorizada (contexto restrito à empr
     expect((await store.get("branches", b2.id))!.timezone).toBe(DEFAULT_TZ); // fuso único da instalação: campo do formulário ignorado
     expect((await setBranchStatus(gA, b2.id, "inactive", "teste")).status).toBe("inactive");
     const x = await directUser("vinc-x", { name: "Xavier", companyIds: [A], roleId: (await roleOf(A, "cashier")).id });
-    expect(await setCompanyUsers(gA, B, [x.id])).toEqual(["+Xavier"]);
+    expect(await setCompanyUsers(gA, B, [x.id])).toEqual({ changes: ["+Xavier"], noRole: [] });
     const xb = (await store.get("users", x.id))!;
     expect(xb.companyIds).toEqual([A, B]);
     // perfil equivalente da empresa B (perfil de sistema de mesma chave) definido no vínculo
@@ -207,7 +207,7 @@ describe("vínculos de usuários por empresa (setCompanyUsers)", () => {
     const linked = (await listAll(store, "users")).filter((u) => !u.isAdmin && (u.companyIds ?? []).includes(A)).map((u) => u.id);
     await expect(setCompanyUsers(gA, A, linked.filter((id) => id !== x.id && id !== y.id))).rejects.toThrow(/Yuri Só A ficaria/);
     expect((await store.get("users", x.id))!.companyIds).toEqual([A, B]); // nada gravado
-    const changes = await setCompanyUsers(gA, A, linked.filter((id) => id !== x.id));
+    const { changes } = await setCompanyUsers(gA, A, linked.filter((id) => id !== x.id));
     expect(changes).toEqual(["−Xênia Duas"]);
     const xa = (await store.get("users", x.id))!;
     expect(xa.companyIds).toEqual([B]);

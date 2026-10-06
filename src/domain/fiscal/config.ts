@@ -9,6 +9,7 @@ import { saveFile } from "@/lib/core/files";
 import { peekNumber } from "@/lib/core/numbering";
 import { isValidCnpj, onlyDigits } from "@/lib/core/text";
 import { getFiscalConfig, numberKey, saveFiscalConfig } from "./service";
+import { secretRefProblem } from "../integrations";
 
 /**
  * Configurações fiscais (Tela 34): dados do emitente (empresa/filial), certificado A1 (somente metadados),
@@ -163,7 +164,9 @@ export async function uploadCertificate(ctx: Ctx, branchId: string | null, input
   assert(input.data.length > 100 && input.data.length < 200_000, "Arquivo de certificado com tamanho inválido.");
   assert(input.password, "Informe a senha do certificado (usada somente para ler a validade; não é gravada).");
   const ref = input.passwordRef.trim();
-  assert(/^[A-Z][A-Z0-9_]{2,80}$/.test(ref), "Informe o NOME da variável de ambiente que guarda a senha (ex.: CERT_A1_SENHA).");
+  // somente o NOME; variáveis do próprio sistema (banco, sessão, rotinas) não são aceitas
+  const refProblem = secretRefProblem(ref, { label: "Variável de ambiente que guarda a senha", example: "CERT_A1_SENHA" });
+  assert(!refProblem, refProblem ?? "", "secret_ref");
   const info = parsePfx(input.data, input.password);
   const company = await ctx.store.getOrThrow("companies", ctx.companyId);
   const branch = branchId ? await ctx.store.get("branches", branchId) : null;

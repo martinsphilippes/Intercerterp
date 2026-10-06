@@ -24,6 +24,7 @@ import { DocStatus, FiscalStatusBar, RowActions, StatusTabs } from "../_componen
 import { PeriodLinks } from "../_components/period-links";
 import { FormDialogButton } from "../_components/form-dialog";
 import { batchRetransmitAction, toggleContingencyAction } from "../actions";
+import { cscRefProblem } from "@/domain/integrations";
 
 export const metadata = { title: "NFC-e" };
 
@@ -51,7 +52,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const link = (extra: Record<string, string | null>) => `/fiscal/nfce${qs({ ...extra, page: null }, pp)}`;
   const canFix = canDo(s.user, "fiscal.issue") && Boolean(s.branch);
   const count = (x: string) => base.filter((r) => inStatus(r, x)).length;
-  const cscOk = cfg ? (cfg.provider === "simulated" ? null : Boolean(cfg.cscId && cfg.cscTokenRef && process.env[cfg.cscTokenRef])) : null;
+  const cscOk = cfg ? (cfg.provider === "simulated" ? null : Boolean(cfg.cscId && cfg.cscTokenRef && !cscRefProblem(cfg.cscTokenRef) && process.env[cfg.cscTokenRef])) : null;
   const seriesInUse = [...new Set((await listAll(s.ctx.store, "terminals", { filters: [["eq", "companyId", s.ctx.companyId], ...(s.ctx.branchId ? [["eq", "branchId", s.ctx.branchId] as any] : [])] })).map((t) => t.nfceSeries ?? cfg?.nfceSeries ?? 1))].sort();
   const columns: Column<DocRow>[] = [
     { key: "number", label: "NFC-e", sortable: true, fixed: true, cell: (r) => <span>{r.numberLabel}<span className="block text-xs font-normal text-slate-500">Série {r.series ?? "—"}</span></span> },

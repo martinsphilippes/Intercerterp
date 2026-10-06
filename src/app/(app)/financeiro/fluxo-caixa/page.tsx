@@ -297,7 +297,7 @@ async function Competence({ s, from, to, branchId, categoryId, costCenterId, cat
   return (
     <div className="space-y-4">
       <Notice tone="info">
-        Regime de competência: títulos (vendas a prazo, cartão, contas a pagar, manuais) pelo valor total na data de competência + lançamentos diretos sem título (vendas à vista, cancelamentos, devoluções, tarifas) pela data. Encargos de baixa ficam no realizado. Período: {formatDate(c.from)} a {formatDate(c.to)} · {c.titleCount} título(s) e {c.entryCount} lançamento(s) direto(s).
+        Regime de competência: títulos (vendas a prazo, cartão, contas a pagar, manuais) pelo valor total na data de competência + lançamentos diretos sem título (vendas à vista, cancelamentos, devoluções, tarifas) pela data. Devoluções de vendas a prazo abatidas do título reduzem a receita da categoria do título na data do abatimento (linhas “Devoluções (abatimento)”). Encargos de baixa ficam no realizado. Período: {formatDate(c.from)} a {formatDate(c.to)} · {c.titleCount} título(s), {c.entryCount} lançamento(s) direto(s) e {c.abatementCount} abatimento(s).
       </Notice>
       <Card title="Resultado por competência" bodyClass="p-0">
         <div className="overflow-x-auto">
@@ -313,14 +313,23 @@ async function Competence({ s, from, to, branchId, categoryId, costCenterId, cat
             </thead>
             <tbody>
               {c.rows.map((r) => (
-                <tr key={`${r.type}-${r.categoryId}`}>
+                <tr key={`${r.type}-${r.categoryId}-${r.source ?? ""}`}>
                   <td>
                     <span className="mr-2 text-xs text-slate-400">{r.type === "revenue" ? "Receita" : "Despesa"}</span>
+                    {r.source === "abatement" && "Devoluções (abatimento) — "}
                     {r.categoryId ? (catNames.get(r.categoryId) ?? "—") : "Sem categoria"}
                     <span className="ml-2 text-xs">
-                      <Link className="text-brand-700 hover:underline" href={titlesLink(r.type, r.categoryId)}>títulos</Link>
-                      {" · "}
-                      <Link className="text-brand-700 hover:underline" href={`/financeiro/fluxo-caixa${qs({ tab: "movimentos", from: c.from, to: c.to, category: r.categoryId || "none", direct: "1", status: "realized" })}`}>diretos</Link>
+                      {r.source === "abatement" ? (
+                        <Link className="text-brand-700 hover:underline" href={`/financeiro/receber${qs({ abFrom: c.from, abTo: c.to, category: r.categoryId || "none", branch: branchId, state: null })}`} title="Parcelas a receber abatidas por devolução no período">
+                          parcelas abatidas
+                        </Link>
+                      ) : (
+                        <>
+                          <Link className="text-brand-700 hover:underline" href={titlesLink(r.type, r.categoryId)}>títulos</Link>
+                          {" · "}
+                          <Link className="text-brand-700 hover:underline" href={`/financeiro/fluxo-caixa${qs({ tab: "movimentos", from: c.from, to: c.to, category: r.categoryId || "none", direct: "1", status: "realized" })}`}>diretos</Link>
+                        </>
+                      )}
                     </span>
                   </td>
                   {c.byMonth.map((m) => (

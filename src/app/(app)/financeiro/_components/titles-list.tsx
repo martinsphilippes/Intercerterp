@@ -131,6 +131,8 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
     },
     { key: "amount", label: "Valor", align: "right", sortable: true, cell: (r) => <span className={!rec && r.state === "overdue" ? "text-red-700" : undefined}>{formatMoney(r.amount)}</span> },
     { key: "paid", label: rec ? "Recebido" : "Pago", align: "right", sortable: true, hidden: true, cell: (r) => (r.paid ? formatMoney(r.paid) : "—") },
+    // abatido por devolução de mercadoria (sem dinheiro): separado do recebido; visível no detalhamento da competência
+    ...(rec ? [{ key: "abated", label: "Abatido (devolução)", align: "right" as const, sortable: true, hidden: !(p.f.abFrom || p.f.abTo), cell: (r: Row) => (r.abated ? formatMoney(r.abated) : "—") }] : []),
     {
       key: "balance",
       label: "Saldo",
@@ -225,7 +227,10 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
   ];
   if (!rec) filters.push({ type: "select", name: "approval", label: "Autorização", options: [{ value: "pending", label: "A autorizar" }, { value: "approved", label: "Autorizadas" }] });
   if (!s.ctx.branchId) filters.push({ type: "select", name: "branch", label: "Filial", options: branches, all: "Todas (consolidado)" });
-  const periodNote = [p.f.dueFrom && `vencimento desde ${formatDate(p.f.dueFrom)}`, p.f.dueTo && `até ${formatDate(p.f.dueTo)}`, p.f.compFrom && `competência desde ${formatDate(p.f.compFrom)}`, p.f.compTo && `até ${formatDate(p.f.compTo)}`].filter(Boolean).join(" ");
+  const periodNote = [
+    p.f.dueFrom && `vencimento desde ${formatDate(p.f.dueFrom)}`, p.f.dueTo && `até ${formatDate(p.f.dueTo)}`, p.f.compFrom && `competência desde ${formatDate(p.f.compFrom)}`, p.f.compTo && `até ${formatDate(p.f.compTo)}`,
+    rec && p.f.abFrom && `abatimento por devolução desde ${formatDate(p.f.abFrom)}`, rec && p.f.abTo && `até ${formatDate(p.f.abTo)}`,
+  ].filter(Boolean).join(" ");
 
   // painel lateral (contas a pagar): previsão de caixa, despesas por categoria e fila de aprovação
   let side: React.ReactNode = null;
@@ -327,7 +332,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
         pageSize={p.pageSize}
         exportKey={rec ? "fin-receivables" : "fin-payables"}
         rowHref={(r) => `${basePath}/${r.titleId}`}
-        totals={{ amount: formatMoney(sum("amount")), paid: formatMoney(sum("paid")), balance: formatMoney(sum("balance")) }}
+        totals={{ amount: formatMoney(sum("amount")), paid: formatMoney(sum("paid")), ...(rec ? { abated: formatMoney(sum("abated")) } : {}), balance: formatMoney(sum("balance")) }}
         empty={
           <div className="p-10 text-center text-sm text-slate-500">
             Nenhuma parcela no recorte.{" "}

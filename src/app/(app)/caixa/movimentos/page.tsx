@@ -87,6 +87,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <Stat label="Devoluções em espécie" value={formatMoney(sum.totals.refunds)} hint={`${count("refund")} saída(s) a clientes`} tone={sum.totals.refunds ? "warn" : "default"} />
       </div>
       {showExpected && <p className="mb-4 text-xs text-slate-500">Saldo estimado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções {formatMoney(sum.totals.refunds)} = <b>{formatMoney(sum.expected.cash)}</b>. Sangria não reduz faturamento; suprimento não é venda.</p>}
+      {!showExpected && <p className="mb-4 text-xs text-slate-500">Conferência cega: os recebimentos de venda em dinheiro desta sessão (lista e exportação) ficam ocultos até a contagem ser registrada no fechamento.</p>}
       <div className="grid gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
         <div>
           {open && canDo(s.user, "cash.withdrawal") && canOperate ? (

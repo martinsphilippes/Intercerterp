@@ -41,7 +41,7 @@ export interface PdvProps {
   parked: Array<{ id: string; name: string | null; customerName: string | null; total: number; itemsCount: number; parkedAt: string; expired: boolean; operatorName: string; terminalName: string }>;
   allowNegative: boolean;
   exchange: { returnId: string; number: number; saleNumber: number; voucherCode: string | null; voucherBalance: number } | null;
-  pendingExchange: { returnId: string; number: number; itemsTotal: number } | null;
+  pendingExchange: { returnId: string; number: number; itemsTotal: number; credit: number } | null;
 }
 
 const TERMINAL_COOKIE = "ic_pdv_terminal";
@@ -421,7 +421,7 @@ export function PdvApp(props: PdvProps) {
       )}
       {props.pendingExchange && (
         <div className="flex flex-wrap items-center gap-3 border-b border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-900">
-          <ArrowLeftRight className="size-4" /> Troca da devolução nº {props.pendingExchange.number} ({formatMoney(props.pendingExchange.itemsTotal)}) aguardando. O atendimento atual tem itens.
+          <ArrowLeftRight className="size-4" /> Troca da devolução nº {props.pendingExchange.number} ({props.pendingExchange.credit > 0 ? `vale de ${formatMoney(props.pendingExchange.credit)}` : "sem vale: valor abatido do título a prazo"}) aguardando. O atendimento atual tem itens.
           <Button size="sm" variant="primary" loading={pending} onClick={() => run(() => startExchangeAction(props.terminal.id, props.pendingExchange!.returnId))}>
             Salvar atual como pré-venda e iniciar a troca
           </Button>
@@ -429,7 +429,8 @@ export function PdvApp(props: PdvProps) {
       )}
       {props.exchange && (
         <div className="flex flex-wrap items-center gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
-          <ArrowLeftRight className="size-4" /> Troca — devolução nº {props.exchange.number} (venda nº {props.exchange.saleNumber}). Vale {props.exchange.voucherCode} com {formatMoney(exchangeVoucher)} será aplicado no pagamento.
+          <ArrowLeftRight className="size-4" /> Troca — devolução nº {props.exchange.number} (venda nº {props.exchange.saleNumber}).{" "}
+          {props.exchange.voucherCode ? `Vale ${props.exchange.voucherCode} com ${formatMoney(exchangeVoucher)} será aplicado no pagamento.` : "Valor abatido do título a prazo da venda de origem; sem vale a aplicar."}
           <span className="font-semibold">
             {totals.total >= exchangeVoucher ? `Diferença a pagar pelo cliente: ${formatMoney(totals.total - exchangeVoucher)}` : `Diferença a favor do cliente: ${formatMoney(exchangeVoucher - totals.total)} (permanece no vale)`}
           </span>

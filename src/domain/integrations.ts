@@ -21,17 +21,27 @@ export interface CatalogProvider {
   config: string[];
   /** variável de ambiente sugerida por segredo */
   defaultRefs?: Record<string, string>;
+  /**
+   * Prefixos aceitos para o NOME das variáveis de credencial deste provedor: o servidor envia o VALOR da variável
+   * ao provedor, então só variáveis "do provedor" podem ser vinculadas (nunca segredos do próprio sistema).
+   */
+  refPrefixes?: string[];
   /** o que o teste faz (ou por que não há teste) */
   test: string;
   simulated?: boolean;
 }
+
+/** Variáveis aceitas para o token da Focus NFe (NF-e, NFC-e e NFS-e). */
+export const FOCUS_REF_PREFIXES = ["FOCUSNFE_", "FOCUS_", "NFE_", "NFCE_", "NFSE_"];
+/** Variáveis aceitas para o código do CSC da NFC-e. */
+export const CSC_REF_PREFIXES = ["NFCE_", "CSC_", "FOCUSNFE_", "FOCUS_"];
 
 export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; description: string; providers: CatalogProvider[]; consumer: string; consumers: Array<{ label: string; href: string }> }> = {
   pix: {
     label: "Pix",
     description: "Cobranças Pix com QR Code dinâmico e confirmação pelo provedor.",
     providers: [
-      { id: "mercadopago", label: "Mercado Pago", secrets: ["accessToken"], config: ["baseUrl"], defaultRefs: { accessToken: "MERCADOPAGO_ACCESS_TOKEN" }, test: "Consulta autenticada à API do provedor (provider.test)." },
+      { id: "mercadopago", label: "Mercado Pago", secrets: ["accessToken"], config: [], defaultRefs: { accessToken: "MERCADOPAGO_ACCESS_TOKEN" }, refPrefixes: ["MERCADOPAGO_", "MP_"], test: "Consulta autenticada à API do provedor (provider.test)." },
       { id: "simulated", label: "Simulação (sem valor financeiro)", secrets: [], config: [], test: "Verifica o provedor de simulação (sem instituição real).", simulated: true },
     ],
     consumer: "PDV → Pagamento da venda",
@@ -51,7 +61,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     label: "NF-e / NFC-e",
     description: "Emissão, consulta, cancelamento, CC-e e inutilização de NF-e e NFC-e (configuração fiscal por filial).",
     providers: [
-      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [], defaultRefs: { token: "FOCUSNFE_TOKEN" }, test: "Consulta autenticada à API Focus NFe (testFiscalConnection)." },
+      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [], defaultRefs: { token: "FOCUSNFE_TOKEN" }, refPrefixes: FOCUS_REF_PREFIXES, test: "Consulta autenticada à API Focus NFe (testFiscalConnection)." },
       { id: "simulated", label: "Simulação (documento sem validade fiscal)", secrets: [], config: [], test: "Verifica o provedor de simulação (sem SEFAZ).", simulated: true },
     ],
     consumer: "Fiscal → NF-e / NFC-e; PDV → Venda concluída",
@@ -61,7 +71,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     label: "NFS-e",
     description: "Emissão de notas de serviço pelo padrão nacional ou municipal do provedor (configuração fiscal por filial).",
     providers: [
-      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [], defaultRefs: { token: "FOCUSNFE_TOKEN" }, test: "Consulta autenticada à API Focus NFe (testFiscalConnection)." },
+      { id: "focusnfe", label: "Focus NFe", secrets: ["token"], config: [], defaultRefs: { token: "FOCUSNFE_TOKEN" }, refPrefixes: FOCUS_REF_PREFIXES, test: "Consulta autenticada à API Focus NFe (testFiscalConnection)." },
       { id: "simulated", label: "Simulação (documento sem validade fiscal)", secrets: [], config: [], test: "Verifica o provedor de simulação (sem prefeitura).", simulated: true },
     ],
     consumer: "Fiscal → NFS-e",
@@ -72,7 +82,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     description: "Importação de extratos OFX/CSV e retornos CNAB 240/400. Conexão automática requer API do banco.",
     providers: [
       { id: "file_import", label: "Importação de arquivos (OFX, CSV, CNAB)", secrets: [], config: [], test: "Sem teste: não há conexão remota — os arquivos são importados manualmente na conciliação." },
-      { id: "open_finance", label: "API bancária / Open Finance", secrets: ["clientId", "clientSecret"], config: ["baseUrl"], defaultRefs: { clientId: "BANK_CLIENT_ID", clientSecret: "BANK_CLIENT_SECRET" }, test: "Conector de API bancária não implementado nesta versão." },
+      { id: "open_finance", label: "API bancária / Open Finance", secrets: ["clientId", "clientSecret"], config: [], defaultRefs: { clientId: "BANK_CLIENT_ID", clientSecret: "BANK_CLIENT_SECRET" }, refPrefixes: ["BANK_", "BANCO_", "OPENFINANCE_", "OPEN_FINANCE_"], test: "Conector de API bancária não implementado nesta versão." },
     ],
     consumer: "Financeiro → Conciliação bancária",
     consumers: [{ label: "Conciliação bancária", href: "/financeiro/conciliacao" }],
@@ -89,7 +99,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     description: "Envio de documentos, convites e recuperação de senha.",
     providers: [
       { id: "appwrite_messaging", label: "Appwrite Messaging", secrets: [], config: ["providerId"], test: "Envio real de mensagem de teste ao usuário logado." },
-      { id: "resend", label: "Resend (API)", secrets: ["apiKey"], config: ["from"], defaultRefs: { apiKey: "RESEND_API_KEY" }, test: "Envio real de mensagem de teste ao usuário logado." },
+      { id: "resend", label: "Resend (API)", secrets: ["apiKey"], config: ["from"], defaultRefs: { apiKey: "RESEND_API_KEY" }, refPrefixes: ["RESEND_"], test: "Envio real de mensagem de teste ao usuário logado." },
     ],
     consumer: "Documentos, convites, suporte",
     consumers: [{ label: "NFC-e/NF-e por e-mail", href: "/fiscal/nfce" }, { label: "Pacote à contabilidade", href: "/fiscal/relatorios?tab=exportacao" }],
@@ -97,7 +107,6 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
 };
 
 export const CONFIG_LABEL: Record<string, string> = {
-  baseUrl: "URL base da API",
   acquirer: "Adquirente",
   debitFeeBps: "Taxa débito (bps)",
   creditFeeBps: "Taxa crédito (bps)",
@@ -124,8 +133,94 @@ export const STATUS_LABEL: Record<string, string> = {
 const scopeKey = (companyId: string, branchId: string | null | undefined, kind: string) => `${companyId}|${branchId ?? "*"}|${kind}`;
 export const integrationId = (companyId: string, branchId: string | null | undefined, kind: string) => detId("integration", scopeKey(companyId, branchId, kind));
 
-/** Integração efetiva para a filial (específica ou da empresa). */
-export async function getIntegration(store: Store, companyId: string, branchId: string | null | undefined, kind: IntegrationKind): Promise<Doc | null> {
+// ───────────────────────────── Referências de credencial (nome da variável de ambiente)
+
+/** Formato do NOME da variável de ambiente que guarda uma credencial (nunca o valor). */
+export const SECRET_REF_FORMAT = /^[A-Z][A-Z0-9_]{2,63}$/;
+
+/**
+ * Variáveis do próprio servidor (banco, sessão, rotinas, hospedagem, nuvem, sistema operacional). Nunca são aceitas
+ * como credencial de integração: o servidor envia o VALOR da variável vinculada ao provedor.
+ */
+const RESERVED_ENV_NAMES = new Set([
+  "CRON_SECRET", "SETUP_TOKEN", "DATA_BACKEND", "DATABASE_URL", "MEMORY_TX_MODE", "FOCUSNFE_BASE_URL", "BASE_URL", "APP_URL",
+  "PATH", "HOME", "USER", "USERNAME", "PWD", "OLDPWD", "SHELL", "HOSTNAME", "HOST", "PORT", "TMPDIR", "TMP", "TEMP", "LANG", "TZ", "CI",
+  "LOGIN", "PASSWORD", "TOKEN", "API_KEY", "SECRET", "SECRET_KEY", "PRIVATE_KEY",
+]);
+const RESERVED_ENV_PREFIXES = [
+  "APPWRITE_", "NEXT_", "NODE_", "NPM_", "VERCEL", "SESSION", "AWS_", "AZURE_", "GOOGLE_", "GCP_", "GCLOUD_", "FIREBASE_", "GITHUB_", "GIT_",
+  "DATABASE_", "DB_", "POSTGRES", "PG", "MYSQL", "MONGO", "REDIS", "KV_", "BLOB_", "EDGE_CONFIG", "CRON_", "SETUP_", "DATA_", "AUTH_", "JWT_",
+  "LOCAL_", "DEMO_", "APP_", "HTTP_", "HTTPS_", "NO_PROXY", "ALL_PROXY", "SSL_", "LD_", "XDG_", "ANTHROPIC", "CLAUDE", "OPENAI", "SENTRY_", "TURBO_",
+];
+
+export function isReservedEnvName(name: string) {
+  return RESERVED_ENV_NAMES.has(name) || RESERVED_ENV_PREFIXES.some((p) => name.startsWith(p));
+}
+
+/**
+ * Problema no NOME de variável informado para uma credencial (ou null se aceito): formato, variável reservada do
+ * sistema e — quando informados — prefixos do provedor.
+ */
+export function secretRefProblem(name: string | null | undefined, opts: { label: string; example: string; prefixes?: string[] | null }): string | null {
+  const v = String(name ?? "").trim();
+  if (!SECRET_REF_FORMAT.test(v)) return `"${opts.label}": informe o NOME da variável de ambiente (ex.: ${opts.example}), nunca o valor da credencial — letras maiúsculas, dígitos e "_", de 3 a 64 caracteres.`;
+  if (isReservedEnvName(v)) return `"${opts.label}": a variável ${v} é do próprio sistema (banco, sessão, rotinas ou hospedagem) e não pode ser vinculada a uma integração. Crie uma variável própria para a credencial (ex.: ${opts.example}).`;
+  if (opts.prefixes?.length && !opts.prefixes.some((p) => v.startsWith(p))) return `"${opts.label}": o nome da variável deve começar com ${opts.prefixes.join(", ")} (ex.: ${opts.example}) — somente credenciais deste provedor podem ser enviadas a ele.`;
+  return null;
+}
+
+/** Problema no nome da variável de um segredo do provedor do catálogo. */
+export function providerSecretProblem(prov: CatalogProvider, secret: string, name: string | null | undefined) {
+  return secretRefProblem(name, { label: SECRET_LABEL[secret] ?? secret, example: prov.defaultRefs?.[secret] ?? `${prov.refPrefixes?.[0] ?? "MINHA_"}CHAVE`, prefixes: prov.refPrefixes });
+}
+
+/** Token da Focus NFe (configuração fiscal / integração fiscal). */
+export function fiscalTokenRefProblem(name: string | null | undefined) {
+  return secretRefProblem(name, { label: "Variável do token", example: "FOCUSNFE_TOKEN", prefixes: FOCUS_REF_PREFIXES });
+}
+
+/** Código do CSC da NFC-e. */
+export function cscRefProblem(name: string | null | undefined) {
+  return secretRefProblem(name, { label: "CSC da NFC-e — variável do código", example: "NFCE_CSC", prefixes: CSC_REF_PREFIXES });
+}
+
+/** Chaves de configuração nunca aceitas: o endereço do provedor é fixo no código (evita desviar credenciais — SSRF). */
+const FORBIDDEN_CONFIG_KEYS = ["baseUrl"];
+
+const catalogProvider = (kind: string, provider: string | null | undefined) => INTEGRATION_CATALOG[kind as IntegrationKind]?.providers.find((p) => p.id === provider);
+
+/** Somente os segredos do provedor no catálogo atual (vínculos antigos de outros provedores/versões são ignorados). */
+export function effectiveSecretRefs(integration: Doc): Record<string, string> {
+  const prov = catalogProvider(integration.kind, integration.provider);
+  const refs: Record<string, string> = {};
+  for (const s of prov?.secrets ?? []) {
+    const v = integration.secretRefs?.[s];
+    if (typeof v === "string" && v) refs[s] = v;
+  }
+  return refs;
+}
+
+/** Vínculo de credencial gravado com nome não permitido (ex.: gravado antes desta validação) — a integração não opera. */
+export function integrationRefProblem(integration: Doc): string | null {
+  const prov = catalogProvider(integration.kind, integration.provider);
+  if (!prov) return null;
+  const refs = effectiveSecretRefs(integration);
+  for (const s of prov.secrets) if (refs[s]) {
+    const p = providerSecretProblem(prov, s, refs[s]);
+    if (p) return p;
+  }
+  return null;
+}
+
+/** Cópia segura para os consumidores: sem chaves de configuração proibidas e só com os segredos do provedor. */
+function safeIntegration(integration: Doc): Doc {
+  const config: Record<string, any> = { ...(integration.config ?? {}) };
+  for (const k of FORBIDDEN_CONFIG_KEYS) delete config[k];
+  return { ...integration, config, secretRefs: effectiveSecretRefs(integration) };
+}
+
+/** Registro efetivo (filial habilitada ou empresa), sem saneamento — uso administrativo (ex.: remover vínculo inválido). */
+export async function findIntegration(store: Store, companyId: string, branchId: string | null | undefined, kind: IntegrationKind): Promise<Doc | null> {
   if (branchId) {
     const b = await store.get("integrations", detId("integration", scopeKey(companyId, branchId, kind)));
     if (b && b.enabled !== false) return b;
@@ -134,7 +229,15 @@ export async function getIntegration(store: Store, companyId: string, branchId: 
   return c && c.enabled !== false ? c : null;
 }
 
-const ENV_NAME = /^[A-Z][A-Z0-9_]{1,80}$/;
+/**
+ * Integração efetiva para a filial (específica ou da empresa). Registro com vínculo de credencial não permitido é
+ * tratado como não configurado (null); a configuração devolvida nunca traz URL base (endereço fixo do provedor).
+ */
+export async function getIntegration(store: Store, companyId: string, branchId: string | null | undefined, kind: IntegrationKind): Promise<Doc | null> {
+  const raw = await findIntegration(store, companyId, branchId, kind);
+  if (!raw || integrationRefProblem(raw)) return null;
+  return safeIntegration(raw);
+}
 
 export async function saveIntegration(
   ctx: Ctx,
@@ -145,18 +248,23 @@ export async function saveIntegration(
   assert(cat, "Tipo de integração desconhecido.");
   const prov = cat.providers.find((p) => p.id === input.provider);
   assert(prov, "Provedor não suportado para esta integração.");
+  // o endereço da API é fixo no código de cada provedor: nunca configurável (o servidor enviaria a credencial a ele)
+  for (const k of FORBIDDEN_CONFIG_KEYS) {
+    const v = input.config?.[k];
+    assert(v === undefined || v === null || v === "", "O endereço (URL base) da API do provedor não é configurável: o sistema usa somente o endereço oficial do provedor.", "forbidden_config");
+  }
   const refs: Record<string, string> = {};
   for (const s of prov.secrets) {
     const v = (input.secretRefs?.[s] ?? prov.defaultRefs?.[s] ?? "").trim();
     if (!v) continue;
-    assert(ENV_NAME.test(v), `"${SECRET_LABEL[s] ?? s}": informe o NOME da variável de ambiente (ex.: ${prov.defaultRefs?.[s] ?? "MINHA_CHAVE"}), nunca o valor da credencial.`);
+    const problem = providerSecretProblem(prov, s, v);
+    assert(!problem, problem ?? "", "secret_ref");
     refs[s] = v;
   }
   const config: Record<string, any> = {};
   for (const k of prov.config) if (input.config?.[k] !== undefined && input.config[k] !== "") config[k] = input.config[k];
   if (input.config?.connectionName) config.connectionName = String(input.config.connectionName).trim().slice(0, 120);
   if (config.accountantEmail) assert(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(config.accountantEmail)), "E-mail da contabilidade inválido.");
-  if (config.baseUrl) assert(/^https:\/\//.test(String(config.baseUrl)), "A URL base deve usar https://.");
   if (config.connectorUrl) assert(/^https?:\/\//.test(String(config.connectorUrl)), "URL do conector inválida.");
   const sk = scopeKey(ctx.companyId, input.branchId, input.kind);
   const id = detId("integration", sk);
@@ -214,7 +322,8 @@ export async function setIntegrationStatus(store: Store, id: string, status: str
 
 /** Segredos faltantes (nomes de variáveis sem valor no ambiente). */
 export function missingSecrets(integration: Doc): string[] {
-  const refs: Record<string, string> = integration.secretRefs ?? {};
+  // somente os segredos do provedor no catálogo atual (ex.: TEF via conector não usa credencial no servidor)
+  const refs = effectiveSecretRefs(integration);
   return Object.entries(refs)
     .filter(([, envName]) => envName && !process.env[envName])
     .map(([k, envName]) => `${k} (${envName})`);
@@ -224,8 +333,11 @@ export function missingSecrets(integration: Doc): string[] {
 export function secretStatus(kind: IntegrationKind, provider: string | null | undefined, refs: Record<string, string> | null | undefined) {
   const prov = INTEGRATION_CATALOG[kind]?.providers.find((p) => p.id === provider);
   if (!prov) return [];
-  return prov.secrets.map((s) => {
+  return prov.secrets.map((s): { key: string; label: string; envName: string; defined: boolean; problem?: string } => {
     const envName = refs?.[s] || prov.defaultRefs?.[s] || "";
+    // nome não permitido: nunca consulta a variável (nem para dizer se está definida)
+    const problem = envName ? providerSecretProblem(prov, s, envName) : null;
+    if (problem) return { key: s, label: SECRET_LABEL[s] ?? s, envName, defined: false, problem };
     return { key: s, label: SECRET_LABEL[s] ?? s, envName, defined: Boolean(envName && process.env[envName]) };
   });
 }
@@ -294,11 +406,15 @@ export async function testIntegration(ctx: Ctx, kind: IntegrationKind, branchId:
     await audit(ctx, { module: "admin", action: "integration.test", entityType: "integration", entityId: integ?.id ?? null, summary: `Teste ${INTEGRATION_CATALOG[kind].label}: ${STATUS_LABEL[out.status]} — ${out.message}`.slice(0, 480), result: out.ok ? "success" : "failure" });
     return out;
   }
-  integ = await getIntegration(ctx.store, ctx.companyId, branchId, kind);
-  if (!integ) return { status: "not_configured", ok: false, message: "Integração não configurada." };
-  const missing = missingSecrets(integ);
+  const raw = await findIntegration(ctx.store, ctx.companyId, branchId, kind);
+  if (!raw) return { status: "not_configured", ok: false, message: "Integração não configurada." };
+  const refProblem = integrationRefProblem(raw);
+  integ = safeIntegration(raw);
+  const missing = refProblem ? [] : missingSecrets(integ);
   try {
-    if (missing.length) out = { status: "error", ok: false, message: `Credencial ausente no servidor: ${missing.join(", ")}. Defina a variável de ambiente e teste novamente.` };
+    // vínculo com variável não permitida: tratado como não configurado — o segredo nunca é lido nem enviado
+    if (refProblem) out = { status: "not_configured", ok: false, message: `${refProblem} Salve a integração novamente com uma variável permitida.` };
+    else if (missing.length) out = { status: "error", ok: false, message: `Credencial ausente no servidor: ${missing.join(", ")}. Defina a variável de ambiente e teste novamente.` };
     else if (kind === "pix") {
       const { pixProviderFrom } = await import("./payments/providers");
       const p = pixProviderFrom(integ);
@@ -355,9 +471,17 @@ export async function saveFiscalIntegration(ctx: Ctx, branchId: string | null, i
   requireAction(ctx, "admin.integrations");
   assert(["focusnfe", "simulated"].includes(input.provider), "Provedor fiscal não suportado.");
   assert(["homologacao", "producao"].includes(input.environment), "Ambiente inválido.");
-  if (input.provider === "focusnfe" && input.tokenRef !== "") assert(ENV_NAME.test(input.tokenRef || ""), "Informe o NOME da variável de ambiente do token (ex.: FOCUSNFE_TOKEN), nunca o token.");
+  // o token é enviado à Focus NFe: só variáveis da Focus/NF-e (nunca segredos do sistema) — validado também com simulação,
+  // pois o nome fica gravado e passa a valer ao trocar o provedor
+  if (input.provider === "focusnfe" || (input.tokenRef ?? "") !== "") {
+    const p = input.tokenRef === "" ? null : fiscalTokenRefProblem(input.tokenRef);
+    assert(!p, p ?? "", "secret_ref");
+  }
   if (input.connectionName !== undefined) assert(input.connectionName?.trim(), "Informe o nome da conexão.");
-  if (input.cscTokenRef) assert(ENV_NAME.test(input.cscTokenRef), "Informe o NOME da variável do CSC (ex.: NFCE_CSC).");
+  if (input.cscTokenRef) {
+    const p = cscRefProblem(input.cscTokenRef);
+    assert(!p, p ?? "", "secret_ref");
+  }
   const { saveFiscalConfig, getFiscalConfig } = await import("./fiscal/service");
   const cur = await getFiscalConfig(ctx.store, ctx.companyId, branchId);
   const patch: Record<string, any> = { provider: input.provider, environment: input.environment, tokenRef: input.tokenRef === "" ? "" : input.tokenRef || "FOCUSNFE_TOKEN" };
@@ -464,7 +588,9 @@ export async function usageSummary(ctx: Ctx, kind: IntegrationKind) {
 }
 
 /** Diagnóstico acionável a partir do estado medido e da mensagem do último teste. */
-export function diagnose(status: string, message: string | null | undefined, secrets: Array<{ envName: string; defined: boolean; label: string }>): string {
+export function diagnose(status: string, message: string | null | undefined, secrets: Array<{ envName: string; defined: boolean; label: string; problem?: string }>): string {
+  const blocked = secrets.find((s) => s.problem);
+  if (blocked) return `Vínculo de credencial não permitido — ${blocked.problem} Informe outra variável e salve; a integração não opera até lá.`;
   const missing = secrets.filter((s) => !s.defined);
   if (status === "not_configured") return "Escolha o provedor, informe os nomes das variáveis de credencial e salve; depois execute o teste.";
   if (missing.length) return `Defina no servidor (ex.: Vercel → Settings → Environment Variables, ou .env.local) a(s) variável(is) ${missing.map((m) => m.envName || m.label).join(", ")} e teste novamente. O valor nunca é gravado no banco.`;

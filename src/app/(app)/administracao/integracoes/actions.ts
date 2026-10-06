@@ -60,10 +60,13 @@ export async function unlinkCredentialAction(kind: IntegrationKind, scope: "bran
       assert(cfg, "Configuração fiscal não cadastrada.");
       await saveFiscalIntegration(s.ctx, branchId, { kind, provider: cfg!.provider, environment: cfg!.environment ?? "homologacao", tokenRef: "", enabled: kind === "fiscal_nfe" ? cfg!.nfeEnabled !== false : cfg!.nfseEnabled !== false });
     } else {
-      const { getIntegration } = await import("@/domain/integrations");
-      const integ = await getIntegration(s.ctx.store, s.ctx.companyId, branchId, kind);
+      // registro bruto: também remove vínculos gravados com variável não permitida (que tornam a integração inoperante)
+      const { findIntegration } = await import("@/domain/integrations");
+      const integ = await findIntegration(s.ctx.store, s.ctx.companyId, branchId, kind);
       assert(integ, "Integração não configurada.");
-      await saveIntegration(s.ctx, { kind, branchId: integ!.branchId ?? null, provider: integ!.provider, environment: integ!.environment, config: integ!.config, secretRefs: {}, enabled: integ!.enabled !== false });
+      const config: Record<string, any> = { ...(integ!.config ?? {}) };
+      delete config.baseUrl; // URL base não é mais configurável (endereço oficial do provedor)
+      await saveIntegration(s.ctx, { kind, branchId: integ!.branchId ?? null, provider: integ!.provider, environment: integ!.environment, config, secretRefs: {}, enabled: integ!.enabled !== false });
     }
     return { ok: true as const, message: "Vínculo de credencial removido. A integração não opera até um novo vínculo." };
   });

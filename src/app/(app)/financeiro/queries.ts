@@ -5,7 +5,7 @@ import type { Ctx } from "@/lib/core/ctx";
 import { normalizeSearch, type ListParams } from "@/lib/list";
 import { addDays, diffDays, monthEnd, monthStart, today } from "@/lib/dates";
 import { nameMap } from "@/lib/server/lookups";
-import { cardFeeByInstallment, dueState, type TitleKind } from "@/domain/finance";
+import { cardFeeByInstallment, dueState, liveRenegotiationsOf, type TitleKind } from "@/domain/finance";
 import { categoryDefaults, categoryFilterValue, computeCashflow, entrySide, isSettlementFeeReversal, methodAccountMap, resolveCategory, type CashflowFilter, type Granularity } from "@/domain/cashflow";
 import { roundDiv } from "@/lib/money";
 
@@ -59,10 +59,25 @@ async function titlesMap(ctx: Ctx, ids: string[]) {
   return map;
 }
 
+/** Abatimentos de devolução ativos por parcela (a receber): valor total e datas. */
+async function abatementsByInstallment(ctx: Ctx) {
+  const map = new Map<string, { total: number; dates: string[] }>();
+  const list = await listAll(ctx.store, "settlements", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "abatement"], ["eq", "status", "active"]] });
+  for (const s of list) {
+    const cur = map.get(s.installmentId) ?? { total: 0, dates: [] };
+    cur.total += s.principal ?? 0;
+    cur.dates.push(s.date);
+    map.set(s.installmentId, cur);
+  }
+  return map;
+}
+
 /**
  * Consulta única das listagens de contas a receber/pagar (tela e exportação): uma linha por parcela.
  * Filtros: state (overdue|due_today|upcoming|open|partial|paid|cancelled), dueFrom/dueTo, compFrom/compTo,
- * party, branch (consolidado), category, costCenter, origin, approval (a pagar), method, q.
+ * party, branch (consolidado), category, costCenter, origin, approval (a pagar), method, q;
+ * abFrom/abTo (a receber): parcelas com abatimento de devolução no período (detalhamento da competência).
+ * "paid" = principal baixado sem os abatimentos; "abated" = abatido por devolução (coluna própria).
  */
 export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
   const t0 = today();
@@ -86,7 +101,13 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
   if (p.f.costCenter) filters.push(["eq", "costCenterId", p.f.costCenter]);
   if (p.f.method) filters.push(["eq", "methodKind", p.f.method]);
   if (p.f.title) filters.push(["eq", "titleId", p.f.title]);
-  const insts = await listAll(ctx.store, "installments", { filters, orderBy: [{ field: "dueDate", dir: "asc" }] });
+  const allInsts = await listAll(ctx.store, "installments", { filters, orderBy: [{ field: "dueDate", dir: "asc" }] });
+  // abatimentos de devolução (a receber): baixa sem dinheiro — fica fora do "recebido" e dos descontos, em coluna própria
+  const abated = kind === "receivable" ? await abatementsByInstallment(ctx) : new Map<string, { total: number; dates: string[] }>();
+  const abFrom = p.f.abFrom || "";
+  const abTo = p.f.abTo || "";
+  // detalhamento da competência: parcelas com abatimento no período (abFrom/abTo)
+  const insts = abFrom || abTo ? allInsts.filter((i) => (abated.get(i.id)?.dates ?? []).some((d) => (!abFrom || d >= abFrom) && (!abTo || d <= abTo))) : allInsts;
   const titles = await titlesMap(ctx, insts.map((i) => i.titleId));
   const [cats, ccs, branches] = await Promise.all([nameMap(ctx, "fin_categories"), nameMap(ctx, "cost_centers"), nameMap(ctx, "branches")]);
   // categoria efetiva (mesma regra do fluxo de caixa/competência): títulos de venda/compra sem categoria caem na padrão
@@ -107,6 +128,7 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
       const hay = normalizeSearch(`${t.number} ${i.partyName ?? ""} ${i.description ?? ""} ${t.documentNumber ?? ""} ${i.ourNumber ?? ""}`);
       if (!hay.includes(q)) continue;
     }
+    const ab = abated.get(i.id)?.total ?? 0;
     rows.push({
       id: i.id,
       titleId: t.id,
@@ -123,9 +145,12 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
       competenceDate: i.competenceDate as string,
       dueDate: i.dueDate as string,
       amount: i.amount as number,
-      paid: i.paid as number,
+      /** principal efetivamente recebido/pago (sem abatimentos de devolução) */
+      paid: ((i.paid ?? 0) - ab) as number,
+      /** abatido por devolução de mercadoria (sem movimento em conta) */
+      abated: ab,
       balance: i.balance as number,
-      extras: (i.interest + i.fine - i.discount) as number,
+      extras: ((i.interest ?? 0) + (i.fine ?? 0) - ((i.discount ?? 0) - ab)) as number,
       status: i.status as string,
       state: dueState(i, t0),
       daysLate: i.status !== "paid" && i.status !== "cancelled" && i.dueDate < t0 ? Math.round((Date.parse(t0) - Date.parse(i.dueDate)) / 86400000) : 0,
@@ -204,9 +229,20 @@ export async function titleDetail(ctx: Ctx, id: string) {
     const nt = renegTitles.get(m.operationId);
     if (nt && nt.companyId === ctx.companyId) renegOf.set(m.installmentId, { id: nt.id, number: nt.number });
   }
-  // baixas e estornos (marcadores de renegociação/cancelamento não são movimentos)
-  const moves = settlements.filter((x) => x.kind === "settlement" || x.kind === "reversal");
-  return { title, installments, settlements: moves, entries, bankTxBySettlement, accounts, methods, users, cats, ccs, branches, files: new Map(files.map((f) => [f.id, f])), cardFee, renegOf };
+  // baixas, estornos e abatimentos de devolução (marcadores de renegociação/cancelamento não são movimentos)
+  const moves = settlements.filter((x) => x.kind === "settlement" || x.kind === "reversal" || x.kind === "abatement");
+  // principal efetivamente recebido/pago (baixas ativas) separado do abatido por devolução (sem dinheiro)
+  const principalSettled = moves.filter((x) => x.kind === "settlement" && x.status === "active").reduce((a, x) => a + (x.principal ?? 0), 0);
+  const abated = moves.filter((x) => x.kind === "abatement" && x.status === "active").reduce((a, x) => a + (x.principal ?? 0), 0);
+  const abatedByInst = new Map<string, number>();
+  for (const x of moves) if (x.kind === "abatement" && x.status === "active") abatedByInst.set(x.installmentId, (abatedByInst.get(x.installmentId) ?? 0) + (x.principal ?? 0));
+  // renegociações vigentes geradas a partir deste título (bloqueiam o cancelamento) e título de origem de uma renegociação
+  const renegChildren = await liveRenegotiationsOf(ctx, id);
+  const origin = title.originType === "renegotiation" && title.originId ? await ctx.store.get("titles", title.originId) : null;
+  return {
+    title, installments, settlements: moves, entries, bankTxBySettlement, accounts, methods, users, cats, ccs, branches, files: new Map(files.map((f) => [f.id, f])), cardFee, renegOf,
+    principalSettled, abated, abatedByInst, renegChildren, origin: origin && origin.companyId === ctx.companyId ? origin : null,
+  };
 }
 
 /** Lançamentos que compõem os números do fluxo de caixa (mesma classificação de computeCashflow). */

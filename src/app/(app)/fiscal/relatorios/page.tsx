@@ -365,10 +365,11 @@ async function AccountingTab({ s, params, f }: { s: any; params: SearchParams; f
 async function ExportTab({ s, f }: { s: any; f: any }) {
   const sch = await getAccountingSchedule(s.ctx);
   const integ = await getIntegration(s.ctx.store, s.ctx.companyId, null, "accounting");
-  const history = await packageHistory(s.ctx);
-  const logs = (await listAll(s.ctx.store, "integration_logs", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "kind", "accounting"]], orderBy: [{ field: "occurredAt", dir: "desc" }] }, 30)).slice(0, 15);
   const canCfg = canDo(s.user, "fiscal.configure");
   const canExport = canDo(s.user, "data.export");
+  // pacotes gerados (ZIP com XMLs e relatórios): listagem e download somente com "Exportar dados"
+  const history = canExport ? await packageHistory(s.ctx) : [];
+  const logs = (await listAll(s.ctx.store, "integration_logs", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "kind", "accounting"]], orderBy: [{ field: "occurredAt", dir: "desc" }] }, 30)).slice(0, 15);
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card title="Pacote do período para a contabilidade" description={`${formatDate(f.from)} a ${formatDate(f.to)}${f.branchId || s.ctx.branchId ? " · filial atual" : " · todas as filiais"}`}>
@@ -377,7 +378,7 @@ async function ExportTab({ s, f }: { s: any; f: any }) {
           <input type="hidden" name="from" value={f.from} />
           <input type="hidden" name="to" value={f.to} />
           {f.branchId && <input type="hidden" name="branch" value={f.branchId} />}
-          {canCfg && <Field label="Enviar para (opcional)" hint={integ?.config?.accountantEmail ? `Padrão: ${integ.config.accountantEmail} (integração Área da contabilidade). A obrigação “Entrega de XML” só é concluída pelo envio de todas as filiais a esse e-mail.` : "Configure o e-mail da contabilidade em Integrações."}><Input type="email" name="email" placeholder={integ?.config?.accountantEmail ?? "contabilidade@exemplo.com.br"} /></Field>}
+          {canCfg && <Field label="Enviar para (opcional)" hint={integ?.config?.accountantEmail ? `Padrão: ${integ.config.accountantEmail} (integração Área da contabilidade). A obrigação “Entrega de XML” só é concluída pelo envio do mês inteiro, de todas as filiais, a esse e-mail.` : "Configure o e-mail da contabilidade em Integrações."}><Input type="email" name="email" placeholder={integ?.config?.accountantEmail ?? "contabilidade@exemplo.com.br"} /></Field>}
           {canExport ? (
             <div className="flex flex-wrap justify-end gap-2">
               <button type="submit" name="intent" value="generate" className={buttonClass("secondary")}><FileArchive className="size-4" /> Gerar pacote (download)</button>
@@ -400,7 +401,7 @@ async function ExportTab({ s, f }: { s: any; f: any }) {
         </ActionForm>
       </Card>
       <Card title="Pacotes gerados" bodyClass="p-0">
-        {history.length === 0 ? <EmptyState title="Nenhum pacote gerado" /> : (
+        {!canExport ? <div className="p-4"><Notice tone="info">Baixar pacotes gerados exige a permissão “Exportar dados”.</Notice></div> : history.length === 0 ? <EmptyState title="Nenhum pacote gerado" /> : (
           <table className="table-base w-full text-sm">
             <thead><tr><th>Arquivo</th><th>Gerado em</th><th className="text-right">Tamanho</th></tr></thead>
             <tbody>{history.map((h) => <tr key={h.id}><td><a className="text-brand-700 hover:underline" href={`/api/files/${h.id}`}>{h.name}</a></td><td>{formatDateTime(h.createdAt)}</td><td className="tabular text-right">{((h.sizeBytes ?? 0) / 1024).toFixed(1)} KB</td></tr>)}</tbody>
@@ -433,6 +434,7 @@ async function ObligationsTab({ s, f }: { s: any; f: any }) {
   const userMap = new Map(users.map((u) => [u.value, u.label]));
   const kinds = Object.entries(OBLIGATION_KIND_LABEL).map(([value, label]) => ({ value, label }));
   const canEdit = canDo(s.user, "fiscal.issue");
+  const canExport = canDo(s.user, "data.export");
   // calendário do mês
   const first = `${month}-01`;
   const startDow = new Date(`${first}T12:00:00Z`).getUTCDay();
@@ -478,7 +480,7 @@ async function ObligationsTab({ s, f }: { s: any; f: any }) {
                     <p className="mt-1 text-xs text-emerald-800">
                       Concluída em {formatDate(o.deliveredAt)}{o.receiptNumber ? ` · ${o.receiptNumber}` : ""}{o.amount ? ` · ${formatMoney(o.amount)}` : ""}
                       {o.proofFileId && <> · <a className="underline" href={`/api/files/${o.proofFileId}`}>comprovante</a></>}
-                      {o.exportFileId && <> · <a className="underline" href={`/api/files/${o.exportFileId}`}>pacote enviado</a></>}
+                      {o.exportFileId && (canExport ? <> · <a className="underline" href={`/api/files/${o.exportFileId}`}>pacote enviado</a></> : " · pacote enviado")}
                     </p>
                   ) : (
                     canEdit && (

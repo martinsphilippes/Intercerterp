@@ -26,19 +26,23 @@ export interface DocActionFlags {
   cancelReason?: string | null;
   defaultEmail?: string | null;
   editHref?: string | null;
+  /** origem do documento ("disable" = registro de inutilização: sem descartar/retransmitir/consultar) */
+  originType?: string | null;
 }
 
 /** Ações conforme o estado real do documento (sem botões inativos sem explicação). */
 export function DocActions(f: DocActionFlags) {
-  const editable = ["draft", "pending", "rejected"].includes(f.status);
-  const retrans = ["rejected", "error", "pending", "queued"].includes(f.status);
+  // registro de inutilização: o resultado vem de repetir o pedido de inutilização (não é documento transmissível)
+  const disableRecord = f.originType === "disable";
+  const editable = ["draft", "pending", "rejected"].includes(f.status) && !disableRecord;
+  const retrans = ["rejected", "error", "pending", "queued"].includes(f.status) && !disableRecord;
   // já enviado (attempts > 0, exceto rejeitado): o servidor consulta o provedor antes de descartar
-  const discardable = !f.hasProtocol && ["draft", "pending", "rejected", "queued", "error"].includes(f.status);
+  const discardable = !f.hasProtocol && ["draft", "pending", "rejected", "queued", "error"].includes(f.status) && !disableRecord;
   const sentUnconfirmed = f.attempts > 0 && f.status !== "rejected";
   const printable = f.model !== "nfse" || ["authorized", "cancelled"].includes(f.status) || ["draft", "pending", "rejected"].includes(f.status);
   return (
     <>
-      {f.canIssue && f.status === "draft" && <ActionButton action={transmitAction.bind(null, f.id)} label="Transmitir" variant="primary" icon={<Send className="size-4" />} confirm="Transmitir o documento ao provedor fiscal agora?" />}
+      {f.canIssue && f.status === "draft" && !disableRecord && <ActionButton action={transmitAction.bind(null, f.id)} label="Transmitir" variant="primary" icon={<Send className="size-4" />} confirm="Transmitir o documento ao provedor fiscal agora?" />}
       {f.canIssue && editable && f.editHref && (
         <Link href={f.editHref} className={buttonClass("secondary")}>
           <Pencil className="size-4" /> {f.status === "rejected" ? "Corrigir dados" : "Editar"}
@@ -46,7 +50,7 @@ export function DocActions(f: DocActionFlags) {
       )}
       {f.canIssue && editable && f.model !== "nfse" && <ActionButton action={refreshAction.bind(null, f.id)} label="Atualizar do cadastro" icon={<Wrench className="size-4" />} title="Relê NCM/CEST/CFOP/CST dos produtos (após corrigir o cadastro)" />}
       {f.canIssue && retrans && f.status !== "draft" && <ActionButton action={retransmitAction.bind(null, f.id)} label="Retransmitir" variant={f.status === "rejected" || f.status === "pending" ? "primary" : "secondary"} icon={<RefreshCw className="size-4" />} confirm="Retransmitir com a mesma referência (não cria novo documento)?" />}
-      {f.canIssue && f.attempts > 0 && <ActionButton action={queryAction.bind(null, f.id)} label="Consultar" icon={<Search className="size-4" />} title="Consulta a situação no provedor pela referência" />}
+      {f.canIssue && f.attempts > 0 && !disableRecord && <ActionButton action={queryAction.bind(null, f.id)} label="Consultar" icon={<Search className="size-4" />} title="Consulta a situação no provedor pela referência" />}
       {printable && (
         <Link href={`/fiscal/${f.model}/${f.id}/imprimir`} className={buttonClass("secondary")} target="_blank">
           <Printer className="size-4" /> {f.status === "authorized" || f.status === "cancelled" ? (f.model === "nfce" ? "DANFCE" : f.model === "nfse" ? "Imprimir" : "DANFE") : "Prévia"}
@@ -101,6 +105,9 @@ export function DocActions(f: DocActionFlags) {
           description={`${sentUnconfirmed ? "Este documento já foi enviado: antes de descartar, o sistema consulta o provedor — se estiver autorizado, a situação é atualizada e o descarte é recusado (use Cancelar). " : ""}O documento não autorizado é descartado (não há evento na SEFAZ). Se já recebeu número, inutilize-o depois em NF-e/NFC-e → Inutilização.`}
           submitLabel="Descartar"
         />
+      )}
+      {disableRecord && f.canCancel && f.status !== "unused" && (
+        <span className="max-w-xs text-xs text-slate-500">Pedido de inutilização sem homologação confirmada: repita-o em “Inutilizar numeração” (mesma faixa) para obter o resultado.</span>
       )}
       {f.scopeNote && <span className="max-w-xs text-xs text-slate-500">{f.scopeNote}</span>}
     </>

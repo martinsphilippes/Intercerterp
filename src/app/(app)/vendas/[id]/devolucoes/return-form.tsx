@@ -27,7 +27,7 @@ export function ReturnForm(props: {
   defaultPixAccountId: string | null;
   cashSession: { id: string; number: number; terminalName: string } | null;
   /** venda a prazo: saldo em aberto do título e valor pago ainda não devolvido */
-  deferred?: { open: number; paidAvailable: number } | null;
+  deferred?: { open: number; paidAvailable: number; forgivenAvailable?: number } | null;
 }) {
   const [sel, setSel] = useState<Record<string, { on: boolean; qty: string; reason: string; condition: "resellable" | "damaged" }>>(() =>
     Object.fromEntries(props.items.map((i) => [i.id, { on: false, qty: String(Math.min(1, i.returnable / QTY)).replace(".", ","), reason: "", condition: "resellable" as const }])),
@@ -60,7 +60,10 @@ export function ReturnForm(props: {
   const step = chosen.length === 0 ? 1 : invalid ? 1 : 3;
   // mesmo cálculo do servidor: abate o título a prazo primeiro; só o excedente pago vira reembolso/vale
   const abate = props.deferred ? Math.min(estimated, props.deferred.open) : 0;
-  const compensate = estimated - abate;
+  // desconto concedido no recebimento quitou dívida sem entrada de dinheiro: essa parte não é reembolsada
+  const rawCompensate = estimated - abate;
+  const absorbed = props.deferred && rawCompensate > props.deferred.paidAvailable ? Math.min(rawCompensate - props.deferred.paidAvailable, props.deferred.forgivenAvailable ?? 0) : 0;
+  const compensate = rawCompensate - absorbed;
   const overPaid = Boolean(props.deferred) && compensate > (props.deferred?.paidAvailable ?? 0);
   const needsCustomer = compensation === "store_credit" && !props.sale.customerId;
   const cashBlocked = compensation === "refund" && refundMethod === "cash" && !props.cashSession && compensate > 0;
@@ -70,7 +73,7 @@ export function ReturnForm(props: {
   const abateText = abate > 0 ? `${formatMoney(abate)} abatem o saldo em aberto do crediário/boleto desta venda (o cliente deixa de dever esse valor). ` : "";
   const compensationText =
     compensate <= 0
-      ? "Nada é devolvido em dinheiro ou vale: o cliente ainda não pagou esse valor."
+      ? absorbed > 0 ? "Nada é devolvido em dinheiro ou vale." : "Nada é devolvido em dinheiro ou vale: o cliente ainda não pagou esse valor."
       : compensation === "store_credit"
         ? `Será emitido um vale-crédito de ${formatMoney(compensate)} para ${props.sale.customerName ?? "o cliente"} (saldo consumível em novas compras, validade de 12 meses).`
         : compensation === "exchange"
@@ -80,7 +83,8 @@ export function ReturnForm(props: {
             : refundMethod === "card_reversal"
               ? `Estorno de ${formatMoney(compensate)} no cartão: fica uma obrigação “em processamento” no contas a pagar até a confirmação da adquirente.`
               : `Saída de ${formatMoney(compensate)} da conta selecionada (${props.accounts.find((a) => a.value === accountId)?.label ?? "—"}).`;
-  const financeImpact = abateText + compensationText;
+  const absorbedText = absorbed > 0 ? ` ${formatMoney(absorbed)} correspondem a desconto concedido no recebimento do título (não pago pelo cliente) e não são reembolsados.` : "";
+  const financeImpact = abateText + compensationText + absorbedText;
 
   if (done) {
     return (
@@ -211,6 +215,7 @@ export function ReturnForm(props: {
                   <>
                     <div className="flex justify-between text-xs text-slate-600"><dt>Abatido do título a prazo</dt><dd className="tabular">{formatMoney(abate)}</dd></div>
                     <div className="flex justify-between text-xs text-slate-600"><dt>Devolvido ao cliente (reembolso/vale)</dt><dd className="tabular">{formatMoney(compensate)}</dd></div>
+                    {absorbed > 0 && <div className="flex justify-between text-xs text-slate-600"><dt>Coberto por desconto concedido no recebimento (sem reembolso)</dt><dd className="tabular">{formatMoney(absorbed)}</dd></div>}
                   </>
                 )}
               </dl>

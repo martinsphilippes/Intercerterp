@@ -1,6 +1,6 @@
 import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
-import { addMonths, diffDays, formatDate, monthStart, nowIso, today } from "@/lib/dates";
+import { addMonths, diffDays, formatDate, monthEnd, monthStart, nowIso, today } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
@@ -224,7 +224,8 @@ export async function deleteObligation(ctx: Ctx, id: string) {
 /** Envio confirmado do pacote mensal conclui a obrigação "Entrega de XML" da competência (comprovação = registro do envio). */
 export async function markXmlDelivery(ctx: Ctx, f: FiscalReportFilter, fileId: string, to: string) {
   const period = f.from.slice(0, 7);
-  if (f.to.slice(0, 7) !== period) return null;
+  // somente o pacote do MÊS INTEIRO comprova a entrega da competência (período parcial não conclui a obrigação)
+  if (f.from !== monthStart(f.from) || f.to !== monthEnd(f.from)) return null;
   const rows = await listAll(ctx.store, "fiscal_obligations", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "xml_contabilidade"], ["eq", "period", period]] });
   const o = rows.find((x) => x.status !== "done");
   if (!o) return null;

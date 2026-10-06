@@ -40,7 +40,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <div className="text-right text-xs"><p>Operador: {users.get(session.operatorId)}</p><p>Abertura: {formatDateTime(session.openedAt)}</p><p>Fechamento: {session.closedAt ? `${formatDateTime(session.closedAt)} (${users.get(session.closedBy) ?? "—"})` : "—"}</p><p>Versão: {session.version ?? 1}</p></div>
         </header>
         <section className="grid grid-cols-4 gap-2 text-center">
-          {[["Fundo", sum.totals.opening], ["Vendas (" + sum.totals.salesCount + ")", sum.totals.sales], ["Suprimentos", sum.totals.supply], ["Sangrias", sum.totals.withdrawal], ["Devoluções em espécie", sum.totals.refunds], ["Vendas em dinheiro", showExpected ? sum.totals.cashSales : null], ["Troco entregue", sum.totals.change], ["Dinheiro esperado", showExpected ? sum.expected.cash : null]].map(([l, v]) => (
+          {[["Fundo", sum.totals.opening], ["Vendas (" + sum.totals.salesCount + ")", showExpected ? sum.totals.sales : null], ["Suprimentos", sum.totals.supply], ["Sangrias", sum.totals.withdrawal], ["Devoluções em espécie", sum.totals.refunds], ["Vendas em dinheiro", showExpected ? sum.totals.cashSales : null], ["Troco entregue", sum.totals.change], ["Dinheiro esperado", showExpected ? sum.expected.cash : null]].map(([l, v]) => (
             <div key={String(l)} className="rounded border border-line p-2"><p className="text-xs text-slate-600">{l}</p><p className="font-semibold">{v == null ? "oculto (conferência cega)" : formatMoney(v as number)}</p></div>
           ))}
         </section>

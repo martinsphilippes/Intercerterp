@@ -21,7 +21,7 @@ const ICON: Record<string, React.ReactNode> = { cash: <Banknote className="size-
  * Diferenças nunca são ajustadas automaticamente: exigem justificativa e ficam preservadas no fechamento.
  * Conferência cega (parâmetro cash.blindClose): o previsto só é revelado após informar os valores contados.
  */
-export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBreakdown, checklist, accounts }: { sessionId: string; blind: boolean; methods: Method[]; initialCounted?: Record<string, number> | null; cashBreakdown: { opening: number; cashSales: number; supply: number; withdrawal: number; refunds: number }; checklist: Array<{ key: string; label: string; hint: string }>; accounts: Array<{ value: string; label: string }> }) {
+export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBreakdown, checklist, accounts }: { sessionId: string; blind: boolean; methods: Method[]; initialCounted?: Record<string, number> | null; cashBreakdown: { opening: number; cashSales: number; supply: number; withdrawal: number; refunds: number } | null; checklist: Array<{ key: string; label: string; hint: string }>; accounts: Array<{ value: string; label: string }> }) {
   const toast = useToast();
   const [counted, setCounted] = useState<Record<string, number | null>>(Object.fromEntries(methods.map((m) => [m.key, initialCounted ? (initialCounted[m.key] ?? 0) : null])));
   // conferência cega: o previsto só chega do servidor depois que a contagem é registrada (apuração)
@@ -89,7 +89,7 @@ export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBre
                 </tfoot>
               </table>
             </div>
-            {!blind && (
+            {!blind && cashBreakdown && (
               <p className="px-4 py-2 text-xs text-slate-500">
                 Dinheiro esperado = fundo {formatMoney(cashBreakdown.opening)} + vendas em dinheiro {formatMoney(cashBreakdown.cashSales)} + suprimentos {formatMoney(cashBreakdown.supply)} − sangrias {formatMoney(cashBreakdown.withdrawal)} − devoluções {formatMoney(cashBreakdown.refunds)}. Diferença = informado − esperado, por meio.
               </p>

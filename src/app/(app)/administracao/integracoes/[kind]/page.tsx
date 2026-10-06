@@ -12,7 +12,7 @@ import { Field, FormGrid, Input, Select, Checkbox } from "@/components/ui/form";
 import { Timeline } from "@/components/ui/timeline";
 import { formatDateTime } from "@/lib/dates";
 import { canDo } from "@/lib/permissions";
-import { CONFIG_LABEL, INTEGRATION_CATALOG, integrationJobs, integrationLogs, SECRET_LABEL, usageSummary, type IntegrationKind } from "@/domain/integrations";
+import { CONFIG_LABEL, cscRefProblem, INTEGRATION_CATALOG, integrationJobs, integrationLogs, providerSecretProblem, SECRET_LABEL, usageSummary, type IntegrationKind } from "@/domain/integrations";
 import { REGIME_LABEL } from "@/domain/fiscal/config";
 import { integrationOverview } from "../queries";
 import { IntegrationForm } from "./integration-form";
@@ -39,8 +39,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const base = `/administracao/integracoes/${kind}`;
   const cfg = o.fiscalConfig;
   const envNames = new Set<string>();
-  for (const p of cat.providers) for (const sec of p.secrets) envNames.add(o.record?.secretRefs?.[sec] ?? p.defaultRefs?.[sec] ?? "");
-  const envDefined = Object.fromEntries([...envNames].filter(Boolean).map((n) => [n, Boolean(process.env[n])]));
+  // somente nomes permitidos para o provedor são consultados no ambiente (nunca segredos do sistema)
+  for (const p of cat.providers) for (const sec of p.secrets) {
+    const n = o.record?.secretRefs?.[sec] ?? p.defaultRefs?.[sec] ?? "";
+    if (n && !providerSecretProblem(p, sec, n)) envNames.add(n);
+  }
+  const envDefined = Object.fromEntries([...envNames].map((n) => [n, Boolean(process.env[n])]));
   return (
     <>
       <Link href="/administracao/integracoes" className="mb-3 inline-flex items-center gap-1 text-sm text-brand-700 hover:underline">
@@ -88,13 +92,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   <p className="text-sm font-semibold">Credencial da integração</p>
                   <p className="mb-2 text-xs text-slate-500">Somente o NOME da variável de ambiente que guarda o token do provedor (o valor nunca é gravado). Simulação não usa credencial.</p>
                   <FormGrid cols={2}>
-                    <Field label="Variável do token" hint={cfg?.tokenRef === "" ? <Badge tone="warn">vínculo removido</Badge> : o.secrets[0] ? (o.secrets[0].defined ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida no servidor</Badge>) : undefined}>
+                    <Field label="Variável do token" hint={cfg?.tokenRef === "" ? <Badge tone="warn">vínculo removido</Badge> : o.secrets[0] ? (o.secrets[0].problem ? <Badge tone="bad">nome não permitido</Badge> : o.secrets[0].defined ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida no servidor</Badge>) : undefined}>
                       <Input name="tokenRef" defaultValue={cfg?.tokenRef === "" ? "" : (cfg?.tokenRef ?? "FOCUSNFE_TOKEN")} placeholder="FOCUSNFE_TOKEN" disabled={!canEdit} />
                     </Field>
                     {kind === "fiscal_nfe" && (
                       <>
                         <Field label="CSC da NFC-e — ID"><Input name="cscId" defaultValue={cfg?.cscId ?? ""} disabled={!canEdit} /></Field>
-                        <Field label="CSC da NFC-e — variável do código" hint={cfg?.cscTokenRef ? (process.env[cfg.cscTokenRef] ? <Badge tone="good">definida</Badge> : <Badge tone="warn">não definida</Badge>) : undefined}><Input name="cscTokenRef" defaultValue={cfg?.cscTokenRef ?? "NFCE_CSC"} disabled={!canEdit} /></Field>
+                        <Field label="CSC da NFC-e — variável do código" hint={cfg?.cscTokenRef ? (cscRefProblem(cfg.cscTokenRef) ? <Badge tone="bad">nome não permitido</Badge> : process.env[cfg.cscTokenRef] ? <Badge tone="good">definida</Badge> : <Badge tone="warn">não definida</Badge>) : undefined}><Input name="cscTokenRef" defaultValue={cfg?.cscTokenRef ?? "NFCE_CSC"} disabled={!canEdit} /></Field>
                       </>
                     )}
                   </FormGrid>
@@ -135,7 +139,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                     <li key={sec.key} className="rounded-md bg-slate-50 p-2">
                       <p className="text-xs text-slate-500">{sec.label}</p>
                       <p className="font-mono text-xs">{sec.envName || "— sem vínculo —"}</p>
-                      {sec.envName && <p className="mt-1">{sec.defined ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida no servidor</Badge>}</p>}
+                      {sec.envName && <p className="mt-1">{sec.problem ? <Badge tone="bad">nome não permitido</Badge> : sec.defined ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida no servidor</Badge>}</p>}
+                      {sec.problem && <p className="mt-1 text-xs text-red-700">{sec.problem}</p>}
                     </li>
                   ))}
                 </ul>

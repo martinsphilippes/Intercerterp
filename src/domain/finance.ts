@@ -581,7 +581,7 @@ export async function liveRenegotiationsOf(ctx: Ctx, titleId: string): Promise<D
 }
 
 /** Mensagem única (domínio e tela) para título com parcelas renegociadas em título ainda vigente. */
-export function renegotiationBlockMessage(titleNumber: number, renegs: Array<{ number: number }>) {
+export function renegotiationBlockMessage(titleNumber: number, renegs: ReadonlyArray<Record<string, any>>) {
   const nums = renegs.map((r) => `nº ${r.number}`).join(", ");
   return `Parcelas do título nº ${titleNumber} foram renegociadas (título ${nums}). Desfaça antes a renegociação ${nums} (no título da renegociação, estornando eventuais recebimentos dele) e então cancele este título.`;
 }
@@ -1170,6 +1170,20 @@ export interface PaymentTermInput {
   interestBps: number;
   kind: "both" | "sale" | "purchase";
   active?: boolean;
+}
+
+/**
+ * Regra (decisão: avisar, não recusar): os juros da condição são acrescidos SOMENTE em títulos lançados manualmente
+ * no Financeiro (Contas a receber/pagar → Novo). Vendas (PDV, crediário, boleto) e compras que usam a condição NÃO
+ * acrescentam juros. Recusar juros em condições de venda impediria o uso em títulos manuais a receber (que listam as
+ * mesmas condições), por isso o cadastro aceita, mas avisa explicitamente na tela, na listagem e ao salvar.
+ */
+export function paymentTermInterestNotice(term: { interestBps?: number | null; kind?: string | null }): string | null {
+  if (!term.interestBps || term.interestBps <= 0) return null;
+  const sale = term.kind !== "purchase";
+  const purchase = term.kind !== "sale";
+  const who = sale && purchase ? "Vendas (PDV, crediário e boleto) e compras" : sale ? "Vendas (PDV, crediário e boleto)" : "Compras (pedidos e recebimentos)";
+  return `Atenção: os juros desta condição só são acrescidos em títulos lançados manualmente no Financeiro. ${who} que usarem esta condição NÃO acrescentam juros.`;
 }
 
 export async function savePaymentTerm(ctx: Ctx, id: string | null, input: PaymentTermInput) {

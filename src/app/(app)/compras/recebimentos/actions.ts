@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { runAction, fstr, fopt, fint, fjson } from "@/lib/server/action";
 import { BusinessError } from "@/lib/core/errors";
 import { importNfeXml, fetchXmlByKey, createManualReceipt, updateReceipt, confirmReceipt, cancelReceipt, type ReceiptUpdate } from "@/domain/receipts";
@@ -70,20 +71,28 @@ function parseUpdate(fd: FormData): ReceiptUpdate {
     paymentMethodId: fd.has("paymentMethodId") ? fopt(fd, "paymentMethodId") : undefined,
     effects: fd.has("effects") ? fjson(fd, "effects", undefined as any) : undefined,
     checkAll: fstr(fd, "intent") === "checkAll",
+    // valores de frete/despesas/desconto exibidos quando o formulário foi carregado (edição = diferente deles)
+    chargesShown: fd.has("freightShown") ? { freight: fint(fd, "freightShown"), otherExpenses: fint(fd, "otherExpensesShown"), discount: fint(fd, "discountShown") } : undefined,
+    chargesAuto: fstr(fd, "intent") === "recalcCharges",
+    chargesLostAck: fd.has("chargesLostAckShown") ? fstr(fd, "chargesLostAck") === "1" : undefined,
   };
 }
 
 export async function saveReceiptAction(fd: FormData) {
   const id = fstr(fd, "id");
   const intent = fstr(fd, "intent") || "save";
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
+  const res = await runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     await updateReceipt(s.ctx, id, parseUpdate(fd));
     if (intent === "confirm") {
       const r = await confirmReceipt(s.ctx, id);
       return { ok: true as const, message: `Entrada concluída: recebimento nº ${r.number} confirmado.` };
     }
-    return { ok: true as const, message: intent === "checkAll" ? "Itens marcados como conferidos." : "Conferência salva." };
+    return { ok: true as const, message: intent === "checkAll" ? "Itens marcados como conferidos." : intent === "recalcCharges" ? "Encargos recalculados pelo pedido." : "Conferência salva." };
   });
+  // a conferência pode ter sido gravada (e os encargos recalculados) antes do erro na conclusão: atualiza a
+  // página para o formulário ser remontado com os valores gravados (a chave do formulário é o updatedAt)
+  if (!res.ok && id) revalidatePath(`/compras/recebimentos/${id}`);
+  return res;
 }
 
 /** Retentativa de confirmação interrompida (efeitos idempotentes). */

@@ -50,14 +50,30 @@ export async function blindCloseEnabled(ctx: Ctx, branchId: string) {
 }
 
 /**
+ * Situação da contagem cega da versão atual da sessão: "none" (não registrada), "valid" ou "stale" — o previsto
+ * mudou depois da contagem (venda, cancelamento, suprimento, sangria ou devolução registrados depois): a contagem
+ * não vale mais e precisa ser refeita (a anterior fica preservada em `blindCount.superseded`).
+ */
+export function blindCountState(s: Doc, expectedNow: Record<string, number>): "none" | "valid" | "stale" {
+  const bc = s.blindCount;
+  if (!bc || bc.version !== (s.version ?? 1)) return "none";
+  if (!bc.expected) return "valid"; // contagem registrada antes do controle de recontagem
+  const keys = new Set([...Object.keys(bc.expected), ...Object.keys(expectedNow)]);
+  for (const k of keys) if ((bc.expected[k] ?? 0) !== (expectedNow[k] ?? 0)) return "stale";
+  return "valid";
+}
+
+/**
  * O previsto de uma sessão aberta só é exibido quando a conferência cega está desligada, quando a contagem
- * desta versão já foi registrada, ou para supervisores de caixa.
+ * desta versão já foi registrada (e continua válida: nada mudou no previsto depois dela), ou para supervisores de caixa.
  */
 export async function expectedVisible(ctx: Ctx, s: Doc, blind?: boolean) {
   if (!["open", "reopened"].includes(s.status)) return true;
   if (canDo(ctx.user, "cash.reopen")) return true;
   const isBlind = blind ?? (await blindCloseEnabled(ctx, s.branchId));
-  return !isBlind || s.blindCount?.version === (s.version ?? 1);
+  if (!isBlind) return true;
+  if (s.blindCount?.version !== (s.version ?? 1)) return false;
+  return blindCountState(s, expectedOf(await sessionSummary(ctx, s.id))) === "valid";
 }
 
 export async function openSession(ctx: Ctx, input: { terminalId: string; openingFund: number; peripheralsCheck?: Record<string, any>; notes?: string }) {
@@ -273,7 +289,8 @@ export function requiredChecklist(summary: SessionSummary) {
   ].filter((c) => c.applies);
 }
 
-function expectedOf(summary: SessionSummary) {
+/** Previsto por meio de pagamento (dinheiro = saldo esperado da gaveta). */
+export function expectedOf(summary: SessionSummary) {
   const expected: Record<string, number> = { cash: summary.expected.cash };
   for (const [k, v] of Object.entries(summary.byMethod)) if (k !== "cash") expected[k] = v.expected;
   return expected;
@@ -296,8 +313,10 @@ function validCounted(counted: Record<string, number>) {
 
 /**
  * Apuração sem fechar. Na conferência cega (parâmetro do servidor `cash.blindClose`), a primeira apuração de cada
- * versão da sessão REGISTRA a contagem informada; só então o previsto é revelado. Apurações seguintes devolvem a
- * contagem já registrada (não é possível recontar depois de ver o previsto) e o fechamento usa essa contagem.
+ * versão da sessão REGISTRA a contagem informada (com o previsto daquele instante); só então o previsto é revelado.
+ * Apurações seguintes devolvem a contagem já registrada (não é possível recontar depois de ver o previsto) e o
+ * fechamento usa essa contagem — exceto se o previsto mudou depois dela (venda/movimento posterior): aí a contagem
+ * deixa de valer, o previsto volta a ficar oculto e uma nova contagem é exigida (a anterior fica preservada).
  */
 export async function previewClose(ctx: Ctx, sessionId: string, counted: Record<string, number>) {
   requirePerm(ctx, "cash", "edit");
@@ -307,16 +326,29 @@ export async function previewClose(ctx: Ctx, sessionId: string, counted: Record<
   const blind = await blindCloseEnabled(ctx, s.branchId);
   const version = s.version ?? 1;
   let used = validCounted(counted);
-  if (blind) {
-    if (s.blindCount?.version === version) used = s.blindCount.counted ?? {};
-    else {
-      await ctx.store.update("cash_sessions", s.id, { blindCount: { version, counted: used, at: nowIso(), by: ctx.user.id, byName: ctx.user.name } });
-      await audit(ctx, { module: "cash", action: "session.blind_count", entityType: "cash_session", entityId: s.id, summary: `Contagem cega registrada no caixa nº ${s.number} (versão ${version}) antes da revelação do previsto`, after: { counted: used } });
-    }
-  }
+  // previsto calculado ANTES de registrar a contagem: movimento gravado depois deste ponto invalida a contagem
   const summary = await sessionSummary(ctx, s.id);
   const expected = expectedOf(summary);
-  return { expected, differences: differencesOf(expected, used), counted: used, blind };
+  let recount = false;
+  if (blind) {
+    const state = blindCountState(s, expected);
+    if (state === "valid") used = s.blindCount.counted ?? {};
+    else {
+      recount = state === "stale";
+      const prev = s.blindCount;
+      const superseded = recount ? [...(prev.superseded ?? []), { counted: prev.counted ?? {}, expected: prev.expected ?? null, at: prev.at ?? null, by: prev.by ?? null, byName: prev.byName ?? null }] : [];
+      await ctx.store.update("cash_sessions", s.id, { blindCount: { version, counted: used, expected, at: nowIso(), by: ctx.user.id, byName: ctx.user.name, superseded } });
+      await audit(ctx, {
+        module: "cash", action: "session.blind_count", entityType: "cash_session", entityId: s.id,
+        summary: recount
+          ? `Nova contagem cega registrada no caixa nº ${s.number} (versão ${version}): houve vendas ou movimentos depois da contagem anterior (preservada no histórico)`
+          : `Contagem cega registrada no caixa nº ${s.number} (versão ${version}) antes da revelação do previsto`,
+        after: { counted: used },
+        before: recount ? { counted: prev.counted ?? {} } : null,
+      });
+    }
+  }
+  return { expected, differences: differencesOf(expected, used), counted: used, blind, recount };
 }
 
 /** Recolhimento registrado no último fechamento e ainda não transferido (fechamento interrompido). */
@@ -372,14 +404,16 @@ export async function closeSession(
   assert(["open", "reopened"].includes(s.status), "Sessão já está fechada.");
   const version = s.version ?? 1;
   const blind = await blindCloseEnabled(ctx, s.branchId);
+  const summary = await sessionSummary(ctx, s.id);
+  const expected = expectedOf(summary);
   let counted: Record<string, number>;
   if (blind) {
     // conferência cega: vale a contagem registrada antes da revelação do previsto (nunca a do formulário)
-    assert(s.blindCount?.version === version, "Conferência cega: informe a contagem e clique em “Apurar diferenças” antes de fechar.", "blind_count_required");
+    const state = blindCountState(s, expected);
+    assert(state !== "none", "Conferência cega: informe a contagem e clique em “Apurar diferenças” antes de fechar.", "blind_count_required");
+    assert(state === "valid", "Houve vendas ou movimentos neste caixa depois da contagem cega: conte novamente e clique em “Apurar diferenças” antes de fechar.", "blind_count_stale");
     counted = validCounted(s.blindCount.counted ?? {});
   } else counted = validCounted(input.counted);
-  const summary = await sessionSummary(ctx, s.id);
-  const expected = expectedOf(summary);
   const differences = differencesOf(expected, counted);
   const hasDiff = Object.keys(differences).length > 0;
   if (hasDiff) assert(input.justification?.trim(), "Há divergências entre previsto e informado: registre a justificativa.", "justification_required");

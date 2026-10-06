@@ -104,7 +104,7 @@ export function RowActions({ d, canIssue: canIssueAny, branchId }: { d: Doc; can
           <FileDown className="size-4" />
         </a>
       )}
-      {canIssue && d.status === "processing" && (
+      {canIssue && d.status === "processing" && d.originType !== "disable" && (
         <IconAction action={queryAction.bind(null, d.id)} title="Consultar retorno">
           <RefreshCw className="size-4" />
         </IconAction>

@@ -51,6 +51,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const doc = ret.fiscalDocumentId ? await store.get("fiscal_documents", ret.fiscalDocumentId) : null;
   const sItem = new Map(saleItems.map((i) => [i.id, i]));
   const pendingExchange = ret.kind === "exchange" && !ret.exchangeSaleId;
+  // parte devolvida coberta por desconto concedido no recebimento do título (nem abatida nem compensada)
+  const absorbed = Math.max(0, (ret.itemsTotal ?? 0) - (ret.abatedAmount ?? 0) - (ret.compensatedAmount ?? ret.itemsTotal ?? 0));
   return (
     <>
       <PageHeader
@@ -65,7 +67,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               <ActionButton action={confirmCardReversalAction.bind(null, id)} label="Confirmar estorno na adquirente" icon={<CheckCircle2 className="size-4" />} askReason="NSU/protocolo do estorno confirmado pela adquirente (obrigatório):" />
             )}
             {pendingExchange && can(s.user, "pdv", "create") && s.ctx.branchId === ret.branchId && (
-              <LinkButton href={`/pdv?troca=${id}`} variant="accent"><ArrowLeftRight className="size-4" /> Abrir PDV com o vale da troca</LinkButton>
+              <LinkButton href={`/pdv?troca=${id}`} variant="accent"><ArrowLeftRight className="size-4" /> {voucher ? "Abrir PDV com o vale da troca" : "Abrir PDV para a nova venda da troca"}</LinkButton>
             )}
           </>
         }
@@ -73,7 +75,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       {ret.effectsStatus === "pending" && <div className="mb-4"><Notice tone="warn" title="Efeitos da devolução em processamento">Itens devolvidos, retorno ao estoque e documento fiscal estão sendo concluídos pela tarefa durável.</Notice></div>}
       {ret.status === "processing" && ret.refundMethod === "card_reversal" && <div className="mb-4"><Notice tone="info" title="Estorno no cartão aguardando a adquirente">A devolução fica “em processamento” até a confirmação do estorno (NSU/protocolo) pela adquirente.</Notice></div>}
       {ret.confirmationRef && <div className="mb-4"><Notice tone="info" title="Estorno confirmado">Confirmado pela adquirente em {formatDateTime(ret.completedAt)} por {users.get(ret.confirmedBy) ?? "—"} (ref. {ret.confirmationRef}).</Notice></div>}
-      {pendingExchange && <div className="mb-4"><Notice tone="info" title="Troca aguardando a nova venda">O vale {voucher?.code} ({formatMoney(voucher?.balance)}) será aplicado automaticamente no pagamento do novo atendimento.</Notice></div>}
+      {pendingExchange && (
+        <div className="mb-4">
+          <Notice tone="info" title="Troca aguardando a nova venda">
+            {voucher
+              ? <>O vale {voucher.code} ({formatMoney(voucher.balance)}) será aplicado automaticamente no pagamento do novo atendimento.</>
+              : <>Valor abatido do título a prazo da venda de origem; sem vale a aplicar. A nova venda da troca é paga integralmente pelo cliente.</>}
+          </Notice>
+        </div>
+      )}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Valor devolvido" value={formatMoney(ret.itemsTotal)} hint={`${items.length} item(ns) · custo retornado ${formatMoney(ret.costTotal)}`} />
         <Stat
@@ -82,6 +92,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           hint={[
             (ret.abatedAmount ?? 0) > 0 ? `${formatMoney(ret.abatedAmount)} abatidos do título a prazo` : "",
             (ret.compensatedAmount ?? ret.itemsTotal) > 0 ? `${formatMoney(ret.compensatedAmount ?? ret.itemsTotal)} ${ret.refundMethod ? REFUND_METHOD_LABEL[ret.refundMethod] : voucher ? `em vale ${voucher.code}` : ""}` : "",
+            absorbed > 0 ? `${formatMoney(absorbed)} cobertos por desconto concedido no recebimento (sem reembolso)` : "",
           ].filter(Boolean).join(" · ") || "—"}
         />
         <Stat label={ret.kind === "exchange" ? "Diferença da troca" : "Saldo do vale"} value={ret.kind === "exchange" ? (exSale ? formatMoney(Math.abs(ret.difference)) : "—") : voucher ? formatMoney(voucher.balance) : "—"} hint={ret.kind === "exchange" ? (exSale ? (ret.difference >= 0 ? "paga pelo cliente na nova venda" : "a favor do cliente (permanece no vale)") : "nova venda pendente") : voucher ? `de ${formatMoney(voucher.originalAmount)} · validade ${formatDate(voucher.expiresAt)}` : undefined} />

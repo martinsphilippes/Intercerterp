@@ -11,12 +11,13 @@ import { ActionButton } from "@/components/ui/action-form";
 import { Timeline } from "@/components/ui/timeline";
 import { EmptyState, Notice } from "@/components/ui/empty";
 import { Field, FormGrid, Input, Select, Textarea } from "@/components/ui/form";
+import { cn } from "@/components/ui/cn";
 import { listAll } from "@/lib/db";
 import { formatMoney } from "@/lib/money";
 import { formatDate, formatDateTime, today } from "@/lib/dates";
 import { can, canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
-import { dueState, lateChargeParams, RENEG_MAX_ITEMS, type TitleKind } from "@/domain/finance";
+import { dueState, lateChargeParams, RENEG_MAX_ITEMS, renegotiationBlockMessage, type TitleKind } from "@/domain/finance";
 import { ORIGIN_LABEL, originHref, partyHref, titleDetail } from "../queries";
 import { approvePayableAction, cancelTitleAction, reverseSettlementAction, revokeApprovalAction, sendNoticeAction, undoRenegotiationAction, updateInstallmentAction, updateTitleAction, uploadAttachmentAction } from "../actions";
 import { RenegotiateDialog } from "./renegotiate-dialog";
@@ -52,9 +53,11 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
   const activeSettlements = d.settlements.filter((x) => x.kind === "settlement" && x.status === "active");
   // marcadores técnicos de renegociação (valor zero) não são baixas: ficam fora da lista
   const shownSettlements = d.settlements.filter((x) => x.kind !== "renegotiation" && x.kind !== "renegotiation_undo");
-  const principalPaid = d.installments.reduce((a, i) => a + (i.paid ?? 0), 0);
+  // principal recebido = baixas ativas; o abatimento por devolução (sem dinheiro) fica à parte
+  const principalPaid = d.principalSettled;
+  const abated = d.abated;
   const extras = d.installments.reduce((a, i) => a + (i.interest ?? 0) + (i.fine ?? 0), 0);
-  const discounts = d.installments.reduce((a, i) => a + (i.discount ?? 0), 0);
+  const discounts = d.installments.reduce((a, i) => a + (i.discount ?? 0), 0) - abated;
   const branchCtxMissing = !s.ctx.branchId;
   const settleBlock = t.status === "cancelled" ? "Título cancelado." : pendingApproval ? "Autorize a obrigação antes do pagamento." : branchCtxMissing ? "Selecione uma filial (consolidado é somente consulta)." : !canSettle ? "Sem permissão para baixar títulos." : null;
   const originLink = originHref(t);
@@ -66,6 +69,10 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
   const isCard = t.originType === "sale_card";
   const isReneg = t.originType === "renegotiation" && t.status !== "cancelled";
   const renegNested = d.installments.some((i) => i.status === "renegotiated");
+  // título original já cancelado: desfazer apenas cancela este título (nada volta ao saldo do original)
+  const origCancelled = isReneg && d.origin?.status === "cancelled";
+  // renegociação vigente gerada a partir deste título: o cancelamento exige desfazê-la antes (mesma regra do domínio)
+  const cancelBlock = d.renegChildren.length ? renegotiationBlockMessage(t.number, d.renegChildren) : null;
   const undoBlock = branchCtxMissing
     ? "Selecione uma filial (consolidado é somente consulta)."
     : !canDo(s.user, "finance.settle")
@@ -114,16 +121,20 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
             )}
             {isReneg && can(s.user, "finance", "edit") && (
               <FormDialog
-                label="Desfazer renegociação"
+                label={origCancelled ? "Cancelar renegociação" : "Desfazer renegociação"}
                 icon={<Undo2 className="size-4" />}
                 variant="ghost"
-                title={`Desfazer renegociação — título nº ${t.number}`}
+                title={`${origCancelled ? "Cancelar renegociação" : "Desfazer renegociação"} — título nº ${t.number}`}
                 action={undoRenegotiationAction.bind(null, id)}
-                submitLabel="Desfazer renegociação"
+                submitLabel={origCancelled ? "Cancelar este título" : "Desfazer renegociação"}
                 submitVariant="danger"
                 disabled={Boolean(undoBlock)}
                 disabledReason={undoBlock ?? undefined}
-                description="Este título é cancelado e as parcelas renegociadas voltam ao saldo do título original (aberta ou parcial, com o valor que tinham). Nada é lançado em conta. O histórico é preservado."
+                description={
+                  origCancelled
+                    ? `O título original nº ${d.origin!.number} já está cancelado: apenas este título é cancelado (nada volta ao saldo do original). Nada é lançado em conta. O histórico é preservado.`
+                    : "Este título é cancelado e as parcelas renegociadas voltam ao saldo do título original (aberta ou parcial, com o valor que tinham). Nada é lançado em conta. O histórico é preservado."
+                }
               >
                 <Field label="Motivo" required>
                   <Textarea name="reason" required rows={2} maxLength={300} />
@@ -175,7 +186,7 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
               </FormDialog>
             )}
             {can(s.user, "finance", "delete") && t.originType === "manual" && t.status !== "cancelled" && activeSettlements.length === 0 && (
-              <FormDialog label="Cancelar título" icon={<Ban className="size-4" />} variant="ghost" title={`Cancelar título nº ${t.number}`} action={cancelTitleAction.bind(null, id)} submitLabel="Cancelar título" submitVariant="danger" description="O título e as parcelas deixam de compor saldos e previsões. O histórico é preservado.">
+              <FormDialog label="Cancelar título" icon={<Ban className="size-4" />} variant="ghost" title={`Cancelar título nº ${t.number}`} action={cancelTitleAction.bind(null, id)} submitLabel="Cancelar título" submitVariant="danger" disabled={Boolean(cancelBlock)} disabledReason={cancelBlock ?? undefined} description="O título e as parcelas deixam de compor saldos e previsões. O histórico é preservado.">
                 <Field label="Motivo" required>
                   <Textarea name="reason" required rows={2} maxLength={300} />
                 </Field>
@@ -184,9 +195,10 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
           </>
         }
       />
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className={cn("mb-5 grid grid-cols-2 gap-3", abated ? "lg:grid-cols-6" : "lg:grid-cols-5")}>
         <Stat label="Valor do título" value={formatMoney(t.total)} hint={`${t.installmentsCount} parcela(s) · emissão ${formatDate(t.issueDate)}`} />
         <Stat label={rec ? "Principal recebido" : "Principal pago"} value={formatMoney(principalPaid)} hint={`${activeSettlements.length} baixa(s) ativa(s)`} tone={principalPaid ? "good" : "default"} />
+        {abated > 0 && <Stat label="Abatido por devolução" value={formatMoney(abated)} hint="Devolução de mercadoria (sem movimento em conta)" />}
         <Stat label="Saldo em aberto" value={formatMoney(t.balance)} tone={t.balance && d.installments.some((i) => dueState(i, t0) === "overdue") ? "bad" : "default"} />
         <Stat label="Juros e multa" value={formatMoney(extras)} hint={`Descontos ${formatMoney(discounts)}`} />
         {t.originType === "sale_card" ? (
@@ -234,6 +246,9 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                 <tbody>
                   {d.installments.map((i) => {
                     const st = dueState(i, t0);
+                    const ab = d.abatedByInst.get(i.id) ?? 0;
+                    const recv = (i.paid ?? 0) - ab;
+                    const charges = (i.interest ?? 0) + (i.fine ?? 0) - ((i.discount ?? 0) - ab);
                     return (
                       <tr key={i.id}>
                         <td className="font-medium">
@@ -241,8 +256,11 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                         </td>
                         <td className={st === "overdue" ? "font-medium text-red-700" : undefined}>{formatDate(i.dueDate)}</td>
                         <td className="tabular text-right">{formatMoney(i.amount)}</td>
-                        <td className="tabular text-right">{i.paid ? formatMoney(i.paid) : "—"}</td>
-                        <td className="tabular text-right">{i.interest + i.fine - i.discount ? formatMoney(i.interest + i.fine - i.discount) : "—"}</td>
+                        <td className="tabular text-right">
+                          {recv ? formatMoney(recv) : "—"}
+                          {ab > 0 && <span className="block text-xs text-amber-800" title="Abatido pela devolução de mercadoria (sem movimento em conta)">abatido {formatMoney(ab)}</span>}
+                        </td>
+                        <td className="tabular text-right">{charges ? formatMoney(charges) : "—"}</td>
                         <td className="tabular text-right font-semibold">{formatMoney(i.balance)}</td>
                         {rec && (
                           <td className="text-xs text-slate-600">
@@ -351,14 +369,14 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                           <td>{inst?.number ?? "—"}</td>
                           <td className="tabular whitespace-nowrap text-right">{formatMoney(x.principal)}</td>
                           <td className="tabular whitespace-nowrap text-right text-xs">
-                            {[x.discount && `${x.discount > 0 ? "−" : "+"} ${formatMoney(Math.abs(x.discount))} desc.`, x.interest && `${x.interest > 0 ? "+" : "−"} ${formatMoney(Math.abs(x.interest))} juros`, x.fine && `${x.fine > 0 ? "+" : "−"} ${formatMoney(Math.abs(x.fine))} multa`, x.fee && `tarifa ${x.fee < 0 ? "estornada " : ""}${formatMoney(Math.abs(x.fee))}`].filter(Boolean).map((t) => (
+                            {isAbate ? "abatido do saldo" : [x.discount && `${x.discount > 0 ? "−" : "+"} ${formatMoney(Math.abs(x.discount))} desc.`, x.interest && `${x.interest > 0 ? "+" : "−"} ${formatMoney(Math.abs(x.interest))} juros`, x.fine && `${x.fine > 0 ? "+" : "−"} ${formatMoney(Math.abs(x.fine))} multa`, x.fee && `tarifa ${x.fee < 0 ? "estornada " : ""}${formatMoney(Math.abs(x.fee))}`].filter(Boolean).map((t) => (
                               <span key={String(t)} className="block">{t}</span>
                             ))}
-                            {!x.discount && !x.interest && !x.fine && !x.fee && "—"}
+                            {!isAbate && !x.discount && !x.interest && !x.fine && !x.fee && "—"}
                           </td>
                           <td className="tabular whitespace-nowrap text-right font-medium">{formatMoney(x.total)}</td>
                           <td className="min-w-[140px] text-xs">
-                            {(x.methodId && d.methods.get(x.methodId)) || x.methodKind || "—"}
+                            {isAbate ? "Devolução de mercadoria" : (x.methodId && d.methods.get(x.methodId)) || x.methodKind || "—"}
                             <br />
                             <span className="text-slate-500">{x.accountId ? d.accounts.get(x.accountId) : "—"}</span>
                           </td>
@@ -369,6 +387,8 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                               </Link>
                             ) : isRev ? (
                               "Estorno"
+                            ) : isAbate ? (
+                              "Sem lançamento em conta"
                             ) : (
                               "—"
                             )}

@@ -10,7 +10,7 @@ import { sp, type SearchParams } from "@/lib/list";
 import { getSetting } from "@/lib/core/settings";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { canDo } from "@/lib/permissions";
-import { requiredChecklist, sessionSummary } from "@/domain/cash";
+import { blindCountState, expectedOf, expectedVisible, requiredChecklist, sessionSummary } from "@/domain/cash";
 import { resolveTerminal } from "../../pdv/terminal";
 import { ClosingForm } from "./closing-form";
 
@@ -50,8 +50,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const cancelled = sales.filter((x) => x.status === "cancelled");
   const count = (t: string) => sum.movements.filter((m) => m.type === t).length;
   const blind = Boolean(await getSetting(store, s.ctx.companyId, session.branchId, "cash.blindClose", false));
-  // conferência cega já apurada nesta versão: o previsto pode ser exibido junto com a contagem registrada
-  const blindCounted = blind && session.blindCount?.version === (session.version ?? 1) ? (session.blindCount.counted as Record<string, number>) : null;
+  // conferência cega já apurada nesta versão (e ainda válida): o previsto pode ser exibido junto com a contagem registrada
+  const blindState = blind ? blindCountState(session, expectedOf(sum)) : "none";
+  const blindCounted = blindState === "valid" ? (session.blindCount.counted as Record<string, number>) : null;
+  // valores que permitem deduzir o previsto em dinheiro ficam ocultos até a contagem (supervisor de caixa vê)
+  const showAmounts = await expectedVisible(s.ctx, session, blind);
+  const hidden = "oculto";
   const methods = Object.entries(sum.byMethod)
     .map(([k, v]) => ({ key: k, label: v.label, count: v.count, expected: k === "cash" ? sum.expected.cash : v.expected }))
     .sort((a, b) => (a.key === "cash" ? -1 : b.key === "cash" ? 1 : a.label.localeCompare(b.label)));
@@ -65,18 +69,30 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         description={`${terminals.get(session.terminalId)} · aberto às ${formatDateTime(session.openedAt)} · operador ${users.get(session.operatorId) ?? "—"} · ${duration(session.openedAt)}${session.status === "reopened" ? ` · versão ${session.version} (reaberto)` : ""}`}
         actions={<LinkButton href={`/caixa/movimentos?sessao=${session.id}`}>← Voltar ao caixa</LinkButton>}
       />
+      {blindState === "stale" && (
+        <div className="mb-4">
+          <Notice tone="warn" title="Nova contagem necessária">
+            Houve vendas ou movimentos neste caixa depois da contagem cega registrada em {formatDateTime(session.blindCount?.at)}. A contagem anterior foi preservada no histórico; conte novamente e clique em “Apurar diferenças”.
+          </Notice>
+        </div>
+      )}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Vendas concluídas" value={sum.totals.salesCount} hint={formatMoney(sum.totals.sales)} href={`/vendas?sessao=${session.id}`} />
-        <Stat label="Suprimentos" value={formatMoney(sum.totals.supply)} hint={`${count("supply")} movimentação(ões)`} />
-        <Stat label="Sangrias" value={formatMoney(sum.totals.withdrawal)} hint={`${count("withdrawal")} movimentação(ões)`} />
-        <Stat label="Cancelamentos / devoluções" value={`${cancelled.length} · ${formatMoney(sum.totals.refunds)}`} hint={`Vendas canceladas ${formatMoney(cancelled.reduce((a, x) => a + x.total, 0))}; saídas em espécie ${formatMoney(sum.totals.refunds)}`} href={`/vendas?sessao=${session.id}&situacao=cancelled`} />
+        <Stat label="Vendas concluídas" value={sum.totals.salesCount} hint={showAmounts ? formatMoney(sum.totals.sales) : "valor oculto até a contagem"} href={`/vendas?sessao=${session.id}`} />
+        <Stat label="Suprimentos" value={showAmounts ? formatMoney(sum.totals.supply) : hidden} hint={`${count("supply")} movimentação(ões)`} />
+        <Stat label="Sangrias" value={showAmounts ? formatMoney(sum.totals.withdrawal) : hidden} hint={`${count("withdrawal")} movimentação(ões)`} />
+        <Stat
+          label="Cancelamentos / devoluções"
+          value={showAmounts ? `${cancelled.length} · ${formatMoney(sum.totals.refunds)}` : `${cancelled.length} · ${count("refund")}`}
+          hint={showAmounts ? `Vendas canceladas ${formatMoney(cancelled.reduce((a, x) => a + x.total, 0))}; saídas em espécie ${formatMoney(sum.totals.refunds)}` : "vendas canceladas · saídas em espécie (valores ocultos até a contagem)"}
+          href={`/vendas?sessao=${session.id}&situacao=cancelled`}
+        />
       </div>
       <ClosingForm
         sessionId={session.id}
         blind={blind}
         methods={blind && !blindCounted ? methods.map((m) => ({ ...m, expected: null })) : methods}
         initialCounted={blindCounted}
-        cashBreakdown={{ opening: sum.totals.opening, cashSales: sum.totals.cashSales, supply: sum.totals.supply, withdrawal: sum.totals.withdrawal, refunds: sum.totals.refunds }}
+        cashBreakdown={blind ? null : { opening: sum.totals.opening, cashSales: sum.totals.cashSales, supply: sum.totals.supply, withdrawal: sum.totals.withdrawal, refunds: sum.totals.refunds }}
         checklist={requiredChecklist(sum).map(({ key, label, hint }) => ({ key, label, hint }))}
         accounts={accounts.filter((a) => a.value !== cashAcc?.id)}
       />

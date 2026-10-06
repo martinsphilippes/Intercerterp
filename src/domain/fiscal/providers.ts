@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { detId, isConflict } from "@/lib/db";
 import type { Store } from "@/lib/db/types";
+import { fiscalTokenRefProblem } from "../integrations";
 
 /**
  * Contrato fiscal independente de fornecedor. A referência (`ref`) é única por documento e
@@ -406,7 +407,10 @@ export function fiscalProviderFrom(config: Record<string, any> | null, store?: S
   }
   if (config.provider === "focusnfe") {
     if (config.tokenRef === "") return null; // vínculo de credencial removido
-    const token = process.env[config.tokenRef || "FOCUSNFE_TOKEN"];
+    const ref = config.tokenRef || "FOCUSNFE_TOKEN";
+    // nome não permitido (ex.: segredo do sistema gravado antes da validação): não configurado — a variável nunca é lida
+    if (fiscalTokenRefProblem(ref)) return null;
+    const token = process.env[ref];
     if (!token) return null;
     return new FocusNfeProvider(token, config.environment === "producao" ? "producao" : "homologacao", process.env.FOCUSNFE_BASE_URL || undefined);
   }

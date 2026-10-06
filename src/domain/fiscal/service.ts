@@ -12,7 +12,7 @@ import { nextNumber } from "@/lib/core/numbering";
 import { getSetting } from "@/lib/core/settings";
 import { isValidCnpj, isValidCpf, onlyDigits } from "@/lib/core/text";
 import { fiscalProviderFrom, TPAG, type FiscalModel, type FiscalProvider, type ProviderResult } from "./providers";
-import { logIntegration } from "../integrations";
+import { cscRefProblem, fiscalTokenRefProblem, logIntegration } from "../integrations";
 
 /**
  * Documentos fiscais (Telas 30–35).
@@ -66,6 +66,9 @@ export const ORIGIN_LABEL: Record<string, string> = {
   disable: "Inutilização",
 };
 
+/** Registro de inutilização: não é documento transmissível nem descartável — repete-se o pedido de inutilização. */
+const DISABLE_RECORD_MSG = "Registro de inutilização de numeração: não pode ser descartado, consultado nem retransmitido como documento. Repita o pedido em NF-e/NFC-e → Inutilizar numeração (mesma faixa) para obter o resultado.";
+
 /** Estados em que o documento ainda pode ser corrigido e retransmitido com a mesma referência. */
 export const RETRANSMITTABLE = ["rejected", "error", "pending", "draft", "queued"];
 /** Estados finais (não mudam mais pelo provedor, exceto cancelamento de autorizado). */
@@ -99,6 +102,9 @@ export async function getFiscalConfig(store: Store, companyId: string, branchId:
 export function credentialMessage(cfg: Doc | null) {
   if (!cfg) return "Configuração fiscal não cadastrada.";
   if (cfg.tokenRef === "") return "Vínculo de credencial removido: vincule a variável do token na Central de integrações.";
+  // nome gravado antes da validação (ex.: segredo do sistema): tratado como não configurado — a variável nunca é lida
+  const refProblem = cfg.provider === "focusnfe" ? fiscalTokenRefProblem(cfg.tokenRef || "FOCUSNFE_TOKEN") : null;
+  if (refProblem) return `${refProblem} Vincule novamente o token na Central de integrações.`;
   return `Credencial do provedor ausente: defina a variável de ambiente ${cfg.tokenRef || "FOCUSNFE_TOKEN"} no servidor.`;
 }
 
@@ -115,6 +121,15 @@ export function providerFor(store: Store, cfg: Doc | null) {
 
 export async function saveFiscalConfig(ctx: Ctx, branchId: string | null, data: Record<string, any>) {
   requireAction(ctx, "fiscal.configure");
+  // nomes de variáveis de credencial: só variáveis do provedor (o valor do token é enviado à Focus NFe), nunca do sistema
+  if ("tokenRef" in data && data.tokenRef !== "" && data.tokenRef != null) {
+    const p = fiscalTokenRefProblem(data.tokenRef);
+    assert(!p, p ?? "", "secret_ref");
+  }
+  if ("cscTokenRef" in data && data.cscTokenRef) {
+    const p = cscRefProblem(data.cscTokenRef);
+    assert(!p, p ?? "", "secret_ref");
+  }
   const sk = fiscalScope(ctx.companyId, branchId);
   const id = detId("fiscalcfg", sk);
   const before = await ctx.store.get("fiscal_configs", id);
@@ -1155,16 +1170,30 @@ const SEND_CLAIM_STALE_MS = 5 * 60000;
 /**
  * Reivindicação única da tentativa de envio (id determinístico por documento + nº da tentativa):
  * envios concorrentes do mesmo documento não disputam numeração nem perdem a contagem de tentativas.
+ * Reivindicação "failed" (falha ANTES de registrar a tentativa — nada foi enviado) é reaproveitada por um único
+ * processo: a retomada é reivindicada por um registro próprio (id por documento + tentativa + nº da falha).
  */
 async function claimSend(ctx: Ctx, docId: string, attempt: number): Promise<"ok" | "busy" | "stale"> {
   const id = detId("fiscalsend", docId, attempt);
   try {
-    await ctx.store.create("operations", { companyId: ctx.companyId, type: "fiscal.send", status: "running", entityType: "fiscal_document", entityId: docId, createdBy: ctx.user.id }, id);
+    await ctx.store.create("operations", { companyId: ctx.companyId, type: "fiscal.send", status: "running", entityType: "fiscal_document", entityId: docId, createdBy: ctx.user.id, result: { claimedAt: nowIso() } }, id);
     return "ok";
   } catch (e) {
     if (!isConflict(e)) throw e;
     const claim = await ctx.store.get("operations", id);
-    if (claim?.status === "running" && Date.now() - new Date(claim.createdAt).getTime() > SEND_CLAIM_STALE_MS) {
+    if (claim?.status === "failed") {
+      const failures = Number(claim.result?.failures ?? 1);
+      try {
+        await ctx.store.create("operations", { companyId: ctx.companyId, type: "fiscal.send_retake", status: "done", entityType: "fiscal_document", entityId: docId, createdBy: ctx.user.id }, detId("fiscalsend-retake", docId, attempt, failures));
+      } catch (e2) {
+        if (!isConflict(e2)) throw e2;
+        return "busy"; // outro processo já retomou esta tentativa
+      }
+      await ctx.store.update("operations", id, { status: "running", error: null, result: { ...(claim.result ?? {}), claimedAt: nowIso() } });
+      return "ok";
+    }
+    const claimedAt = claim?.result?.claimedAt ?? claim?.createdAt;
+    if (claim?.status === "running" && Date.now() - new Date(claimedAt).getTime() > SEND_CLAIM_STALE_MS) {
       // processo anterior interrompido ANTES de gravar a tentativa (o envio só ocorre depois): tentativa consumida sem envio
       await ctx.store.update("operations", id, { status: "abandoned" });
       return "stale";
@@ -1173,10 +1202,16 @@ async function claimSend(ctx: Ctx, docId: string, attempt: number): Promise<"ok"
   }
 }
 
-export async function transmitDocument(ctx: Ctx, documentId: string) {
+/**
+ * Transmite (ou consulta antes de reenviar) o documento. `onBusy`: chamado quando outro processo detém o envio desta
+ * tentativa — a tarefa em segundo plano reagenda em vez de concluir.
+ */
+export async function transmitDocument(ctx: Ctx, documentId: string, opts: { onBusy?: () => void } = {}) {
   let doc = await ctx.store.getOrThrow("fiscal_documents", documentId);
   assert(doc.companyId === ctx.companyId, "Documento de outra empresa.");
   if (FINAL.includes(doc.status)) return doc;
+  // registro de inutilização não é transmitido como documento (repita a inutilização da faixa)
+  if (doc.originType === "disable") return doc;
   const company = await ctx.store.getOrThrow("companies", doc.companyId);
   const branch = doc.branchId ? await ctx.store.get("branches", doc.branchId) : null;
   const { cfg, provider } = await providerForDoc(ctx, doc);
@@ -1258,14 +1293,27 @@ export async function transmitDocument(ctx: Ctx, documentId: string) {
   for (;;) {
     const c = await claimSend(ctx, doc.id, attempt);
     if (c === "ok") break;
-    if (c === "busy") return ctx.store.getOrThrow("fiscal_documents", doc.id);
+    if (c === "busy") {
+      opts.onBusy?.();
+      return ctx.store.getOrThrow("fiscal_documents", doc.id);
+    }
     attempt++;
   }
   const claimId = detId("fiscalsend", doc.id, attempt);
-  doc = await ensureNumber(ctx, doc, cfg);
-  const payload = toProviderPayload(doc, company, branch, cfg);
-  // retenção interna da contingência termina no primeiro envio: "contingência" passa a refletir só o retorno do provedor
-  await ctx.store.update("fiscal_documents", doc.id, { status: "processing", attempts: attempt, lastAttemptAt: nowIso(), ...((doc.attempts ?? 0) === 0 && doc.contingency ? { contingency: false } : {}) });
+  let payload: ReturnType<typeof toProviderPayload>;
+  try {
+    doc = await ensureNumber(ctx, doc, cfg);
+    payload = toProviderPayload(doc, company, branch, cfg);
+    // retenção interna da contingência termina no primeiro envio: "contingência" passa a refletir só o retorno do provedor
+    await ctx.store.update("fiscal_documents", doc.id, { status: "processing", attempts: attempt, lastAttemptAt: nowIso(), ...((doc.attempts ?? 0) === 0 && doc.contingency ? { contingency: false } : {}) });
+  } catch (e: any) {
+    // falha antes de registrar a tentativa (nada enviado): libera a reivindicação para a próxima execução reaproveitá-la
+    const claim = await ctx.store.get("operations", claimId).catch(() => null);
+    await ctx.store
+      .update("operations", claimId, { status: "failed", error: String(e?.message ?? e).slice(0, 2000), result: { ...(claim?.result ?? {}), failures: Number(claim?.result?.failures ?? 0) + 1, failedAt: nowIso() } })
+      .catch(() => undefined);
+    throw e;
+  }
   const t0 = Date.now();
   let r: ProviderResult;
   try {
@@ -1296,6 +1344,7 @@ export async function queryDocument(ctx: Ctx, documentId: string) {
   requireAction(ctx, "fiscal.issue");
   const doc = await ctx.store.getOrThrow("fiscal_documents", documentId);
   assertDocScope(ctx, doc);
+  assert(doc.originType !== "disable", DISABLE_RECORD_MSG, "disable_record");
   return queryLoaded(ctx, doc);
 }
 
@@ -1327,6 +1376,7 @@ export async function retransmit(ctx: Ctx, documentId: string) {
   requireAction(ctx, "fiscal.issue");
   const doc = await ctx.store.getOrThrow("fiscal_documents", documentId);
   assertDocScope(ctx, doc);
+  assert(doc.originType !== "disable", DISABLE_RECORD_MSG, "disable_record");
   assert(RETRANSMITTABLE.includes(doc.status), `Documento ${DOC_STATUS_LABEL[doc.status]} não pode ser retransmitido.`);
   // mesma checagem de estoque do "Transmitir" (submitDraft) para NF-e que baixa estoque na autorização
   if (doc.model === "nfe" && doc.effects?.stock && !doc.effects?.appliedAt && doc.operationType !== "entrada" && ["draft", "pending", "rejected"].includes(doc.status)) await checkStockForEffects(ctx, doc);
@@ -1342,7 +1392,7 @@ export async function retransmitBatch(ctx: Ctx, input: { model: FiscalModel; bra
   const branchId = requireBranch(ctx);
   assert(!input.branchId || input.branchId === branchId, "Documento de outra filial: selecione a filial no topo da tela.", "branch_mismatch");
   const filters: any[] = [["eq", "companyId", ctx.companyId], ["eq", "branchId", branchId], ["eq", "model", input.model], ["eq", "status", ["queued", "error", "pending", "processing"]]];
-  let docs = await listAll(ctx.store, "fiscal_documents", { filters });
+  let docs = (await listAll(ctx.store, "fiscal_documents", { filters })).filter((d) => d.originType !== "disable");
   if (input.ids?.length) docs = docs.filter((d) => input.ids!.includes(d.id));
   const out: Array<{ id: string; before: string; after: string }> = [];
   for (const d of docs) {
@@ -1384,6 +1434,8 @@ export async function cancelDocument(ctx: Ctx, documentId: string, justification
   requireAction(ctx, "fiscal.cancel");
   const doc0 = await ctx.store.getOrThrow("fiscal_documents", documentId);
   assertDocScope(ctx, doc0);
+  // pedido de inutilização com erro pode ter sido homologado: a consulta por referência de documento não o comprova
+  assert(doc0.originType !== "disable", DISABLE_RECORD_MSG, "disable_record");
   assert(justification?.trim().length >= 15, "Justificativa deve ter ao menos 15 caracteres.");
   assert(justification.trim().length <= 255, "Justificativa deve ter no máximo 255 caracteres.");
   let doc = doc0;
@@ -1498,8 +1550,12 @@ export async function disableNumbers(ctx: Ctx, input: { branchId: string; model:
   const ref = `inut-${input.model}-${input.branchId}-${input.series}-${input.from}-${input.to}`;
   const id = detId("fiscaldoc", ref);
   const existing = await ctx.store.get("fiscal_documents", id);
-  // repetir uma inutilização já homologada é idempotente: não consulta o provedor nem sobrescreve o protocolo
-  if (existing?.status === "unused") return existing;
+  // repetir uma inutilização já homologada é idempotente: não consulta o provedor nem sobrescreve o protocolo,
+  // mas completa a marcação dos documentos da faixa (ex.: execução anterior interrompida depois da homologação)
+  if (existing?.status === "unused") {
+    await markRangeUnused(ctx, existing, input);
+    return existing;
+  }
   // faixa que se sobrepõe a uma inutilização já homologada
   const homologated = await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "companyId", ctx.companyId], ["eq", "branchId", input.branchId], ["eq", "model", input.model], ["eq", "series", input.series], ["eq", "originType", "disable"], ["eq", "status", "unused"]] });
   const overlap = homologated.find((d) => (d.service?.disableFrom ?? d.number) <= input.to && (d.service?.disableTo ?? d.number) >= input.from);
@@ -1542,15 +1598,31 @@ export async function disableNumbers(ctx: Ctx, input: { branchId: string; model:
   await addEvent(ctx, doc.id, "disable", doc.status, r.message ?? "", input, r.raw, r.protocol);
   await audit(ctx, { module: "fiscal", action: "numbers.disable", entityType: "fiscal_document", entityId: doc.id, summary: `Inutilização ${MODEL_LABEL[input.model]} série ${input.series} nº ${input.from}–${input.to}: ${DOC_STATUS_LABEL[doc.status]}`, reason: input.justification, branchId: input.branchId, result: doc.status === "unused" ? "success" : "failure" });
   if (doc.status !== "unused") throw new BusinessError(`Inutilização não homologada: ${r.message ?? r.status}`);
-  // documentos não autorizados com número da faixa saem da retransmissão (o número não pode mais ser usado)
-  for (const d of docs.filter((x) => !FINAL.includes(x.status) || x.status === "discarded")) {
-    const msg = `Número inutilizado (protocolo ${doc.protocol ?? "—"}).`;
+  await markRangeUnused(ctx, doc, input, docs);
+  return doc;
+}
+
+/**
+ * Documentos não autorizados com número da faixa inutilizada saem da retransmissão (o número não pode mais ser usado).
+ * Idempotente: já marcados são ignorados. Documentos enviados sem retorno confirmado (ou em processamento) nunca são
+ * marcados automaticamente — podem estar autorizados no provedor.
+ */
+async function markRangeUnused(ctx: Ctx, disableDoc: Doc, input: { branchId: string; model: string; series: string; from: number; to: number }, inRange?: Doc[]) {
+  const docs =
+    inRange ??
+    (await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "companyId", ctx.companyId], ["eq", "branchId", input.branchId], ["eq", "model", input.model], ["eq", "series", input.series], ["between", "number", input.from, input.to]] })).filter(
+      (d) => d.originType !== "disable",
+    );
+  const msg = `Número inutilizado (protocolo ${disableDoc.protocol ?? "—"}).`;
+  for (const d of docs) {
+    if (d.status === "unused" || d.status === "processing") continue;
+    if (FINAL.includes(d.status) && d.status !== "discarded") continue;
+    if ((d.attempts ?? 0) > 0 && ["error", "queued", "pending"].includes(d.status)) continue;
     const upd = await ctx.store.update("fiscal_documents", d.id, { status: "unused", statusMessage: msg });
     await addEvent(ctx, d.id, "disable", "unused", `${msg} Inutilização ${input.from}–${input.to}.`);
     await resolveOccurrence(ctx.store, `fiscal:${d.id}`);
     await syncOrigin(ctx, upd);
   }
-  return doc;
 }
 
 /** Números atribuídos e nunca autorizados (descartados) — candidatos à inutilização. */
@@ -1753,7 +1825,10 @@ registerJob("fiscal.transmit", async (ctx, p) => {
     const cfg = await getFiscalConfig(ctx.store, ctx.companyId, d.branchId);
     if (cfg?.contingency) return { held: "contingency" };
   }
-  const r = await transmitDocument(ctx, p.documentId);
+  let busy = false;
+  const r = await transmitDocument(ctx, p.documentId, { onBusy: () => (busy = true) });
+  // outro processo detém o envio desta tentativa: reagenda (a reivindicação conclui, falha ou vence) em vez de concluir
+  if (busy) return { __retryAt: new Date(Date.now() + 60000).toISOString(), state: { status: r.status, busy: true } };
   return { status: r.status };
 });
 registerJob("fiscal.query", async (ctx, p) => {

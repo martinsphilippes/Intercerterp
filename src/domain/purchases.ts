@@ -418,11 +418,14 @@ export async function cancelOrder(ctx: Ctx, id: string, reason: string) {
   assert(!items.some((i) => (i.receivedQty ?? 0) > 0), "Pedido com recebimento não pode ser cancelado — use Encerrar saldo.");
   const drafts = await listAll(ctx.store, "receipts", { filters: [["contains", "orderIds", id], ["eq", "status", "draft"]] });
   assert(!drafts.length, `Há recebimento em conferência (nº ${drafts[0]?.number}) vinculado a este pedido. Cancele-o antes.`);
-  await setOrdersStatus(ctx, [id], "cancelled", { cancelledAt: nowIso() }, { reason, summary: () => `Pedido nº ${o.number} cancelado` });
-  if (o.requestId) {
-    const { refreshRequestAfterOrderChange } = await import("./approvals");
-    await refreshRequestAfterOrderChange(ctx, o.requestId);
-  }
+  const statusOpts: OrderStatusOpts = { reason, summary: () => `Pedido nº ${o.number} cancelado` };
+  // pedido de uma solicitação: cancelamento + recálculo da solicitação disputam a vaga da decisão (decisão
+  // concorrente que leu o pedido em análise não o "ressuscita" como aprovado)
+  const viaRequest = o.requestId ? await (await import("./approvals")).changeOrderInRequest(ctx, o.requestId, id, "cancelled", { cancelledAt: nowIso() }, { kind: "purchase.order_cancel" }) : null;
+  if (viaRequest) {
+    await afterOrdersStatus(ctx, viaRequest.changed, "cancelled", statusOpts);
+    if (viaRequest.requestCancelled) await (await import("./approvals")).afterRequestCancelled(ctx, viaRequest.req);
+  } else await setOrdersStatus(ctx, [id], "cancelled", { cancelledAt: nowIso() }, statusOpts);
   return ctx.store.getOrThrow("purchase_orders", id);
 }
 
@@ -485,10 +488,27 @@ export async function registerOrderSent(ctx: Ctx, id: string, input: { method: "
     assert(input.contact?.trim(), "Informe a pessoa de contato no fornecedor.");
     info = { method: "manual", channel: input.channel!.trim(), contact: input.contact!.trim(), at: input.sentDate ? `${input.sentDate}T12:00:00.000Z` : nowIso(), by: ctx.user.name, byId: ctx.user.id, revision: o.revision ?? 1, notes: input.notes ?? null };
   }
-  await setOrdersStatus(ctx, [id], "sent", { sentAt: info.at, sentMethod: input.method, sentInfo: info }, {
+  const sentPatch = { sentAt: info.at, sentMethod: input.method, sentInfo: info };
+  const statusOpts: OrderStatusOpts = {
     action: "purchase_order.sent",
     summary: () => `Pedido nº ${o.number} (rev. ${o.revision ?? 1}) enviado ao fornecedor ${input.method === "email" ? `por e-mail para ${info.to} (${info.channel})` : `via ${info.channel}, contato ${info.contact}`}`,
-  });
+  };
+  // pedido de uma solicitação: o registro do envio disputa a vaga da decisão (revogação concorrente da
+  // aprovação não devolve para análise um pedido já enviado, e o envio relê o pedido se a revogação vencer)
+  const notSendable = (cur: Doc) => {
+    const why = cur.status === "sent" ? `O pedido nº ${cur.number} já foi enviado nesta revisão.` : `O pedido nº ${cur.number} não está mais aprovado (situação atual: ${ORDER_STATUS_LABEL[cur.status as OrderStatus] ?? cur.status}) — a aprovação foi revista enquanto o envio era registrado; atualize a página.`;
+    return input.method === "email" ? `${why} Atenção: o e-mail já foi enviado para ${info.to} — avise o fornecedor para desconsiderá-lo.` : why;
+  };
+  const viaRequest = o.requestId
+    ? await (await import("./approvals")).changeOrderInRequest(ctx, o.requestId, id, "sent", sentPatch, {
+        kind: "purchase.order_sent",
+        validate: (cur) => {
+          if (!orderNeedsSending(cur)) throw new BusinessError(notSendable(cur), "invalid_state");
+        },
+      })
+    : null;
+  if (viaRequest) await afterOrdersStatus(ctx, viaRequest.changed, "sent", statusOpts);
+  else await setOrdersStatus(ctx, [id], "sent", sentPatch, statusOpts);
   return ctx.store.getOrThrow("purchase_orders", id);
 }
 

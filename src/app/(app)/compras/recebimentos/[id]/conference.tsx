@@ -41,6 +41,8 @@ export interface ConfItem {
   lot: string | null;
   expiry: string | null;
   status: string;
+  /** valor da linha calculado no servidor na última gravação (valor exato da linha do pedido, sem arredondar pelo custo unitário) */
+  lineValue?: number | null;
 }
 
 export interface ConfProps {
@@ -49,6 +51,9 @@ export interface ConfProps {
     hasXml: boolean;
     /** sem XML: encargos (frete, seguro, outras, IPI, desconto geral) calculados pelo pedido (true) ou informados (false) */
     chargesAuto?: boolean | null;
+    /** sem XML: encargos de pedidos já cobrados em outro recebimento (detectado na conclusão) */
+    chargesLost?: Array<{ orderNumber: number | null; receiptNumber: number | null }>;
+    chargesLostAck?: boolean;
     supplierId: string;
     warehouseId: string;
     orderIds: string[];
@@ -91,8 +96,15 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
     setDirty(true);
     setItems((a) => a.map((x) => (x.idx === idx ? { ...x, ...patch } : x)));
   };
-  const lineValue = (it: ConfItem) => (it.ignore || !it.skuId || !it.receivedQty ? 0 : it.receivedQty === it.invoicedQty && it.unitCost === it.invoiceUnitCost && it.invoicedValue > 0 ? it.invoicedValue : lineTotal(it.unitCost, it.receivedQty));
-  const products = useMemo(() => items.reduce((a, it) => a + lineValue(it), 0), [items]);
+  const saved = useMemo(() => new Map(initial.map((i) => [i.idx, i])), [initial]);
+  const lineValue = (it: ConfItem) => {
+    if (it.ignore || !it.skuId || !it.receivedQty) return 0;
+    // item sem alteração desde a gravação: usa o valor calculado no servidor (exato pelo pedido)
+    const s0 = saved.get(it.idx);
+    if (s0 && s0.lineValue != null && !s0.ignore && s0.skuId === it.skuId && s0.receivedQty === it.receivedQty && s0.unitCost === it.unitCost) return s0.lineValue;
+    return it.receivedQty === it.invoicedQty && it.unitCost === it.invoiceUnitCost && it.invoicedValue > 0 ? it.invoicedValue : lineTotal(it.unitCost, it.receivedQty);
+  };
+  const products = items.reduce((a, it) => a + lineValue(it), 0);
   const due = products - Math.min(discount, products) + freight + other;
   const active = items.filter((i) => !i.ignore);
   const checked = active.filter((i) => i.checked).length;
@@ -108,6 +120,10 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
           <input type="hidden" name="freight" value={freight} />
           <input type="hidden" name="otherExpenses" value={other} />
           <input type="hidden" name="discount" value={discount} />
+          {/* valores exibidos ao carregar: só a alteração em relação a eles desliga o cálculo dos encargos pelo pedido */}
+          <input type="hidden" name="freightShown" value={r.freight} />
+          <input type="hidden" name="otherExpensesShown" value={r.otherExpenses} />
+          <input type="hidden" name="discountShown" value={r.discount} />
           {!r.hasXml && <input type="hidden" name="invoicedTotal" value={invoiced} />}
           <input type="hidden" name="effects" value={JSON.stringify(effects)} />
           <FormSection
@@ -246,6 +262,16 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                   <div className="flex items-center justify-between gap-3"><dt title="Outras despesas, seguro, IPI e ST da nota">Outras despesas/IPI/ST</dt><dd className="w-32"><MoneyInput value={other} onChange={(v) => { setDirty(true); setOther(v); }} ariaLabel="Outras despesas" /></dd></div>
                   <div className="flex items-center justify-between gap-3"><dt>Desconto</dt><dd className="w-32"><MoneyInput value={discount} onChange={(v) => { setDirty(true); setDiscount(v); }} ariaLabel="Desconto" /></dd></div>
                   {!r.hasXml && r.chargesAuto != null && <p className="text-xs text-slate-500">{r.chargesAuto ? "Frete, seguro, outras despesas, IPI e desconto geral vêm do pedido, proporcionais ao recebido (recalculados ao salvar). Alterar um desses valores passa a usar o informado." : "Frete, despesas e desconto informados na conferência (não são mais recalculados pelo pedido)."}</p>}
+                  {!r.hasXml && r.chargesAuto === false && (
+                    <SubmitButton pending={pending} variant="secondary" size="sm" name="intent" value="recalcCharges">Recalcular encargos pelo pedido</SubmitButton>
+                  )}
+                  {!r.hasXml && r.chargesAuto === false && (r.chargesLost ?? []).length > 0 && (
+                    <div className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+                      <p>Frete/despesas de {(r.chargesLost ?? []).map((l) => `pedido nº ${l.orderNumber ?? "—"} (cobrados no recebimento nº ${l.receiptNumber ?? "—"})`).join(", ")} já foram cobrados.</p>
+                      <input type="hidden" name="chargesLostAckShown" value="1" />
+                      <label className="mt-1 flex items-center gap-2"><input type="checkbox" name="chargesLostAck" value="1" defaultChecked={Boolean(r.chargesLostAck)} onChange={() => setDirty(true)} className="accent-brand-700" /> Cobrar frete/despesas informados mesmo assim (nova cobrança do fornecedor nesta entrega — justifique em observações)</label>
+                    </div>
+                  )}
                   <div className="flex justify-between border-t border-line pt-2 font-semibold"><dt>Valor devido</dt><dd className="tabular">{formatMoney(due)}</dd></div>
                   {r.hasXml ? (
                     <div className="flex justify-between text-slate-600"><dt>Total da NF-e (faturado)</dt><dd className="tabular">{formatMoney(r.invoicedTotal)}</dd></div>

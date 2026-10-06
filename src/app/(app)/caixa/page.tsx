@@ -39,7 +39,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "status", label: "Situação", cell: (r) => <StatusBadge kind="cash" status={r.status} /> },
     { key: "openingFund", label: "Fundo", align: "right", hidden: true, cell: (r) => formatMoney(r.openingFund) },
     { key: "salesCount", label: "Vendas", align: "right", sortable: true, cell: (r) => r.salesCount },
-    { key: "salesTotal", label: "Total vendido", align: "right", sortable: true, cell: (r) => formatMoney(r.salesTotal) },
+    { key: "salesTotal", label: "Total vendido", align: "right", sortable: true, cell: (r) => (r.salesTotal == null ? <span className="text-slate-400" title="Conferência cega: revelado após a contagem">oculto</span> : formatMoney(r.salesTotal)) },
     { key: "expectedCash", label: "Dinheiro esperado", align: "right", cell: (r) => (r.expectedCash == null && r.status !== "closed" ? <span className="text-slate-400">oculto</span> : formatMoney(r.expectedCash)) },
     { key: "countedCash", label: "Dinheiro contado", align: "right", cell: (r) => (r.countedCash == null ? "—" : formatMoney(r.countedCash)) },
     { key: "totalDiff", label: "Diferença", align: "right", sortable: true, cell: (r) => (r.status !== "closed" ? "—" : r.hasDiff ? <Badge tone="bad">{formatMoney(r.totalDiff)}</Badge> : <Badge tone="good">Sem diferença</Badge>) },

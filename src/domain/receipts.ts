@@ -191,11 +191,15 @@ export interface ReceiptComputation {
  * Recalcula expectativa (saldo dos pedidos), alocação por pedido (FIFO pelo número), rateio de frete,
  * outras despesas e desconto pelo valor recebido, custo de entrada e divergências.
  */
-export function computeReceipt(r: { items: ReceiptItem[]; freight: number; otherExpenses: number; discount: number; invoicedTotal?: number | null; hasXml: boolean; valueTolerance?: number }, lines:Array<{ id: string; skuId: string; remaining: number; netUnit: number; order: { id: string; number: number } }>): ReceiptComputation {
-  const pool = new Map<string, Array<{ id: string; remaining: number; netUnit: number; order: { id: string; number: number } }>>();
+export function computeReceipt(r: { items: ReceiptItem[]; freight: number; otherExpenses: number; discount: number; invoicedTotal?: number | null; hasXml: boolean; valueTolerance?: number }, lines:Array<{ id: string; skuId: string; remaining: number; netUnit: number; order: { id: string; number: number }; qty?: number; unitCost?: number; discount?: number | null }>): ReceiptComputation {
+  const pool = new Map<string, Array<{ id: string; remaining: number; netUnit: number; order: { id: string; number: number }; qty?: number; unitCost?: number; discount?: number | null }>>();
   for (const l of lines) pool.set(l.skuId, [...(pool.get(l.skuId) ?? []), { ...l }]);
   const divergences: Divergence[] = [];
   const items = r.items.map((it) => ({ ...it }));
+  // sem XML: valor exato da linha do pedido (líquido do desconto da linha) proporcional ao alocado, por
+  // arredondamento acumulado — recebimentos parciais somam exatamente o líquido da linha (sem o
+  // arredondamento do custo unitário líquido, ex.: 3 × R$ 10,00 − R$ 1,00 = R$ 29,00, não 3 × R$ 9,67)
+  const exactValue = new Map<number, number | null>();
   for (const it of items) {
     it.allocations = [];
     if (it.ignore) continue;
@@ -207,14 +211,21 @@ export function computeReceipt(r: { items: ReceiptItem[]; freight: number; other
     it.expectedQty = avail.reduce((a, l) => a + l.remaining, 0);
     it.orderUnitCost = avail[0]?.netUnit ?? null;
     let left = it.receivedQty;
+    let exact: number | null = 0;
     for (const l of avail) {
       if (left <= 0) break;
       const q = Math.min(left, l.remaining);
       if (q <= 0) continue;
       it.allocations.push({ orderId: l.order.id, orderItemId: l.id, orderNumber: l.order.number, qty: q });
+      if (exact != null && l.qty && l.qty > 0 && l.unitCost != null && l.netUnit === it.unitCost) {
+        const net = lineTotal(l.unitCost, l.qty) - Math.max(0, l.discount ?? 0);
+        const before = Math.max(0, l.qty - l.remaining);
+        exact += roundDiv(net * Math.min(l.qty, before + q), l.qty) - roundDiv(net * Math.min(l.qty, before), l.qty);
+      } else exact = null;
       l.remaining -= q;
       left -= q;
     }
+    exactValue.set(it.idx, !r.hasXml && left === 0 && it.allocations.length ? exact : null);
     if (!avail.length && lines.length) divergences.push({ kind: "not_ordered", idx: it.idx, skuId: it.skuId, message: `${it.description}: não consta nos pedidos relacionados.` });
     else if (left > 0 && lines.length) divergences.push({ kind: "over_order", idx: it.idx, skuId: it.skuId, message: `${it.description}: recebido ${formatQty(left)} acima do saldo do pedido.` });
     if (r.hasXml && it.receivedQty !== it.invoicedQty) divergences.push({ kind: "qty", idx: it.idx, skuId: it.skuId, message: `${it.description}: recebido ${formatQty(it.receivedQty)} × faturado ${formatQty(it.invoicedQty)}.` });
@@ -225,7 +236,11 @@ export function computeReceipt(r: { items: ReceiptItem[]; freight: number; other
   // valor de cada linha recebida: usa o valor exato faturado quando quantidade e custo coincidem
   const active = items.filter((it) => !it.ignore && it.skuId && it.receivedQty > 0);
   for (const it of items) it.lineValue = 0;
-  for (const it of active) it.lineValue = it.receivedQty === it.invoicedQty && it.unitCost === it.invoiceUnitCost && it.invoicedValue > 0 ? it.invoicedValue : lineTotal(it.unitCost, it.receivedQty);
+  for (const it of active) {
+    const sameAsInvoice = it.receivedQty === it.invoicedQty && it.unitCost === it.invoiceUnitCost && it.invoicedValue > 0;
+    const exact = exactValue.get(it.idx);
+    it.lineValue = r.hasXml && sameAsInvoice ? it.invoicedValue : exact != null ? exact : sameAsInvoice ? it.invoicedValue : lineTotal(it.unitCost, it.receivedQty);
+  }
   const productsTotal = active.reduce((a, it) => a + (it.lineValue ?? 0), 0);
   const weights = active.map((it) => it.lineValue ?? 0);
   const fr = allocate(r.freight, weights);
@@ -515,15 +530,20 @@ export async function createManualReceipt(ctx: Ctx, input: { supplierId: string;
     assert(o.branchId === branchId, `Pedido nº ${o.number} é de outra filial.`);
   }
   const lines = await orderLines(ctx.store, orderIds, ctx.companyId);
-  const bySku = new Map<string, { qty: number; netUnit: number; description: string; unitCode: string; sku: string | null; supplierCode: string | null }>();
+  const bySku = new Map<string, { qty: number; value: number; netUnit: number; description: string; unitCode: string; sku: string | null; supplierCode: string | null }>();
   for (const l of lines) {
     if (l.remaining <= 0) continue;
+    // valor exato do saldo da linha (líquido da linha − parte já recebida), sem arredondar pelo custo unitário líquido
+    const net = lineTotal(l.unitCost, l.qty) - Math.max(0, l.discount ?? 0);
+    const value = l.qty > 0 ? net - roundDiv(net * Math.min(l.qty, l.qty - l.remaining), l.qty) : lineTotal(l.netUnit, l.remaining);
     const cur = bySku.get(l.skuId);
-    if (cur) cur.qty += l.remaining;
-    else bySku.set(l.skuId, { qty: l.remaining, netUnit: l.netUnit, description: l.description, unitCode: l.unitCode, sku: (await ctx.store.get("skus", l.skuId))?.sku ?? null, supplierCode: l.supplierCode ?? null });
+    if (cur) {
+      cur.qty += l.remaining;
+      cur.value += value;
+    } else bySku.set(l.skuId, { qty: l.remaining, value, netUnit: l.netUnit, description: l.description, unitCode: l.unitCode, sku: (await ctx.store.get("skus", l.skuId))?.sku ?? null, supplierCode: l.supplierCode ?? null });
   }
   const items: ReceiptItem[] = [...bySku.entries()].map(([skuId, v], i) => ({
-    idx: i + 1, cProd: v.supplierCode, conversionFactor: QTY, invoicedQty: v.qty, invoicedValue: lineTotal(v.netUnit, v.qty), invoiceUnitCost: v.netUnit, skuId, sku: v.sku, description: v.description, unitCode: v.unitCode,
+    idx: i + 1, cProd: v.supplierCode, conversionFactor: QTY, invoicedQty: v.qty, invoicedValue: v.value, invoiceUnitCost: v.netUnit, skuId, sku: v.sku, description: v.description, unitCode: v.unitCode,
     mapping: "order", expectedQty: v.qty, receivedQty: v.qty, unitCost: v.netUnit, ignore: false, divergence: null,
   }));
   assert(items.length || !orders.length, "Os pedidos selecionados não têm saldo a receber.");
@@ -606,6 +626,17 @@ export interface ReceiptUpdate {
   differenceAction?: "adjust_to_due" | "pay_invoiced";
   notes?: string | null;
   invoicedTotal?: number | null;
+  /**
+   * Frete/outras despesas/desconto EXIBIDOS no formulário quando ele foi carregado. Sem XML, os encargos só
+   * deixam de ser calculados pelo pedido quando o usuário altera um desses valores em relação ao exibido
+   * (um formulário desatualizado — ex.: após erro na conclusão — reenvia os valores antigos sem que isso
+   * seja edição). Sem este campo (chamada direta), compara com os valores gravados.
+   */
+  chargesShown?: { freight: number; otherExpenses: number; discount: number } | null;
+  /** sem XML: volta a calcular frete/seguro/outras despesas/IPI/desconto geral pelo pedido (descarta os informados) */
+  chargesAuto?: boolean;
+  /** sem XML, encargos informados: confirma que o frete/despesas informados são nova cobrança do fornecedor, mesmo com os encargos do pedido já cobrados em outro recebimento */
+  chargesLostAck?: boolean;
 }
 
 export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) {
@@ -663,16 +694,29 @@ export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) 
     assert(wh.branchId === r.branchId, "Depósito de outra filial.");
   }
   for (const [k, v] of [["Frete", input.freight], ["Outras despesas", input.otherExpenses], ["Desconto", input.discount]] as const) assert(v == null || (Number.isInteger(v) && v >= 0), `${k} inválido.`);
-  // sem XML: ao alterar frete/despesas/desconto, os encargos deixam de ser calculados pelo pedido (valores informados)
-  const chargesTouched = (input.freight != null && input.freight !== (r.freight ?? 0)) || (input.otherExpenses != null && input.otherExpenses !== (r.otherExpenses ?? 0)) || (input.discount != null && input.discount !== (r.discount ?? 0));
+  // sem XML: ao alterar frete/despesas/desconto, os encargos deixam de ser calculados pelo pedido (valores informados).
+  // "Alterar" = diferente do que o formulário exibia ao ser carregado (não do gravado: a gravação pode ter
+  // recalculado os encargos depois que o formulário foi aberto, ex.: conclusão interrompida por pendência).
+  const shown = input.chargesShown ?? { freight: r.freight ?? 0, otherExpenses: r.otherExpenses ?? 0, discount: r.discount ?? 0 };
+  const chargesTouched = (input.freight != null && input.freight !== shown.freight) || (input.otherExpenses != null && input.otherExpenses !== shown.otherExpenses) || (input.discount != null && input.discount !== shown.discount);
+  let orderCharges: Record<string, any> | null = null;
+  if (!r.xmlFileId && r.orderCharges) {
+    const wasAuto = r.orderCharges.auto !== false;
+    if (input.chargesAuto) orderCharges = { ...r.orderCharges, auto: true, lostAck: false };
+    else if (wasAuto && chargesTouched) orderCharges = { ...r.orderCharges, auto: false, lostAck: Boolean(input.chargesLostAck) };
+    else if (!wasAuto && input.chargesLostAck !== undefined) orderCharges = { ...r.orderCharges, lostAck: Boolean(input.chargesLostAck) };
+  }
+  // encargos calculados pelo pedido: os valores de frete/despesas/desconto enviados pelo formulário não valem
+  const autoAfter = !r.xmlFileId && Boolean(r.orderCharges) && (orderCharges ?? r.orderCharges).auto !== false;
+  const keepCharges = !autoAfter;
   const patch: Record<string, any> = {
-    ...(!r.xmlFileId && r.orderCharges && r.orderCharges.auto !== false && chargesTouched ? { orderCharges: { ...r.orderCharges, auto: false } } : {}),
+    ...(orderCharges ? { orderCharges } : {}),
     items,
     orderIds,
     ...(input.warehouseId ? { warehouseId: input.warehouseId } : {}),
-    ...(input.freight != null ? { freight: input.freight } : {}),
-    ...(input.otherExpenses != null ? { otherExpenses: input.otherExpenses } : {}),
-    ...(input.discount != null ? { discount: input.discount } : {}),
+    ...(keepCharges && input.freight != null ? { freight: input.freight } : {}),
+    ...(keepCharges && input.otherExpenses != null ? { otherExpenses: input.otherExpenses } : {}),
+    ...(keepCharges && input.discount != null ? { discount: input.discount } : {}),
     ...(input.paymentTermId !== undefined ? { paymentTermId: input.paymentTermId || null } : {}),
     ...(input.differenceAction ? { differenceAction: input.differenceAction } : {}),
     ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
@@ -733,6 +777,18 @@ export function confirmBlockers(r: Doc): string[] {
     if (r.emitter.environment === "homologacao" && !r.emitter.homologationAccepted && !r.notes?.trim()) out.push("NF-e emitida em ambiente de homologação (sem valor fiscal): solicite o XML de produção ou registre a justificativa em observações.");
     if (r.emitter.authorized === false && !r.notes?.trim()) out.push(`XML sem protocolo de autorização da SEFAZ${r.emitter.protocolStatus ? ` (cStat ${r.emitter.protocolStatus}${r.emitter.protocolMessage ? ` – ${r.emitter.protocolMessage}` : ""})` : ""}: confirme a autorização da NF-e no portal da SEFAZ e registre a justificativa em observações.`);
   }
+  // sem XML com encargos informados: frete/despesas do pedido já cobrados em outro recebimento não entram de novo
+  const lost: any[] = !r.xmlFileId && r.orderCharges?.auto === false ? (r.orderCharges.lost ?? []) : [];
+  if (lost.length) {
+    const lostFreight = lost.reduce((a, l) => a + (l.freight ?? 0), 0);
+    const lostOther = lost.reduce((a, l) => a + (l.insurance ?? 0) + (l.otherExpenses ?? 0), 0);
+    const repeated = (lostFreight > 0 && (r.freight ?? 0) > 0) || (lostOther > 0 && (r.otherExpenses ?? 0) > 0);
+    if (repeated && (!r.orderCharges.lostAck || !r.notes?.trim())) {
+      out.push(
+        `Frete/seguro/outras despesas de ${lost.map((l) => `pedido nº ${l.number ?? "—"}`).join(", ")} já foram cobrados no recebimento ${lost.map((l) => `nº ${l.receiptNumber ?? "—"}`).join(", ")}: zere o frete/outras despesas deste recebimento, use “Recalcular encargos pelo pedido” ou, se o fornecedor cobrou nova despesa nesta entrega, marque “Cobrar frete/despesas informados mesmo assim” e registre a justificativa em observações.`,
+      );
+    }
+  }
   const instSum = (r.installments ?? []).reduce((a: number, x: any) => a + x.amount, 0);
   if (payable > 0 && instSum !== payable) out.push("As parcelas não fecham com o valor a pagar — salve a conferência para recalcular.");
   if (eff.createPayable && payable > 0 && (r.installments ?? []).some((x: any) => !x.dueDate)) out.push("Defina a condição de pagamento (vencimentos) para gerar o contas a pagar.");
@@ -768,27 +824,61 @@ async function learnSupplierProduct(ctx: Ctx, r: Doc, it: ReceiptItem) {
  * retira o encargo deste, recalcula o devido e interrompe a confirmação para revisão.
  */
 async function claimOrderCharges(ctx: Ctx, r: Doc) {
-  if (r.xmlFileId) return;
-  const claimed: string[] = (r.orderCharges?.claimed ?? []).filter((oid: string) => (r.orderIds ?? []).includes(oid));
-  const lost: Array<{ orderId: string; number: number | null; receiptNumber: number | null }> = [];
+  if (r.xmlFileId || !r.orderCharges) return;
+  const auto = r.orderCharges.auto !== false;
+  const claimed: string[] = (r.orderCharges.claimed ?? []).filter((oid: string) => (r.orderIds ?? []).includes(oid));
+  const lost: Array<{ orderId: string; number: number | null; receiptNumber: number | null; freight: number; insurance: number; otherExpenses: number }> = [];
+  const added: Array<{ orderId: string; number: number }> = [];
+  const marker = (oid: string) => ({ companyId: ctx.companyId, type: "purchase.order_charges", status: "done", entityType: "purchase_order", entityId: oid, result: { receiptId: r.id, receiptNumber: r.number }, createdBy: ctx.user.id });
   for (const oid of claimed) {
     const mid = chargesMarkerId(oid);
     try {
-      await ctx.store.create("operations", { companyId: ctx.companyId, type: "purchase.order_charges", status: "done", entityType: "purchase_order", entityId: oid, result: { receiptId: r.id, receiptNumber: r.number }, createdBy: ctx.user.id }, mid);
+      await ctx.store.create("operations", marker(oid), mid);
     } catch (e) {
       if (!isConflict(e)) throw e;
       const m = await ctx.store.get("operations", mid);
-      if (m && m.result?.receiptId !== r.id) lost.push({ orderId: oid, number: (await ctx.store.get("purchase_orders", oid))?.number ?? null, receiptNumber: m.result?.receiptNumber ?? null });
+      if (m && m.result?.receiptId !== r.id) {
+        const o = await ctx.store.get("purchase_orders", oid);
+        lost.push({ orderId: oid, number: o?.number ?? null, receiptNumber: m.result?.receiptNumber ?? null, freight: Math.max(0, o?.freight ?? 0), insurance: Math.max(0, o?.insurance ?? 0), otherExpenses: Math.max(0, o?.otherExpenses ?? 0) });
+      }
     }
   }
-  if (!lost.length) return;
-  const orderCharges = { ...r.orderCharges, claimed: claimed.filter((x) => !lost.some((l) => l.orderId === x)) };
+  // encargos ainda sem dono: o recebimento que os assumiria foi cancelado (ou não havia como assumir na abertura).
+  // Com cálculo pelo pedido, este recebimento os assume na confirmação quando: pedido sem entrega anterior,
+  // sem marcador de cobrança e nenhum outro recebimento ativo os assumiu (ou é de XML, que traz o frete da nota).
+  if (auto) {
+    for (const oid of (r.orderIds ?? []) as string[]) {
+      if (claimed.includes(oid)) continue;
+      const o = await ctx.store.get("purchase_orders", oid);
+      if (!o || (o.receivedValue ?? 0) > 0 || Math.max(0, o.freight ?? 0) + Math.max(0, o.insurance ?? 0) + Math.max(0, o.otherExpenses ?? 0) <= 0) continue;
+      if (await ctx.store.get("operations", chargesMarkerId(oid))) continue;
+      const others = (await listAll(ctx.store, "receipts", { filters: [["contains", "orderIds", oid], ["eq", "status", ["draft", "confirming", "confirmed"]]] })).filter((x) => x.id !== r.id);
+      if (others.some((x) => x.status !== "draft" || x.xmlFileId || (x.orderCharges?.claimed ?? []).includes(oid))) continue;
+      try {
+        await ctx.store.create("operations", marker(oid), chargesMarkerId(oid));
+        added.push({ orderId: oid, number: o.number });
+      } catch (e) {
+        if (!isConflict(e)) throw e;
+      }
+    }
+  }
+  if (!lost.length && !added.length) return;
+  const orderCharges = {
+    ...r.orderCharges,
+    claimed: [...claimed.filter((x) => !lost.some((l) => l.orderId === x)), ...added.map((a) => a.orderId)],
+    ...(lost.length ? { lost: [...(r.orderCharges.lost ?? []).filter((l: any) => !lost.some((n) => n.orderId === l.orderId)), ...lost], lostAck: false } : {}),
+  };
   const calc = await recompute(ctx, r, { orderCharges });
   await ctx.store.update("receipts", r.id, { orderCharges, ...omit(calc, "payable") });
-  throw new BusinessError(
-    `Frete/seguro/outras despesas de ${lost.map((l) => `pedido nº ${l.number}`).join(", ")} já foram cobrados no recebimento ${lost.map((l) => `nº ${l.receiptNumber}`).join(", ")}. ${r.orderCharges?.auto !== false ? "Os valores deste recebimento foram recalculados sem esses encargos — revise e conclua novamente." : "Retire esses valores de frete/outras despesas deste recebimento e conclua novamente."}`,
-    "charges_taken",
-  );
+  const parts: string[] = [];
+  if (lost.length) {
+    parts.push(
+      `Frete/seguro/outras despesas de ${lost.map((l) => `pedido nº ${l.number}`).join(", ")} já foram cobrados no recebimento ${lost.map((l) => `nº ${l.receiptNumber}`).join(", ")}. ${auto ? "Os valores deste recebimento foram recalculados sem esses encargos." : "Retire esses valores de frete/outras despesas deste recebimento (ou use “Recalcular encargos pelo pedido”)."}`,
+    );
+  }
+  if (added.length) parts.push(`Frete/seguro/outras despesas de ${added.map((a) => `pedido nº ${a.number}`).join(", ")} ainda não tinham sido cobrados em nenhum recebimento (o recebimento que os assumiria foi cancelado) e foram incluídos neste: valor devido recalculado para ${formatMoney(calc.dueTotal)}.`);
+  await audit(ctx, { module: "purchases", action: "receipt.order_charges", entityType: "receipt", entityId: r.id, summary: `Recebimento nº ${r.number}: ${parts.join(" ")}`, related: [...lost, ...added].map((x) => `purchase_order:${x.orderId}`) });
+  throw new BusinessError(`${parts.join(" ")} Revise e conclua novamente.`, lost.length ? "charges_taken" : "charges_added");
 }
 
 /**

@@ -8,7 +8,7 @@ import { onlyDigits } from "@/lib/core/text";
 import { addDays, nowIso, parseDateInput, today } from "@/lib/dates";
 import { formatMoney, parseBps, parseMoney, parseQty } from "@/lib/money";
 import { evaluateSelection, suggestSelection, type QuoteItem, type QuoteProposal, type ProposalItem } from "./purchase-calc";
-import { cancelOrder, createOrder, orderItems, updateOrder, ORDER_STATUS_LABEL, type OrderInput, type OrderStatus } from "./purchases";
+import { cancelOrder, createOrder, updateOrder, ORDER_STATUS_LABEL, type OrderInput, type OrderStatus } from "./purchases";
 import { assertSupplierUsable, supplierLabel } from "./suppliers";
 import type { QuoteOptions } from "./purchase-calc";
 
@@ -430,10 +430,9 @@ export async function generateOrders(ctx: Ctx, id: string, opts: { submit?: bool
     let o: Doc;
     const prev = keep.get(g.supplierId);
     if (prev) {
-      // rascunho de tentativa anterior: ressincroniza itens/condições com a seleção atual
-      const its = await orderItems(ctx.store, prev.id);
-      const same = prev.total === g.total && its.length === g.items.length && g.items.every((it) => its.some((x) => x.skuId === it.skuId && x.qty === it.qty && x.unitCost === it.unitPrice && (x.discount ?? 0) === it.discount));
-      if (!same) await updateOrder(ctx, prev.id, input);
+      // rascunho de tentativa anterior: ressincroniza itens E condições (pagamento, entrega, frete, observações)
+      // com a seleção atual — sempre, pois a proposta pode ter mudado só a condição/prazo com o mesmo total
+      await updateOrder(ctx, prev.id, input);
       o = await ctx.store.update("purchase_orders", prev.id, { proposalRef });
     } else {
       // chave idempotente por cotação × fornecedor; pedido cancelado com a mesma chave não é reaproveitado

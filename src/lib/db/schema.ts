@@ -370,6 +370,8 @@ export const COLLECTIONS: CollectionDef[] = [
       cartId: id(), exchangeReturnId: id(), completedAt: dt, cancelledAt: dt, cancelReason: s(500), cancelledBy: id(),
       notes: txt, operationId: id(), effectsStatus: s(20), discountApprovedBy: id(),
       cancelEffectsStatus: s(20),
+      // pendências do cancelamento repassadas ao Financeiro (títulos com baixa mantidos): [{ titleId, number, message }]
+      cancelPending: json,
     },
     indexes: [u("u_idem", "idemKey"), k("i_branch_date", "branchId", "completedAt"), k("i_customer", "customerId"), k("i_session", "cashSessionId"), k("i_number", "companyId", "number")],
   },

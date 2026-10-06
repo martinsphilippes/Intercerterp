@@ -30,10 +30,27 @@ function csvCell(v: any, type?: Col["type"]) {
   return String(v);
 }
 
-/** CSV compatível com Excel pt-BR (UTF-8 com BOM, separador ;) — mesmo formato das exportações de tela. */
+/**
+ * Número negativo já formatado em texto ("-12,34", "-1.234,56", "-R$ 12,34", "-12,5%"): só sinal, "R$", espaços,
+ * dígitos, separadores e "%" — não compõe fórmula (mesma regra de src/lib/exporters.ts).
+ */
+const PREFORMATTED_NEGATIVE = /^-\s*(R\$\s*)?\d[\d.,]*%?$/;
+
+/** Neutraliza fórmulas em texto (injeção de fórmula no Excel/planilhas) com o prefixo "'"; colunas numéricas não são afetadas. */
+export function neutralizeCsvText(s: string, numeric = false): string {
+  if (numeric || !s) return s;
+  if (PREFORMATTED_NEGATIVE.test(s)) return s;
+  return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+}
+
+/** CSV compatível com Excel pt-BR (UTF-8 com BOM, separador ;) — mesmo formato (e neutralização) das exportações de tela. */
 export function csv(cols: Col[], rows: Record<string, any>[]) {
   const esc = (s: string) => (/[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  return "﻿" + [cols.map((c) => esc(c.label)).join(";"), ...rows.map((r) => cols.map((c) => esc(csvCell(r[c.key], c.type))).join(";"))].join("\r\n");
+  const isNum = (t?: Col["type"]) => t === "money" || t === "qty";
+  return (
+    "﻿" +
+    [cols.map((c) => esc(neutralizeCsvText(c.label))).join(";"), ...rows.map((r) => cols.map((c) => esc(neutralizeCsvText(csvCell(r[c.key], c.type), isNum(c.type)))).join(";"))].join("\r\n")
+  );
 }
 
 export const BOOK_COLS: Col[] = [

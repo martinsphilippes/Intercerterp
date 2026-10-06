@@ -6,12 +6,14 @@ import { today } from "@/lib/dates";
 import { QTY, roundDiv } from "@/lib/money";
 import { categoryDescendants, categoryPath, fiscalIssues, fiscalStatus } from "@/domain/products";
 import { defaultPriceTableId, priceMetrics } from "@/domain/pricing";
+import { canSeeBranch } from "../estoque/queries";
 
 export type ProductRow = Awaited<ReturnType<typeof queryProducts>>["rows"][number];
 
 /**
  * Consulta única da lista de produtos (tela e exportação).
  * Saldo por filial = físico − reservado nos depósitos de estoque disponível (trânsito e avarias não entram).
+ * Só as filiais permitidas ao usuário (`ctx.user.branchIds`) entram: colunas, totais, valor, trânsito e exportação.
  * Preço = tabela padrão, preço geral vigente hoje (faixa mín–máx entre variações).
  */
 export async function queryProducts(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
@@ -25,7 +27,7 @@ export async function queryProducts(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   if (p.f.ecommerce === "1") filters.push(["eq", "availableEcommerce", true]);
   const categories = await listAll(ctx.store, "categories", { filters: [["eq", "companyId", cid]] });
   if (p.f.category) filters.push(["eq", "categoryId", categoryDescendants(categories, p.f.category)]);
-  const [products, skus, branches, warehouses, balances, brands, taxGroups] = await Promise.all([
+  const [products, skus, allBranches, warehouses, allBalances, brands, taxGroups] = await Promise.all([
     listAll(ctx.store, "products", { filters, orderBy: [{ field: "name", dir: "asc" }] }),
     listAll(ctx.store, "skus", { filters: [["eq", "companyId", cid]] }),
     listAll(ctx.store, "branches", { filters: [["eq", "companyId", cid]], orderBy: [{ field: "code", dir: "asc" }] }),
@@ -34,6 +36,9 @@ export async function queryProducts(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
     listAll(ctx.store, "brands", { filters: [["eq", "companyId", cid]] }),
     listAll(ctx.store, "tax_groups", { filters: [["eq", "companyId", cid]] }),
   ]);
+  // filiais fora do alcance do usuário não aparecem (nem somam em totais, valor, trânsito ou exportação)
+  const branches = allBranches.filter((b) => canSeeBranch(ctx, b.id));
+  const balances = allBalances.filter((b) => canSeeBranch(ctx, b.branchId));
   const tableId = await defaultPriceTableId(ctx.store, cid);
   const prices = tableId ? await listAll(ctx.store, "prices", { filters: [["eq", "priceTableId", tableId]] }) : [];
   const date = today();

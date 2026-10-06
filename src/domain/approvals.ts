@@ -1,6 +1,6 @@
 import { resolveRoleId } from "@/lib/auth/users";
 import { unscoped } from "@/lib/db/scoped-store";
-import { detId, isConflict, listAll } from "@/lib/db";
+import { detId, isConflict, listAll, retryOnConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
@@ -158,7 +158,52 @@ const MAX_ORDERS_PER_REQUEST = 90;
  */
 const decisionSlotId = (requestId: string, seq: number) => detId("approval-slot", requestId, String(seq));
 
-const CONCURRENT_DECISION = "Esta etapa já foi decidida (ou a decisão foi revista) por outra pessoa enquanto você decidia. Atualize a página e confira a situação antes de decidir.";
+const CONCURRENT_DECISION = "Esta etapa já foi decidida (ou a decisão foi revista, ou um pedido da solicitação foi cancelado/enviado) por outra pessoa enquanto você decidia. Atualize a página e confira a situação antes de decidir.";
+
+/** Registro da vaga `decisionSeq` ocupada por uma mudança fora da decisão (cancelamento/envio de pedido, recálculo). */
+function slotDoc(ctx: Ctx, requestId: string, seq: number, type: string, result: Record<string, any>) {
+  return { companyId: ctx.companyId, type, status: "done", entityType: "purchase_request", entityId: requestId, result: { seq, ...result }, createdBy: ctx.user.id };
+}
+
+/** Alteração da solicitação depois que pedidos dela mudaram: total/frete dos pedidos ativos, ou cancelada se nenhum restou. */
+async function requestPatchAfterOrders(store: Store, req: Doc, cancelling?: string) {
+  const orders = await Promise.all((req.orderIds ?? []).map((id: string) => store.get("purchase_orders", id)));
+  const active = orders.filter((o): o is Doc => Boolean(o) && o!.status !== "cancelled" && o!.id !== cancelling);
+  if (!active.length) return req.status === "cancelled" ? {} : { status: "cancelled", decidedAt: nowIso() };
+  const total = active.reduce((a, o) => a + o.total, 0);
+  return total !== req.total ? { total, freight: active.reduce((a, o) => a + (o.freight ?? 0), 0) } : {};
+}
+
+/** Efeitos da solicitação cancelada (todos os pedidos cancelados): pendências das etapas resolvidas e auditoria. */
+export async function afterRequestCancelled(ctx: Ctx, req: Doc) {
+  for (let i = 0; i < (req.steps ?? []).length; i++) await resolveOccurrence(ctx.store, occKey(req, i));
+  await audit(ctx, { module: "purchases", action: "purchase_request.cancelled", entityType: "purchase_request", entityId: req.id, summary: `Solicitação nº ${req.number} cancelada (todos os pedidos cancelados)` });
+}
+
+/**
+ * Muda o estado de UM pedido de uma solicitação fora da decisão (cancelamento, registro de envio) disputando a
+ * mesma vaga `decisionSeq` da decisão/revogação, na mesma transação que grava o pedido e a solicitação: a
+ * decisão ou revogação concorrente que leu o estado anterior falha (vaga ocupada) em vez de sobrescrever o
+ * pedido (ex.: pedido cancelado "ressuscitado" como aprovado). Se a decisão vencer, esta mudança relê o pedido e
+ * revalida (`validate` e a máquina de estados). Devolve null se a solicitação não existe mais.
+ */
+export async function changeOrderInRequest(ctx: Ctx, requestId: string, orderId: string, to: OrderStatus, patch: Record<string, any>, opts: { kind: string; validate?: (o: Doc) => void }) {
+  return retryOnConflict(async () => {
+    const req = await ctx.store.get("purchase_requests", requestId);
+    if (!req) return null;
+    const o = await getOrder(ctx, orderId);
+    opts.validate?.(o);
+    const changed = planOrdersStatus([o], to);
+    const reqPatch: Record<string, any> = to === "cancelled" ? await requestPatchAfterOrders(ctx.store, req, orderId) : {};
+    const seq = req.decisionSeq ?? 0;
+    await ctx.store.transaction(async (t) => {
+      await t.create("operations", slotDoc(ctx, requestId, seq, opts.kind, { orderId, to }), decisionSlotId(requestId, seq));
+      if (changed.length) await t.update("purchase_orders", orderId, { status: to, ...patch });
+      await t.update("purchase_requests", requestId, { ...reqPatch, decisionSeq: seq + 1 });
+    });
+    return { order: o, changed, req, requestCancelled: reqPatch.status === "cancelled" };
+  });
+}
 
 async function proposalWarnings(store: Store, orders: Doc[]) {
   const t = today();
@@ -450,20 +495,25 @@ export async function revokeDecision(ctx: Ctx, decisionId: string, reason: strin
   return updated;
 }
 
-/** Recalcula a solicitação quando um pedido dela é cancelado. */
+/**
+ * Recalcula a solicitação quando pedidos dela mudam (cancelamento): total/frete dos ativos ou cancelada.
+ * Disputa a vaga `decisionSeq` (uma decisão concorrente não grava sobre o estado recalculado, e vice-versa).
+ * O cancelamento de pedido usa `changeOrderInRequest`, que já faz este recálculo na mesma transação.
+ */
 export async function refreshRequestAfterOrderChange(ctx: Ctx, requestId: string) {
-  const req = await ctx.store.get("purchase_requests", requestId);
-  if (!req) return;
-  const orders = await Promise.all((req.orderIds ?? []).map((id: string) => ctx.store.get("purchase_orders", id)));
-  const active = orders.filter((o): o is Doc => Boolean(o) && o!.status !== "cancelled");
-  if (!active.length) {
-    await ctx.store.update("purchase_requests", requestId, { status: "cancelled", decidedAt: nowIso() });
-    for (let i = 0; i < (req.steps ?? []).length; i++) await resolveOccurrence(ctx.store, occKey(req, i));
-    await audit(ctx, { module: "purchases", action: "purchase_request.cancelled", entityType: "purchase_request", entityId: requestId, summary: `Solicitação nº ${req.number} cancelada (todos os pedidos cancelados)` });
-    return;
-  }
-  const total = active.reduce((a, o) => a + o.total, 0);
-  if (total !== req.total) await ctx.store.update("purchase_requests", requestId, { total, freight: active.reduce((a, o) => a + (o.freight ?? 0), 0) });
+  const res = await retryOnConflict(async () => {
+    const req = await ctx.store.get("purchase_requests", requestId);
+    if (!req) return null;
+    const patch: Record<string, any> = await requestPatchAfterOrders(ctx.store, req);
+    if (!Object.keys(patch).length) return null;
+    const seq = req.decisionSeq ?? 0;
+    await ctx.store.transaction(async (t) => {
+      await t.create("operations", slotDoc(ctx, requestId, seq, "purchase.request_refresh", {}), decisionSlotId(requestId, seq));
+      await t.update("purchase_requests", requestId, { ...patch, decisionSeq: seq + 1 });
+    });
+    return { req, cancelled: patch.status === "cancelled" };
+  });
+  if (res?.cancelled) await afterRequestCancelled(ctx, res.req);
 }
 
 export const REQUEST_STATUS: Record<string, string> = { in_review: "Em análise", approved: "Aprovada", adjust: "Em ajuste", rejected: "Rejeitada", cancelled: "Cancelada" };

@@ -16,7 +16,7 @@ import { formatDate, today } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
 import { getSetting } from "@/lib/core/settings";
-import { ACCOUNT_KIND_LABEL, DRE_GROUPS, lateChargeParams, METHOD_KINDS } from "@/domain/finance";
+import { ACCOUNT_KIND_LABEL, DRE_GROUPS, lateChargeParams, METHOD_KINDS, paymentTermInterestNotice } from "@/domain/finance";
 import { FormDialog } from "../_components/form-dialog";
 import { buttonClass } from "@/components/ui/button";
 import { PercentField } from "./percent-field";
@@ -139,7 +139,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <Field label="Intervalo (dias)" required hint="30 = mensal (mesmo dia do mês)">
           <Input type="number" name="intervalDays" min={1} max={365} defaultValue={t?.intervalDays ?? 30} required />
         </Field>
-        <Field label="Juros (% sobre o total)" hint="Acrescido ao valor parcelado quando as parcelas de um título manual são geradas por esta condição (total + juros%).">
+        <Field label="Juros (% sobre o total) — somente títulos manuais" hint="Acrescido ao valor parcelado (total + juros%) apenas em títulos lançados manualmente no Financeiro. Vendas (PDV, crediário, boleto) e compras que usarem esta condição NÃO acrescentam juros.">
           <BpsInput name="interestBps" value={t?.interestBps ?? 0} />
         </Field>
         <Field label="Uso">
@@ -322,7 +322,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   <td className="tabular text-right">{t.installments}</td>
                   <td className="tabular text-right">{t.firstDueDays} dia(s)</td>
                   <td className="tabular text-right">{t.intervalDays} dia(s)</td>
-                  <td className="tabular text-right">{formatBps(t.interestBps ?? 0)}</td>
+                  <td className="tabular text-right">
+                    {formatBps(t.interestBps ?? 0)}
+                    {paymentTermInterestNotice(t) && (
+                      <span className="mt-0.5 block" title={paymentTermInterestNotice(t)!}>
+                        <Badge tone="warn">{t.kind === "purchase" ? "Só títulos manuais" : "Não aplicado em vendas"}</Badge>
+                      </span>
+                    )}
+                  </td>
                   <td>{t.kind === "sale" ? "Vendas" : t.kind === "purchase" ? "Compras" : "Vendas e compras"}</td>
                   <td>{active(t)}</td>
                   <td className="text-right">

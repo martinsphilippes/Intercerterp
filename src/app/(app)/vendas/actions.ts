@@ -18,8 +18,13 @@ export async function cancelSaleAction(saleId: string, fd: FormData) {
     const pays = await s.ctx.store.list("sale_payments", { filters: [["eq", "saleId", saleId]], limit: 50 });
     const pending = pays.items.filter((p) => p.status === "refund_pending");
     const manual = pays.items.filter((p) => p.status === "refund_manual");
+    const kept = Array.isArray(sale.cancelPending) ? (sale.cancelPending as Array<{ number: number }>) : [];
     const parts = [
-      sale.cancelEffectsStatus === "done" ? "Efeitos de estoque, caixa, títulos e fiscal estornados." : "Efeitos do cancelamento em processamento (a tarefa durável conclui o que faltar).",
+      sale.cancelEffectsStatus !== "done"
+        ? "Efeitos do cancelamento em processamento (a tarefa durável conclui o que faltar)."
+        : kept.length
+          ? `Estoque, caixa e fiscal estornados; título(s) ${kept.map((k) => `nº ${k.number}`).join(", ")} com recebimento mantido(s) — o Financeiro foi notificado para estornar.`
+          : "Efeitos de estoque, caixa, títulos e fiscal estornados.",
       pending.length ? `Estorno Pix de ${formatMoney(pending.reduce((a, p) => a + p.amount, 0))} pendente no provedor.` : "",
       manual.length ? `Pix manual: devolva ${formatMoney(manual.reduce((a, p) => a + p.amount, 0))} ao cliente.` : "",
     ].filter(Boolean);
@@ -62,9 +67,10 @@ export async function processReturnAction(saleId: string, fd: FormData) {
       terminalId: await browserTerminal(s.ctx.branchId),
     });
     const abated = ret.abatedAmount ?? 0;
+    const absorbed = Math.max(0, ret.itemsTotal - abated - (ret.compensatedAmount ?? ret.itemsTotal));
     return {
       ok: true as const,
-      message: `Devolução nº ${ret.number} registrada — ${formatMoney(ret.itemsTotal)}${abated > 0 ? ` (${formatMoney(abated)} abatidos do título a prazo; ${formatMoney(ret.compensatedAmount ?? 0)} compensados ao cliente)` : ""}.`,
+      message: `Devolução nº ${ret.number} registrada — ${formatMoney(ret.itemsTotal)}${abated > 0 || absorbed > 0 ? ` (${abated > 0 ? `${formatMoney(abated)} abatidos do título a prazo; ` : ""}${formatMoney(ret.compensatedAmount ?? 0)} compensados ao cliente${absorbed > 0 ? `; ${formatMoney(absorbed)} cobertos por desconto concedido no recebimento, sem reembolso` : ""})` : ""}.`,
       redirect: `/vendas/devolucoes/${ret.id}`,
       data: { id: ret.id },
     };

@@ -19,6 +19,8 @@ import { queryBranches } from "../queries";
 import { setCompanyStatusAction } from "../actions";
 import { CompanyUsersForm } from "../forms";
 import { companyView } from "../access";
+import { unscoped } from "@/lib/db/scoped-store";
+import { resolveRoleId } from "@/lib/auth/users";
 
 export const metadata = { title: "Empresa" };
 
@@ -34,6 +36,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const users = await listAll(cc.store, "users");
   const linked = users.filter((u) => u.isAdmin || (u.companyIds ?? []).includes(id));
   const fiscal = await listAll(cc.store, "fiscal_configs", { filters: [["eq", "companyId", id]] });
+  // vinculados sem perfil nesta empresa (ex.: sem perfil equivalente ao vincular): não acessam nenhum módulo nela
+  const roles = tab === "usuarios" ? await listAll(unscoped(cc.store), "roles") : [];
+  const rolesById = new Map(roles.map((r) => [r.id, r]));
+  const noRole = (u: Record<string, any>) => tab === "usuarios" && !u.isAdmin && (u.companyIds ?? []).includes(id) && !resolveRoleId(u, id, rolesById, roles);
   const base = `/administracao/empresas/${id}`;
   const a = c.address ?? {};
   // as ações exigem a permissão na empresa em uso (runAction) E no perfil da empresa-alvo (companyAdminCtx)
@@ -166,7 +172,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             users={users
               .filter((u) => u.isAdmin || s.user.isAdmin || (u.companyIds ?? []).some((x: string) => s.user.companyIds.includes(x)))
               .sort((x, y) => x.name.localeCompare(y.name, "pt-BR"))
-              .map((u) => ({ id: u.id, name: u.name, email: u.email, linked: (u.companyIds ?? []).includes(id), isAdmin: Boolean(u.isAdmin), status: u.status, self: !s.user.isAdmin && u.id === s.user.id }))}
+              .map((u) => ({ id: u.id, name: u.name, email: u.email, linked: (u.companyIds ?? []).includes(id), isAdmin: Boolean(u.isAdmin), status: u.status, self: !s.user.isAdmin && u.id === s.user.id, noRole: noRole(u) }))}
           />
         </Card>
       )}

@@ -355,6 +355,8 @@ export interface CompetenceFilter {
 export interface CompetenceRow {
   categoryId: string;
   type: "revenue" | "expense";
+  /** "abatement" = devoluções abatidas de títulos a receber (linha própria, reduz a receita da categoria do título) */
+  source?: "abatement";
   months: Record<string, number>;
   total: number;
 }
@@ -362,6 +364,8 @@ export interface CompetenceRow {
 /**
  * Regime de competência: títulos (exceto cancelados) pelo total na data de competência — a receber = receita,
  * a pagar = despesa; lançamentos diretos sem título (vendas à vista, cancelamentos, devoluções, tarifas) pela data.
+ * Devolução de venda a prazo abatida do título (baixa "abatimento", sem lançamento em conta): reduz a receita
+ * pela data do abatimento, na categoria do título (linha "Devoluções (abatimento)"); título cancelado já não conta.
  * Encargos de baixa (juros/multa/desconto) não entram (são financeiros, vistos no realizado).
  */
 export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
@@ -384,16 +388,20 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
     return !e.titleId && !e.settlementId;
   });
   const etitles = await titlesByIds(store, entries.map((e) => e.titleId));
+  // abatimentos de devolução (baixa sem lançamento em conta) pela data do abatimento; branch pelo título
+  const abatements = await listAll(store, "settlements", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "abatement"], ["eq", "status", "active"], ["between", "date", from, to]] });
+  const atitles = await titlesByIds(store, abatements.map((s) => s.titleId));
   const rows = new Map<string, CompetenceRow>();
-  const add = (categoryId: string | null, type: "revenue" | "expense", month: string, v: number) => {
-    const k = `${type}|${categoryId ?? ""}`;
-    if (!rows.has(k)) rows.set(k, { categoryId: categoryId ?? "", type, months: {}, total: 0 });
+  const add = (categoryId: string | null, type: "revenue" | "expense", month: string, v: number, source?: "abatement") => {
+    const k = `${type}|${categoryId ?? ""}|${source ?? ""}`;
+    if (!rows.has(k)) rows.set(k, { categoryId: categoryId ?? "", type, ...(source ? { source } : {}), months: {}, total: 0 });
     const r = rows.get(k)!;
     r.months[month] = (r.months[month] ?? 0) + v;
     r.total += v;
   };
   let titleCount = 0;
   let entryCount = 0;
+  let abatementCount = 0;
   const catFilter = categoryFilterValue(f.categoryId);
   for (const t of titles) {
     if (t.originType === "renegotiation") continue; // receita já reconhecida no título original
@@ -411,13 +419,24 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
     entryCount++;
     add(c, entrySide(e) === "in" ? "revenue" : "expense", e.date.slice(0, 7), e.amount);
   }
+  for (const s of abatements) {
+    const t = atitles.get(s.titleId);
+    // título cancelado (ex.: devolução integral sem recebimento) não compõe a receita: o abatimento também não
+    if (!t || t.kind !== "receivable" || t.status === "cancelled" || t.companyId !== ctx.companyId) continue;
+    if (f.branchId && t.branchId !== f.branchId) continue;
+    const c = resolveCategory({ categoryId: t.categoryId, kind: "", originType: t.originType }, t, defaults);
+    if (catFilter !== undefined && c !== catFilter) continue;
+    if (f.costCenterId && t.costCenterId !== f.costCenterId) continue;
+    abatementCount++;
+    add(c, "revenue", s.date.slice(0, 7), -(s.principal ?? 0), "abatement");
+  }
   const list = [...rows.values()].sort((a, b) => (a.type === b.type ? Math.abs(b.total) - Math.abs(a.total) : a.type === "revenue" ? -1 : 1));
   const byMonth = months.map((m) => {
     const revenue = list.filter((r) => r.type === "revenue").reduce((s, r) => s + (r.months[m] ?? 0), 0);
     const expense = list.filter((r) => r.type === "expense").reduce((s, r) => s + (r.months[m] ?? 0), 0);
     return { month: m, label: formatMonth(m), revenue, expense, result: revenue + expense };
   });
-  return { months, byMonth, rows: list, titleCount, entryCount, from, to };
+  return { months, byMonth, rows: list, titleCount, entryCount, abatementCount, from, to };
 }
 
 export function periodDefaults(ref = today()) {

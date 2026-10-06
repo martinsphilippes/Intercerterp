@@ -1,7 +1,8 @@
 import { detId, isConflict, listAll } from "@/lib/db";
-import { nowIso } from "@/lib/dates";
+import { formatDateTime, nowIso } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireBranch, type Ctx } from "@/lib/core/ctx";
+import { audit } from "@/lib/core/audit";
 import { getIntegration, logIntegration } from "../integrations";
 import { pixProviderFrom, REFUND_DONE_STATUSES, simulatedPix, type ProviderCharge } from "./providers";
 
@@ -24,6 +25,20 @@ async function providerFor(ctx: Ctx) {
  */
 export function maybePayable(intent: { status?: string; cancelConfirmedAt?: string | null; expiresAt?: string | null }) {
   return intent.status === "cancelled" && !intent.cancelConfirmedAt && (!intent.expiresAt || intent.expiresAt > nowIso());
+}
+
+/** Validade padrão das cobranças criadas (minutos) e folga usada quando o provedor não informou a validade. */
+const PIX_EXPIRY_MINUTES = 30;
+const PIX_EXPIRY_MARGIN_MINUTES = 30;
+
+/**
+ * Até quando a cobrança pode ser paga: validade informada pelo provedor ou, sem ela (criação sem resposta),
+ * criação + validade padrão + folga.
+ */
+export function intentDeadline(intent: { expiresAt?: string | null; createdAt?: string | null }): string | null {
+  if (intent.expiresAt) return intent.expiresAt;
+  if (!intent.createdAt) return null;
+  return new Date(new Date(intent.createdAt).getTime() + (PIX_EXPIRY_MINUTES + PIX_EXPIRY_MARGIN_MINUTES) * 60000).toISOString();
 }
 
 async function refresh(ctx: Ctx, intent: any) {
@@ -154,6 +169,14 @@ export async function cancelIntentAtProvider(ctx: Ctx, intent: any) {
     logIntegration(ctx.store, { companyId: ctx.companyId, branchId: ctx.branchId, integrationId: integ?.id, kind: "pix", action: "cancel_charge", status, message });
   const pendingCancel = (message: string) => ctx.store.update("payment_intents", intent.id, { cancelRequestedAt: nowIso(), lastCheckedAt: nowIso(), errorMessage: message.slice(0, 500) });
   if (!p) {
+    // cobrança já vencida não pode mais ser paga: encerra localmente (registrando que o provedor não confirmou)
+    const deadline = intentDeadline(intent);
+    if (deadline && new Date(deadline).getTime() < Date.now()) {
+      const message = `Cobrança ${intent.reference} expirada (validade ${formatDateTime(deadline)}); encerrada localmente sem confirmação do provedor (Pix sem provedor/credencial configurado). Confira o extrato da conta recebedora.`;
+      await log("info", message);
+      await audit(ctx, { module: "pdv", action: "pix.expire_local", entityType: "payment_intent", entityId: intent.id, summary: message, related: intent.cartId ? [`cart:${intent.cartId}`] : [] });
+      return ctx.store.update("payment_intents", intent.id, { status: "expired", cancelRequestedAt: nowIso(), lastCheckedAt: nowIso(), errorMessage: message.slice(0, 500) });
+    }
     await pendingCancel("Cancelamento não enviado: Pix sem provedor/credencial configurado.");
     throw new BusinessError(`Não foi possível cancelar a cobrança Pix ${intent.reference} no provedor (Pix sem provedor/credencial configurado nesta filial). Ela pode continuar pagável até expirar: confira o recebimento antes de liberar o cliente.`, "pix_cancel_failed");
   }

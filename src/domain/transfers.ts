@@ -242,8 +242,12 @@ export async function separateTransfer(ctx: Ctx, id: string) {
 export async function shipTransfer(ctx: Ctx, id: string) {
   requirePerm(ctx, "stock", "edit");
   let t = await loadTransfer(ctx, id);
+  if (t.status === "cancelled" || t.cancelledAt) {
+    // na origem, conclui um cancelamento que tenha ficado incompleto (ex.: expedição concorrente) antes de recusar
+    if (ctx.branchId === t.fromBranchId) await abortShipIfCancelled(ctx, id, "Transferência cancelada não pode ser expedida.");
+    throw new BusinessError("Transferência cancelada não pode ser expedida.", "transfer_cancelled");
+  }
   if (["in_transit", "partial", "received"].includes(t.status)) return t;
-  assert(t.status !== "cancelled", "Transferência cancelada não pode ser expedida.");
   if (t.status === "draft") t = await separateTransfer(ctx, id);
   assert(["separated", "shipping"].includes(t.status), "Somente transferências separadas podem ser expedidas.");
   assert(ctx.branchId === t.fromBranchId, "A expedição é feita no contexto da filial de origem.");
@@ -261,7 +265,7 @@ export async function shipTransfer(ctx: Ctx, id: string) {
     for (const i of items) {
       await applyOnce(ctx, `transfer:${id}:ship:${i.skuId}`, { entityType: "transfer", entityId: id }, async (tx) => {
         const now = await ctx.store.get("transfers", id);
-        if (now?.status === "cancelled") throw new BusinessError("A transferência foi cancelada durante a expedição.");
+        if (now?.status === "cancelled" || now?.cancelledAt) throw new BusinessError("A transferência foi cancelada durante a expedição.", "transfer_cancelled");
         const cid = consumedCounterId(id, i.skuId);
         if (!(await ctx.store.get("counters", cid))) await tx.create("counters", { key: consumedKey(id, i.skuId), value: 0 }, cid);
         await releaseReservations(ctx, "transfer", id, "consumed", i.skuId, tx);
@@ -270,23 +274,56 @@ export async function shipTransfer(ctx: Ctx, id: string) {
       });
     }
   } catch (e) {
+    // cancelamento concorrente: devolve à origem o que esta expedição lançou e recusa com a mensagem do cancelamento
+    await abortShipIfCancelled(ctx, id);
     const cur = await transferItemsFromMovements(ctx, t);
     const shipped = cur.filter((i) => i.shippedQty > 0).length;
     const fresh = await ctx.store.get("transfers", id);
-    if (fresh?.status === "shipping") {
+    if (fresh?.status === "shipping" && !fresh.cancelledAt) {
       // nada saiu: volta a "separado"; algo saiu: permanece em expedição incompleta com o expedido registrado
       await ctx.store.update("transfers", id, shipped ? { items: cur } : { status: "separated" });
+      await abortShipIfCancelled(ctx, id); // o cancelamento pode ter sido gravado entre a leitura e a gravação acima
     }
     if (shipped && e instanceof BusinessError) {
       throw new BusinessError(`Expedição incompleta: ${shipped} de ${items.length} item(ns) já saíram da origem. ${e.message} Regularize e clique em "Expedir" para concluir, ou cancele a transferência para devolver à origem o que já saiu.`, e.code, e.details);
     }
     throw e;
   }
+  // nunca grava "em trânsito" sobre um cancelamento: confere antes e depois da gravação (sem atualização condicional
+  // no banco, a conferência posterior desfaz a sobreposição e devolve à origem o que saiu)
+  await abortShipIfCancelled(ctx, id);
   const next = await transferItemsFromMovements(ctx, t);
   const totalCost = next.reduce((a, i) => a + roundDiv(i.shippedQty * i.unitCost, QTY), 0);
   const u = await ctx.store.update("transfers", id, { status: "in_transit", items: next, shippedAt: t.shippedAt ?? nowIso(), shippedBy: ctx.user.id, totalCost });
+  await abortShipIfCancelled(ctx, id);
   await audit(ctx, { module: "stock", action: "transfer.ship", entityType: "transfer", entityId: id, summary: `Transferência ${transferCode(t.number)} expedida — em trânsito para o destino`, related: next.map((i) => `sku:${i.skuId}`) });
   return u;
+}
+
+/**
+ * Expedição × cancelamento: se o cancelamento já foi gravado (status ou `cancelledAt`, que a expedição nunca
+ * apaga), conclui o cancelamento — devolve à origem o que estiver em trânsito, libera reservas, regrava itens
+ * e divergências e restaura o status "cancelado" — e recusa a expedição. Sem cancelamento, não faz nada.
+ */
+async function abortShipIfCancelled(ctx: Ctx, id: string, message?: string): Promise<void> {
+  const fresh = await ctx.store.get("transfers", id);
+  if (!fresh || (fresh.status !== "cancelled" && !fresh.cancelledAt)) return;
+  let doc = fresh;
+  if (fresh.status !== "cancelled" || (await cancellationIncomplete(ctx, fresh))) {
+    const done = await completeCancellation(ctx, fresh, fresh.cancelReason ?? "cancelada durante a expedição", nowIso());
+    doc = done.doc;
+    if (done.settled.length) {
+      await audit(ctx, { module: "stock", action: "transfer.cancel_complete", entityType: "transfer", entityId: id, summary: `Transferência ${transferCode(fresh.number)}: cancelada durante a expedição — ${done.settled.length} item(ns) já expedido(s) devolvido(s) à origem`, reason: fresh.cancelReason ?? null, related: done.settled.map((i) => `sku:${i.skuId}`) });
+    }
+  }
+  if (message) throw new BusinessError(message, "transfer_cancelled");
+  const back = ((doc.items ?? []) as TransferItem[]).filter((i) => (i.returnedQty ?? 0) > 0).length;
+  throw new BusinessError(
+    back
+      ? `A transferência foi cancelada durante a expedição: ${back} item(ns) que já tinham saído voltaram à origem e nada ficou em trânsito.`
+      : "A transferência foi cancelada durante a expedição; nenhum item saiu da origem.",
+    "transfer_cancelled",
+  );
 }
 
 /**
@@ -470,31 +507,93 @@ export async function resolveTransferPending(ctx: Ctx, id: string, input: { mode
 }
 
 /**
+ * Conclui o cancelamento a partir dos movimentos (fonte de verdade): devolve à origem tudo o que estiver
+ * pendente em trânsito, libera as reservas e regrava status, itens recalculados, `returnedAt` e as
+ * divergências "returned" que faltarem (uma por quantidade devolvida ainda não registrada). Idempotente e
+ * segura em paralelo: cada devolução (`settlePending`) e cada reserva é encerrada uma única vez.
+ */
+async function completeCancellation(ctx: Ctx, t: Doc, reason: string, at: string): Promise<{ doc: Doc; settled: TransferItem[] }> {
+  const settled: TransferItem[] = [];
+  for (const i of await transferItemsFromMovements(ctx, t)) {
+    if (pendingQty(i) <= 0) continue;
+    await settlePending(ctx, t, i, "return", `cancelamento — ${reason}`);
+    settled.push(i);
+  }
+  await releaseReservations(ctx, "transfer", t.id, "released");
+  const fresh = await loadTransfer(ctx, t.id);
+  const items = await transferItemsFromMovements(ctx, fresh);
+  const divergences = [...((fresh.divergences ?? []) as any[])];
+  for (const i of items) {
+    const noted = divergences.filter((d) => d.kind === "returned" && d.skuId === i.skuId).reduce((a, d) => a + (Number(d.qty) || 0), 0);
+    if ((i.returnedQty ?? 0) > noted) divergences.push({ kind: "returned", skuId: i.skuId, qty: i.returnedQty - noted, note: `Cancelamento: ${reason}`, at, by: ctx.user.id });
+  }
+  const returned = items.some((i) => (i.returnedQty ?? 0) > 0);
+  const doc = await ctx.store.update("transfers", t.id, {
+    status: "cancelled",
+    cancelledAt: fresh.cancelledAt ?? at,
+    cancelReason: fresh.cancelReason ?? reason,
+    items,
+    divergences,
+    returnedAt: returned ? (fresh.returnedAt ?? at) : (fresh.returnedAt ?? null),
+  });
+  return { doc, settled };
+}
+
+/** Cancelamento gravado mas incompleto: pendente em trânsito, itens/divergências desatualizados ou reserva ativa. */
+async function cancellationIncomplete(ctx: Ctx, t: Doc): Promise<boolean> {
+  const items = await transferItemsFromMovements(ctx, t);
+  if (items.some((i) => pendingQty(i) > 0)) return true;
+  const stored = new Map(((t.items ?? []) as TransferItem[]).map((i) => [i.skuId, i]));
+  const divs = (t.divergences ?? []) as any[];
+  for (const i of items) {
+    const s = stored.get(i.skuId);
+    if ((s?.shippedQty ?? 0) !== i.shippedQty || (s?.returnedQty ?? 0) !== i.returnedQty || (s?.lostQty ?? 0) !== i.lostQty) return true;
+    const noted = divs.filter((d) => d.kind === "returned" && d.skuId === i.skuId).reduce((a, d) => a + (Number(d.qty) || 0), 0);
+    if (i.returnedQty > noted || (i.returnedQty > 0 && !t.returnedAt)) return true;
+  }
+  const active = await ctx.store.list("stock_reservations", { filters: [["eq", "originType", "transfer"], ["eq", "originId", t.id], ["eq", "status", "active"]], limit: 1 });
+  return active.items.length > 0;
+}
+
+/**
  * Cancela rascunho, separada ou com expedição incompleta: libera as reservas e devolve à origem o que já
  * tiver saído (movimentos `transfer_return` idempotentes, baixando o trânsito do destino). Depois da
  * expedição completa, use o retorno à origem.
+ * Repetir o cancelamento de uma transferência já cancelada não altera nada — exceto quando o cancelamento
+ * ficou incompleto (interrupção ou expedição simultânea): aí conclui a devolução e regrava itens e divergências.
  */
 export async function cancelTransfer(ctx: Ctx, id: string, reason: string) {
   requirePerm(ctx, "stock", "edit");
   const t = await loadTransfer(ctx, id);
-  if (t.status === "cancelled") return t;
+  if (t.status === "cancelled") {
+    if (!(await cancellationIncomplete(ctx, t))) return t;
+    assert(ctx.branchId === t.fromBranchId, "Conclua o cancelamento no contexto da filial de origem.");
+    const { doc, settled } = await completeCancellation(ctx, t, t.cancelReason ?? (reason?.trim() || "cancelamento"), nowIso());
+    await resolveOccurrence(ctx.store, `transfer_overdue:${id}`);
+    await audit(ctx, {
+      module: "stock",
+      action: "transfer.cancel_complete",
+      entityType: "transfer",
+      entityId: id,
+      summary: `Transferência ${transferCode(t.number)}: cancelamento concluído${settled.length ? ` — ${settled.length} item(ns) em trânsito devolvido(s) à origem` : " — itens e divergências atualizados"}`,
+      reason: t.cancelReason ?? null,
+      related: settled.map((i) => `sku:${i.skuId}`),
+    });
+    return doc;
+  }
   assert(["draft", "separated", "shipping"].includes(t.status), "Transferência já expedida: use \"Retornar à origem\" para o saldo em trânsito.");
   assert(ctx.branchId === t.fromBranchId, "Cancele no contexto da filial de origem.");
   assert(reason?.trim(), "Informe o motivo do cancelamento.");
   const at = nowIso();
   // o que já saiu da origem (expedição incompleta) volta para ela antes de cancelar — nada fica preso em trânsito
-  const current = t.status === "draft" ? [] : await transferItemsFromMovements(ctx, t);
-  const back = current.filter((i) => pendingQty(i) > 0);
-  for (const i of back) await settlePending(ctx, t, i, "return", `cancelamento — ${reason.trim()}`);
-  await releaseReservations(ctx, "transfer", id, "released");
-  const patch: Record<string, any> = { status: "cancelled", cancelledAt: at, cancelReason: reason.trim() };
-  if (back.length) {
-    const fresh = await loadTransfer(ctx, id);
-    patch.items = await transferItemsFromMovements(ctx, t);
-    patch.returnedAt = at;
-    patch.divergences = [...((fresh.divergences ?? []) as any[]), ...back.map((i) => ({ kind: "returned", skuId: i.skuId, qty: pendingQty(i), note: `Cancelamento: ${reason.trim()}`, at, by: ctx.user.id }))];
+  let { doc: u, settled: back } = await completeCancellation(ctx, t, reason.trim(), at);
+  // expedição simultânea pode ter lançado saída depois da leitura dos movimentos: confere de novo após gravar
+  // o cancelamento (uma expedição que ainda não viu o cancelamento devolve, ela mesma, o que lançar depois)
+  if (await cancellationIncomplete(ctx, u)) {
+    const again = await completeCancellation(ctx, u, reason.trim(), at);
+    u = again.doc;
+    back = [...back, ...again.settled.filter((i) => !back.some((b) => b.skuId === i.skuId))];
   }
-  const u = await ctx.store.update("transfers", id, patch);
   await resolveOccurrence(ctx.store, `transfer_overdue:${id}`);
   await audit(ctx, {
     module: "stock",

@@ -18,6 +18,8 @@ const installmentColumns = (rec: boolean) => [
   { key: "dueDate", label: "Vencimento", type: "date" as const },
   { key: "amount", label: "Valor", type: "money" as const },
   { key: "paid", label: rec ? "Recebido (principal)" : "Pago (principal)", type: "money" as const },
+  // abatimento por devolução de mercadoria (sem dinheiro): coluna própria, fora do recebido e dos descontos
+  ...(rec ? [{ key: "abated", label: "Abatido (devolução)", type: "money" as const }] : []),
   { key: "extras", label: "Encargos − descontos", type: "money" as const },
   { key: "balance", label: "Saldo", type: "money" as const },
   { key: "state", label: "Situação" },

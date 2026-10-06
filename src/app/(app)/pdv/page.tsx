@@ -66,12 +66,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   }
   // troca: devolução com vale a aplicar
   const trocaParam = sp(params, "troca");
-  let pendingExchange: { returnId: string; number: number; itemsTotal: number } | null = null;
+  let pendingExchange: { returnId: string; number: number; itemsTotal: number; credit: number } | null = null;
   if (trocaParam && cart.exchangeReturnId !== trocaParam) {
     const ret = await store.get("returns", trocaParam);
     if (ret && ret.companyId === s.ctx.companyId && ret.kind === "exchange" && !ret.exchangeSaleId) {
       if ((cart.items ?? []).length === 0) cart = await saveCart(s.ctx, cart.id, { exchangeReturnId: ret.id, ...(ret.customerId ? { customerId: ret.customerId } : {}) });
-      else pendingExchange = { returnId: ret.id, number: ret.number, itemsTotal: ret.itemsTotal };
+      else pendingExchange = { returnId: ret.id, number: ret.number, itemsTotal: ret.itemsTotal, credit: ret.compensatedAmount ?? ret.itemsTotal };
     }
   }
   let exchange: { returnId: string; number: number; saleNumber: number; voucherCode: string | null; voucherBalance: number } | null = null;

@@ -48,7 +48,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const openDeferred = deferred.reduce((a, i) => a + (i.balance ?? 0), 0);
   const refundPending = payments.filter((p) => p.status === "refund_pending");
   const refundManual = payments.filter((p) => p.status === "refund_manual");
-  const paymentHint = sale.status === "cancelled" ? (refundPending.length ? "Estorno Pix pendente no provedor" : refundManual.length ? "Devolver Pix manual ao cliente" : "Estornado no cancelamento") : sale.paymentStatus === "paid" ? "Recebido integralmente" : `A receber ${formatMoney(openDeferred)} em ${deferred.filter((i) => i.balance > 0).length} parcela(s)`;
+  const paymentHint = sale.status === "cancelled" ? (refundPending.length ? "Estorno Pix pendente no provedor" : refundManual.length ? "Devolver Pix manual ao cliente" : "Estornado no cancelamento") : sale.paymentStatus === "paid" ? (deferred.length && (sale.returnedTotal ?? 0) > 0 && openDeferred === 0 ? "Nada a receber (saldo abatido por devolução)" : "Recebido integralmente") : `A receber ${formatMoney(openDeferred)} em ${deferred.filter((i) => i.balance > 0).length} parcela(s)`;
   const stockDone = sale.effectsStatus === "done";
   const canCancel = sale.status === "completed" && (sale.returnedTotal ?? 0) === 0 && canDo(s.user, "sale.cancel") && s.ctx.branchId === sale.branchId;
   const canReturn = sale.status === "completed" && returnable > 0 && canDo(s.user, "sale.return") && s.ctx.branchId === sale.branchId;
@@ -92,6 +92,15 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <Notice tone="bad" title={`Venda cancelada em ${formatDateTime(sale.cancelledAt)} por ${users.get(sale.cancelledBy) ?? "—"}`}>
             Motivo: {sale.cancelReason}. A venda original é preservada;{" "}
             {sale.cancelEffectsStatus === "pending" ? "os efeitos do cancelamento (estoque, títulos, fiscal, estorno Pix) estão sendo concluídos pela tarefa durável." : "os efeitos foram estornados (veja as abas)."}
+            {Array.isArray(sale.cancelPending) && sale.cancelPending.length > 0 && (
+              <>
+                {" "}<b>Pendente no Financeiro:</b> título(s){" "}
+                {sale.cancelPending.map((p: { titleId: string; number: number; message: string }, i: number) => (
+                  <span key={p.titleId}>{i > 0 ? "; " : ""}<Link className="underline" href={`/financeiro/receber/${p.titleId}`}>nº {p.number}</Link> ({p.message})</span>
+                ))}{" "}
+                mantido(s) por terem recebimento — o Financeiro foi notificado para estornar as baixas, devolver o valor ao cliente e cancelar os títulos.
+              </>
+            )}
             {refundPending.length > 0 && <> Estorno Pix de {formatMoney(refundPending.reduce((a, p) => a + p.amount, 0))} <b>pendente no provedor</b>{refundPending[0].refundMessage ? ` (${refundPending[0].refundMessage})` : ""}.</>}
             {refundManual.length > 0 && <> Pix manual: <b>devolva {formatMoney(refundManual.reduce((a, p) => a + p.amount, 0))} ao cliente</b> pela conta do Pix (o sistema não estorna Pix manual).</>}
           </Notice>

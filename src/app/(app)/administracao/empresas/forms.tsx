@@ -147,7 +147,7 @@ export function BranchForm({
   );
 }
 
-export function CompanyUsersForm({ companyId, users, disabled }: { companyId: string; users: Array<{ id: string; name: string; email: string; linked: boolean; isAdmin: boolean; status: string; self?: boolean }>; disabled?: boolean }) {
+export function CompanyUsersForm({ companyId, users, disabled }: { companyId: string; users: Array<{ id: string; name: string; email: string; linked: boolean; isAdmin: boolean; status: string; self?: boolean; noRole?: boolean }>; disabled?: boolean }) {
   return (
     <ActionForm action={setCompanyUsersAction} className="space-y-3">
       {({ pending, error }) => (
@@ -165,7 +165,17 @@ export function CompanyUsersForm({ companyId, users, disabled }: { companyId: st
                     {u.name} <span className="block text-xs text-slate-500">você — {u.linked ? "vinculado" : "não vinculado"} (o próprio vínculo é alterado por outro gestor)</span>
                   </p>
                 ) : (
-                  <Checkbox name="userIds" value={u.id} defaultChecked={u.linked} label={<span>{u.name} <span className="block text-xs text-slate-500">{u.email}{u.status !== "active" ? ` · ${u.status}` : ""}</span></span>} />
+                  <Checkbox
+                    name="userIds"
+                    value={u.id}
+                    defaultChecked={u.linked}
+                    label={
+                      <span>
+                        {u.name} <span className="block text-xs text-slate-500">{u.email}{u.status !== "active" ? ` · ${u.status}` : ""}</span>
+                        {u.noRole && <span className="block text-xs text-amber-700">Sem perfil nesta empresa: não acessa nenhum módulo aqui até o perfil ser definido no cadastro do usuário.</span>}
+                      </span>
+                    }
+                  />
                 )}
               </div>
             ))}

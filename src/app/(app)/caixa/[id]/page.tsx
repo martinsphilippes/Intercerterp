@@ -73,7 +73,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       )}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Fundo de abertura" value={formatMoney(sum.totals.opening)} hint="Não é receita" />
-        <Stat label="Vendas concluídas" value={sum.totals.salesCount} hint={formatMoney(sum.totals.sales)} href={`/vendas?sessao=${id}`} />
+        <Stat label="Vendas concluídas" value={sum.totals.salesCount} hint={showExpected ? formatMoney(sum.totals.sales) : "valor oculto até a contagem cega"} href={`/vendas?sessao=${id}`} />
         <Stat label="Suprimentos / sangrias" value={`${formatMoney(sum.totals.supply)} / ${formatMoney(sum.totals.withdrawal)}`} href={`${base}?tab=movimentos`} />
         <Stat label="Dinheiro esperado (agora)" value={showExpected ? formatMoney(sum.expected.cash) : "oculto"} hint={showExpected ? `troco entregue ${formatMoney(sum.totals.change)} · devoluções ${formatMoney(sum.totals.refunds)}` : "conferência cega: revelado após a contagem"} />
         <Stat label={open ? "Situação" : "Diferença do fechamento"} value={open ? (session.status === "reopened" ? "Reaberto" : "Aberto") : formatMoney(totalDiff)} tone={open ? "default" : totalDiff || Object.keys(diffs).length ? "bad" : "good"} hint={!open && session.justification ? `Justificativa: ${session.justification}` : undefined} />
@@ -139,7 +139,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               ))}
             </tbody>
           </table>
-          <p className="border-t border-line px-4 py-2 text-xs text-slate-500">Recebimentos de venda em dinheiro: {sum.movements.filter((m) => m.type === "sale").length} lançamento(s), {formatMoney(sum.totals.cashSales)} (ver aba Vendas).</p>
+          <p className="border-t border-line px-4 py-2 text-xs text-slate-500">
+            {showExpected
+              ? <>Recebimentos de venda em dinheiro: {sum.movements.filter((m) => m.type === "sale").length} lançamento(s), {formatMoney(sum.totals.cashSales)} (ver aba Vendas).</>
+              : <>Recebimentos de venda em dinheiro: ocultos até a contagem cega ser registrada no fechamento.</>}
+          </p>
         </Card>
       )}
       {tab === "vendas" && (
