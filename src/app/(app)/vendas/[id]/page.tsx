@@ -45,7 +45,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const mBps = marginBps(netRevenue, netCost);
   const doc = d.docs.find((x) => x.originType === "sale") ?? null;
   // a prazo: título da venda e as renegociações dele (o saldo renegociado passa ao novo título)
-  const deferred = d.installments.filter((i) => i.kind === "receivable" && ["sale", "renegotiation"].includes(d.titles.find((t) => t.id === i.titleId)?.originType ?? "") && i.status !== "cancelled");
+  const deferred = d.installments.filter((i) => i.kind === "receivable" && ["sale", "renegotiation"].includes(d.titles.find((t) => t.id === i.titleId)?.originType ?? ""));
   const openDeferred = deferred.reduce((a, i) => a + (i.balance ?? 0), 0);
   const refundPending = payments.filter((p) => p.status === "refund_pending");
   const refundManual = payments.filter((p) => p.status === "refund_manual");
