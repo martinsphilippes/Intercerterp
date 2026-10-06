@@ -17,6 +17,8 @@ ERP web para lojas de varejo: PDV, vendas e caixa, produtos e estoque, clientes,
 
 O app abre em tela cheia, com atalhos para PDV, Painel, Produtos e Contas a receber. O service worker guarda só arquivos estáticos; dados e ações sempre passam pelo servidor (sem cópia local de dados da empresa). Sem conexão, aparece uma página informando que o ERP precisa de internet — o PDV não opera offline.
 
+**Acesso rápido (ambiente de teste):** com `SHOW_DEMO_LOGIN=1`, a tela de login lista os usuários da empresa de demonstração por setor, com a senha e um botão “Entrar” de um clique. Só aparecem usuários marcados como demonstração (nunca contas reais nem o administrador geral). Remova a variável ao entrar em operação real.
+
 ## Instalação automatizada (sem a tela de primeiro acesso)
 
 `GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação) e `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema).
