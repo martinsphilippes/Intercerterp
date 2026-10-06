@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/shell/sidebar";
 import { UnitSwitcher } from "@/components/shell/unit-switcher";
 import { GlobalSearch } from "@/components/shell/global-search";
 import { UserMenu } from "@/components/shell/user-menu";
+import { InstallAppButton } from "@/components/pwa/install-button";
 import { can } from "@/lib/permissions";
 import { listAll, getStore, configuredBackend } from "@/lib/db";
 import { accessibleUnits } from "@/lib/auth/users";
@@ -39,6 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <Bell className="size-5 text-slate-600" />
               {unread.total > 0 && <span className="absolute right-1 top-1 min-w-4 rounded-full bg-accent-500 px-1 text-center text-[10px] font-bold leading-4 text-white">{unread.total > 99 ? "99+" : unread.total}</span>}
             </Link>
+            <InstallAppButton />
             <UserMenu name={s.user.name} role={s.user.roleName ?? ""} />
           </div>
         </header>

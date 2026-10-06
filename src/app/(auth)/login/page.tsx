@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InstallAppButton } from "@/components/pwa/install-button";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/server/session";
 import { isEmptyInstallation, ensureBootstrap } from "@/lib/server/bootstrap";
@@ -27,6 +28,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <Link href="/suporte" className="text-slate-500 hover:underline">
           Precisa de ajuda? Fale com o suporte
         </Link>
+      </div>
+      <div className="mt-4 flex justify-end">
+        <InstallAppButton />
       </div>
       <p className="mt-4 flex items-center gap-1.5 text-xs text-slate-400">
         <ShieldCheck className="size-3.5" aria-hidden /> Conexão protegida · tentativas de acesso são registradas

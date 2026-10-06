@@ -2,13 +2,21 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { missingDeploymentConfig } from "@/lib/server/deploy-config";
+import { RegisterServiceWorker } from "@/components/pwa/register-sw";
 
 export const metadata: Metadata = {
   title: { default: "Intercert ERP", template: "%s · Intercert ERP" },
   description: "ERP Intercert para comércio e varejo",
+  applicationName: "Intercert ERP",
+  appleWebApp: { capable: true, title: "Intercert", statusBarStyle: "black-translucent" },
+  formatDetection: { telephone: false },
+  icons: {
+    icon: [{ url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" }, { url: "/icons/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0f2147" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0f2147", viewportFit: "cover" };
 
 function SetupNeeded({ missing }: { missing: string[] }) {
   const vars: Array<[string, string]> = [
@@ -66,6 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt-BR">
       <body className="min-h-screen">
         <ToastProvider>{children}</ToastProvider>
+        <RegisterServiceWorker />
       </body>
     </html>
   );
