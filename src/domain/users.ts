@@ -28,6 +28,10 @@ import { auditedGuard } from "./roles";
  *  - alcance do gestor: só gerencia usuários vinculados à empresa em uso; quem não é administrador não gerencia
  *    administradores, não concede administrador, só vincula às empresas em que também administra usuários e não altera
  *    o próprio vínculo/perfil; vínculos do usuário com empresas fora do alcance do gestor são preservados;
+ *  - restrição de filiais (`branchIds`) é uma lista única para todas as empresas do usuário (vazia = todas): quem não
+ *    administra usuários em todas as empresas do alvo não inclui restrição em quem não tem nem remove a de quem tem
+ *    (a restrição nas empresas fora do alcance fica idêntica); com restrição, empresa do alcance sem filial marcada
+ *    recebe todas as filiais dela;
  *  - perfil por empresa: o perfil escolhido vale na empresa em uso (`roleByCompany`); os perfis nas demais empresas
  *    do usuário não mudam.
  */
@@ -133,6 +137,11 @@ async function assertCanManageCompanies(ctx: Ctx, companyIds: string[]) {
   }
 }
 
+/** Nomes (fantasia ou razão social) das empresas, para mensagens. */
+async function companyNames(ctx: Ctx, ids: string[]) {
+  return (await Promise.all(ids.map((c) => unscoped(ctx.store).get("companies", c)))).map((c, i) => (c ? c.tradeName || c.name : ids[i]));
+}
+
 /**
  * Senha, situação, convite, e-mail/login e limite de desconto valem em TODAS as empresas do usuário: quem não é
  * administrador só os altera se administra usuários em todas as empresas vinculadas ao alvo.
@@ -143,7 +152,7 @@ async function assertManagesWholeUser(ctx: Ctx, u: Doc, what: string) {
   const ok = await manageableCompanyIds(ctx, companies);
   const outside = companies.filter((c) => !ok.has(c));
   if (!outside.length) return;
-  const names = (await Promise.all(outside.map((c) => unscoped(ctx.store).get("companies", c)))).map((c, i) => (c ? c.tradeName || c.name : outside[i]));
+  const names = await companyNames(ctx, outside);
   throw new PermissionError(
     `${what}: ${u.name} também tem acesso a ${outside.length === 1 ? "uma empresa" : `${outside.length} empresas`} em que você não administra usuários (${names.join(", ")}). Peça a um administrador ou a quem administra usuários em todas as empresas dele.`,
   );
@@ -302,7 +311,8 @@ export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
     // empresa fora do alcance é recusado.
     const inputCompanies = input.companyIds.filter(Boolean);
     const manageable = await manageableCompanyIds(ctx, [...(before.companyIds ?? []), ...inputCompanies]);
-    const branchCompany = new Map((await listAll(base, "branches")).map((b) => [b.id, b.companyId as string]));
+    const allBranches = await listAll(base, "branches");
+    const branchCompany = new Map(allBranches.map((b) => [b.id, b.companyId as string]));
     const inScope = (b: string) => manageable.has(branchCompany.get(b) ?? "");
     const keptCompanies = (before.companyIds ?? []).filter((c: string) => !manageable.has(c));
     const keptBranches = (before.branchIds ?? []).filter((b: string) => !inScope(b));
@@ -313,6 +323,41 @@ export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
       companyIds: [...new Set([...inputCompanies, ...keptCompanies])],
       branchIds: [...new Set([...input.branchIds.filter((b) => b && (inScope(b) || !branchCompany.has(b))), ...keptBranches])],
     };
+    // A restrição de filiais (branchIds) é UMA lista para todas as empresas do usuário: vazia = todas as filiais de todas
+    // as empresas (e o consolidado); com itens = só as filiais listadas, em qualquer empresa. Alvo com empresa fora do
+    // alcance do gestor: a restrição nelas precisa ficar idêntica — não se inclui restrição em quem não tem, não se remove
+    // a de quem tem (as filiais de fora já são preservadas acima).
+    if (keptCompanies.length) {
+      const had = (before.branchIds ?? []).length > 0;
+      const will = merged.branchIds.length > 0;
+      if (had !== will) {
+        const names = (await companyNames(ctx, keptCompanies)).join(", ");
+        const outside = `${names} (${keptCompanies.length === 1 ? "empresa" : "empresas"} em que você não administra usuários)`;
+        if (!had) {
+          throw new PermissionError(
+            `Restringir filiais: ${before.name} acessa todas as filiais, e a restrição de filiais vale para todas as empresas dele — inclusive ${outside}, onde ele perderia o acesso. Deixe as filiais desmarcadas ou peça a um administrador (ou a quem administra usuários em todas as empresas dele).`,
+          );
+        }
+        throw new PermissionError(
+          `Marque ao menos uma filial: ${before.name} tem restrição de filiais, que vale para todas as empresas dele. Sem filial marcada, a restrição deixaria de valer também em ${outside}. Para liberar todas as filiais, peça a um administrador (ou a quem administra usuários em todas as empresas dele).`,
+        );
+      }
+      if (will) {
+        // Com restrição, a lista é literal: empresa do alcance sem filial marcada = nenhuma filial dela (nunca ampliação
+        // silenciosa). Se o usuário tinha filiais nessa empresa e todas foram desmarcadas, a intenção é ambígua (no
+        // formulário sem restrição, "nenhuma" significaria "todas") — recusamos e pedimos uma escolha explícita.
+        const listed = new Set(merged.branchIds.map((b) => branchCompany.get(b)));
+        const hadIn = new Set((before.branchIds ?? []).map((b: string) => branchCompany.get(b)));
+        const emptied = merged.companyIds.filter((c) => manageable.has(c) && !listed.has(c) && hadIn.has(c));
+        if (emptied.length) {
+          const names = (await companyNames(ctx, emptied)).join(", ");
+          throw new BusinessError(
+            `Marque ao menos uma filial de ${names}: ${before.name} tem restrição de filiais (que vale para todas as empresas dele) e, sem filial marcada, perderia o acesso a ${emptied.length === 1 ? "essa empresa" : "essas empresas"}. Para liberar todas as filiais, peça a um administrador (ou a quem administra usuários em todas as empresas dele).`,
+            "branch_required",
+          );
+        }
+      }
+    }
     // dados de acesso e limite de desconto valem em todas as empresas do usuário
     const emailChanged = (input.email?.trim().toLowerCase() ?? "") !== (before.email ?? "");
     const loginChanged = (input.login?.trim().toLowerCase() || null) !== (before.login ?? null);

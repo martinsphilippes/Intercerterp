@@ -47,8 +47,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   // fila de pendentes (independente do período): o que ainda não tem retorno definitivo
   const queueFilters: any[] = [["eq", "companyId", s.ctx.companyId], ["eq", "model", "nfce"], ["eq", "status", ["queued", "error", "pending", "processing"]]];
   if (s.ctx.branchId) queueFilters.push(["eq", "branchId", s.ctx.branchId]);
-  const queue = await listAll(s.ctx.store, "fiscal_documents", { filters: queueFilters, orderBy: [{ field: "issuedAt", dir: "asc" }] });
-  const rejectedOpen = await listAll(s.ctx.store, "fiscal_documents", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "model", "nfce"], ["eq", "status", "rejected"], ...(s.ctx.branchId ? [["eq", "branchId", s.ctx.branchId] as any] : [])] });
+  const queueAll = await listAll(s.ctx.store, "fiscal_documents", { filters: queueFilters, orderBy: [{ field: "issuedAt", dir: "asc" }] });
+  const rejectedAll = await listAll(s.ctx.store, "fiscal_documents", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "model", "nfce"], ["eq", "status", "rejected"], ...(s.ctx.branchId ? [["eq", "branchId", s.ctx.branchId] as any] : [])] });
+  // inutilizações não homologadas não são transmitidas nem corrigidas como documento (o lote as ignora): listadas à parte
+  const queue = queueAll.filter((d) => d.originType !== "disable");
+  const rejectedOpen = rejectedAll.filter((d) => d.originType !== "disable");
+  const disablesOpen = [...queueAll, ...rejectedAll].filter((d) => d.originType === "disable");
   const link = (extra: Record<string, string | null>) => `/fiscal/nfce${qs({ ...extra, page: null }, pp)}`;
   const canFix = canDo(s.user, "fiscal.issue") && Boolean(s.branch);
   const count = (x: string) => base.filter((r) => inStatus(r, x)).length;
@@ -91,7 +95,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           canTest={can(s.user, "fiscal", "view")}
           extra={
             <>
-              <span>CSC: {cscOk == null ? "não exigido na simulação" : cscOk ? <Badge tone="good">configurado</Badge> : <Badge tone="bad">ausente (ID ou variável)</Badge>}</span>
+              <span>CSC: {cscOk == null ? "não exigido na simulação" : cscOk ? <Badge tone="good">configurado</Badge> : cfg?.cscTokenRef && cscRefProblem(cfg.cscTokenRef) ? <Badge tone="bad">variável com nome não permitido</Badge> : <Badge tone="bad">ausente (ID ou variável)</Badge>}</span>
               <span>Série(s) em uso: {seriesInUse.join(", ") || cfg?.nfceSeries || 1}</span>
             </>
           }
@@ -110,6 +114,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <Stat label="Rejeitadas (abertas)" value={rejectedOpen.length} hint="Precisam de correção — todos os períodos" href={`/fiscal/nfce?status=rejected&from=2000-01-01&to=${today()}`} tone={rejectedOpen.length ? "bad" : "default"} />
         <Stat label={from === to && to === today() ? "Canceladas hoje" : "Canceladas no período"} value={st.cancelled.count} hint={`${formatMoney(st.cancelled.total)} cancelados`} href={link({ status: "cancelled" })} />
       </div>
+      {disablesOpen.length > 0 && (
+        <div className="mb-4">
+          <Notice tone="warn" title={`Inutilizações não homologadas (${disablesOpen.length})`}>
+            {disablesOpen.slice(0, 10).map((d) => `Série ${d.series ?? "—"} nº ${d.service?.disableFrom ?? d.number ?? "—"}–${d.service?.disableTo ?? d.number ?? "—"} (${DOC_STATUS_LABEL[d.status] ?? d.status})`).join("; ")}
+            {disablesOpen.length > 10 ? "; …" : ""}. Inutilização não é retransmitida em lote: repita a inutilização da mesma faixa em “Inutilizar numeração”.
+          </Notice>
+        </div>
+      )}
       {(queue.length > 0 || rejectedOpen.length > 0) && (
         <Card
           title={<span id="pendencias">Pendências e contingência</span>}

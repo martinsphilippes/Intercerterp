@@ -305,6 +305,12 @@ function differencesOf(expected: Record<string, number>, counted: Record<string,
   return differences;
 }
 
+/** Diferença vinculante de uma contagem cega registrada (contagens antigas: contado − previsto daquele instante). */
+export function blindCountDifferences(bc: { counted?: Record<string, number> | null; expected?: Record<string, number> | null; differences?: Record<string, number> | null } | null | undefined): Record<string, number> {
+  if (!bc) return {};
+  return bc.differences ?? (bc.expected ? differencesOf(bc.expected, bc.counted ?? {}) : {});
+}
+
 function validCounted(counted: Record<string, number>) {
   assert(counted && typeof counted === "object", "Informe os valores contados.");
   for (const [k, v] of Object.entries(counted)) assert(Number.isInteger(v) && v >= 0, `Valor informado inválido para ${k}.`);
@@ -312,11 +318,52 @@ function validCounted(counted: Record<string, number>) {
 }
 
 /**
+ * Recontagem cega (mesma versão da sessão, depois que o previsto mudou): a diferença já revelada não pode ser apagada.
+ * Por meio de pagamento:
+ *  - D = diferença vinculante da contagem anterior (= contado anterior − previsto anterior; a "contagem efetiva" de agora é
+ *    contado anterior + (previsto atual − previsto anterior) = previsto atual + D);
+ *  - N = diferença da nova contagem (informado − previsto atual).
+ * Vale N quando D = 0 (nenhuma diferença revelada antes) ou quando N tem o mesmo sinal de D e é maior ou igual em valor
+ * absoluto (a recontagem revelou diferença ainda maior). Caso contrário a diferença D é mantida (contado vinculante =
+ * contagem efetiva) e o valor informado fica registrado em `informed` / `kept`. Assim, se qualquer contagem da versão
+ * revelou diferença, o fechamento fica com divergência (exige justificativa).
+ */
+export function bindingRecount(
+  prev: { counted?: Record<string, number> | null; expected?: Record<string, number> | null; differences?: Record<string, number> | null },
+  informed: Record<string, number>,
+  expectedNow: Record<string, number>,
+) {
+  const prevCounted = prev.counted ?? {};
+  const prevExpected = prev.expected ?? {};
+  const prevDiffs = prev.differences ?? differencesOf(prevExpected, prevCounted);
+  const counted: Record<string, number> = {};
+  const differences: Record<string, number> = {};
+  const kept: Record<string, { previousDifference: number; informed: number; informedDifference: number }> = {};
+  const keys = new Set([...Object.keys(prevCounted), ...Object.keys(prevExpected), ...Object.keys(prevDiffs), ...Object.keys(expectedNow), ...Object.keys(informed)]);
+  for (const k of keys) {
+    const d = prevDiffs[k] ?? 0;
+    const inf = informed[k] ?? 0;
+    const n = inf - (expectedNow[k] ?? 0);
+    const takeNew = d === 0 || (Math.sign(n) === Math.sign(d) && Math.abs(n) >= Math.abs(d));
+    if (takeNew) {
+      if (k in informed) counted[k] = inf;
+      if (n !== 0) differences[k] = n;
+    } else {
+      counted[k] = Math.max(0, (expectedNow[k] ?? 0) + d);
+      differences[k] = d;
+      kept[k] = { previousDifference: d, informed: inf, informedDifference: n };
+    }
+  }
+  return { counted, differences, kept };
+}
+
+/**
  * Apuração sem fechar. Na conferência cega (parâmetro do servidor `cash.blindClose`), a primeira apuração de cada
  * versão da sessão REGISTRA a contagem informada (com o previsto daquele instante); só então o previsto é revelado.
  * Apurações seguintes devolvem a contagem já registrada (não é possível recontar depois de ver o previsto) e o
  * fechamento usa essa contagem — exceto se o previsto mudou depois dela (venda/movimento posterior): aí a contagem
- * deixa de valer, o previsto volta a ficar oculto e uma nova contagem é exigida (a anterior fica preservada).
+ * deixa de valer, o previsto volta a ficar oculto e uma nova contagem é exigida (a anterior fica preservada). A nova
+ * contagem não reduz nem inverte diferença já revelada (ver `bindingRecount`).
  */
 export async function previewClose(ctx: Ctx, sessionId: string, counted: Record<string, number>) {
   requirePerm(ctx, "cash", "edit");
@@ -330,25 +377,41 @@ export async function previewClose(ctx: Ctx, sessionId: string, counted: Record<
   const summary = await sessionSummary(ctx, s.id);
   const expected = expectedOf(summary);
   let recount = false;
+  let differences: Record<string, number> | null = null;
+  let informed: Record<string, number> = used;
+  let kept: ReturnType<typeof bindingRecount>["kept"] = {};
   if (blind) {
     const state = blindCountState(s, expected);
-    if (state === "valid") used = s.blindCount.counted ?? {};
-    else {
+    if (state === "valid") {
+      used = s.blindCount.counted ?? {};
+      differences = s.blindCount.differences ?? null;
+      informed = s.blindCount.informed ?? used;
+      kept = s.blindCount.kept ?? {};
+    } else {
       recount = state === "stale";
       const prev = s.blindCount;
-      const superseded = recount ? [...(prev.superseded ?? []), { counted: prev.counted ?? {}, expected: prev.expected ?? null, at: prev.at ?? null, by: prev.by ?? null, byName: prev.byName ?? null }] : [];
-      await ctx.store.update("cash_sessions", s.id, { blindCount: { version, counted: used, expected, at: nowIso(), by: ctx.user.id, byName: ctx.user.name, superseded } });
+      if (recount) {
+        const r = bindingRecount(prev, used, expected);
+        used = r.counted;
+        differences = r.differences;
+        kept = r.kept;
+      } else differences = differencesOf(expected, used);
+      const superseded = recount
+        ? [...(prev.superseded ?? []), { counted: prev.counted ?? {}, informed: prev.informed ?? prev.counted ?? {}, expected: prev.expected ?? null, differences: prev.expected ? blindCountDifferences(prev) : null, at: prev.at ?? null, by: prev.by ?? null, byName: prev.byName ?? null }]
+        : [];
+      await ctx.store.update("cash_sessions", s.id, { blindCount: { version, counted: used, informed, expected, differences, kept: Object.keys(kept).length ? kept : null, at: nowIso(), by: ctx.user.id, byName: ctx.user.name, superseded } });
+      const keptText = Object.entries(kept).map(([k, v]) => `${summary.byMethod[k]?.label ?? k}: informado ${formatMoney(v.informed)}, mantida a diferença ${v.previousDifference > 0 ? "+" : ""}${formatMoney(v.previousDifference)}`).join("; ");
       await audit(ctx, {
         module: "cash", action: "session.blind_count", entityType: "cash_session", entityId: s.id,
         summary: recount
-          ? `Nova contagem cega registrada no caixa nº ${s.number} (versão ${version}): houve vendas ou movimentos depois da contagem anterior (preservada no histórico)`
+          ? `Nova contagem cega registrada no caixa nº ${s.number} (versão ${version}): houve vendas ou movimentos depois da contagem anterior (preservada no histórico)${keptText ? ` · a recontagem não reduz diferença já revelada — ${keptText}` : ""}`
           : `Contagem cega registrada no caixa nº ${s.number} (versão ${version}) antes da revelação do previsto`,
-        after: { counted: used },
-        before: recount ? { counted: prev.counted ?? {} } : null,
+        after: { counted: used, informed, differences, kept: Object.keys(kept).length ? kept : null },
+        before: recount ? { counted: prev.counted ?? {}, expected: prev.expected ?? null } : null,
       });
     }
   }
-  return { expected, differences: differencesOf(expected, used), counted: used, blind, recount };
+  return { expected, differences: differences ?? differencesOf(expected, used), counted: used, informed, kept, blind, recount };
 }
 
 /** Recolhimento registrado no último fechamento e ainda não transferido (fechamento interrompido). */
@@ -407,14 +470,19 @@ export async function closeSession(
   const summary = await sessionSummary(ctx, s.id);
   const expected = expectedOf(summary);
   let counted: Record<string, number>;
+  let blindDiffs: Record<string, number> | null = null;
+  let informedCash: number | null = null;
   if (blind) {
     // conferência cega: vale a contagem registrada antes da revelação do previsto (nunca a do formulário)
     const state = blindCountState(s, expected);
     assert(state !== "none", "Conferência cega: informe a contagem e clique em “Apurar diferenças” antes de fechar.", "blind_count_required");
     assert(state === "valid", "Houve vendas ou movimentos neste caixa depois da contagem cega: conte novamente e clique em “Apurar diferenças” antes de fechar.", "blind_count_stale");
     counted = validCounted(s.blindCount.counted ?? {});
+    // diferença vinculante registrada na apuração (a recontagem não apaga diferença já revelada)
+    blindDiffs = s.blindCount.differences ?? null;
+    informedCash = s.blindCount.informed?.cash ?? null;
   } else counted = validCounted(input.counted);
-  const differences = differencesOf(expected, counted);
+  const differences = blindDiffs ?? differencesOf(expected, counted);
   const hasDiff = Object.keys(differences).length > 0;
   if (hasDiff) assert(input.justification?.trim(), "Há divergências entre previsto e informado: registre a justificativa.", "justification_required");
   if (input.enforceChecklist) {
@@ -426,7 +494,9 @@ export async function closeSession(
   if (input.transferToAccountId && (input.transferAmount ?? 0) > 0) {
     const amount = input.transferAmount!;
     assert(Number.isInteger(amount) && amount > 0, "Valor do recolhimento inválido.");
-    assert(amount <= (counted.cash ?? 0), `Recolhimento (${formatMoney(amount)}) maior que o dinheiro contado (${formatMoney(counted.cash ?? 0)}).`, "transfer_over_counted");
+    // limite: o menor entre o dinheiro contado vinculante e o informado na última contagem
+    const cashCap = Math.min(counted.cash ?? 0, informedCash ?? counted.cash ?? 0);
+    assert(amount <= cashCap, `Recolhimento (${formatMoney(amount)}) maior que o dinheiro contado (${formatMoney(cashCap)}).`, "transfer_over_counted");
     let target: Doc;
     try {
       target = await assertUsableAccount(ctx, input.transferToAccountId);

@@ -17,7 +17,7 @@ import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { dueState } from "@/domain/finance";
 import { MOVEMENT_LABEL } from "@/domain/stock";
-import { COMPENSATION_LABEL, REFUND_METHOD_LABEL } from "@/domain/sales";
+import { COMPENSATION_LABEL, openCancelPending, REFUND_METHOD_LABEL } from "@/domain/sales";
 import { saleDetail } from "../queries";
 import { cancelSaleAction } from "../actions";
 import { EmailReceipt, FiscalStatus, WhatsAppLink } from "../sale-widgets";
@@ -44,6 +44,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const margin = netRevenue - netCost;
   const mBps = marginBps(netRevenue, netCost);
   const doc = d.docs.find((x) => x.originType === "sale") ?? null;
+  // pendências do cancelamento pela situação atual dos títulos (o que o Financeiro já resolveu some do aviso)
+  const cancelPending = sale.status === "cancelled" ? await openCancelPending(s.ctx.store, sale) : [];
   // a prazo: título da venda e as renegociações dele (o saldo renegociado passa ao novo título)
   const deferred = d.installments.filter((i) => i.kind === "receivable" && ["sale", "renegotiation"].includes(d.titles.find((t) => t.id === i.titleId)?.originType ?? ""));
   const openDeferred = deferred.reduce((a, i) => a + (i.balance ?? 0), 0);
@@ -93,10 +95,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <Notice tone="bad" title={`Venda cancelada em ${formatDateTime(sale.cancelledAt)} por ${users.get(sale.cancelledBy) ?? "—"}`}>
             Motivo: {sale.cancelReason}. A venda original é preservada;{" "}
             {sale.cancelEffectsStatus === "pending" ? "os efeitos do cancelamento (estoque, títulos, fiscal, estorno Pix) estão sendo concluídos pela tarefa durável." : "os efeitos foram estornados (veja as abas)."}
-            {Array.isArray(sale.cancelPending) && sale.cancelPending.length > 0 && (
+            {cancelPending.length > 0 && (
               <>
                 {" "}<b>Pendente no Financeiro:</b> título(s){" "}
-                {sale.cancelPending.map((p: { titleId: string; number: number; message: string }, i: number) => (
+                {cancelPending.map((p, i) => (
                   <span key={p.titleId}>{i > 0 ? "; " : ""}<Link className="underline" href={`/financeiro/receber/${p.titleId}`}>nº {p.number}</Link> ({p.message})</span>
                 ))}{" "}
                 mantido(s) por terem recebimento — o Financeiro foi notificado para estornar as baixas, devolver o valor ao cliente e cancelar os títulos.

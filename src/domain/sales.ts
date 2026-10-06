@@ -843,6 +843,33 @@ export interface CancelPendingTitle {
 }
 
 /**
+ * Pendências do cancelamento ainda abertas no Financeiro, pela situação ATUAL dos títulos mantidos: título já cancelado
+ * (ou inexistente) deixa de ser pendência; o motivo é recalculado (baixas ativas agora, renegociação mantida ainda aberta
+ * ou "falta cancelar o título" quando as baixas já foram estornadas).
+ */
+export async function openCancelPending(store: Store, sale: Doc): Promise<CancelPendingTitle[]> {
+  const list: CancelPendingTitle[] = Array.isArray(sale.cancelPending) ? sale.cancelPending : [];
+  if (!list.length) return [];
+  const live: Array<{ p: CancelPendingTitle; title: Doc }> = [];
+  for (const p of list) {
+    const title = await store.get("titles", p.titleId);
+    if (title && title.status !== "cancelled") live.push({ p, title });
+  }
+  const out: CancelPendingTitle[] = [];
+  for (const { p, title } of live) {
+    const active = await activeSettlementsOf(store, title.id);
+    const child = live.find((x) => x.title.originType === "renegotiation" && x.title.originId === title.id);
+    const message = active.length
+      ? `${active.length} baixa(s) ativa(s) — ${formatMoney(active.reduce((a, st) => a + (st.total ?? 0), 0))} recebidos`
+      : child
+        ? `renegociado no título nº ${child.title.number}, que foi mantido`
+        : "sem baixa ativa — falta cancelar o título no Financeiro";
+    out.push({ titleId: p.titleId, number: p.number, message });
+  }
+  return out;
+}
+
+/**
  * Títulos da venda cancelada: cancelados quando não há recebimento. Título com baixa ativa (registrada entre o
  * cancelamento e estes efeitos) é MANTIDO — o dinheiro já entrou e o estorno/devolução é decisão do Financeiro —
  * e vira pendência notificada ao Financeiro (sem retentativa automática). Renegociações são tratadas antes do

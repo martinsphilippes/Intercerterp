@@ -1,4 +1,4 @@
-import { detId, findOne, isConflict, listAll, sha256 } from "@/lib/db";
+import { detId, findOne, isConflict, listAll, retryOnConflict, sha256 } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
@@ -14,6 +14,7 @@ import { defaultWarehouse, postMovements } from "./stock";
 import { parseNfeXml, nfeKeyIsValid, type ParsedNfe } from "./nfe-xml";
 import { CONFIRMED, ORDER_STATUS_LABEL, netUnitCost } from "./purchase-calc";
 import { orderItems, refreshOrderReceipts, remainingQty } from "./purchases";
+import { occupyDecisionSlots } from "./approvals";
 import { createSupplier, findSupplierByDoc, supplierLabel } from "./suppliers";
 
 /**
@@ -133,8 +134,57 @@ async function getReceiptForWrite(ctx: Ctx, id: string) {
   return r;
 }
 
-/** Marcador de cobrança única do frete/seguro/outras despesas do pedido (um recebimento sem XML por pedido). */
+/**
+ * Marcador de cobrança única do frete/seguro/outras despesas do pedido: gravado pelo recebimento sem XML que
+ * CONFIRMA a cobrança (na passagem para "confirmando"; vale quem confirmar primeiro). Só vale enquanto o dono está
+ * ativo e vinculado ao pedido: cancelar o recebimento ou desvincular o pedido antes da confirmação o libera.
+ */
 const chargesMarkerId = (orderId: string) => detId("po-charges", orderId);
+
+/** Libera o marcador de cobrança do pedido se ele (ainda) pertencer ao recebimento indicado. */
+async function releaseChargesMarker(store: Store, orderId: string, receiptId: string | null) {
+  const m = await store.get("operations", chargesMarkerId(orderId));
+  if (!m || (m.result?.receiptId ?? null) !== receiptId) return false;
+  await store.delete("operations", m.id);
+  return true;
+}
+
+/**
+ * Marcador de cobrança vigente do pedido. Marcador de recebimento cancelado ou que não está mais vinculado ao pedido
+ * (estado de versão anterior ou de concorrência entre conferência e conclusão) não vale e é liberado aqui.
+ */
+async function liveChargesMarker(store: Store, orderId: string) {
+  const m = await store.get("operations", chargesMarkerId(orderId));
+  if (!m) return null;
+  const ownerId: string | null = m.result?.receiptId ?? null;
+  const owner = ownerId ? await store.get("receipts", ownerId) : null;
+  if (owner && owner.status !== "cancelled" && (owner.orderIds ?? []).includes(orderId)) return m;
+  await releaseChargesMarker(store, orderId, ownerId);
+  return null;
+}
+
+/**
+ * Frete/seguro/outras despesas do pedido já cobrados por OUTRO recebimento:
+ *  - marcador de cobrança vigente de outro recebimento (o que confirmou a cobrança);
+ *  - recebimento com XML vinculado ao pedido (a nota traz o próprio frete);
+ *  - recebimento sem XML confirmando/confirmado que os assumiu (registro anterior ao marcador) ou com encargos
+ *    informados pelo usuário (substituem os do pedido).
+ * Entrega parcial confirmada SEM esses encargos não conta: o próximo recebimento confirmado do pedido os assume.
+ * `pendingClaims` (prévia na abertura de um recebimento): conta também o rascunho sem XML que já os assumiu — na
+ * confirmação, porém, vale quem confirmar primeiro.
+ */
+async function orderChargesTaken(store: Store, orderId: string, selfId: string | null, pendingClaims = false) {
+  const m = await liveChargesMarker(store, orderId);
+  if (m) return m.result?.receiptId !== selfId;
+  const others = (await listAll(store, "receipts", { filters: [["contains", "orderIds", orderId], ["eq", "status", ["draft", "confirming", "confirmed"]]] })).filter((x) => x.id !== selfId);
+  return others.some((x) => {
+    if (x.xmlFileId) return true;
+    const claims = (x.orderCharges?.claimed ?? []).includes(orderId);
+    if (x.status === "draft") return pendingClaims && claims;
+    const informed = !x.orderCharges || x.orderCharges.auto === false;
+    return claims || (informed && (x.freight ?? 0) + (x.otherExpenses ?? 0) > 0);
+  });
+}
 
 /** Situações de pedido aceitas num recebimento já vinculado (recebido = sem saldo, não aloca nada). */
 const LINKABLE = [...CONFIRMED, "received"];
@@ -548,15 +598,11 @@ export async function createManualReceipt(ctx: Ctx, input: { supplierId: string;
   }));
   assert(items.length || !orders.length, "Os pedidos selecionados não têm saldo a receber.");
   const number = await nextNumber(ctx.store, `receipt:${ctx.companyId}`);
-  // frete/seguro/outras despesas do pedido são cobrados uma única vez: só quando o pedido ainda não teve
-  // entrega e não há outro recebimento ativo (em conferência/confirmando/confirmado) vinculado a ele.
-  // A confirmação registra o consumo (marcador por pedido) e recusa uma segunda cobrança concorrente.
+  // frete/seguro/outras despesas do pedido são cobrados uma única vez: entram na prévia quando nenhum recebimento
+  // os cobrou (entregas parciais confirmadas sem eles não contam) e nenhum outro rascunho já os assumiu.
+  // A confirmação registra a cobrança (marcador por pedido; vale quem confirmar primeiro).
   const claimed: string[] = [];
-  for (const o of orders) {
-    if (o.receivedValue > 0) continue;
-    const others = await listAll(ctx.store, "receipts", { filters: [["contains", "orderIds", o.id], ["eq", "status", ["draft", "confirming", "confirmed"]]] });
-    if (!others.length && !(await ctx.store.get("operations", chargesMarkerId(o.id)))) claimed.push(o.id);
-  }
+  for (const o of orders) if (!(await orderChargesTaken(ctx.store, o.id, null, true))) claimed.push(o.id);
   const base = {
     companyId: ctx.companyId, branchId, createdBy: ctx.user.id, number, warehouseId: input.warehouseId || orders[0]?.warehouseId || (await defaultWarehouse(ctx.store, branchId)).id, supplierId: supplier.id,
     orderIds, nfeKey: key || null, nfeNumber: input.nfeNumber || (key ? String(Number(key.slice(25, 34))) : null), nfeSeries: input.nfeSeries || (key ? String(Number(key.slice(22, 25))) : null),

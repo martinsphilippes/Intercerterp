@@ -8,6 +8,7 @@ import { normalizeSearch, type ListParams } from "@/lib/list";
 import { nameMap } from "@/lib/server/lookups";
 import { PAYMENT_KIND_LABEL } from "@/domain/pricing-calc";
 import { saleTitleChain } from "@/domain/sales";
+import { expectedVisible } from "@/domain/cash";
 
 /** Período padrão do histórico: últimos 30 dias (inclui hoje). */
 export function salesPeriod(f: Record<string, string>) {
@@ -20,6 +21,16 @@ async function inChunks<T = any>(ctx: Ctx, collection: string, field: string, id
   const out: Doc<T>[] = [];
   for (let i = 0; i < ids.length; i += 100) out.push(...(await listAll<T>(ctx.store, collection, { filters: [["eq", field, ids.slice(i, i + 100)], ...extra] })));
   return out;
+}
+
+/**
+ * Conferência cega: a sessão de caixa está aberta, sem contagem registrada (ou com contagem desatualizada) e o usuário não é
+ * supervisor de caixa — os valores das vendas dessa sessão ficam ocultos (com vendas só em dinheiro, revelariam o previsto).
+ */
+export async function sessionAmountsHidden(ctx: Ctx, sessionId: string | null | undefined) {
+  if (!sessionId) return false;
+  const sess = await ctx.store.get("cash_sessions", sessionId);
+  return Boolean(sess && !(await expectedVisible(ctx, sess)));
 }
 
 /**
@@ -46,6 +57,9 @@ export async function querySales(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   if (p.f.sessao) filters.push(["eq", "cashSessionId", p.f.sessao]);
   if (p.f.devolucao === "1") filters.push(["gt", "returnedTotal", 0]);
   let sales = await listAll(ctx.store, "sales", { filters, orderBy: [{ field: "completedAt", dir: "desc" }] });
+  // vendas de uma sessão de caixa em conferência cega ainda não contada: valores ocultos (tela e CSV), como no caixa
+  const hideAmounts = await sessionAmountsHidden(ctx, p.f.sessao);
+  const money = (v: number): number | null => (hideAmounts ? null : v);
   const docIds = sales.map((s) => s.fiscalDocumentId).filter(Boolean) as string[];
   const docs = await inChunks(ctx, "fiscal_documents", "id", docIds);
   const dmap = new Map(docs.map((d) => [d.id, d]));
@@ -86,14 +100,15 @@ export async function querySales(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
     customerName: (s.customerSnapshot?.name ?? "Consumidor final") as string,
     customerDoc: (s.customerSnapshot?.doc ?? null) as string | null,
     itemsCount: (s.itemsCount ?? 0) as number,
-    subtotal: (s.subtotal ?? 0) as number,
-    discountTotal: (s.discountTotal ?? 0) as number,
-    surchargeTotal: (s.surchargeTotal ?? 0) as number,
-    total: (s.total ?? 0) as number,
-    returnedTotal: (s.returnedTotal ?? 0) as number,
-    net: ((s.total ?? 0) - (s.returnedTotal ?? 0)) as number,
-    costTotal: ((s.costTotal ?? 0) - (s.returnedCost ?? 0)) as number,
-    changeAmount: (s.changeAmount ?? 0) as number,
+    subtotal: money(s.subtotal ?? 0),
+    discountTotal: money(s.discountTotal ?? 0),
+    surchargeTotal: money(s.surchargeTotal ?? 0),
+    total: money(s.total ?? 0),
+    returnedTotal: money(s.returnedTotal ?? 0),
+    net: money((s.total ?? 0) - (s.returnedTotal ?? 0)),
+    costTotal: money((s.costTotal ?? 0) - (s.returnedCost ?? 0)),
+    changeAmount: money(s.changeAmount ?? 0),
+    amountsHidden: hideAmounts,
     paymentMethods: [...(names.get(s.id) ?? [])].join(", "),
     paymentKinds: [...(kinds.get(s.id) ?? [])],
     status: s.status as string,
@@ -129,7 +144,7 @@ export function salesTotals(rows: SaleRow[]) {
     cost: sum(done, "costTotal"),
     cancelledCount: cancelled.length,
     cancelledTotal: sum(cancelled, "total"),
-    withReturns: done.filter((r) => r.returnedTotal > 0).length,
+    withReturns: done.filter((r) => (r.returnedTotal ?? 0) > 0).length,
   };
 }
 

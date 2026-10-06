@@ -253,7 +253,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
               </div>
             )}
             <p className="border-t border-line px-4 py-2 text-xs text-slate-500">
-              Valores aplicados por meio nas vendas concluídas do período (troco excluído; vale-crédito usado em trocas aparece como meio de pagamento). Devoluções do período pela forma de compensação; em venda a prazo, a parte abatida do título (crediário) aparece em linha própria, sem saída de caixa. Taxas de cartão não reduzem a receita comercial (ficam no financeiro).
+              Valores aplicados por meio nas vendas concluídas do período (troco excluído; vale-crédito usado em trocas aparece como meio de pagamento). Devoluções do período pela forma de compensação; em venda a prazo, a parte abatida do título (crediário) e a parte coberta por desconto concedido no recebimento aparecem em linhas próprias, sem saída de caixa. Taxas de cartão não reduzem a receita comercial (ficam no financeiro).
             </p>
           </Card>
         )

@@ -43,6 +43,10 @@ export function UserForm({
   const [invite, setInvite] = useState<{ id: string; invite: any } | null>(null);
   const role = roles.find((r) => r.value === roleId);
   const visibleBranches = useMemo(() => branches.filter((b) => isAdmin || companyIds.includes(b.companyId)), [branches, companyIds, isAdmin]);
+  // restrição de filiais é uma lista única para todas as empresas do usuário: com empresa fora do alcance do editor, a
+  // restrição não pode ser incluída (usuário sem restrição) nem removida; com restrição, vale por empresa do alcance
+  const outsideReach = !isAdmin && (kept?.companies ?? 0) > 0;
+  const lockBranches = outsideReach && !(u.branchIds ?? []).length;
   const toggle = (list: string[], v: string, on: boolean) => (on ? [...new Set([...list, v])] : list.filter((x) => x !== v));
 
   if (invite) {
@@ -176,12 +180,23 @@ export function UserForm({
                   <div className="space-y-1.5">
                     {visibleBranches.map((b) => (
                       <div key={b.value}>
-                        <Checkbox name="branchIds" value={b.value} label={b.label} checked={branchIds.includes(b.value)} onChange={(e) => setBranchIds((l) => toggle(l, b.value, e.target.checked))} />
+                        <Checkbox name="branchIds" value={b.value} label={b.label} checked={branchIds.includes(b.value)} disabled={lockBranches} onChange={(e) => setBranchIds((l) => toggle(l, b.value, e.target.checked))} />
                       </div>
                     ))}
                     {!visibleBranches.length && <p className="text-xs text-slate-500">Selecione ao menos uma empresa.</p>}
                   </div>
-                  {branchIds.filter((b) => visibleBranches.some((v) => v.value === b)).length === 0 && <p className="mt-2 text-xs text-slate-500">Nenhuma marcada: todas as filiais.</p>}
+                  {lockBranches ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      O usuário acessa todas as filiais. A restrição de filiais vale para todas as empresas dele, inclusive as que estão fora do seu alcance, por isso só um administrador (ou quem administra usuários em todas as empresas dele) pode restringi-las.
+                    </p>
+                  ) : outsideReach ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Com restrição de filiais, a lista vale para todas as empresas: marque as filiais que o usuário deve acessar em cada empresa do seu alcance (empresa sem filial marcada fica sem acesso). A restrição nas empresas fora do seu alcance é mantida
+                      {(kept?.branches ?? 0) === 0 ? " — mantenha ao menos uma filial marcada, senão a restrição deixaria de valer também nelas." : "."}
+                    </p>
+                  ) : (
+                    branchIds.filter((b) => visibleBranches.some((v) => v.value === b)).length === 0 && <p className="mt-2 text-xs text-slate-500">Nenhuma marcada: todas as filiais.</p>
+                  )}
                 </div>
               </div>
             )}

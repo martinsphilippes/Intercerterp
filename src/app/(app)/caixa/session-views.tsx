@@ -33,6 +33,12 @@ export function ClosureTable({ expected, counted, differences }: { expected: Rec
   );
 }
 
+function diffText(d: Record<string, number> | null | undefined) {
+  if (!d) return ""; // contagens registradas antes do registro de diferença por contagem
+  const parts = Object.entries(d ?? {}).filter(([, v]) => v !== 0).map(([k, v]) => `${METHOD_LABEL[k] ?? k} ${v > 0 ? "+" : ""}${formatMoney(v)}`);
+  return parts.length ? `, diferença ${parts.join(", ")}` : ", sem diferença";
+}
+
 /** Versões de conferência e reaberturas (histórico preservado da sessão). */
 export function SessionVersions({ history }: { history: any[] }) {
   if (!history?.length) return <p className="text-sm text-slate-500">Sem eventos.</p>;
@@ -55,7 +61,15 @@ export function SessionVersions({ history }: { history: any[] }) {
               {Array.isArray(h.blindCount?.superseded) && h.blindCount.superseded.length > 0 && (
                 <p className="text-xs text-amber-800">
                   Contagem cega refeita por vendas/movimentos posteriores — contagens anteriores preservadas:{" "}
-                  {h.blindCount.superseded.map((c: any) => `${formatDateTime(c.at)} ${c.byName ?? ""}: dinheiro ${formatMoney(c.counted?.cash ?? 0)}${c.expected ? ` (previsto então ${formatMoney(c.expected.cash ?? 0)})` : ""}`).join("; ")}.
+                  {h.blindCount.superseded.map((c: any) => `${formatDateTime(c.at)} ${c.byName ?? ""}: dinheiro ${formatMoney(c.counted?.cash ?? 0)}${c.expected ? ` (previsto então ${formatMoney(c.expected.cash ?? 0)})` : ""}${diffText(c.differences)}`).join("; ")}.
+                </p>
+              )}
+              {h.blindCount?.kept && Object.keys(h.blindCount.kept).length > 0 && (
+                <p className="text-xs text-red-800">
+                  A recontagem não reduz diferença já revelada — valores informados na última contagem:{" "}
+                  {Object.entries(h.blindCount.kept as Record<string, { previousDifference: number; informed: number; informedDifference: number }>)
+                    .map(([k, v]) => `${METHOD_LABEL[k] ?? k} ${formatMoney(v.informed)} (diferença ${v.informedDifference > 0 ? "+" : ""}${formatMoney(v.informedDifference)}); mantida ${v.previousDifference > 0 ? "+" : ""}${formatMoney(v.previousDifference)}`)
+                    .join("; ")}.
                 </p>
               )}
               {h.checklist && <p className="text-xs text-slate-500">Conferências: {Object.entries(h.checklist).map(([k, v]) => `${CHECK_LABEL[k] ?? k} ${v ? "✓" : "✗"}`).join(" · ")}</p>}

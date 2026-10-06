@@ -14,6 +14,9 @@ import { formatMoney } from "@/lib/money";
 import { closeSessionAction, previewCloseAction } from "../actions";
 
 interface Method { key: string; label: string; count: number; expected: number | null }
+type Kept = Record<string, { previousDifference: number; informed: number; informedDifference: number }>;
+/** Resultado da contagem cega registrada no servidor (diferença vinculante, valores informados e diferenças mantidas na recontagem). */
+interface BlindResult { differences: Record<string, number> | null; informed: Record<string, number> | null; kept: Kept | null }
 const ICON: Record<string, React.ReactNode> = { cash: <Banknote className="size-4" />, debit: <CreditCard className="size-4" />, credit: <CreditCard className="size-4" />, pix: <QrCode className="size-4" /> };
 
 /**
@@ -21,12 +24,14 @@ const ICON: Record<string, React.ReactNode> = { cash: <Banknote className="size-
  * Diferenças nunca são ajustadas automaticamente: exigem justificativa e ficam preservadas no fechamento.
  * Conferência cega (parâmetro cash.blindClose): o previsto só é revelado após informar os valores contados.
  */
-export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBreakdown, checklist, accounts }: { sessionId: string; blind: boolean; methods: Method[]; initialCounted?: Record<string, number> | null; cashBreakdown: { opening: number; cashSales: number; supply: number; withdrawal: number; refunds: number } | null; checklist: Array<{ key: string; label: string; hint: string }>; accounts: Array<{ value: string; label: string }> }) {
+export function ClosingForm({ sessionId, blind, methods, initialCounted, initialBlind, cashBreakdown, checklist, accounts }: { sessionId: string; blind: boolean; methods: Method[]; initialCounted?: Record<string, number> | null; initialBlind?: BlindResult | null; cashBreakdown: { opening: number; cashSales: number; supply: number; withdrawal: number; refunds: number } | null; checklist: Array<{ key: string; label: string; hint: string }>; accounts: Array<{ value: string; label: string }> }) {
   const toast = useToast();
   const [counted, setCounted] = useState<Record<string, number | null>>(Object.fromEntries(methods.map((m) => [m.key, initialCounted ? (initialCounted[m.key] ?? 0) : null])));
   // conferência cega: o previsto só chega do servidor depois que a contagem é registrada (apuração)
   const [expected, setExpected] = useState<Record<string, number> | null>(blind && !initialCounted ? null : Object.fromEntries(methods.map((m) => [m.key, m.expected ?? 0])));
   const countLocked = blind && expected != null;
+  // conferência cega: a diferença que vale é a registrada no servidor (a recontagem não reduz diferença já revelada)
+  const [blindResult, setBlindResult] = useState<BlindResult | null>(blind ? (initialBlind ?? null) : null);
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [justification, setJustification] = useState("");
   const [transferTo, setTransferTo] = useState("");
@@ -34,19 +39,25 @@ export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBre
   const [revealing, startReveal] = useTransition();
   const filled = methods.every((m) => counted[m.key] != null);
   const numeric = Object.fromEntries(methods.map((m) => [m.key, counted[m.key] ?? 0]));
-  const diffs = useMemo(() => (expected ? Object.fromEntries(methods.map((m) => [m.key, (counted[m.key] ?? 0) - (expected[m.key] ?? 0)])) : null), [expected, counted, methods]);
+  const serverDiffs = blind && expected ? blindResult?.differences ?? null : null;
+  const diffs = useMemo(() => (expected ? Object.fromEntries(methods.map((m) => [m.key, serverDiffs ? (serverDiffs[m.key] ?? 0) : (counted[m.key] ?? 0) - (expected[m.key] ?? 0)])) : null), [expected, counted, methods, serverDiffs]);
   const totalExpected = expected ? Object.values(expected).reduce((a, b) => a + b, 0) : null;
   const totalCounted = Object.values(numeric).reduce((a, b) => a + b, 0);
-  const totalDiff = totalExpected == null ? null : totalCounted - totalExpected;
-  const hasDiff = diffs ? Object.values(diffs).some((d) => d !== 0) : false;
+  const totalDiff = totalExpected == null ? null : serverDiffs ? Object.values(serverDiffs).reduce((a, b) => a + b, 0) : totalCounted - totalExpected;
+  const hasDiff = serverDiffs ? Object.values(serverDiffs).some((d) => d !== 0) : diffs ? Object.values(diffs).some((d) => d !== 0) : false;
+  const kept = Object.entries(blindResult?.kept ?? {});
+  const labelOf = (k: string) => methods.find((m) => m.key === k)?.label ?? k;
   const allChecked = checklist.every((c) => checks[c.key]);
-  const transferOver = Boolean(transferTo) && transferAmount > (numeric.cash ?? 0);
+  // recolhimento limitado ao menor entre o dinheiro contado considerado e o informado na última contagem
+  const cashCap = Math.min(numeric.cash ?? 0, blindResult?.informed?.cash ?? numeric.cash ?? 0);
+  const transferOver = Boolean(transferTo) && transferAmount > cashCap;
   const canClose = filled && expected != null && allChecked && (!hasDiff || justification.trim().length > 0) && !transferOver;
   const reveal = () =>
     startReveal(async () => {
       const res = await previewCloseAction(sessionId, numeric);
       if (!res.ok) return toast("error", res.error);
       setExpected(res.data!.expected);
+      setBlindResult({ differences: res.data!.differences ?? null, informed: res.data!.informed ?? null, kept: (res.data!.kept as Kept) ?? null });
       // a contagem que vale é a registrada no servidor (não pode ser alterada depois da revelação)
       const reg = res.data!.counted ?? {};
       setCounted(Object.fromEntries(methods.map((m) => [m.key, reg[m.key] ?? 0])));
@@ -94,6 +105,13 @@ export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBre
                 Dinheiro esperado = fundo {formatMoney(cashBreakdown.opening)} + vendas em dinheiro {formatMoney(cashBreakdown.cashSales)} + suprimentos {formatMoney(cashBreakdown.supply)} − sangrias {formatMoney(cashBreakdown.withdrawal)} − devoluções {formatMoney(cashBreakdown.refunds)}. Diferença = informado − esperado, por meio.
               </p>
             )}
+            {blind && kept.length > 0 && (
+              <p className="border-t border-line bg-amber-50 px-4 py-2 text-xs text-amber-900">
+                Recontagem: a diferença já revelada na contagem anterior foi mantida (a recontagem não reduz nem inverte diferença já revelada) —{" "}
+                {kept.map(([k, v]) => `${labelOf(k)}: informado ${formatMoney(v.informed)} (diferença ${v.informedDifference > 0 ? "+" : ""}${formatMoney(v.informedDifference)}), mantida ${v.previousDifference > 0 ? "+" : ""}${formatMoney(v.previousDifference)}`).join("; ")}.
+                {" "}O valor informado fica registrado no fechamento; a justificativa é obrigatória.
+              </p>
+            )}
             {blind && (
               <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3 text-sm">
                 <EyeOff className="size-4 text-slate-500" />
@@ -129,7 +147,7 @@ export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBre
                 <div className="mt-2 grid gap-2">
                   <Select value={transferTo} onChange={(e) => setTransferTo(e.target.value)} placeholder="Não recolher agora" options={accounts} aria-label="Conta de destino" />
                   {transferTo && <MoneyInput value={transferAmount} onChange={setTransferAmount} ariaLabel="Valor recolhido" />}
-                  {transferOver && <p className="text-xs text-red-700">O recolhimento não pode passar do dinheiro contado ({formatMoney(numeric.cash ?? 0)}).</p>}
+                  {transferOver && <p className="text-xs text-red-700">O recolhimento não pode passar do dinheiro contado ({formatMoney(cashCap)}).</p>}
                   <p className="text-xs text-slate-500">Gera transferência entre contas (Caixa → destino) com o valor informado, limitado ao dinheiro contado.</p>
                 </div>
               </details>

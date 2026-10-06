@@ -10,7 +10,7 @@ import { sp, type SearchParams } from "@/lib/list";
 import { getSetting } from "@/lib/core/settings";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { canDo } from "@/lib/permissions";
-import { blindCountState, expectedOf, expectedVisible, requiredChecklist, sessionSummary } from "@/domain/cash";
+import { blindCountDifferences, blindCountState, expectedOf, expectedVisible, requiredChecklist, sessionSummary } from "@/domain/cash";
 import { resolveTerminal } from "../../pdv/terminal";
 import { ClosingForm } from "./closing-form";
 
@@ -53,6 +53,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   // conferência cega já apurada nesta versão (e ainda válida): o previsto pode ser exibido junto com a contagem registrada
   const blindState = blind ? blindCountState(session, expectedOf(sum)) : "none";
   const blindCounted = blindState === "valid" ? (session.blindCount.counted as Record<string, number>) : null;
+  const staleHadDiff = blindState === "stale" && Object.keys(blindCountDifferences(session.blindCount)).length > 0;
+  const blindResult = blindState === "valid" ? { differences: session.blindCount.differences ?? null, informed: session.blindCount.informed ?? null, kept: session.blindCount.kept ?? null } : null;
   // valores que permitem deduzir o previsto em dinheiro ficam ocultos até a contagem (supervisor de caixa vê)
   const showAmounts = await expectedVisible(s.ctx, session, blind);
   const hidden = "oculto";
@@ -73,6 +75,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <div className="mb-4">
           <Notice tone="warn" title="Nova contagem necessária">
             Houve vendas ou movimentos neste caixa depois da contagem cega registrada em {formatDateTime(session.blindCount?.at)}. A contagem anterior foi preservada no histórico; conte novamente e clique em “Apurar diferenças”.
+            {staleHadDiff && " A diferença já revelada na contagem anterior continua valendo: a recontagem só pode mantê-la ou revelar diferença maior no mesmo sentido."}
           </Notice>
         </div>
       )}
@@ -92,6 +95,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         blind={blind}
         methods={blind && !blindCounted ? methods.map((m) => ({ ...m, expected: null })) : methods}
         initialCounted={blindCounted}
+        initialBlind={blindResult}
         cashBreakdown={blind ? null : { opening: sum.totals.opening, cashSales: sum.totals.cashSales, supply: sum.totals.supply, withdrawal: sum.totals.withdrawal, refunds: sum.totals.refunds }}
         checklist={requiredChecklist(sum).map(({ key, label, hint }) => ({ key, label, hint }))}
         accounts={accounts.filter((a) => a.value !== cashAcc?.id)}

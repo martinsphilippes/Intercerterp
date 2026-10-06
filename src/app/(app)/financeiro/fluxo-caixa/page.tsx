@@ -293,7 +293,7 @@ async function Movements({ s, params, p }: { s: Awaited<ReturnType<typeof requir
 async function Competence({ s, from, to, branchId, categoryId, costCenterId, catNames }: { s: Awaited<ReturnType<typeof requireSession>>; from: string; to: string; branchId: string | null; categoryId: string | null; costCenterId: string | null; catNames: Map<string, string> }) {
   const c = await computeCompetence(s.ctx, { fromMonth: from.slice(0, 7), toMonth: to.slice(0, 7), branchId, categoryId, costCenterId });
   const titlesLink = (type: "revenue" | "expense", cat: string, m?: string) =>
-    `/financeiro/${type === "revenue" ? "receber" : "pagar"}${qs({ compFrom: m ? `${m}-01` : c.from, compTo: m ? `${m}-31` : c.to, category: cat || "none", competence: "1", branch: branchId, state: null })}`;
+    `/financeiro/${type === "revenue" ? "receber" : "pagar"}${qs({ compFrom: m ? `${m}-01` : c.from, compTo: m ? `${m}-31` : c.to, category: cat || "none", competence: "1", branch: branchId, costCenter: costCenterId, state: null })}`;
   return (
     <div className="space-y-4">
       <Notice tone="info">
@@ -320,7 +320,7 @@ async function Competence({ s, from, to, branchId, categoryId, costCenterId, cat
                     {r.categoryId ? (catNames.get(r.categoryId) ?? "—") : "Sem categoria"}
                     <span className="ml-2 text-xs">
                       {r.source === "abatement" ? (
-                        <Link className="text-brand-700 hover:underline" href={`/financeiro/receber${qs({ abFrom: c.from, abTo: c.to, category: r.categoryId || "none", branch: branchId, state: null })}`} title="Parcelas a receber abatidas por devolução no período">
+                        <Link className="text-brand-700 hover:underline" href={`/financeiro/receber${qs({ abFrom: c.from, abTo: c.to, category: r.categoryId || "none", branch: branchId, costCenter: costCenterId, state: null })}`} title="Parcelas a receber abatidas por devolução no período">
                           parcelas abatidas
                         </Link>
                       ) : (

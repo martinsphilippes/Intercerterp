@@ -59,14 +59,16 @@ async function titlesMap(ctx: Ctx, ids: string[]) {
   return map;
 }
 
-/** Abatimentos de devolução ativos por parcela (a receber): valor total e datas. */
+type Abatements = { total: number; items: Array<{ date: string; amount: number }> };
+
+/** Abatimentos de devolução ativos por parcela (a receber): valor total e cada abatimento (data e valor). */
 async function abatementsByInstallment(ctx: Ctx) {
-  const map = new Map<string, { total: number; dates: string[] }>();
+  const map = new Map<string, Abatements>();
   const list = await listAll(ctx.store, "settlements", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "abatement"], ["eq", "status", "active"]] });
   for (const s of list) {
-    const cur = map.get(s.installmentId) ?? { total: 0, dates: [] };
+    const cur = map.get(s.installmentId) ?? { total: 0, items: [] };
     cur.total += s.principal ?? 0;
-    cur.dates.push(s.date);
+    cur.items.push({ date: s.date, amount: s.principal ?? 0 });
     map.set(s.installmentId, cur);
   }
   return map;
@@ -76,8 +78,9 @@ async function abatementsByInstallment(ctx: Ctx) {
  * Consulta única das listagens de contas a receber/pagar (tela e exportação): uma linha por parcela.
  * Filtros: state (overdue|due_today|upcoming|open|partial|paid|cancelled), dueFrom/dueTo, compFrom/compTo,
  * party, branch (consolidado), category, costCenter, origin, approval (a pagar), method, q;
- * abFrom/abTo (a receber): parcelas com abatimento de devolução no período (detalhamento da competência).
- * "paid" = principal baixado sem os abatimentos; "abated" = abatido por devolução (coluna própria).
+ * abFrom/abTo (a receber): parcelas com abatimento de devolução no período (detalhamento da competência) — aí "abated"
+ * é só o abatido NO PERÍODO (fecha com a linha "Devoluções (abatimento)" da competência); "abatedTotal" é o de sempre.
+ * "paid" = principal baixado sem os abatimentos (todos); "abated" = abatido por devolução (coluna própria).
  */
 export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
   const t0 = today();
@@ -103,11 +106,13 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
   if (p.f.title) filters.push(["eq", "titleId", p.f.title]);
   const allInsts = await listAll(ctx.store, "installments", { filters, orderBy: [{ field: "dueDate", dir: "asc" }] });
   // abatimentos de devolução (a receber): baixa sem dinheiro — fica fora do "recebido" e dos descontos, em coluna própria
-  const abated = kind === "receivable" ? await abatementsByInstallment(ctx) : new Map<string, { total: number; dates: string[] }>();
+  const abated = kind === "receivable" ? await abatementsByInstallment(ctx) : new Map<string, Abatements>();
   const abFrom = p.f.abFrom || "";
   const abTo = p.f.abTo || "";
+  const abPeriod = abFrom || abTo;
+  const inAbPeriod = (d: string) => (!abFrom || d >= abFrom) && (!abTo || d <= abTo);
   // detalhamento da competência: parcelas com abatimento no período (abFrom/abTo)
-  const insts = abFrom || abTo ? allInsts.filter((i) => (abated.get(i.id)?.dates ?? []).some((d) => (!abFrom || d >= abFrom) && (!abTo || d <= abTo))) : allInsts;
+  const insts = abPeriod ? allInsts.filter((i) => (abated.get(i.id)?.items ?? []).some((x) => inAbPeriod(x.date))) : allInsts;
   const titles = await titlesMap(ctx, insts.map((i) => i.titleId));
   const [cats, ccs, branches] = await Promise.all([nameMap(ctx, "fin_categories"), nameMap(ctx, "cost_centers"), nameMap(ctx, "branches")]);
   // categoria efetiva (mesma regra do fluxo de caixa/competência): títulos de venda/compra sem categoria caem na padrão
@@ -129,6 +134,7 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
       if (!hay.includes(q)) continue;
     }
     const ab = abated.get(i.id)?.total ?? 0;
+    const abInPeriod = abPeriod ? (abated.get(i.id)?.items ?? []).filter((x) => inAbPeriod(x.date)).reduce((a, x) => a + x.amount, 0) : ab;
     rows.push({
       id: i.id,
       titleId: t.id,
@@ -147,8 +153,10 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
       amount: i.amount as number,
       /** principal efetivamente recebido/pago (sem abatimentos de devolução) */
       paid: ((i.paid ?? 0) - ab) as number,
-      /** abatido por devolução de mercadoria (sem movimento em conta) */
-      abated: ab,
+      /** abatido por devolução de mercadoria (sem movimento em conta); com abFrom/abTo, só o abatido no período */
+      abated: abInPeriod,
+      /** abatido por devolução em qualquer data */
+      abatedTotal: ab,
       balance: i.balance as number,
       extras: ((i.interest ?? 0) + (i.fine ?? 0) - ((i.discount ?? 0) - ab)) as number,
       status: i.status as string,

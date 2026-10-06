@@ -161,7 +161,9 @@ describe("usuários: alcance de quem gerencia usuários sem ser administrador", 
     const u = await directUser("multi", { name: "Mateus Multi", companyIds: [A, B], branchIds: [bB1], roleId: (await roleOf(A, "cashier")).id });
     const after = await updateUser(rita, u.id, { name: "Mateus Multi", email: u.email, phone: "11999990000", roleId: (await roleOf(A, "cashier")).id, companyIds: [A], branchIds: [] });
     expect(after.companyIds.sort()).toEqual([A, B].sort());
-    expect(after.branchIds).toEqual([bB1]);
+    // filial de B preservada; com restrição de filiais (lista única e literal), A continua sem filial — nenhuma ampliação
+    // silenciosa por uma edição que só trocou o telefone
+    expect([...after.branchIds].sort()).toEqual([bB1]);
     expect(after.phone).toBe("11999990000");
   });
 });

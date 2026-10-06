@@ -554,14 +554,17 @@ export const RETURN_FORM_LABEL: Record<string, string> = {
   card_reversal: "Devolução — estorno no cartão",
   refund: "Devolução — reembolso",
   abatement: "Devolução — abatimento do título a prazo",
+  absorbed: "Devolução — coberta por desconto concedido no recebimento",
 };
 
 /**
  * Quebra por meio de pagamento: valores aplicados nas vendas concluídas (somam as vendas antes das devoluções)
  * e devoluções do período pela forma de compensação. Pagamentos − devoluções = receita líquida.
  * Devolução de venda a prazo (crediário): a parte abatida do título (`returns.abatedAmount`) não sai do caixa nem vira
- * vale — fica na linha "abatimento do título a prazo"; só o restante (o compensado ao cliente) vai para a forma de
- * compensação. Devoluções antigas (sem abatimento registrado): tudo na forma de compensação.
+ * vale — fica na linha "abatimento do título a prazo"; a parte coberta por desconto concedido na baixa do título (nem
+ * abatida nem compensada: valor devolvido − abatido − `returns.compensatedAmount`) também não é reembolsada — fica na
+ * linha "coberta por desconto concedido no recebimento"; só o compensado ao cliente vai para a forma de compensação.
+ * Devoluções antigas (sem abatimento/compensado registrados): tudo na forma de compensação.
  */
 export async function paymentBreakdown(store: Store, scope: ReportScope): Promise<{ rows: PaymentRow[]; paymentsTotal: number; returnsTotal: number; netRevenue: number }> {
   const facts = await loadFacts(store, scope);
@@ -597,11 +600,14 @@ export async function paymentBreakdown(store: Store, scope: ReportScope): Promis
   for (const [docId, total] of returnTotals) {
     const ret = facts.returns.get(docId)!;
     const form = ret.compensation === "refund" ? (ret.refundMethod ?? "refund") : (ret.compensation ?? "refund");
-    // limitado ao valor das linhas: abatido + compensado = valor devolvido (mantém pagamentos − devoluções = receita líquida)
+    // limitado ao valor das linhas: abatido + absorvido + compensado = valor devolvido (mantém pagamentos − devoluções = receita líquida)
     const abated = Math.min(Math.max(ret.abatedAmount ?? 0, 0), Math.max(total, 0));
-    const compensated = total - abated;
+    const rest = total - abated;
+    const compensated = ret.compensatedAmount == null || rest <= 0 ? rest : Math.min(Math.max(ret.compensatedAmount, 0), rest);
+    const absorbed = rest - compensated;
     if (abated > 0) addReturn("abatement", docId, abated);
-    if (compensated !== 0 || abated === 0) addReturn(form, docId, compensated);
+    if (absorbed > 0) addReturn("absorbed", docId, absorbed);
+    if (compensated !== 0 || (abated === 0 && absorbed === 0)) addReturn(form, docId, compensated);
   }
   const rows = [...map.values()].sort((a, b) => (a.kind === b.kind ? b.amount - a.amount : a.kind === "payment" ? -1 : 1));
   const paymentsTotal = rows.filter((r) => r.kind === "payment").reduce((a, r) => a + r.amount, 0);

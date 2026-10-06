@@ -1166,47 +1166,64 @@ async function activeSibling(ctx: Ctx, doc: Doc): Promise<Doc | null> {
 
 /** Envio considerado interrompido (sem gravar a tentativa) após este intervalo — o provedor responde em até 30 s. */
 const SEND_CLAIM_STALE_MS = 5 * 60000;
+/** Espera máxima da tarefa por um mesmo detentor do envio: além disso para de reagendar e alerta (nunca reagenda sem fim). */
+const SEND_BUSY_MAX_WAIT_MS = 3 * SEND_CLAIM_STALE_MS;
+
+/** Marca de tempo vencida (ou inválida, ou adiantada além da validade — relógio fora de sincronia): não segura o envio. */
+function claimExpired(iso: unknown) {
+  const t = new Date(String(iso ?? "")).getTime();
+  return !Number.isFinite(t) || Math.abs(Date.now() - t) > SEND_CLAIM_STALE_MS;
+}
+
+type SendClaim = { kind: "ok" } | { kind: "busy"; holder: string } | { kind: "done" } | { kind: "skip" };
 
 /**
  * Reivindicação única da tentativa de envio (id determinístico por documento + nº da tentativa):
  * envios concorrentes do mesmo documento não disputam numeração nem perdem a contagem de tentativas.
- * Reivindicação "failed" (falha ANTES de registrar a tentativa — nada foi enviado) é reaproveitada por um único
- * processo: a retomada é reivindicada por um registro próprio (id por documento + tentativa + nº da falha).
+ * Reivindicação parada sem registrar a tentativa — "failed" (falha antes do registro: nada foi enviado), "running"
+ * além da validade (processo interrompido) ou "abandoned" (versão anterior) — é retomada por um único processo:
+ * a retomada é reivindicada por um registro próprio (id por documento + tentativa + episódio). Retomada também parada
+ * além da validade consome a tentativa ("skip": segue para a próxima). "busy" só enquanto o detentor está na validade.
  */
-async function claimSend(ctx: Ctx, docId: string, attempt: number): Promise<"ok" | "busy" | "stale"> {
+async function claimSend(ctx: Ctx, docId: string, attempt: number): Promise<SendClaim> {
   const id = detId("fiscalsend", docId, attempt);
   try {
     await ctx.store.create("operations", { companyId: ctx.companyId, type: "fiscal.send", status: "running", entityType: "fiscal_document", entityId: docId, createdBy: ctx.user.id, result: { claimedAt: nowIso() } }, id);
-    return "ok";
+    return { kind: "ok" };
   } catch (e) {
     if (!isConflict(e)) throw e;
-    const claim = await ctx.store.get("operations", id);
-    if (claim?.status === "failed") {
-      const failures = Number(claim.result?.failures ?? 1);
-      try {
-        await ctx.store.create("operations", { companyId: ctx.companyId, type: "fiscal.send_retake", status: "done", entityType: "fiscal_document", entityId: docId, createdBy: ctx.user.id }, detId("fiscalsend-retake", docId, attempt, failures));
-      } catch (e2) {
-        if (!isConflict(e2)) throw e2;
-        return "busy"; // outro processo já retomou esta tentativa
-      }
-      await ctx.store.update("operations", id, { status: "running", error: null, result: { ...(claim.result ?? {}), claimedAt: nowIso() } });
-      return "ok";
-    }
-    const claimedAt = claim?.result?.claimedAt ?? claim?.createdAt;
-    if (claim?.status === "running" && Date.now() - new Date(claimedAt).getTime() > SEND_CLAIM_STALE_MS) {
-      // processo anterior interrompido ANTES de gravar a tentativa (o envio só ocorre depois): tentativa consumida sem envio
-      await ctx.store.update("operations", id, { status: "abandoned" });
-      return "stale";
-    }
-    return "busy";
   }
+  const claim = await ctx.store.get("operations", id);
+  if (!claim) return { kind: "busy", holder: id };
+  if (claim.status === "done") {
+    // tentativa concluída por outro processo: devolve a situação atual; sem registro no documento, a tentativa está consumida
+    const cur = await ctx.store.get("fiscal_documents", docId);
+    return (cur?.attempts ?? 0) >= attempt ? { kind: "done" } : { kind: "skip" };
+  }
+  const claimedAt = claim.result?.claimedAt ?? claim.createdAt;
+  let episode: Array<string | number> | null = null;
+  if (claim.status === "failed") episode = [Number(claim.result?.failures ?? 1)];
+  else if (claim.status === "abandoned" || (claim.status === "running" && claimExpired(claimedAt))) episode = ["stale", String(claimedAt)];
+  if (!episode) return { kind: "busy", holder: `${id}:${claimedAt}` };
+  const retakeId = detId("fiscalsend-retake", docId, attempt, ...episode);
+  try {
+    await ctx.store.create("operations", { companyId: ctx.companyId, type: "fiscal.send_retake", status: "done", entityType: "fiscal_document", entityId: docId, createdBy: ctx.user.id, result: { retakenAt: nowIso(), from: claim.status } }, retakeId);
+  } catch (e2) {
+    if (!isConflict(e2)) throw e2;
+    // outro processo já retomou este episódio: aguarda enquanto a retomada está na validade; parada além dela, consome a tentativa
+    const retake = await ctx.store.get("operations", retakeId);
+    if (retake && claimExpired(retake.result?.retakenAt ?? retake.createdAt)) return { kind: "skip" };
+    return { kind: "busy", holder: retakeId };
+  }
+  await ctx.store.update("operations", id, { status: "running", error: null, result: { ...(claim.result ?? {}), claimedAt: nowIso(), retakes: Number(claim.result?.retakes ?? 0) + 1 } });
+  return { kind: "ok" };
 }
 
 /**
  * Transmite (ou consulta antes de reenviar) o documento. `onBusy`: chamado quando outro processo detém o envio desta
- * tentativa — a tarefa em segundo plano reagenda em vez de concluir.
+ * tentativa (com a identificação do detentor) — a tarefa em segundo plano reagenda em vez de concluir.
  */
-export async function transmitDocument(ctx: Ctx, documentId: string, opts: { onBusy?: () => void } = {}) {
+export async function transmitDocument(ctx: Ctx, documentId: string, opts: { onBusy?: (holder: string) => void } = {}) {
   let doc = await ctx.store.getOrThrow("fiscal_documents", documentId);
   assert(doc.companyId === ctx.companyId, "Documento de outra empresa.");
   if (FINAL.includes(doc.status)) return doc;
@@ -1290,13 +1307,12 @@ export async function transmitDocument(ctx: Ctx, documentId: string, opts: { onB
   }
   // reivindicação da tentativa: só um processo numera e envia; os demais devolvem a situação atual
   let attempt = (doc.attempts ?? 0) + 1;
-  for (;;) {
+  for (let skipped = 0; ; skipped++) {
+    if (skipped >= 50) throw new BusinessError("Não foi possível reservar uma tentativa de envio para o documento (tentativas anteriores interrompidas). Tente novamente.", "send_claim");
     const c = await claimSend(ctx, doc.id, attempt);
-    if (c === "ok") break;
-    if (c === "busy") {
-      opts.onBusy?.();
-      return ctx.store.getOrThrow("fiscal_documents", doc.id);
-    }
+    if (c.kind === "ok") break;
+    if (c.kind === "busy") opts.onBusy?.(c.holder);
+    if (c.kind !== "skip") return ctx.store.getOrThrow("fiscal_documents", doc.id);
     attempt++;
   }
   const claimId = detId("fiscalsend", doc.id, attempt);
@@ -1825,10 +1841,32 @@ registerJob("fiscal.transmit", async (ctx, p) => {
     const cfg = await getFiscalConfig(ctx.store, ctx.companyId, d.branchId);
     if (cfg?.contingency) return { held: "contingency" };
   }
-  let busy = false;
-  const r = await transmitDocument(ctx, p.documentId, { onBusy: () => (busy = true) });
-  // outro processo detém o envio desta tentativa: reagenda (a reivindicação conclui, falha ou vence) em vez de concluir
-  if (busy) return { __retryAt: new Date(Date.now() + 60000).toISOString(), state: { status: r.status, busy: true } };
+  let holder = null as string | null;
+  const r = await transmitDocument(ctx, p.documentId, { onBusy: (h) => (holder = h) });
+  if (holder) {
+    // outro processo detém o envio desta tentativa: reagenda (a reivindicação conclui, falha ou vence e é retomada)
+    // em vez de concluir — limitado: o mesmo detentor além da espera máxima encerra o reagendamento com alerta
+    const waitId = detId("fiscalsend-wait", d.id, holder);
+    let wait = await ctx.store.get("operations", waitId);
+    if (!wait) {
+      try {
+        wait = await ctx.store.create("operations", { companyId: ctx.companyId, type: "fiscal.send_wait", status: "running", entityType: "fiscal_document", entityId: d.id, createdBy: ctx.user.id, result: { since: nowIso() } }, waitId);
+      } catch (e) {
+        if (!isConflict(e)) throw e;
+        wait = await ctx.store.get("operations", waitId);
+      }
+    }
+    const since = wait?.result?.since ?? wait?.createdAt;
+    const waited = Date.now() - new Date(since ?? Date.now()).getTime();
+    if (!(waited <= SEND_BUSY_MAX_WAIT_MS)) {
+      const msg = `Envio automático interrompido: a transmissão está reservada por outro processo há mais de ${Math.round(SEND_BUSY_MAX_WAIT_MS / 60000)} min sem conclusão. Consulte a situação do documento e use "Retransmitir" (mesma referência).`;
+      await ctx.store.update("operations", waitId, { status: "done", error: msg }).catch(() => undefined);
+      await addEvent(ctx, d.id, "retry", r.status, msg);
+      await raiseFiscalIssue(ctx, r, msg);
+      return { status: r.status, busy: true, stopped: true };
+    }
+    return { __retryAt: new Date(Date.now() + 60000).toISOString(), state: { status: r.status, busy: true } };
+  }
   return { status: r.status };
 });
 registerJob("fiscal.query", async (ctx, p) => {

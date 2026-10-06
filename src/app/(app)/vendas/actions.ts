@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { runAction, fstr, fopt, fjson } from "@/lib/server/action";
-import { cancelSale, confirmCardReversal, processReturn, refreshSaleFiscal, sendSaleReceiptEmail, type ReturnInput } from "@/domain/sales";
+import { cancelSale, confirmCardReversal, openCancelPending, processReturn, refreshSaleFiscal, sendSaleReceiptEmail, type ReturnInput } from "@/domain/sales";
 import { formatMoney } from "@/lib/money";
 import { TERMINAL_COOKIE } from "../pdv/terminal";
 
@@ -18,7 +18,8 @@ export async function cancelSaleAction(saleId: string, fd: FormData) {
     const pays = await s.ctx.store.list("sale_payments", { filters: [["eq", "saleId", saleId]], limit: 50 });
     const pending = pays.items.filter((p) => p.status === "refund_pending");
     const manual = pays.items.filter((p) => p.status === "refund_manual");
-    const kept = Array.isArray(sale.cancelPending) ? (sale.cancelPending as Array<{ number: number }>) : [];
+    // pendências pela situação atual dos títulos (repetir o cancelamento depois que o Financeiro resolveu não as repete)
+    const kept = await openCancelPending(s.ctx.store, sale);
     const parts = [
       sale.cancelEffectsStatus !== "done"
         ? "Efeitos do cancelamento em processamento (a tarefa durável conclui o que faltar)."

@@ -33,6 +33,12 @@ const TABS = [
   { key: "historico", label: "Histórico" },
 ];
 
+/** Situação da variável de credencial: nome não permitido (com o motivo), definida ou não definida no servidor. */
+function RefBadge({ problem, defined, definedLabel = "definida no servidor", missingLabel = "não definida no servidor", showReason = true }: { problem: string | null; defined: boolean; definedLabel?: string; missingLabel?: string; showReason?: boolean }) {
+  if (problem) return <><Badge tone="bad">nome não permitido</Badge>{showReason && <span className="mt-1 block text-xs text-red-700">{problem}</span>}</>;
+  return defined ? <Badge tone="good">{definedLabel}</Badge> : <Badge tone="warn">{missingLabel}</Badge>;
+}
+
 const submit = (label: string) => <button type="submit" className={buttonClass("accent")}>{label}</button>;
 const discard = <button type="reset" className={buttonClass("ghost")}>Descartar</button>;
 
@@ -54,9 +60,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   const taxGroups = await listAll(s.ctx.store, "tax_groups", { filters: [["eq", "companyId", s.ctx.companyId]], orderBy: [{ field: "name" }] });
   const tgOptions = taxGroups.map((g) => ({ value: g.id, label: g.name }));
   // nomes não permitidos (segredos do sistema, gravados antes da validação) nunca são consultados no ambiente
-  const tokenDefined = cfg?.tokenRef && !fiscalTokenRefProblem(cfg.tokenRef) ? Boolean(process.env[cfg.tokenRef]) : false;
-  const cscDefined = cfg?.cscTokenRef && !cscRefProblem(cfg.cscTokenRef) ? Boolean(process.env[cfg.cscTokenRef]) : false;
-  const certPassDefined = cfg?.certificate?.passwordRef && !secretRefProblem(cfg.certificate.passwordRef, { label: "Senha", example: "CERT_A1_SENHA" }) ? Boolean(process.env[cfg.certificate.passwordRef]) : false;
+  // (o motivo aparece como "nome não permitido", não como "não definida" — redefinir a variável não resolveria)
+  const tokenProblem = cfg?.tokenRef ? fiscalTokenRefProblem(cfg.tokenRef) : null;
+  const cscProblem = cfg?.cscTokenRef ? cscRefProblem(cfg.cscTokenRef) : null;
+  const certPassProblem = cfg?.certificate?.passwordRef ? secretRefProblem(cfg.certificate.passwordRef, { label: "Senha", example: "CERT_A1_SENHA" }) : null;
+  const tokenDefined = cfg?.tokenRef && !tokenProblem ? Boolean(process.env[cfg.tokenRef]) : false;
+  const cscDefined = cfg?.cscTokenRef && !cscProblem ? Boolean(process.env[cfg.cscTokenRef]) : false;
+  const certPassDefined = cfg?.certificate?.passwordRef && !certPassProblem ? Boolean(process.env[cfg.certificate.passwordRef]) : false;
   return (
     <>
       <PageHeader
@@ -135,7 +145,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   { label: "Validade", value: <span>{formatDate(cfg.certificate.validFrom)} a {formatDate(cfg.certificate.validTo)} <Badge tone={days! < 0 ? "bad" : days! <= 30 ? "warn" : "good"}>{days! < 0 ? "vencido" : `${days} dia(s) restantes`}</Badge></span> },
                   // .pfx contém a chave privada: download e nome da variável da senha só para quem configura o fiscal
                   { label: "Arquivo", value: canCfgCert ? <a className="text-brand-700 underline" href={`/api/files/${cfg.certificate.fileId}`}>{cfg.certificate.fileName}</a> : <span>{cfg.certificate.fileName}{cfg.certificate.sha256 ? <span className="block font-mono text-xs text-slate-500">SHA-256 {String(cfg.certificate.sha256).slice(0, 16)}…</span> : null}</span> },
-                  { label: "Senha (referência)", value: <span>{canCfgCert ? <>variável <code>{cfg.certificate.passwordRef}</code> — </> : null}{certPassDefined ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida</Badge>}</span> },
+                  { label: "Senha (referência)", value: <span>{canCfgCert ? <>variável <code>{cfg.certificate.passwordRef}</code> — </> : null}<RefBadge problem={certPassProblem} defined={Boolean(certPassDefined)} missingLabel="não definida" showReason={canCfgCert} /></span> },
                   { label: "Carregado em", value: `${formatDateTime(cfg.certificate.uploadedAt)} por ${cfg.certificate.uploadedBy}` },
                   (cfg.certificate.warnings ?? []).length > 0 && { label: "Alertas", value: <span className="text-amber-800">{cfg.certificate.warnings.join(" ")}</span> },
                 ]}
@@ -249,9 +259,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                 <FormGrid cols={2}>
                   <Field label="Provedor"><Select name="provider" defaultValue={cfg.provider ?? "simulated"} options={[{ value: "focusnfe", label: "Focus NFe" }, { value: "simulated", label: "Simulação (sem validade fiscal)" }]} /></Field>
                   <Field label="Ambiente" hint="Homologação e produção são contextos distintos no provedor."><Select name="environment" defaultValue={cfg.environment ?? "homologacao"} options={[{ value: "homologacao", label: "Homologação (testes)" }, { value: "producao", label: "Produção (validade fiscal)" }]} /></Field>
-                  <Field label="Variável de ambiente do token" hint={<span>Somente o NOME. {cfg.tokenRef ? (tokenDefined ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida no servidor</Badge>) : null}</span>}><Input name="tokenRef" defaultValue={cfg.tokenRef ?? "FOCUSNFE_TOKEN"} /></Field>
+                  <Field label="Variável de ambiente do token" hint={<span>Somente o NOME. {cfg.tokenRef ? <RefBadge problem={tokenProblem} defined={Boolean(tokenDefined)} /> : null}</span>}><Input name="tokenRef" defaultValue={cfg.tokenRef ?? "FOCUSNFE_TOKEN"} /></Field>
                   <Field label="CSC da NFC-e — ID (idToken)"><Input name="cscId" defaultValue={cfg.cscId ?? ""} /></Field>
-                  <Field label="CSC da NFC-e — variável do código" hint={<span>Somente o NOME. {cfg.cscTokenRef ? (cscDefined ? <Badge tone="good">definida</Badge> : <Badge tone="warn">não definida</Badge>) : null}</span>}><Input name="cscTokenRef" defaultValue={cfg.cscTokenRef ?? "NFCE_CSC"} /></Field>
+                  <Field label="CSC da NFC-e — variável do código" hint={<span>Somente o NOME. {cfg.cscTokenRef ? <RefBadge problem={cscProblem} defined={Boolean(cscDefined)} definedLabel="definida" missingLabel="não definida" /> : null}</span>}><Input name="cscTokenRef" defaultValue={cfg.cscTokenRef ?? "NFCE_CSC"} /></Field>
                 </FormGrid>
                 {canEdit && <div className="flex justify-end gap-2">{discard}{submit("Salvar conexão")}</div>}
               </ActionForm>

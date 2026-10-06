@@ -33,7 +33,10 @@ export function IntegrationForm({
   const prov = providers.find((p) => p.id === provider) ?? providers[0];
   const [refs, setRefs] = useState<Record<string, string>>(() => {
     const r: Record<string, string> = {};
-    for (const p of providers) for (const s of p.secrets) r[s] = current?.secretRefs?.[s] ?? p.defaultRefs?.[s] ?? "";
+    // provedor já salvo: somente o vínculo gravado (após "Remover vínculo" o campo fica em branco); demais: nome padrão sugerido
+    for (const p of providers) for (const s of p.secrets) r[s] = r[s] || p.defaultRefs?.[s] || "";
+    const saved = providers.find((p) => p.id === current?.provider);
+    for (const s of saved?.secrets ?? []) r[s] = current?.secretRefs?.[s] ?? "";
     return r;
   });
   return (
@@ -60,7 +63,7 @@ export function IntegrationForm({
               <p className="mb-2 text-xs text-slate-500">Informe apenas o NOME da variável de ambiente do servidor. O valor nunca é gravado nem exibido.</p>
               <FormGrid cols={2}>
                 {prov.secrets.map((s) => (
-                  <Field key={s} label={secretLabels[s] ?? s} hint={<span>{envDefined[refs[s]] ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida no servidor</Badge>}</span>}>
+                  <Field key={s} label={secretLabels[s] ?? s} hint={<span>{!refs[s] ? <Badge tone="warn">sem vínculo</Badge> : envDefined[refs[s]] ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida no servidor</Badge>}</span>}>
                     <Input name={`secret_${s}`} value={refs[s] ?? ""} onChange={(e) => setRefs({ ...refs, [s]: e.target.value.toUpperCase() })} placeholder={prov.defaultRefs?.[s]} disabled={!canEdit} />
                   </Field>
                 ))}

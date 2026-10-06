@@ -45,6 +45,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "totalDiff", label: "Diferença", align: "right", sortable: true, cell: (r) => (r.status !== "closed" ? "—" : r.hasDiff ? <Badge tone="bad">{formatMoney(r.totalDiff)}</Badge> : <Badge tone="good">Sem diferença</Badge>) },
   ];
   const sum = (k: keyof SessionRow) => all.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  // conferência cega: sessões com total vendido oculto ficam fora da soma — e isso é dito explicitamente
+  const hiddenSales = all.filter((r) => r.salesTotal == null).length;
+  const salesSum = `${formatMoney(sum("salesTotal"))}${hiddenSales ? ` (sem ${hiddenSales} oculta(s))` : ""}`;
   return (
     <>
       <PageHeader
@@ -68,7 +71,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Caixas abertos" value={open.length} hint={open.map((r) => r.terminalName).join(", ") || "Nenhum"} href={link({ situacao: "open" })} />
-        <Stat label="Sessões no recorte" value={all.length} hint={`${formatMoney(sum("salesTotal"))} vendidos`} />
+        <Stat label="Sessões no recorte" value={all.length} hint={hiddenSales ? `${formatMoney(sum("salesTotal"))} vendidos (sem ${hiddenSales} sessão(ões) em conferência cega, com total oculto até a contagem)` : `${formatMoney(sum("salesTotal"))} vendidos`} />
         <Stat label="Fechamentos com divergência" value={withDiff.length} tone={withDiff.length ? "bad" : "good"} href={link({ divergencia: "1" })} hint="Diferenças preservadas com justificativa" />
         <Stat label="Diferença acumulada" value={formatMoney(withDiff.reduce((a, r) => a + r.totalDiff, 0))} tone={withDiff.length ? "warn" : "default"} hint="Informado − esperado (todas as formas)" />
       </div>
@@ -96,7 +99,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         pageSize={p.pageSize}
         exportKey="cash_sessions"
         rowHref={(r) => `/caixa/${r.id}`}
-        totals={{ salesCount: sum("salesCount"), salesTotal: formatMoney(sum("salesTotal")) }}
+        totals={{ salesCount: sum("salesCount"), salesTotal: <span title={hiddenSales ? "Sessões em conferência cega ainda não contadas não entram na soma" : undefined}>{salesSum}</span> }}
         empty={<div className="p-10 text-center text-sm text-slate-500">Nenhuma sessão de caixa no recorte.</div>}
       />
     </>

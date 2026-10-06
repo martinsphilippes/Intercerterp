@@ -15,7 +15,8 @@ import { formatDoc } from "@/lib/core/text";
 import { can } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
 import { PAYMENT_KIND_LABEL } from "@/domain/pricing-calc";
-import { querySales, salesPeriod, salesTotals, type SaleRow } from "./queries";
+import { Notice } from "@/components/ui/empty";
+import { querySales, salesPeriod, salesTotals, sessionAmountsHidden, type SaleRow } from "./queries";
 
 export const metadata = { title: "Histórico de vendas" };
 
@@ -40,13 +41,16 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   if (preset && !p.f.de && !p.f.ate) Object.assign(p.f, { de: preset.de, ate: preset.ate });
   const { from, to } = salesPeriod(p.f);
   const all = await querySales(s.ctx, p);
+  // conferência cega: vendas de sessão de caixa aberta ainda não contada — valores ocultos (como nas telas do caixa)
+  const amountsHidden = await sessionAmountsHidden(s.ctx, p.f.sessao);
+  const hid = (v: string) => (amountsHidden ? "oculto" : v);
   const { rows, total } = paginate(all, p);
   const tot = salesTotals(all);
   // comparação com o período anterior de mesma duração (mesmos filtros)
   const len = diffDays(from, to) + 1;
   const prevRows = await querySales(s.ctx, { q: p.q, f: { ...p.f, de: addDays(from, -len), ate: addDays(from, -1) } });
   const prev = salesTotals(prevRows);
-  const trend = prev.net > 0 ? Math.round(((tot.net - prev.net) * 10000) / prev.net) : null;
+  const trend = !amountsHidden && prev.net > 0 ? Math.round(((tot.net - prev.net) * 10000) / prev.net) : null;
   const pendingDocs = all.filter((r) => r.status === "completed" && ["pending", "queued", "processing", "error", "rejected", "contingency"].includes(r.fiscalStatus));
   const [users, branches, terminals] = await Promise.all([lookups.users(s.ctx), lookups.branches(s.ctx), lookups.terminals(s.ctx, s.ctx.branchId)]);
   const base = "/vendas";
@@ -60,11 +64,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "paymentMethods", label: "Pagamento", cell: (r) => <span className="text-slate-700">{r.paymentMethods || "—"}<span className="block"><StatusBadge kind="payment" status={r.paymentStatus} /></span></span> },
     { key: "operatorName", label: "Operador", hidden: true, cell: (r) => r.operatorName },
     { key: "sellerName", label: "Vendedor", hidden: true, cell: (r) => r.sellerName ?? "—" },
-    { key: "status", label: "Situação", cell: (r) => <span className="flex flex-col items-start gap-1"><StatusBadge kind="sale" status={r.status} />{r.returnedTotal > 0 && <Badge tone={r.returnedTotal >= r.total ? "bad" : "warn"}>{r.returnedTotal >= r.total ? "Devolvida" : "Devolução parcial"}</Badge>}</span> },
+    { key: "status", label: "Situação", cell: (r) => <span className="flex flex-col items-start gap-1"><StatusBadge kind="sale" status={r.status} />{(r.returnedTotal ?? 0) > 0 && <Badge tone={(r.returnedTotal ?? 0) >= (r.total ?? 0) ? "bad" : "warn"}>{(r.returnedTotal ?? 0) >= (r.total ?? 0) ? "Devolvida" : "Devolução parcial"}</Badge>}</span> },
     { key: "itemsCount", label: "Itens", align: "right", hidden: true, cell: (r) => r.itemsCount },
     { key: "subtotal", label: "Bruto", align: "right", sortable: true, hidden: true, cell: (r) => formatMoney(r.subtotal) },
     { key: "discountTotal", label: "Descontos", align: "right", sortable: true, cell: (r) => (r.discountTotal ? formatMoney(r.discountTotal) : "—") },
-    { key: "total", label: "Valor", align: "right", sortable: true, cell: (r) => <span className={r.status === "cancelled" ? "text-slate-400 line-through" : "font-semibold"}>{formatMoney(r.total)}</span> },
+    { key: "total", label: "Valor", align: "right", sortable: true, cell: (r) => (r.amountsHidden ? <span className="text-slate-400" title="Conferência cega: revelado após a contagem">oculto</span> : <span className={r.status === "cancelled" ? "text-slate-400 line-through" : "font-semibold"}>{formatMoney(r.total)}</span>) },
     { key: "returnedTotal", label: "Devolvido", align: "right", sortable: true, cell: (r) => (r.returnedTotal ? <Link className="text-amber-700 hover:underline" href={`/vendas/devolucoes?venda=${r.id}`}>{formatMoney(r.returnedTotal)}</Link> : "—") },
     { key: "net", label: "Líquido", align: "right", sortable: true, hidden: true, cell: (r) => formatMoney(r.net) },
   ];
@@ -81,11 +85,16 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           </>
         }
       />
+      {amountsHidden && (
+        <div className="mb-4">
+          <Notice tone="info" title="Conferência cega em andamento">Os valores das vendas desta sessão de caixa ficam ocultos (tela e exportação) até a contagem ser registrada no fechamento. Supervisores de caixa veem os valores.</Notice>
+        </div>
+      )}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Stat label="Vendas no período" value={tot.count.toLocaleString("pt-BR")} hint={trend == null ? "Sem base no período anterior" : `${trend >= 0 ? "↑" : "↓"} ${formatBps(Math.abs(trend), 1)} no líquido vs. ${len} dia(s) anteriores`} href={link({ situacao: "completed" })} tone={trend != null && trend < 0 ? "warn" : "default"} />
-        <Stat label="Faturamento líquido" value={formatMoney(tot.net)} hint={`Bruto ${formatMoney(tot.subtotal)} − desc. ${formatMoney(tot.discount)} + acrésc. ${formatMoney(tot.surcharge)} − devol. ${formatMoney(tot.returned)} · ticket médio ${formatMoney(tot.count ? Math.round(tot.total / tot.count) : 0)}`} href={link({ situacao: "completed" })} />
-        <Stat label="Devolvido" value={formatMoney(tot.returned)} hint={`${tot.withReturns} venda(s) com devolução`} href={link({ devolucao: "1" })} tone={tot.returned ? "warn" : "default"} />
-        <Stat label="Vendas canceladas" value={tot.cancelledCount} hint={`${formatMoney(tot.cancelledTotal)} · ${all.length ? formatBps(Math.round((tot.cancelledCount * 10000) / all.length), 1) : "0%"} das vendas do recorte`} href={link({ situacao: "cancelled" })} />
+        <Stat label="Vendas no período" value={tot.count.toLocaleString("pt-BR")} hint={amountsHidden ? "Conferência cega: valores ocultos até a contagem" : trend == null ? "Sem base no período anterior" : `${trend >= 0 ? "↑" : "↓"} ${formatBps(Math.abs(trend), 1)} no líquido vs. ${len} dia(s) anteriores`} href={link({ situacao: "completed" })} tone={trend != null && trend < 0 ? "warn" : "default"} />
+        <Stat label="Faturamento líquido" value={hid(formatMoney(tot.net))} hint={amountsHidden ? "Conferência cega: valores da sessão revelados após a contagem" : `Bruto ${formatMoney(tot.subtotal)} − desc. ${formatMoney(tot.discount)} + acrésc. ${formatMoney(tot.surcharge)} − devol. ${formatMoney(tot.returned)} · ticket médio ${formatMoney(tot.count ? Math.round(tot.total / tot.count) : 0)}`} href={link({ situacao: "completed" })} />
+        <Stat label="Devolvido" value={hid(formatMoney(tot.returned))} hint={`${tot.withReturns} venda(s) com devolução`} href={link({ devolucao: "1" })} tone={tot.returned ? "warn" : "default"} />
+        <Stat label="Vendas canceladas" value={tot.cancelledCount} hint={`${hid(formatMoney(tot.cancelledTotal))} · ${all.length ? formatBps(Math.round((tot.cancelledCount * 10000) / all.length), 1) : "0%"} das vendas do recorte`} href={link({ situacao: "cancelled" })} />
         <Stat label="Documentos pendentes" value={pendingDocs.length} hint={pendingDocs.length ? "Requer atenção: sem autorização fiscal" : "Nenhuma pendência"} tone={pendingDocs.length ? "warn" : "good"} href={link({ fiscal: "pending_any" })} />
       </div>
       <FilterBar
@@ -135,7 +144,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         pageSize={p.pageSize}
         exportKey="sales"
         rowHref={(r) => `/vendas/${r.id}`}
-        totals={{ discountTotal: formatMoney(tot.discount), total: formatMoney(tot.total), returnedTotal: formatMoney(tot.returned), net: formatMoney(tot.net), subtotal: formatMoney(tot.subtotal) }}
+        totals={amountsHidden ? { total: "oculto" } : { discountTotal: formatMoney(tot.discount), total: formatMoney(tot.total), returnedTotal: formatMoney(tot.returned), net: formatMoney(tot.net), subtotal: formatMoney(tot.subtotal) }}
         footer={<p className="border-t border-line px-3 py-2 text-xs text-slate-500">Totais do recorte consideram apenas vendas concluídas ({tot.count}); canceladas ({tot.cancelledCount}) aparecem na lista para rastreabilidade.</p>}
         empty={<div className="p-10 text-center text-sm text-slate-500">Nenhuma venda no recorte. Ajuste o período ou os filtros.</div>}
       />

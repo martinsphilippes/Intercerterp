@@ -336,7 +336,9 @@ export function secretStatus(kind: IntegrationKind, provider: string | null | un
   const prov = INTEGRATION_CATALOG[kind]?.providers.find((p) => p.id === provider);
   if (!prov) return [];
   return prov.secrets.map((s): { key: string; label: string; envName: string; defined: boolean; problem?: string } => {
-    const envName = refs?.[s] || prov.defaultRefs?.[s] || "";
+    // registro salvo (refs presente): somente o vínculo gravado — "Remover vínculo" ou campo em branco = sem vínculo, como no
+    // uso real (Pix/e-mail/fiscal não recorrem ao nome padrão); sem registro: o nome padrão do provedor (sugestão até salvar)
+    const envName = (refs ? refs[s] : prov.defaultRefs?.[s]) || "";
     // nome não permitido: nunca consulta a variável (nem para dizer se está definida)
     const problem = envName ? providerSecretProblem(prov, s, envName) : null;
     if (problem) return { key: s, label: SECRET_LABEL[s] ?? s, envName, defined: false, problem };
@@ -595,6 +597,8 @@ export function diagnose(status: string, message: string | null | undefined, sec
   if (blocked) return `Vínculo de credencial não permitido — ${blocked.problem} Informe outra variável e salve; a integração não opera até lá.`;
   const missing = secrets.filter((s) => !s.defined);
   if (status === "not_configured") return "Escolha o provedor, informe os nomes das variáveis de credencial e salve; depois execute o teste.";
+  const unlinked = secrets.filter((s) => !s.envName);
+  if (unlinked.length) return `Credencial sem vínculo (${unlinked.map((u) => u.label).join(", ")}): informe o nome da variável de ambiente na configuração e salve; a integração não opera até lá.`;
   if (missing.length) return `Defina no servidor (ex.: Vercel → Settings → Environment Variables, ou .env.local) a(s) variável(is) ${missing.map((m) => m.envName || m.label).join(", ")} e teste novamente. O valor nunca é gravado no banco.`;
   const m = message ?? "";
   if (/HTTP 401|HTTP 403|recus/i.test(m)) return "O provedor recusou a credencial: gere um novo token no painel do provedor, atualize a variável de ambiente e reinicie/reimplante o servidor.";

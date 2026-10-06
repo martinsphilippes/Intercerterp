@@ -74,7 +74,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Fundo de abertura" value={formatMoney(sum.totals.opening)} hint="Não é receita" />
         <Stat label="Vendas concluídas" value={sum.totals.salesCount} hint={showExpected ? formatMoney(sum.totals.sales) : "valor oculto até a contagem cega"} href={`/vendas?sessao=${id}`} />
-        <Stat label="Suprimentos / sangrias" value={`${formatMoney(sum.totals.supply)} / ${formatMoney(sum.totals.withdrawal)}`} href={`${base}?tab=movimentos`} />
+        <Stat
+          label="Suprimentos / sangrias"
+          value={showExpected ? `${formatMoney(sum.totals.supply)} / ${formatMoney(sum.totals.withdrawal)}` : "oculto"}
+          hint={showExpected ? undefined : `${sum.movements.filter((m) => m.type === "supply").length} suprimento(s) · ${sum.movements.filter((m) => m.type === "withdrawal").length} sangria(s) — valores revelados após a contagem`}
+          href={`${base}?tab=movimentos`}
+        />
         <Stat label="Dinheiro esperado (agora)" value={showExpected ? formatMoney(sum.expected.cash) : "oculto"} hint={showExpected ? `troco entregue ${formatMoney(sum.totals.change)} · devoluções ${formatMoney(sum.totals.refunds)}` : "conferência cega: revelado após a contagem"} />
         <Stat label={open ? "Situação" : "Diferença do fechamento"} value={open ? (session.status === "reopened" ? "Reaberto" : "Aberto") : formatMoney(totalDiff)} tone={open ? "default" : totalDiff || Object.keys(diffs).length ? "bad" : "good"} hint={!open && session.justification ? `Justificativa: ${session.justification}` : undefined} />
       </div>
@@ -147,7 +152,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         </Card>
       )}
       {tab === "vendas" && (
-        <Card title="Vendas da sessão" bodyClass="p-0">
+        <Card title="Vendas da sessão" description={showExpected ? undefined : "Conferência cega: os valores das vendas ficam ocultos até a contagem ser registrada no fechamento."} bodyClass="p-0">
           {sales.length === 0 ? <EmptyState title="Nenhuma venda nesta sessão" /> : (
             <table className="table-base w-full text-sm">
               <thead><tr><th>Venda</th><th>Data</th><th>Cliente</th><th>Situação</th><th>Fiscal</th><th className="text-right">Total</th></tr></thead>
@@ -159,7 +164,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                     <td>{x.customerSnapshot?.name ?? "Consumidor final"}</td>
                     <td><StatusBadge kind="sale" status={x.status} /></td>
                     <td><StatusBadge kind="fiscal" status={x.fiscalStatus} /></td>
-                    <td className={`tabular text-right ${x.status === "cancelled" ? "text-slate-400 line-through" : ""}`}>{formatMoney(x.total)}</td>
+                    <td className={`tabular text-right ${x.status === "cancelled" ? "text-slate-400 line-through" : ""}`}>{showExpected ? formatMoney(x.total) : <span className="text-slate-400" title="Conferência cega: revelado após a contagem">oculto</span>}</td>
                   </tr>
                 ))}
               </tbody>
