@@ -5,6 +5,7 @@ import { ConflictError, NotFoundError } from "../db/types";
 import { requireSession, type SessionInfo } from "./session";
 import type { Crud, ModuleKey } from "../permissions";
 import { can } from "../permissions";
+import { scheduleBackgroundJobs } from "./background-jobs";
 
 export type ActionResult<T = unknown> = { ok: true; data?: T; message?: string; redirect?: string } | { ok: false; error: string; code?: string; fields?: Record<string, string> };
 
@@ -26,6 +27,8 @@ export async function runAction<T>(
     if (opts.requireBranch && !s.branch) return { ok: false, error: "Selecione uma filial específica (o contexto consolidado é somente consulta).", code: "branch_required" };
     const out = await fn(s);
     for (const p of opts.revalidate ?? []) revalidatePath(p);
+    // tarefas vencidas (retentativas, envio fiscal, e-mails) rodam depois da resposta, sem atrasar a tela
+    scheduleBackgroundJobs();
     if (out && typeof out === "object" && "ok" in (out as any)) return out as ActionResult<T>;
     return { ok: true, data: out as T };
   } catch (e: any) {

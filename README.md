@@ -41,7 +41,7 @@ Sem acesso de linha de comando ao Appwrite, abra a aplicação publicada: a tela
 ## Publicação na Vercel
 
 Variáveis do projeto: `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_API_KEY` (sensível), `APPWRITE_DATABASE_ID`, `CRON_SECRET`, `SETUP_TOKEN`, `APP_TIMEZONE=America/Sao_Paulo` e, conforme integrações, `FOCUSNFE_TOKEN`, `NFCE_CSC`, `MERCADOPAGO_ACCESS_TOKEN`, `RESEND_API_KEY`.
-O `vercel.json` agenda `/api/jobs` (tarefas fiscais, efeitos de venda, rotinas diárias de notificações e backup). Em plano sem cron frequente, a Central de integrações oferece “Executar tarefas pendentes agora”.
+O `vercel.json` agenda `/api/jobs` **uma vez por dia** (compatível com o plano Hobby, que só permite cron diário): rotinas diárias de notificações, obrigações, backup e retenção. As tarefas vencidas (retentativas de efeitos de venda, envio/consulta fiscal, e-mails) também rodam **em segundo plano depois de cada ação de usuário** (sem atrasar a tela, com reivindicação única por tentativa) e pela Central de integrações (“Executar tarefas pendentes agora”). No plano Pro, o cron pode ser mais frequente (ex.: `*/10 * * * *`).
 
 Sem as variáveis do Appwrite na Vercel, a aplicação mostra a página **“configuração pendente”** com a lista do que falta (nenhum dado é gravado). Somente para apresentação, `DATA_BACKEND=memory` sobe uma demonstração volátil (recriada a cada reinício e sem consistência entre instâncias).
 

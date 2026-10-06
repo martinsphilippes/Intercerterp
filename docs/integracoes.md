@@ -35,7 +35,7 @@ Na Central de integrações (Administração → Integrações) cada integraçã
 
 ## Tarefas duráveis e rotinas
 
-`/api/jobs` (Vercel Cron a cada 10 min; ou “Executar tarefas pendentes agora”) processa: efeitos da venda (`sale.effects`), transmissão/consulta/cancelamento fiscal, recálculo de saldo de conta, backup agendado e rotinas diárias (vencidos, contas a pagar do dia, obrigações fiscais, acompanhamento de compras, estoque, retenção de backup). Cada tentativa é reivindicada por registro único (nunca executa duas vezes em paralelo) e usa recuo exponencial; esgotadas as tentativas, a tarefa vira “morta” e gera notificação.
+`/api/jobs` (Vercel Cron diário — limite do plano Hobby; tarefas vencidas também rodam em segundo plano após cada ação de usuário e por “Executar tarefas pendentes agora”) processa: efeitos da venda (`sale.effects`), transmissão/consulta/cancelamento fiscal, recálculo de saldo de conta, backup agendado e rotinas diárias (vencidos, contas a pagar do dia, obrigações fiscais, acompanhamento de compras, estoque, retenção de backup). Cada tentativa é reivindicada por registro único (nunca executa duas vezes em paralelo) e usa recuo exponencial; esgotadas as tentativas, a tarefa vira “morta” e gera notificação.
 
 ## Conector de periféricos
 

@@ -26,7 +26,7 @@ Monólito modular: um modelo de dados (`src/lib/db/schema.ts`), serviços de dom
 - **Sequência por agregado**: movimentos de estoque `(balanceId, seq)`, lançamentos em conta `(accountId, seq)` e baixas `(installmentId, seq)` têm índice único. Duas operações concorrentes sobre o mesmo saldo geram conflito → `retryOnConflict` relê e reaplica. Nenhuma baixa dupla do mesmo saldo nem consumo duplo de estoque.
 - **Limites atômicos**: `increment(..., {min/max})` impede devolução acima do vendido e saldo negativo de vale/título.
 - **Transações Appwrite** (máx. 100 operações): venda, baixa, estorno, transferência etc. gravam documento + efeitos juntos. Efeitos volumosos (estoque da venda) vão por tarefa durável idempotente.
-- **Outbox** (`jobs`): emissão/consulta fiscal, efeitos da venda, notificações e rotinas. Executor em `/api/jobs` (Vercel Cron) com reivindicação única por tentativa e recuo exponencial.
+- **Outbox** (`jobs`): emissão/consulta fiscal, efeitos da venda, notificações e rotinas. Executor em `/api/jobs` (Vercel Cron diário) e em segundo plano após cada ação de usuário (`after()`, a cada 30 s no máximo por instância), com reivindicação única por tentativa, recuo exponencial e limite geral de reagendamentos.
 
 ## Serviços de domínio (`src/domain`)
 
