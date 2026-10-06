@@ -315,3 +315,14 @@ Quando conflitam com as seções anteriores, estas prevalecem.
 
 #### Riscos residuais conhecidos
 - Ver `docs/pendencias-externas.md` (seção “Riscos residuais conhecidos”).
+
+## 20. Desempenho e experiência de navegação [Decisão]
+
+- **Medição (06/10/2026, produção):** cada consulta ao Appwrite Cloud (região fra, função Vercel fra1) levou de 36 a 98 ms (≈70 ms). Antes das otimizações, uma navegação por 12 telas fazia 314 consultas (13 a 45 por tela) e cada tela disparava ~28 requisições de pré-carga em segundo plano.
+- **Memória por requisição** (`src/lib/db/read-cache.ts`): durante a montagem de uma tela, a mesma consulta (tabela + filtros) vai ao banco uma única vez. Qualquer gravação limpa a memória. Fora da renderização (ações, tarefas, scripts, testes) nada é memorizado por requisição. Resultado: 314 → ~190 consultas na mesma navegação.
+- **Memória curta entre requisições — 15 s por instância** para `companies`, `branches`, `roles`, `settings` e `payment_methods`. Na mesma instância, a gravação invalida na hora; em outra instância a alteração pode levar até 15 s para aparecer (ex.: perfil de permissão alterado, filial inativada, parâmetro mudado). Tabelas com contadores, saldos ou estado operacional (terminais, depósitos, estoque, caixa, títulos) **não** entram nessa memória.
+- **Pré-carga só na intenção** (`src/components/ui/link.tsx`): links pré-carregam ao passar o mouse, tocar ou focar, e não mais todos os links visíveis do menu e das tabelas.
+- **Gráficos sob demanda** (`src/components/charts/lazy.tsx`): a biblioteca de gráficos (~120 KB) carrega depois da página; painel inicial de 227 KB para 110 KB de JavaScript.
+- **Retorno visual imediato:** botões com relevo e indicador de carregamento, barra de progresso global (`src/components/ui/nav-progress.tsx`) e tela "Carregando…" entre páginas (`src/app/(app)/loading.tsx`).
+- **Diagnóstico:** `STORE_TRACE=1` registra cada leitura com a duração (`[store] list users 70ms`) nos logs; deixe `0` em operação normal.
+- **Limite estrutural:** o banco (Appwrite fra) e o servidor (Vercel fra1) estão na Europa; quem acessa do Brasil soma ~200 ms de ida e volta por navegação. O Appwrite Cloud não oferece região no Brasil; mover só o servidor para São Paulo pioraria (cada consulta cruzaria o oceano).
