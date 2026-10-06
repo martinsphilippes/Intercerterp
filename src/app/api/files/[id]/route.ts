@@ -1,49 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/server/session";
+import { requireApiSession } from "@/lib/server/session";
 import { readFile } from "@/lib/core/files";
-import { can, canDo, type ModuleKey } from "@/lib/permissions";
-
-/** Módulo exigido para ler o arquivo, conforme o registro de origem. */
-const ENTITY_MODULE: Record<string, ModuleKey> = {
-  title: "finance",
-  bank_import: "finance",
-  bank_transaction: "finance",
-  reconciliation: "finance",
-  fiscal_document: "fiscal",
-  fiscal_obligation: "fiscal",
-  fiscal_export: "fiscal",
-  tax_group: "fiscal",
-  receipt: "purchases",
-  product: "products",
-  ticket: "support",
-  sale: "sales",
-  return: "sales",
-  branch: "admin",
-  setting: "admin",
-};
+import { fileAccessDenial } from "./access";
 
 /** Tipos seguros para exibição no navegador; o resto é sempre baixado como anexo. */
 const SAFE_INLINE = /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/;
 
 /**
  * Download de arquivo armazenado (XML, anexos, comprovantes, imagens, backups).
- * Restrito à empresa ativa e à permissão do módulo de origem; certificado digital e backups exigem
- * as operações específicas (fiscal.configure / admin.backup).
+ * Restrito à empresa ativa e à permissão do módulo de origem; certificado digital, backups e pacote contábil exigem
+ * as operações específicas (fiscal.configure / admin.backup / data.export) — regra em `./access.ts`.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const s = await getSession();
-  if (!s?.ctx.companyId) return new NextResponse("Não autenticado", { status: 401 });
+  const s = await requireApiSession("text");
+  if (s instanceof NextResponse) return s;
   const { id } = await params;
   const meta0 = await s.ctx.store.get("files", id);
   if (!meta0 || meta0.companyId !== s.ctx.companyId) return new NextResponse("Arquivo não encontrado", { status: 404 });
-  if (meta0.bucket === "backups" || meta0.entityType === "backup" || meta0.entityType === "restore_job") {
-    if (!canDo(s.user, "admin.backup")) return new NextResponse("Sem permissão para arquivos de backup", { status: 403 });
-  } else if (meta0.kind === "certificate_a1" || meta0.entityType === "fiscal_config") {
-    if (!canDo(s.user, "fiscal.configure")) return new NextResponse("Sem permissão para o certificado digital", { status: 403 });
-  } else {
-    const requiredModule = (meta0.entityType && ENTITY_MODULE[meta0.entityType]) || (meta0.bucket === "images" ? "products" : null);
-    if (!requiredModule || !can(s.user, requiredModule, "view")) return new NextResponse("Sem permissão para este arquivo", { status: 403 });
-  }
+  const denied = fileAccessDenial(s.user, meta0);
+  if (denied) return new NextResponse(denied, { status: 403 });
   try {
     const { meta, data } = await readFile(s.ctx, id);
     const mime = String(meta.mime ?? "");

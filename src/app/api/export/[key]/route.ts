@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/server/session";
+import { requireApiSession } from "@/lib/server/session";
 import { getExport, toCsv } from "@/lib/exporters";
 import { can, canDo } from "@/lib/permissions";
 import { audit } from "@/lib/core/audit";
@@ -7,8 +7,8 @@ import "@/exports";
 
 /** Exporta o recorte filtrado de uma listagem (mesma consulta da tela). */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
-  const s = await getSession();
-  if (!s?.ctx.companyId) return new NextResponse("Não autenticado", { status: 401 });
+  const s = await requireApiSession("text");
+  if (s instanceof NextResponse) return s;
   const { key } = await params;
   const def = getExport(key);
   if (!def) return new NextResponse("Exportação desconhecida", { status: 404 });

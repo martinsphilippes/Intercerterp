@@ -1,4 +1,4 @@
-import { listAll } from "@/lib/db";
+import { detId, listAll } from "@/lib/db";
 import type { Doc, Filter, Store } from "@/lib/db/types";
 import { DEFAULT_TZ, addDays, dayRange, diffDays, formatDate, monthEnd, monthStart, toLocalDate, today } from "@/lib/dates";
 import { marginBps, roundDiv } from "@/lib/money";
@@ -17,7 +17,8 @@ import { PAYMENT_KIND_LABEL } from "./pricing-calc";
  *  - Margem bruta = (receita líquida − CMV) / receita líquida; receita ≤ 0 → "sem receita". Agregados sempre pelos totais.
  *  - Ticket médio = receita líquida / nº de vendas concluídas no recorte.
  *  - Devoluções entram na data do movimento da devolução (e na filial onde foram registradas),
- *    mesmo que a venda original seja anterior ao recorte.
+ *    mesmo que a venda original seja anterior ao recorte. Devolução com efeitos ainda pendentes (itens devolvidos não
+ *    gravados pela tarefa durável) entra pelas linhas do próprio documento, na data de registro.
  *  - Intervalo técnico [00:00 do 1º dia, 00:00 do dia seguinte ao último) no fuso da empresa (America/Sao_Paulo).
  */
 
@@ -234,11 +235,29 @@ export async function loadFacts(store: Store, scope: ReportScope): Promise<Facts
     };
   });
 
-  // Devoluções: data e filial do MOVIMENTO (return_items.completedAt), venda original pode ser anterior
+  // Devoluções: data e filial do MOVIMENTO (return_items.completedAt), venda original pode ser anterior.
+  // Devolução já gravada com efeitos pendentes (a tarefa `return.effects` ainda não gravou todos os return_items): a
+  // mercadoria já voltou e a venda já foi abatida — as linhas faltantes vêm do próprio documento (returns.lines), na data
+  // de registro (a mesma que a tarefa grava em return_items.completedAt), com o id determinístico do item a ser gravado.
+  // Lidas ANTES dos itens: item gravado entre as duas leituras aparece nos itens e não é duplicado.
+  const pending = (await listAll(store, "returns", { filters: [...baseFilters(scope, "createdAt"), ["eq", "effectsStatus", "pending"]] })).filter(
+    (r) => ELIGIBLE_RETURN_STATUSES.includes(r.status) && Array.isArray(r.lines) && r.lines.length > 0,
+  );
   const retItems = await listAll(store, "return_items", { filters: baseFilters(scope, "completedAt") });
   const returnsAll = await byIds(store, "returns", retItems.map((r) => r.returnId));
   const returns = new Map([...returnsAll].filter(([, r]) => ELIGIBLE_RETURN_STATUSES.includes(r.status)));
   const eligibleItems = retItems.filter((r) => returns.has(r.returnId));
+  const written = new Set(retItems.map((r) => `${r.returnId}:${r.saleItemId}`));
+  for (const ret of pending) {
+    for (const l of ret.lines as Array<Record<string, any>>) {
+      if (written.has(`${ret.id}:${l.saleItemId}`)) continue;
+      if (!returns.has(ret.id)) returns.set(ret.id, ret);
+      eligibleItems.push({
+        id: detId("retitem", ret.id, l.saleItemId), createdAt: ret.createdAt, updatedAt: ret.updatedAt, returnId: ret.id, saleId: ret.saleId, saleItemId: l.saleItemId,
+        skuId: l.skuId, qty: l.qty, total: l.total, costTotal: l.costTotal, branchId: ret.branchId, completedAt: ret.createdAt,
+      });
+    }
+  }
   const originItems = await byIds(store, "sale_items", eligibleItems.map((r) => r.saleItemId));
   const originSales = await byIds(store, "sales", eligibleItems.map((r) => r.saleId ?? originItems.get(r.saleItemId)?.saleId));
   for (const r of eligibleItems) {
@@ -534,11 +553,15 @@ export const RETURN_FORM_LABEL: Record<string, string> = {
   account: "Devolução — reembolso em conta",
   card_reversal: "Devolução — estorno no cartão",
   refund: "Devolução — reembolso",
+  abatement: "Devolução — abatimento do título a prazo",
 };
 
 /**
  * Quebra por meio de pagamento: valores aplicados nas vendas concluídas (somam as vendas antes das devoluções)
  * e devoluções do período pela forma de compensação. Pagamentos − devoluções = receita líquida.
+ * Devolução de venda a prazo (crediário): a parte abatida do título (`returns.abatedAmount`) não sai do caixa nem vira
+ * vale — fica na linha "abatimento do título a prazo"; só o restante (o compensado ao cliente) vai para a forma de
+ * compensação. Devoluções antigas (sem abatimento registrado): tudo na forma de compensação.
  */
 export async function paymentBreakdown(store: Store, scope: ReportScope): Promise<{ rows: PaymentRow[]; paymentsTotal: number; returnsTotal: number; netRevenue: number }> {
   const facts = await loadFacts(store, scope);
@@ -558,18 +581,27 @@ export async function paymentBreakdown(store: Store, scope: ReportScope): Promis
     map.set(key, row);
   }
   const t = totalsOf(facts.lines);
-  for (const l of facts.lines) {
-    if (l.kind !== "return") continue;
-    const ret = facts.returns.get(l.docId)!;
-    const form = ret.compensation === "refund" ? (ret.refundMethod ?? "refund") : (ret.compensation ?? "refund");
+  const addReturn = (form: string, docId: string, amount: number) => {
     const key = `ret:${form}`;
     const row = map.get(key) ?? { id: key, label: RETURN_FORM_LABEL[form] ?? `Devolução — ${form}`, kind: "return" as const, amount: 0, count: 0 };
-    row.amount += l.total;
+    row.amount += amount;
     const set = counted.get(key) ?? new Set<string>();
-    set.add(l.docId);
+    set.add(docId);
     counted.set(key, set);
     row.count = set.size;
     map.set(key, row);
+  };
+  // por DOCUMENTO de devolução (as linhas de uma devolução têm a mesma data e filial)
+  const returnTotals = new Map<string, number>();
+  for (const l of facts.lines) if (l.kind === "return") returnTotals.set(l.docId, (returnTotals.get(l.docId) ?? 0) + l.total);
+  for (const [docId, total] of returnTotals) {
+    const ret = facts.returns.get(docId)!;
+    const form = ret.compensation === "refund" ? (ret.refundMethod ?? "refund") : (ret.compensation ?? "refund");
+    // limitado ao valor das linhas: abatido + compensado = valor devolvido (mantém pagamentos − devoluções = receita líquida)
+    const abated = Math.min(Math.max(ret.abatedAmount ?? 0, 0), Math.max(total, 0));
+    const compensated = total - abated;
+    if (abated > 0) addReturn("abatement", docId, abated);
+    if (compensated !== 0 || abated === 0) addReturn(form, docId, compensated);
   }
   const rows = [...map.values()].sort((a, b) => (a.kind === b.kind ? b.amount - a.amount : a.kind === "payment" ? -1 : 1));
   const paymentsTotal = rows.filter((r) => r.kind === "payment").reduce((a, r) => a + r.amount, 0);

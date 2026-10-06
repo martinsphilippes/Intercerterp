@@ -14,7 +14,7 @@ import { Notice, EmptyState } from "@/components/ui/empty";
 import { formatDateTime } from "@/lib/dates";
 import { formatPhone } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
-import { inviteState } from "@/domain/users";
+import { inviteState, manageableCompanyIds } from "@/domain/users";
 import { userRoleIn } from "@/lib/auth/users";
 import { unscoped } from "@/lib/db/scoped-store";
 import { MatrixView } from "../perfis/matrix-view";
@@ -36,6 +36,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const [companies, branches] = await Promise.all([listAll(unscoped(s.ctx.store), "companies"), listAll(unscoped(s.ctx.store), "branches")]);
   // quem não é administrador não gerencia o acesso de um administrador
   const manage = can(s.user, "admin", "edit") && canDo(s.user, "admin.users") && (!u.isAdmin || s.user.isAdmin);
+  // senha, situação e convite valem em todas as empresas do usuário: exigem administrar usuários em todas elas
+  const userCompanies: string[] = u.companyIds ?? [];
+  const managed = manage && !s.user.isAdmin ? await manageableCompanyIds(s.ctx, userCompanies) : null;
+  const manageAll = manage && (!managed || userCompanies.every((c) => managed.has(c)));
   const self = u.id === s.user.id;
   const inv = inviteState(u);
   const statusKey = inv === "expired" ? "invite_expired" : u.status;
@@ -67,18 +71,25 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 <Pencil className="size-4" /> Editar
               </LinkButton>
             )}
-            {manage && !self && u.status === "active" && <SetPasswordButton id={id} name={u.name} />}
-            {manage && !self && u.status === "active" && (
+            {manageAll && !self && u.status === "active" && <SetPasswordButton id={id} name={u.name} />}
+            {manageAll && !self && u.status === "active" && (
               <>
                 <ActionButton action={setUserStatusAction.bind(null, id, "suspended")} label="Suspender" variant="danger" askReason="Motivo da suspensão (mostrado ao usuário ao tentar entrar):" />
                 <ActionButton action={setUserStatusAction.bind(null, id, "inactive")} label="Inativar" confirm="Inativar o usuário? Ele não poderá mais entrar; o histórico é preservado." />
               </>
             )}
-            {manage && !self && (u.status === "suspended" || u.status === "inactive") && u.authId && <ActionButton action={setUserStatusAction.bind(null, id, "active")} label="Reativar acesso" variant="primary" />}
-            {manage && !self && u.status === "invited" && <ActionButton action={cancelInviteAction.bind(null, id)} label="Cancelar convite" confirm="Cancelar o convite? O link deixará de funcionar." />}
+            {manageAll && !self && (u.status === "suspended" || u.status === "inactive") && u.authId && <ActionButton action={setUserStatusAction.bind(null, id, "active")} label="Reativar acesso" variant="primary" />}
+            {manageAll && !self && u.status === "invited" && <ActionButton action={cancelInviteAction.bind(null, id)} label="Cancelar convite" confirm="Cancelar o convite? O link deixará de funcionar." />}
           </>
         }
       />
+      {manage && !manageAll && !self && (
+        <div className="mb-4">
+          <Notice tone="info" title="Gestão parcial deste usuário">
+            {u.name} também acessa empresa(s) em que você não administra usuários. Senha, situação do acesso, convite, e-mail/login e limite de desconto valem em todas elas e só podem ser alterados por um administrador ou por quem administra usuários em todas as empresas dele.
+          </Notice>
+        </div>
+      )}
       {u.status === "suspended" && (
         <div className="mb-4">
           <Notice tone="bad" title={`Acesso suspenso${u.suspendedAt ? ` em ${formatDateTime(u.suspendedAt)}` : ""}`}>
@@ -133,7 +144,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   { label: "Expira em", value: u.status === "invited" ? formatDateTime(u.inviteExpiresAt) : "—" },
                 ]}
               />
-              {manage && (u.status === "invited" || (!u.authId && u.status === "inactive")) && (
+              {manageAll && (u.status === "invited" || (!u.authId && u.status === "inactive")) && (
                 <div className="mt-4 flex flex-wrap items-start gap-2">
                   <ResendInviteButton id={id} label={u.status === "invited" ? "Reenviar convite (novo link)" : "Enviar novo convite"} />
                 </div>

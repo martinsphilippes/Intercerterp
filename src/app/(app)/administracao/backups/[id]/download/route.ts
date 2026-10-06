@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/server/session";
+import { requireApiSession } from "@/lib/server/session";
 import { can, canDo } from "@/lib/permissions";
 import { audit } from "@/lib/core/audit";
 import { backupArtifact, backupCode } from "@/domain/backup";
 
 /** Download do artefato completo (partes concatenadas) — exige a operação "Backup e restauração". */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const s = await getSession();
-  if (!s?.ctx.companyId) return new NextResponse("Não autenticado", { status: 401 });
+  const s = await requireApiSession("text");
+  if (s instanceof NextResponse) return s;
   if (!can(s.user, "admin") || !canDo(s.user, "admin.backup")) {
     await audit(s.ctx, { module: "admin", action: "backup.download.denied", entityType: "backup", entityId: (await params).id, summary: "Tentativa sem permissão: baixar artefato de backup", result: "failure" });
     return new NextResponse("Sem permissão", { status: 403 });

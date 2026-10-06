@@ -36,8 +36,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const fiscal = await listAll(cc.store, "fiscal_configs", { filters: [["eq", "companyId", id]] });
   const base = `/administracao/empresas/${id}`;
   const a = c.address ?? {};
-  const edit = can(cc.user, "admin", "edit");
-  const create = can(cc.user, "admin", "create");
+  // as ações exigem a permissão na empresa em uso (runAction) E no perfil da empresa-alvo (companyAdminCtx)
+  const edit = can(s.user, "admin", "edit") && can(cc.user, "admin", "edit");
+  const create = can(s.user, "admin", "create") && can(cc.user, "admin", "create");
   const inactive = c.status === "inactive";
   return (
     <>

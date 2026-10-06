@@ -56,12 +56,29 @@ function mapMpStatus(s: string): IntentStatus {
   }
 }
 
+/** Endereço oficial da API do Mercado Pago. */
+export const MERCADOPAGO_API_URL = "https://api.mercadopago.com";
+
+/**
+ * Endereço da API do Mercado Pago usado com a credencial. Fixo; só pode ser trocado por variável de ambiente do
+ * servidor (`MERCADOPAGO_BASE_URL`, ex.: simulador em homologação) — nunca por dado gravado no banco (a credencial
+ * vai no cabeçalho Authorization e não pode ser enviada a um host escolhido na Central de integrações).
+ */
+export function mercadoPagoBaseUrl(): string {
+  const env = process.env.MERCADOPAGO_BASE_URL?.trim();
+  return env ? env.replace(/\/+$/, "") : MERCADOPAGO_API_URL;
+}
+
+/** Nome de variável de ambiente válido para referência de credencial (mesma regra da Central de integrações). */
+const ENV_REF = /^[A-Z][A-Z0-9_]{1,80}$/;
+
 /** Mercado Pago — API de Pagamentos (Pix). Credencial via variável de ambiente referenciada. */
 export class MercadoPagoProvider implements PaymentProvider {
   readonly id = "mercadopago";
   readonly label = "Mercado Pago (Pix)";
   readonly simulated = false;
-  constructor(private readonly accessToken: string, private readonly baseUrl = "https://api.mercadopago.com") {}
+  private readonly baseUrl = mercadoPagoBaseUrl();
+  constructor(private readonly accessToken: string) {}
 
   private async call(path: string, init: RequestInit & { idem?: string } = {}) {
     const res = await fetch(this.baseUrl + path, {
@@ -114,7 +131,7 @@ export class MercadoPagoProvider implements PaymentProvider {
   }
 
   async refund(providerId: string, amount?: number) {
-    const r = await this.call(`/v1/payments/${providerId}/refunds`, { method: "POST", idem: `refund-${providerId}-${amount ?? "total"}`, body: JSON.stringify(amount ? { amount: amount / 100 } : {}) });
+    const r = await this.call(`/v1/payments/${encodeURIComponent(providerId)}/refunds`, { method: "POST", idem: `refund-${providerId}-${amount ?? "total"}`, body: JSON.stringify(amount ? { amount: amount / 100 } : {}) });
     return { status: r?.status ?? "unknown", raw: r };
   }
 
@@ -193,14 +210,18 @@ export function simulatedPix() {
   return g.__simPix;
 }
 
-/** Resolve o provedor configurado a partir do registro de integração. */
+/**
+ * Resolve o provedor configurado a partir do registro de integração. O endereço da API NÃO vem do registro
+ * (`config.baseUrl` é ignorado): ver `mercadoPagoBaseUrl`.
+ */
 export function pixProviderFrom(integration: Record<string, any> | null): PaymentProvider | null {
   if (!integration?.provider) return null;
   if (integration.provider === "mercadopago") {
-    const ref = integration.secretRefs?.accessToken ?? "MERCADOPAGO_ACCESS_TOKEN";
+    const ref = String(integration.secretRefs?.accessToken ?? "MERCADOPAGO_ACCESS_TOKEN").trim();
+    if (!ENV_REF.test(ref)) return null;
     const token = process.env[ref];
     if (!token) return null;
-    return new MercadoPagoProvider(token, integration.config?.baseUrl);
+    return new MercadoPagoProvider(token);
   }
   if (integration.provider === "simulated") return simulatedPix();
   return null;

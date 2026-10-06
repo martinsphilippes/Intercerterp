@@ -169,6 +169,23 @@ export async function listRoles(store: Store, companyId: string) {
   return roles.sort((a, b) => Number(Boolean(b.system)) - Number(Boolean(a.system)) || String(a.name).localeCompare(String(b.name), "pt-BR"));
 }
 
+/**
+ * Usuários por perfil da empresa (perfil efetivo NA empresa; administradores não usam perfil). Lê usuários e perfis
+ * uma única vez — para listagens com contagem por perfil.
+ */
+export async function usersByRole(store: Store, companyId: string): Promise<Map<string, Doc[]>> {
+  const base = unscoped(store);
+  const [users, roles] = await Promise.all([listAll(base, "users"), listAll(base, "roles")]);
+  const rolesById = new Map(roles.map((r) => [r.id, r]));
+  const out = new Map<string, Doc[]>();
+  for (const u of users) {
+    if (u.isAdmin || !(u.companyIds ?? []).includes(companyId)) continue;
+    const rid = resolveRoleId(u, companyId, rolesById, roles);
+    if (rid) out.set(rid, [...(out.get(rid) ?? []), u]);
+  }
+  return out;
+}
+
 /** Usuários cujo perfil NA EMPRESA DO PERFIL é este (perfil por empresa; administradores não usam perfil). */
 export async function roleUsers(store: Store, roleId: string) {
   const base = unscoped(store);

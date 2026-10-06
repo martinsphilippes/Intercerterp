@@ -5,7 +5,7 @@ import { normalizeSearch, type ListParams } from "@/lib/list";
 import { companyUsers, inviteState } from "@/domain/users";
 import { unscoped } from "@/lib/db/scoped-store";
 import { resolveRoleId } from "@/lib/auth/users";
-import { listRoles, roleCoverage, roleUsers } from "@/domain/roles";
+import { listRoles, roleCoverage, usersByRole } from "@/domain/roles";
 
 /** Consulta única da listagem de usuários (tela e exportação). */
 export async function queryUsers(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
@@ -47,11 +47,7 @@ export async function queryUsers(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
 }
 
 export async function queryRoles(ctx: Ctx) {
-  const roles = await listRoles(ctx.store, ctx.companyId);
-  const out = [];
-  for (const r of roles) {
-    const users = await roleUsers(ctx.store, r.id);
-    out.push({ ...r, ...roleCoverage(r), usersCount: users.filter((u) => u.status !== "inactive").length });
-  }
-  return out;
+  // usuários e perfis lidos uma única vez (não por perfil)
+  const [roles, byRole] = await Promise.all([listRoles(ctx.store, ctx.companyId), usersByRole(ctx.store, ctx.companyId)]);
+  return roles.map((r) => ({ ...r, ...roleCoverage(r), usersCount: (byRole.get(r.id) ?? []).filter((u) => u.status !== "inactive").length }));
 }

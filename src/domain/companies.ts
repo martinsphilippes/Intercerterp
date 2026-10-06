@@ -341,7 +341,7 @@ export async function setBranchStatus(ctx: Ctx, id: string, status: "active" | "
  * Duas fases: valida TODOS os usuários antes de gravar qualquer vínculo; depois grava (em blocos transacionais) e audita.
  * Quem não é administrador só altera usuários que enxerga (com alguma empresa em comum) e nunca o próprio vínculo.
  */
-export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: string[]) {
+export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: string[]): Promise<{ changes: string[]; noRole: string[] }> {
   const c = await companyAdminCtx(ctx, companyId, "edit");
   requireAction(c, "admin.users");
   const company = await c.store.getOrThrow("companies", companyId);
@@ -394,7 +394,8 @@ export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: stri
       related: plan.map((p) => `user:${p.user.id}`),
     });
   }
-  return changes;
+  // vinculados sem perfil equivalente nesta empresa: sem permissão nela até o perfil ser definido (avisado na tela)
+  return { changes, noRole };
 }
 
 /** Resumo de uma filial (usuários, terminais, depósitos, caixas abertos). */

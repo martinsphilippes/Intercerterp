@@ -188,7 +188,7 @@ export function UserForm({
             {isAdmin && !self && companyIds.map((c) => <input key={c} type="hidden" name="companyIds" value={c} />)}
             {!isAdmin && kept && (kept.companies > 0 || kept.branches > 0) && (
               <p className="mt-3 text-xs text-slate-500">
-                Este usuário também está vinculado a {kept.companies > 0 ? `${kept.companies} empresa(s)` : ""}{kept.companies > 0 && kept.branches > 0 ? " e " : ""}{kept.branches > 0 ? `${kept.branches} filial(is)` : ""} fora do seu acesso. Esses vínculos são mantidos ao salvar.
+                Este usuário também está vinculado a {kept.companies > 0 ? `${kept.companies} empresa(s)` : ""}{kept.companies > 0 && kept.branches > 0 ? " e " : ""}{kept.branches > 0 ? `${kept.branches} filial(is)` : ""} fora do seu alcance (empresas a que você não tem acesso ou em que não administra usuários). Esses vínculos são mantidos ao salvar.
               </p>
             )}
           </FormSection>

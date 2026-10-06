@@ -574,22 +574,60 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
 /** Limite de escritas por transação do Appwrite. */
 const TX_LIMIT = 100;
 
+/** Títulos de renegociação vigentes (não cancelados) gerados a partir do título `titleId`. */
+export async function liveRenegotiationsOf(ctx: Ctx, titleId: string): Promise<Doc[]> {
+  const list = await listAll(ctx.store, "titles", { filters: [["eq", "originType", "renegotiation"], ["eq", "originId", titleId]] });
+  return list.filter((t) => t.companyId === ctx.companyId && t.status !== "cancelled").sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+}
+
+/** Mensagem única (domínio e tela) para título com parcelas renegociadas em título ainda vigente. */
+export function renegotiationBlockMessage(titleNumber: number, renegs: Array<{ number: number }>) {
+  const nums = renegs.map((r) => `nº ${r.number}`).join(", ");
+  return `Parcelas do título nº ${titleNumber} foram renegociadas (título ${nums}). Desfaça antes a renegociação ${nums} (no título da renegociação, estornando eventuais recebimentos dele) e então cancele este título.`;
+}
+
+export interface CancelTitleOptions {
+  /**
+   * Cancela também, em cascata, os títulos de renegociação vigentes gerados a partir deste título (e os das
+   * renegociações deles), desde que nenhum tenha recebimento ativo. Uso: extinção da dívida de origem
+   * (ex.: cancelamento da venda). Sem a opção, o cancelamento é recusado enquanto houver renegociação vigente.
+   */
+  cascadeRenegotiations?: boolean;
+}
+
 /**
  * Cancela título sem baixas ativas (ex.: venda cancelada).
  * Concorrência com baixa: o saldo do título é lido ANTES de conferir as baixas e zerado com decremento limitado a 0 —
  * uma baixa gravada depois da leitura reduz o saldo e faz o decremento violar o limite (o cancelamento é recusado);
  * uma baixa que tente gravar depois do cancelamento viola o mesmo limite (saldo 0) e é recusada.
+ * Renegociação: título com parcela renegociada em título de renegociação vigente NÃO é cancelado (regra segura:
+ * o saldo devido está no título novo e cancelá-lo em silêncio apagaria uma dívida acordada) — desfaça antes a
+ * renegociação; `opts.cascadeRenegotiations` cancela as renegociações sem recebimento junto. A renegociação
+ * concorrente é recusada pelo mesmo limite do saldo (ver renegotiate).
  * Repetir o cancelamento conclui parcelas que tenham ficado pendentes (idempotente).
  */
-export async function cancelTitle(ctx: Ctx, id: string, reason: string) {
+export async function cancelTitle(ctx: Ctx, id: string, reason: string, opts: CancelTitleOptions = {}) {
   const title = await ctx.store.getOrThrow("titles", id);
   assert(title.companyId === ctx.companyId, "Título de outra empresa.", "cross_company");
-  const activeSettlements = () => listAll(ctx.store, "settlements", { filters: [["eq", "titleId", id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
+  const activeSettlementsOf = (tid: string) => listAll(ctx.store, "settlements", { filters: [["eq", "titleId", tid], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
+  const activeSettlements = () => activeSettlementsOf(id);
   const hasSettlements = () => new BusinessError("Título possui baixas ativas. Estorne as baixas antes de cancelar.", "has_settlements");
+  const renegBlocked = (rs: Doc[]) => new BusinessError(renegotiationBlockMessage(title.number, rs), "has_renegotiation");
   const instsOf = () => listAll(ctx.store, "installments", { filters: [["eq", "titleId", id]] });
   let changed = false;
   if (title.status !== "cancelled") {
     if ((await activeSettlements()).length) throw hasSettlements();
+    let renegs = await liveRenegotiationsOf(ctx, id);
+    if (renegs.length && opts.cascadeRenegotiations) {
+      for (const r of renegs) {
+        if ((await activeSettlementsOf(r.id)).length) {
+          throw new BusinessError(`O título nº ${r.number} (renegociação do título nº ${title.number}) possui recebimento(s) ativo(s). Estorne-os antes de cancelar.`, "has_settlements");
+        }
+      }
+      for (const r of renegs) await cancelTitle(ctx, r.id, `${reason} — cancelamento do título original nº ${title.number}`, opts);
+      renegs = await liveRenegotiationsOf(ctx, id);
+    }
+    if (renegs.length) throw renegBlocked(renegs);
     try {
       await retryOnConflict(() =>
         ctx.store.transaction(async (t) => {
@@ -597,6 +635,8 @@ export async function cancelTitle(ctx: Ctx, id: string, reason: string) {
           const cur = await ctx.store.getOrThrow("titles", id);
           if (cur.status === "cancelled") return;
           if ((await activeSettlements()).length) throw hasSettlements();
+          const live = await liveRenegotiationsOf(ctx, id);
+          if (live.length) throw renegBlocked(live);
           const pending = (await instsOf()).filter((i) => i.status !== "cancelled");
           if (cur.balance > 0) await t.increment("titles", id, "balance", -cur.balance, { min: 0 });
           // títulos muito longos: parcelas concluídas logo abaixo, fora desta transação (baixa já é recusada pelo título cancelado)
@@ -606,7 +646,13 @@ export async function cancelTitle(ctx: Ctx, id: string, reason: string) {
         }),
       );
     } catch (e) {
-      if (isConflict(e) && (await activeSettlements()).length) throw hasSettlements();
+      if (isConflict(e)) {
+        // baixa ou renegociação gravada entre a leitura e o commit: o limite do saldo recusou o cancelamento
+        if ((await activeSettlements()).length) throw hasSettlements();
+        const live = await liveRenegotiationsOf(ctx, id);
+        if (live.length) throw renegBlocked(live);
+        if (e.reason === "bounds") throw new BusinessError(`O título nº ${title.number} foi alterado por outra operação ao mesmo tempo. Atualize a tela e tente novamente.`, "concurrent_change");
+      }
       throw e;
     }
   }
@@ -1309,39 +1355,51 @@ export async function renegotiate(ctx: Ctx, input: RenegotiateInput) {
   const sum = input.installments.reduce((a, i) => a + i.amount, 0);
   assert(sum === total, `As novas parcelas somam ${formatMoney(sum)}, mas o valor renegociado é ${formatMoney(total)}.`);
   for (const i of input.installments) assert(isDate(i.dueDate) && i.amount > 0, "Novas parcelas precisam de vencimento e valor.");
-  const created = await retryOnConflict(() =>
-    ctx.store.transaction(async (t) => {
-      for (const i of insts) {
-        const cur = await ctx.store.getOrThrow("installments", i.id);
-        assert(cur.balance === i.balance && ["open", "partial"].includes(cur.status), "A parcela foi alterada por outra operação. Atualize e tente novamente.");
-        const seq = cur.seq + 1;
-        // marcador na sequência da parcela (índice único installmentId+seq): baixa/estorno concorrente gera conflito no commit
-        // e a operação perdedora relê o estado; também registra qual título recebeu o saldo (operationId)
-        const key = `reneg:${input.idemKey}:${cur.id}`;
-        await t.create(
-          "settlements",
+  const cancelledMsg = () => new BusinessError(`O título nº ${title.number} foi cancelado por outra operação; a renegociação não foi registrada.`, "title_cancelled");
+  let created: Doc;
+  try {
+    created = await retryOnConflict(() =>
+      ctx.store.transaction(async (t) => {
+        if ((await ctx.store.getOrThrow("titles", title.id)).status === "cancelled") throw cancelledMsg();
+        for (const i of insts) {
+          const cur = await ctx.store.getOrThrow("installments", i.id);
+          assert(cur.balance === i.balance && ["open", "partial"].includes(cur.status), "A parcela foi alterada por outra operação. Atualize e tente novamente.");
+          const seq = cur.seq + 1;
+          // marcador na sequência da parcela (índice único installmentId+seq): baixa/estorno concorrente gera conflito no commit
+          // e a operação perdedora relê o estado; também registra qual título recebeu o saldo (operationId)
+          const key = `reneg:${input.idemKey}:${cur.id}`;
+          await t.create(
+            "settlements",
+            {
+              companyId: ctx.companyId, branchId: title.branchId ?? branchId, createdBy: ctx.user.id, installmentId: cur.id, titleId: title.id, kind: "renegotiation", seq, date: today(),
+              principal: 0, interest: 0, fine: 0, discount: 0, fee: 0, total: 0, status: "active", operationId: newId, notes: `Saldo ${formatMoney(cur.balance)} renegociado`, idemKey: key,
+            },
+            detId("settle", key),
+          );
+          await t.update("installments", i.id, { status: "renegotiated", balance: 0, seq });
+        }
+        await t.increment("titles", title.id, "balance", -base, { min: 0 });
+        return createTitle(
+          ctx,
           {
-            companyId: ctx.companyId, branchId: title.branchId ?? branchId, createdBy: ctx.user.id, installmentId: cur.id, titleId: title.id, kind: "renegotiation", seq, date: today(),
-            principal: 0, interest: 0, fine: 0, discount: 0, fee: 0, total: 0, status: "active", operationId: newId, notes: `Saldo ${formatMoney(cur.balance)} renegociado`, idemKey: key,
+            kind: "receivable", partyType: title.partyType, partyId: title.partyId, partyName: title.partyName, description: `Renegociação do título nº ${title.number} — ${title.description}`,
+            documentNumber: title.documentNumber, originType: "renegotiation", originId: title.id, issueDate: today(), competenceDate: title.competenceDate, categoryId: title.categoryId,
+            costCenterId: title.costCenterId, installments: input.installments.map((i) => ({ ...i, methodKind: insts[0].methodKind ?? null })),
+            notes: `Parcelas renegociadas: ${insts.map((i) => i.number).join(", ")} (saldo ${formatMoney(base)} + encargos ${formatMoney(input.charges)} − desconto ${formatMoney(input.discount)}). ${input.reason.trim()}`,
+            idemKey: `reneg:${input.idemKey}`, branchId: title.branchId ?? branchId,
           },
-          detId("settle", key),
+          t,
         );
-        await t.update("installments", i.id, { status: "renegotiated", balance: 0, seq });
-      }
-      await t.increment("titles", title.id, "balance", -base, { min: 0 });
-      return createTitle(
-        ctx,
-        {
-          kind: "receivable", partyType: title.partyType, partyId: title.partyId, partyName: title.partyName, description: `Renegociação do título nº ${title.number} — ${title.description}`,
-          documentNumber: title.documentNumber, originType: "renegotiation", originId: title.id, issueDate: today(), competenceDate: title.competenceDate, categoryId: title.categoryId,
-          costCenterId: title.costCenterId, installments: input.installments.map((i) => ({ ...i, methodKind: insts[0].methodKind ?? null })),
-          notes: `Parcelas renegociadas: ${insts.map((i) => i.number).join(", ")} (saldo ${formatMoney(base)} + encargos ${formatMoney(input.charges)} − desconto ${formatMoney(input.discount)}). ${input.reason.trim()}`,
-          idemKey: `reneg:${input.idemKey}`, branchId: title.branchId ?? branchId,
-        },
-        t,
-      );
-    }),
-  );
+      }),
+    );
+  } catch (e) {
+    // cancelamento (ou baixa) gravado entre a leitura e o commit: o limite do saldo do título recusa a renegociação
+    if (isConflict(e) && e.reason === "bounds") {
+      if ((await ctx.store.get("titles", title.id))?.status === "cancelled") throw cancelledMsg();
+      throw new BusinessError("As parcelas ou o saldo do título foram alterados por outra operação ao mesmo tempo. Atualize a tela e tente novamente.", "concurrent_change");
+    }
+    throw e;
+  }
   await refreshTitleStatus(ctx.store, title.id);
   for (const i of insts) await resolveOccurrence(ctx.store, `overdue:${i.id}`);
   await audit(ctx, { module: "finance", action: "title.renegotiate", entityType: "title", entityId: title.id, summary: `Parcelas ${insts.map((i) => i.number).join(", ")} renegociadas → título nº ${created.number} (${formatMoney(total)} em ${input.installments.length} parcela(s))`, reason: input.reason, related: [`title:${created.id}`, ...insts.map((i) => `installment:${i.id}`)] });
@@ -1375,9 +1433,15 @@ export async function undoRenegotiation(ctx: Ctx, renegTitleId: string, reason: 
   if (nt.status === "cancelled") return nt;
   const orig = await ctx.store.getOrThrow("titles", nt.originId);
   assert(orig.companyId === ctx.companyId, "Título original de outra empresa.", "cross_company");
-  assert(orig.status !== "cancelled", `O título original nº ${orig.number} foi cancelado; a renegociação não pode ser desfeita.`);
   const active = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", nt.id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
   if (active.length) throw new BusinessError(`O título nº ${nt.number} já possui recebimento(s). Estorne-os antes de desfazer a renegociação.`, "has_settlements");
+  if (orig.status === "cancelled") {
+    // original já cancelado (dados anteriores à trava do cancelamento): não há saldo a devolver — apenas o título novo é cancelado
+    const note = `Renegociação desfeita (título original nº ${orig.number} já cancelado): ${reason.trim()}`;
+    await cancelTitle(ctx, nt.id, note.slice(0, 500));
+    await audit(ctx, { module: "finance", action: "title.renegotiation_undo", entityType: "title", entityId: nt.id, summary: `Renegociação desfeita: título nº ${nt.number} cancelado (o título original nº ${orig.number} já estava cancelado; nada volta ao saldo)`, reason, related: [`title:${orig.id}`] });
+    return ctx.store.getOrThrow("titles", nt.id);
+  }
   const origInsts = await renegotiatedInstallments(ctx, nt, orig);
   assert(origInsts.length > 0, "Não foram encontradas as parcelas renegociadas do título original.");
   let already = false;

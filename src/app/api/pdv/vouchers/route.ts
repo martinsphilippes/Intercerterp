@@ -1,12 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/server/session";
+import { requireApiSession } from "@/lib/server/session";
 import { can } from "@/lib/permissions";
 import { today } from "@/lib/dates";
 
 /** Consulta de vale-crédito pelo código (saldo, validade e titular) para uso no pagamento. */
 export async function GET(req: NextRequest) {
-  const s = await getSession();
-  if (!s?.ctx.companyId) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  const s = await requireApiSession();
+  if (s instanceof NextResponse) return s;
   if (!can(s.user, "pdv")) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   const code = (req.nextUrl.searchParams.get("code") ?? "").trim().toUpperCase();
   if (!code) return NextResponse.json({ error: "Informe o código" }, { status: 400 });

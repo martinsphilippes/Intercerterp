@@ -35,7 +35,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const tables = await listAll(bc.store, "price_tables", { filters: [["eq", "companyId", b.companyId]] });
   const fiscal = await listAll(bc.store, "fiscal_configs", { filters: [["eq", "branchId", id]] });
   const base = `/administracao/empresas/filiais/${id}`;
-  const edit = can(bc.user, "admin", "edit");
+  // as ações exigem a permissão na empresa em uso (runAction) E no perfil da empresa da filial (branchAdminCtx)
+  const edit = can(s.user, "admin", "edit") && can(bc.user, "admin", "edit");
   const a = b.address ?? {};
   const wh = sum.warehouses.find((w) => w.id === b.defaultWarehouseId);
   const kind = branchKind(b);

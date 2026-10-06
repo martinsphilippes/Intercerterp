@@ -69,7 +69,10 @@ export async function setBranchStatusAction(id: string, status: "active" | "inac
 export async function setCompanyUsersAction(fd: FormData) {
   const companyId = fstr(fd, "companyId");
   return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/empresas/${companyId}`] }, async (s) => {
-    const changes = await setCompanyUsers(s.ctx, companyId, fd.getAll("userIds").map(String));
-    return { ok: true as const, message: changes.length ? `Vínculos atualizados: ${changes.join(", ")}.` : "Nenhuma alteração nos vínculos." };
+    const { changes, noRole } = await setCompanyUsers(s.ctx, companyId, fd.getAll("userIds").map(String));
+    const warn = noRole.length
+      ? ` Atenção: ${noRole.join(", ")} ficou(aram) sem perfil nesta empresa (não há perfil equivalente) e não acessa(m) nenhum módulo nela até você definir o perfil — troque para esta empresa e edite o usuário em Administração → Usuários.`
+      : "";
+    return { ok: true as const, message: changes.length ? `Vínculos atualizados: ${changes.join(", ")}.${warn}` : "Nenhuma alteração nos vínculos." };
   });
 }

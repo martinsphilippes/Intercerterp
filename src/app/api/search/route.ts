@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/server/session";
+import { requireApiSession } from "@/lib/server/session";
 import { can } from "@/lib/permissions";
 import { searchable, onlyDigits, formatDoc } from "@/lib/core/text";
 import { formatMoney } from "@/lib/money";
 
 /** Pesquisa global agrupada por tipo de registro, respeitando permissões e empresa ativa. */
 export async function GET(req: NextRequest) {
-  const s = await getSession();
-  if (!s?.ctx.companyId) return NextResponse.json({ hits: [] }, { status: 401 });
+  const s = await requireApiSession();
+  if (s instanceof NextResponse) return s;
   const raw = (req.nextUrl.searchParams.get("q") ?? "").trim();
   if (raw.length < 2) return NextResponse.json({ hits: [] });
   const q = searchable(raw);

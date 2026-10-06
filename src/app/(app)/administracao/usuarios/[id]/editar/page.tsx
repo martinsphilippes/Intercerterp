@@ -18,7 +18,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   if (u.isAdmin && !s.user.isAdmin) redirect("/sem-permissao");
   const o = await userFormOptions(s);
   const role = u.isAdmin ? null : await userRoleIn(s.ctx.store, u, s.ctx.companyId);
-  // vínculos com empresas/filiais fora do alcance do editor: exibidos e preservados no servidor
+  // vínculos com empresas/filiais fora do alcance do editor (sem acesso ou sem administrar usuários nelas): contados e preservados no servidor
   const visibleCompanies = new Set(o.companies.map((c) => c.value));
   const visibleBranches = new Set(o.branches.map((b) => b.value));
   const keptCompanies = (u.companyIds ?? []).filter((c: string) => !visibleCompanies.has(c)).length;

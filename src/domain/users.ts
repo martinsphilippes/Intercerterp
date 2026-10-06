@@ -100,18 +100,53 @@ async function loadManagedUser(ctx: Ctx, id: string): Promise<Doc> {
 }
 
 /**
+ * Empresas (dentre as informadas) em que o editor administra usuários: acesso à empresa + perfil daquela empresa com
+ * admin/editar e "admin.users" (na empresa em uso, a guarda da operação já conferiu). Administradores: todas.
+ */
+export async function manageableCompanyIds(ctx: Ctx, companyIds: string[]): Promise<Set<string>> {
+  const ids = [...new Set(companyIds.filter(Boolean))];
+  if (ctx.user.isAdmin) return new Set(ids);
+  const out = new Set<string>();
+  const me = ctx.user.id !== "system" ? await unscoped(ctx.store).get("users", ctx.user.id) : null;
+  for (const c of ids) {
+    if (!(ctx.user.companyIds ?? []).includes(c)) continue;
+    if (c === ctx.companyId) {
+      out.add(c);
+      continue;
+    }
+    const u = me ? await toCtxUser(ctx.store, me, c) : null;
+    if (u && can(u, "admin", "edit") && canDo(u, "admin.users")) out.add(c);
+  }
+  return out;
+}
+
+/**
  * O gestor só altera vínculos (inclusão ou remoção) de empresas em que ele mesmo administra usuários
  * (acesso à empresa + perfil daquela empresa com admin/editar e "admin.users"). Administradores: todas.
  */
 async function assertCanManageCompanies(ctx: Ctx, companyIds: string[]) {
   if (ctx.user.isAdmin) return;
-  const me = ctx.user.id !== "system" ? await unscoped(ctx.store).get("users", ctx.user.id) : null;
+  const ok = await manageableCompanyIds(ctx, companyIds);
   for (const c of new Set(companyIds)) {
     if (!(ctx.user.companyIds ?? []).includes(c)) throw new PermissionError("Empresa fora do seu acesso: você só pode vincular usuários às empresas a que tem acesso.");
-    if (c === ctx.companyId) continue;
-    const u = me ? await toCtxUser(ctx.store, me, c) : null;
-    if (!u || !can(u, "admin", "edit") || !canDo(u, "admin.users")) throw new PermissionError("Seu perfil na outra empresa não permite gerenciar usuários: o vínculo com ela não pode ser alterado por você.");
+    if (!ok.has(c)) throw new PermissionError("Seu perfil na outra empresa não permite gerenciar usuários: o vínculo com ela não pode ser alterado por você.");
   }
+}
+
+/**
+ * Senha, situação, convite, e-mail/login e limite de desconto valem em TODAS as empresas do usuário: quem não é
+ * administrador só os altera se administra usuários em todas as empresas vinculadas ao alvo.
+ */
+async function assertManagesWholeUser(ctx: Ctx, u: Doc, what: string) {
+  if (ctx.user.isAdmin) return;
+  const companies = [...new Set<string>(u.companyIds ?? [])];
+  const ok = await manageableCompanyIds(ctx, companies);
+  const outside = companies.filter((c) => !ok.has(c));
+  if (!outside.length) return;
+  const names = (await Promise.all(outside.map((c) => unscoped(ctx.store).get("companies", c)))).map((c, i) => (c ? c.tradeName || c.name : outside[i]));
+  throw new PermissionError(
+    `${what}: ${u.name} também tem acesso a ${outside.length === 1 ? "uma empresa" : `${outside.length} empresas`} em que você não administra usuários (${names.join(", ")}). Peça a um administrador ou a quem administra usuários em todas as empresas dele.`,
+  );
 }
 
 /** Mapa empresa → perfil explícito com o perfil efetivo atual de cada empresa (congela o que hoje vem do perfil legado). */
@@ -262,12 +297,27 @@ export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
   const currentRole = before.isAdmin ? null : await userRoleIn(ctx.store, before, ctx.companyId);
   let merged: UserInput = { ...input };
   if (!ctx.user.isAdmin) {
-    // vínculos com empresas (e filiais delas) fora do alcance do gestor são preservados — merge no servidor
-    const mine = new Set(ctx.user.companyIds ?? []);
+    // alcance do gestor = empresas em que ele administra usuários (admin/editar + "admin.users" no perfil DAQUELA empresa).
+    // Vínculos com empresas (e filiais delas) fora desse alcance são preservados — merge no servidor; incluir filial de
+    // empresa fora do alcance é recusado.
+    const inputCompanies = input.companyIds.filter(Boolean);
+    const manageable = await manageableCompanyIds(ctx, [...(before.companyIds ?? []), ...inputCompanies]);
     const branchCompany = new Map((await listAll(base, "branches")).map((b) => [b.id, b.companyId as string]));
-    const keptCompanies = (before.companyIds ?? []).filter((c: string) => !mine.has(c));
-    const keptBranches = (before.branchIds ?? []).filter((b: string) => !mine.has(branchCompany.get(b) ?? ""));
-    merged = { ...input, companyIds: [...new Set([...input.companyIds, ...keptCompanies])], branchIds: [...new Set([...input.branchIds, ...keptBranches])] };
+    const inScope = (b: string) => manageable.has(branchCompany.get(b) ?? "");
+    const keptCompanies = (before.companyIds ?? []).filter((c: string) => !manageable.has(c));
+    const keptBranches = (before.branchIds ?? []).filter((b: string) => !inScope(b));
+    const addedOutside = input.branchIds.filter((b) => b && !inScope(b) && !(before.branchIds ?? []).includes(b) && branchCompany.has(b));
+    if (addedOutside.length) throw new PermissionError("Filial de empresa em que você não administra usuários: o acesso a ela não pode ser alterado por você.");
+    merged = {
+      ...input,
+      companyIds: [...new Set([...inputCompanies, ...keptCompanies])],
+      branchIds: [...new Set([...input.branchIds.filter((b) => b && (inScope(b) || !branchCompany.has(b))), ...keptBranches])],
+    };
+    // dados de acesso e limite de desconto valem em todas as empresas do usuário
+    const emailChanged = (input.email?.trim().toLowerCase() ?? "") !== (before.email ?? "");
+    const loginChanged = (input.login?.trim().toLowerCase() || null) !== (before.login ?? null);
+    if (emailChanged || loginChanged) await assertManagesWholeUser(ctx, before, "Alterar e-mail ou login");
+    if ((input.discountLimitBps ?? null) !== (before.discountLimitBps ?? null)) await assertManagesWholeUser(ctx, before, "Alterar o limite de desconto");
     if (id === ctx.user.id) {
       const changed =
         !sameSet([...new Set(merged.companyIds.filter(Boolean))], before.companyIds ?? []) ||
@@ -336,6 +386,7 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
   await guard(ctx, "edit", `alterar situação de usuário para ${status}`, id);
   const u = await loadManagedUser(ctx, id);
   assert(u.id !== ctx.user.id, "Você não pode alterar a situação do seu próprio acesso.");
+  await assertManagesWholeUser(ctx, u, "Alterar a situação do acesso");
   if (status === "suspended") assert(reason?.trim(), "Informe o motivo da suspensão.");
   if (status === u.status) return u;
   const what = status === "suspended" ? "Suspender" : "Inativar";
@@ -368,6 +419,7 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
 export async function resendInvite(ctx: Ctx, id: string, origin: string): Promise<{ user: Doc; invite: InviteResult }> {
   await guard(ctx, "edit", "reenviar convite", id);
   const u = await loadManagedUser(ctx, id);
+  await assertManagesWholeUser(ctx, u, "Reenviar o convite");
   assert(!u.authId || u.status === "invited", "Este usuário já ativou o acesso; use “Definir nova senha” se ele esqueceu a senha.");
   assert(u.status !== "suspended", "Usuário suspenso: reative antes de reenviar o convite.");
   const days = await getSetting<number>(ctx.store, ctx.companyId, null, "users.inviteExpiryDays", DEFAULT_INVITE_DAYS);
@@ -383,6 +435,7 @@ export async function resendInvite(ctx: Ctx, id: string, origin: string): Promis
 export async function cancelInvite(ctx: Ctx, id: string) {
   await guard(ctx, "edit", "cancelar convite", id);
   const u = await loadManagedUser(ctx, id);
+  await assertManagesWholeUser(ctx, u, "Cancelar o convite");
   assert(u.status === "invited", "Não há convite pendente para este usuário.");
   const after = await ctx.store.update("users", id, { status: "inactive", inviteTokenHash: null, inviteExpiresAt: null });
   await audit(ctx, { module: "admin", action: "user.invite_cancel", entityType: "user", entityId: id, summary: `Convite de ${u.name} cancelado (link invalidado)` });
@@ -394,6 +447,7 @@ export async function adminSetPassword(ctx: Ctx, id: string, password: string) {
   await guard(ctx, "edit", "redefinir senha de usuário", id);
   assert(password.length >= 8, "A senha deve ter ao menos 8 caracteres.");
   const u = await loadManagedUser(ctx, id);
+  await assertManagesWholeUser(ctx, u, "Redefinir a senha");
   assert(u.status === "active", "Somente usuários ativos podem ter a senha redefinida.");
   const auth = getAuth();
   if (u.authId) {

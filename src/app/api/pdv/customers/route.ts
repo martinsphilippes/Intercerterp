@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/server/session";
+import { requireApiSession } from "@/lib/server/session";
 import { can } from "@/lib/permissions";
 import { listAll } from "@/lib/db";
 import { onlyDigits, searchable } from "@/lib/core/text";
 
 /** Identificação do cliente no PDV (Tela 6): nome, CPF/CNPJ, telefone e e-mail — mesma base do CRM. */
 export async function GET(req: NextRequest) {
-  const s = await getSession();
-  if (!s?.ctx.companyId) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  const s = await requireApiSession();
+  if (s instanceof NextResponse) return s;
   if (!can(s.user, "pdv") && !can(s.user, "customers")) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   const store = s.ctx.store;
   const cid = s.ctx.companyId;

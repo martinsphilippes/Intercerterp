@@ -1,9 +1,9 @@
-import { listAll } from "../db";
+import { detId, isConflict, listAll } from "../db";
 import type { Doc, Store } from "../db/types";
 import { unscoped } from "../db/scoped-store";
 import { DEFAULT_ROLES, SPECIAL_ACTIONS } from "../permissions";
-import { audit } from "../core/audit";
-import { systemCtx } from "../core/ctx";
+import { sanitize } from "../core/audit";
+import { nowIso } from "../dates";
 
 /**
  * Sincronização dos perfis de SISTEMA com os modelos padrão (DEFAULT_ROLES).
@@ -47,11 +47,25 @@ export async function syncRoleTemplate(store: Store, role: Doc): Promise<Doc> {
   const after = await base.update("roles", role.id, { actions, templateActions: plan.templateActions });
   if (plan.missing.length) {
     const labels = plan.missing.map((a) => SPECIAL_ACTIONS.find((x) => x.key === a)?.label ?? a);
-    await audit(systemCtx(base, role.companyId ?? ""), {
-      module: "admin", action: "role.template_sync", entityType: "role", entityId: role.id,
-      summary: `Perfil de sistema "${role.name}" recebeu operação(ões) nova(s) do modelo padrão: ${labels.join(", ")} (nada do que foi configurado foi removido)`,
-      before: { actions: role.actions ?? [] }, after: { actions },
-    });
+    // id determinístico (perfil + operações acrescentadas + modelo aplicado): sincronizações concorrentes do mesmo perfil
+    // (várias requisições lendo o perfil ao mesmo tempo) gravam um único registro de auditoria
+    const auditId = detId("audit", "role.template_sync", role.id, [...plan.missing].sort().join(","), [...plan.templateActions].sort().join(","));
+    try {
+      await base.create(
+        "audit_logs",
+        {
+          companyId: role.companyId ?? null, branchId: null, userId: "system", userName: "Sistema", userRole: "Administrador",
+          module: "admin", action: "role.template_sync", entityType: "role", entityId: role.id,
+          summary: `Perfil de sistema "${role.name}" recebeu operação(ões) nova(s) do modelo padrão: ${labels.join(", ")} (nada do que foi configurado foi removido)`,
+          before: sanitize({ actions: role.actions ?? [] }), after: sanitize({ actions }), reason: null, result: "success", ip: null,
+          occurredAt: nowIso(), operationId: null, related: [`role:${role.id}`],
+        },
+        auditId,
+      );
+    } catch (e) {
+      // já registrado por outra sincronização concorrente; outras falhas de auditoria não derrubam o acesso
+      if (!isConflict(e)) console.error("[audit] falha ao registrar sincronização de perfil", e);
+    }
   }
   return after;
 }

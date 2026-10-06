@@ -1,6 +1,7 @@
 /**
  * Destino após o login (`?next=`): somente caminho relativo interno. Recusa URL absoluta, protocolo relativo ("//host"),
- * barra invertida ("/\\host" — navegadores tratam como "//"), caracteres de controle e esquemas ("javascript:").
+ * barra invertida ("/\\host" — navegadores tratam como "//"), caracteres de controle e esquemas ("javascript:"). A conferência
+ * vale também para o caminho já normalizado (segmentos "." e ".." podem produzir "//host").
  */
 export function safeNextPath(raw: unknown, fallback = "/dashboard"): string {
   const v = typeof raw === "string" ? raw.trim() : "";
@@ -10,7 +11,10 @@ export function safeNextPath(raw: unknown, fallback = "/dashboard"): string {
   try {
     const u = new URL(v, "http://interno.invalid");
     if (u.origin !== "http://interno.invalid") return fallback;
-    return `${u.pathname}${u.search}${u.hash}`;
+    const out = `${u.pathname}${u.search}${u.hash}`;
+    // o caminho normalizado também não pode virar protocolo relativo ("/.//host" → "//host")
+    if (!out.startsWith("/") || out.startsWith("//") || out.startsWith("/\\")) return fallback;
+    return out;
   } catch {
     return fallback;
   }

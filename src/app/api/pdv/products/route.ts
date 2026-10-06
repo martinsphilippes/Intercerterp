@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/server/session";
+import { requireApiSession } from "@/lib/server/session";
 import { can } from "@/lib/permissions";
 import { listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
@@ -13,8 +13,8 @@ import { availableMap } from "@/domain/stock";
  * Preço vigente da tabela selecionada (filial/vigência/atacado) e disponível na filial.
  */
 export async function GET(req: NextRequest) {
-  const s = await getSession();
-  if (!s?.ctx.companyId) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  const s = await requireApiSession();
+  if (s instanceof NextResponse) return s;
   if (!can(s.user, "pdv")) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   const branchId = s.ctx.branchId;
   if (!branchId) return NextResponse.json({ error: "Selecione uma filial" }, { status: 400 });

@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 import { cache } from "react";
 import { getStore } from "../db";
 import { getAuth } from "../auth/provider";
@@ -8,7 +9,7 @@ import { accessibleUnits, findUserByAuthId, toCtxUser } from "../auth/users";
 import type { Ctx } from "../core/ctx";
 import { can, type Crud, type ModuleKey } from "../permissions";
 import { ensureBootstrap } from "./bootstrap";
-import { scopeStore } from "../db/scoped-store";
+import { ScopedStore, scopeStore } from "../db/scoped-store";
 
 export const SESSION_COOKIE = "ic_session";
 export const UNIT_COOKIE = "ic_unit";
@@ -50,9 +51,10 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   const user = await toCtxUser(store, userDoc, company?.id ?? null);
   const h = await headers();
   if (!company || (!branch && !consolidated)) {
-    // contexto incompleto: as páginas internas redirecionam para a seleção de unidade
+    // contexto incompleto: as páginas internas redirecionam para a seleção de unidade e as rotas /api recusam
+    // (requireApiSession). O Store fica restrito mesmo assim (sem empresa: só registros globais) — nunca sem escopo.
     return {
-      ctx: { store, user, companyId: company?.id ?? "", branchId: null, ip: h.get("x-forwarded-for") ?? undefined },
+      ctx: { store: new ScopedStore(store, company?.id ?? ""), user, companyId: company?.id ?? "", branchId: null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined },
       user,
       company: company ?? {},
       branch: null,
@@ -74,11 +76,30 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   };
 });
 
+/** Contexto de trabalho completo: empresa ativa e filial ativa (ou o consolidado da empresa). */
+export function hasWorkContext(s: Pick<SessionInfo, "ctx" | "branch" | "consolidated">): boolean {
+  return Boolean(s.ctx.companyId) && (Boolean(s.branch) || s.consolidated);
+}
+
 /** Exige sessão com empresa/filial definida; redireciona quando ausente. */
 export async function requireSession(module?: ModuleKey, op: Crud = "view"): Promise<SessionInfo> {
   const s = await getSession();
   if (!s) redirect("/login");
-  if (!s.ctx.companyId || (!s.branch && !s.consolidated)) redirect("/selecionar-unidade");
+  if (!hasWorkContext(s)) redirect("/selecionar-unidade");
   if (module && !can(s.user, module, op)) redirect("/sem-permissao");
+  return s;
+}
+
+/**
+ * Sessão para rotas de API e downloads (route handlers): exige autenticação E contexto de trabalho completo
+ * (empresa ativa + filial ativa ou consolidado). Contexto incompleto — ex.: a filial em uso foi inativada — é recusado,
+ * em vez de operar com `branchId` nulo. Devolve a sessão ou a resposta de erro pronta:
+ *   const s = await requireApiSession(); if (s instanceof NextResponse) return s;
+ */
+export async function requireApiSession(format: "json" | "text" = "json"): Promise<SessionInfo | NextResponse> {
+  const s = await getSession();
+  const fail = (status: number, error: string) => (format === "json" ? NextResponse.json({ error }, { status }) : new NextResponse(error, { status }));
+  if (!s) return fail(401, "Não autenticado. Entre novamente.");
+  if (!hasWorkContext(s)) return fail(409, "Selecione a empresa e a filial de trabalho (a unidade em uso não está disponível).");
   return s;
 }
