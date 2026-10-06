@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download } from "lucide-react";
 import { cn } from "./cn";
 import { qs, type SearchParams } from "@/lib/list";

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { redirect } from "next/navigation";
 import { listAll } from "@/lib/db";
 import { requireSession } from "@/lib/server/session";

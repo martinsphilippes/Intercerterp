@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { PublicTicketForm } from "./form";
 
 export const metadata = { title: "Suporte" };

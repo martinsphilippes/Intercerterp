@@ -2,7 +2,7 @@
 
 import { formatDateTime } from "@/lib/dates";
 import { useMemo, useState, useTransition } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, CheckCheck, EyeOff, HandCoins, Link2, Link2Off, ListChecks, Plus, RotateCcw, Unlink, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";

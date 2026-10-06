@@ -1,5 +1,5 @@
 import { isStale } from "@/lib/core/jobs";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Play, AlertTriangle } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Building2, Plus } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { listAll } from "@/lib/db";

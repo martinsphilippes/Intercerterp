@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Save, Send } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, FormGrid, FormSection, Input, Select, Textarea, Checkbox } from "@/components/ui/form";

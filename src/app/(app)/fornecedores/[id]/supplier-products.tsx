@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { ActionForm, ActionButton, SubmitButton } from "@/components/ui/action-form";
 import { Dialog } from "@/components/ui/dialog";

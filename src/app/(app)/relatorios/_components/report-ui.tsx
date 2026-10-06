@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { formatDateTimeSeconds } from "@/lib/dates";
 import { ArrowDownRight, ArrowUpRight, Filter, Info, Minus } from "lucide-react";
 import { buttonClass } from "@/components/ui/button";

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { BarChart3, Download } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
@@ -9,7 +9,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState, Notice } from "@/components/ui/empty";
 import { inputClass } from "@/components/ui/form";
 import { cn } from "@/components/ui/cn";
-import { ParetoChart } from "@/components/charts/pareto-chart";
+import { ParetoChart } from "@/components/charts/lazy";
 import { canDo } from "@/lib/permissions";
 import { formatBps, formatMoney, formatQty, marginBps, markupBps, roundDiv } from "@/lib/money";
 import { formatDate } from "@/lib/dates";

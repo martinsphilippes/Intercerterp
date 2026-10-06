@@ -2,7 +2,7 @@ import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { FilterBar } from "@/components/ui/filters";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Lock } from "lucide-react";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";

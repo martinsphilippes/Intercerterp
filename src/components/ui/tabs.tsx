@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { cn } from "./cn";
 
 /** Abas por URL (?tab=) — navegáveis, compartilháveis e preservadas ao recarregar. */

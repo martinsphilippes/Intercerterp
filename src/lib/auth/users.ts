@@ -81,8 +81,9 @@ export async function findUserByAuthId(store: Store, authId: string): Promise<Do
 export async function accessibleUnits(store: Store, u: Doc) {
   const { listAll } = await import("../db");
   const base = unscoped(store);
-  const companies = (await listAll(base, "companies")).filter((c) => u.isAdmin || (u.companyIds ?? []).includes(c.id));
-  const branches = (await listAll(base, "branches")).filter(
+  const [allCompanies, allBranches] = await Promise.all([listAll(base, "companies"), listAll(base, "branches")]);
+  const companies = allCompanies.filter((c) => u.isAdmin || (u.companyIds ?? []).includes(c.id));
+  const branches = allBranches.filter(
     (b) => companies.some((c) => c.id === b.companyId) && (u.isAdmin || !(u.branchIds?.length) || u.branchIds.includes(b.id)),
   );
   return { companies, branches };

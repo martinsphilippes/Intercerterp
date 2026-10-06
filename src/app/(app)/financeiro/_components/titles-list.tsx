@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { BadgeCheck, Eye, Plus, Receipt } from "lucide-react";
 import type { SessionInfo } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";

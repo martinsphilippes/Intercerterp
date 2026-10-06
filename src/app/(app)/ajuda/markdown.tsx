@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Fragment } from "react";
 
 /** Renderizador mínimo e seguro (sem HTML bruto) do Markdown simples dos artigos de ajuda. */

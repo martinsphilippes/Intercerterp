@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { InstallAppButton } from "@/components/pwa/install-button";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/server/session";

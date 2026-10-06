@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Plus, Search } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { listAll } from "@/lib/db";

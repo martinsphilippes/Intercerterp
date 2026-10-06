@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useMemo, useState, useTransition } from "react";
 import { FileText, ListPlus, Star, Trash2 } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, BarChart3, CalendarClock, CheckCircle2, Clock, DollarSign, FileWarning, PackageSearch, PieChart, Plus, Receipt, ScanBarcode, ShoppingCart, Target, TrendingDown, Wallet } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
@@ -6,7 +6,7 @@ import { Card, Stat } from "@/components/ui/card";
 import { Badge, SimBadge, StatusBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { EmptyState, Notice } from "@/components/ui/empty";
-import { RevenueChart } from "@/components/charts/revenue-chart";
+import { RevenueChart } from "@/components/charts/lazy";
 import { Meter } from "@/components/charts/bars";
 import { can } from "@/lib/permissions";
 import { formatBps, formatMoney, formatQty } from "@/lib/money";

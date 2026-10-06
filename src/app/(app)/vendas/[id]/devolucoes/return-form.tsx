@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ArrowLeftRight, CheckCircle2, FileText, Gift, History, Package, Receipt, Undo2, Wallet } from "lucide-react";
 import { ActionForm } from "@/components/ui/action-form";
 import { buttonClass } from "@/components/ui/button";

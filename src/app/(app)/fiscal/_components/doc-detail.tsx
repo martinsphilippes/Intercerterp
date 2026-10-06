@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { ShieldCheck } from "lucide-react";
 import QRCode from "qrcode";
 import { listAll } from "@/lib/db";

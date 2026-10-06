@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Monitor, RefreshCw, WifiOff, Wifi } from "lucide-react";
 import { listAll } from "@/lib/db";
 import { requireSession } from "@/lib/server/session";

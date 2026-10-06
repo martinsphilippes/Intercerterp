@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { AlertTriangle, Ban, BookOpen, CalendarClock, Download, FileArchive, Receipt, Scale, Send } from "lucide-react";
 import { listAll } from "@/lib/db";
 import { requireSession } from "@/lib/server/session";
@@ -23,7 +23,7 @@ import { getAccountingSchedule, packageHistory } from "@/domain/fiscal/export";
 import { displayStatus, getTemplates, listObligations, OBLIGATION_KIND_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_SUPPORT } from "@/domain/fiscal/obligations";
 import { getIntegration } from "@/domain/integrations";
 import { bookRows, cancelRows, cfopRows, monthOptions, ncmRows, periodDocRows, previousFilter, rejectRows, reportFilter, serviceRows } from "./queries";
-import { StackedByModel } from "./charts";
+import { StackedByModel } from "@/components/charts/lazy";
 import { CompleteObligationButton, NewObligationButton, TemplatesEditor } from "./obligation-ui";
 import { deleteObligationAction, generateObligationsAction, generatePackageAction, obligationStatusAction, saveScheduleAction } from "../actions";
 import { FormDialogButton } from "../_components/form-dialog";

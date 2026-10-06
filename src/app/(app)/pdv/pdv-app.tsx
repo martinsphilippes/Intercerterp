@@ -2,7 +2,7 @@
 
 import { formatTime, formatDateTime } from "@/lib/dates";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle, ArrowLeftRight, BadgePercent, Ban, CheckCircle2, ClipboardList, CloudOff, CreditCard, LogOut, Minus, Monitor, Pencil, Plus, RefreshCcw, Save, ShoppingCart, Trash2, UserRound, Wallet,

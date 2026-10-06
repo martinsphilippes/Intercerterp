@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { cn } from "@/components/ui/cn";
 import { formatBps, formatMoney, roundDiv } from "@/lib/money";
 import { variationBps, type Row, type Totals } from "@/domain/reports";

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
 import { BadgeCheck, Ban, CreditCard, Download, Mail, Paperclip, Pencil, Receipt, Undo2 } from "lucide-react";
 import type { SessionInfo } from "@/lib/server/session";

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { addMonths, monthEnd, monthStart, today } from "@/lib/dates";
 import { qs, type SearchParams } from "@/lib/list";
 import { cn } from "@/components/ui/cn";

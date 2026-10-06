@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { AlertTriangle, ClipboardCheck } from "lucide-react";
 import { QtyInput, MoneyInput } from "@/components/ui/money-input";

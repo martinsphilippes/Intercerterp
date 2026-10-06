@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Banknote, CreditCard, EyeOff, FileText, Lock, QrCode, Wallet } from "lucide-react";
 import { ActionForm } from "@/components/ui/action-form";
 import { Badge } from "@/components/ui/badge";

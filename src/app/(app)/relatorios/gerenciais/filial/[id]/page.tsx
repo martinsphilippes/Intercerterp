@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Download } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
@@ -8,7 +8,7 @@ import { Badge, StatusBadge } from "@/components/ui/badge";
 import { LinkButton, buttonClass } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState, Notice } from "@/components/ui/empty";
-import { RevenueChart } from "@/components/charts/revenue-chart";
+import { RevenueChart } from "@/components/charts/lazy";
 import { canDo } from "@/lib/permissions";
 import { formatMoney, marginBps } from "@/lib/money";
 import { formatDateTime } from "@/lib/dates";

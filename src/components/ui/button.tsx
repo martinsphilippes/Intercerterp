@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { cn } from "./cn";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "accent" | "outline";

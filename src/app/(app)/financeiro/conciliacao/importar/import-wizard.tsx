@@ -2,7 +2,7 @@
 
 import { formatDateTimeSeconds } from "@/lib/dates";
 import { useRef, useState, useTransition } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import { FileUp, RefreshCw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";

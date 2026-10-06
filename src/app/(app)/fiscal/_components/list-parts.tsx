@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Eye, FileDown, Pencil, Printer, RefreshCw, Search, Send } from "lucide-react";
 import type { Doc } from "@/lib/db/types";
 import { Badge, SimBadge, StatusBadge } from "@/components/ui/badge";

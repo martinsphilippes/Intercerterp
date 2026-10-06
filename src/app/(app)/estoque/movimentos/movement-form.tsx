@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { PackagePlus, PackageMinus, SlidersHorizontal, Trash2, ArrowLeftRight, Package } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, Input, Select, Textarea, FormGrid } from "@/components/ui/form";

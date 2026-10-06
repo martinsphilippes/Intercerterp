@@ -1,6 +1,7 @@
 import path from "node:path";
 import { AppwriteStore } from "./appwrite-store";
 import { MemoryStore } from "./memory-store";
+import { ReadCachedStore } from "./read-cache";
 import { COLLECTIONS } from "./schema";
 import { ConflictError, Doc, Filter, ListOptions, Store } from "./types";
 
@@ -47,8 +48,27 @@ export function getStore(): Store {
   if (backend === "appwrite") store = new AppwriteStore(appwriteConfig());
   else if (backend === "local") store = new MemoryStore(process.env.LOCAL_DATA_DIR ?? path.join(process.cwd(), ".data", "local"));
   else store = new MemoryStore();
-  g.__intercertStore = store;
-  return store;
+  // leituras repetidas na mesma tela vão ao banco uma vez só (ver read-cache.ts)
+  g.__intercertStore = new ReadCachedStore(process.env.STORE_TRACE === "1" ? traced(store) : store);
+  return g.__intercertStore;
+}
+
+/** Diagnóstico (STORE_TRACE=1): registra cada leitura com a duração, para medir consultas por tela. */
+function traced(store: Store): Store {
+  return new Proxy(store, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv);
+      if (typeof v !== "function" || !["get", "getOrThrow", "list"].includes(String(prop))) return typeof v === "function" ? v.bind(target) : v;
+      return async (...args: unknown[]) => {
+        const t0 = performance.now();
+        try {
+          return await v.apply(target, args);
+        } finally {
+          console.log(`[store] ${String(prop)} ${String(args[0])} ${(performance.now() - t0).toFixed(1)}ms`);
+        }
+      };
+    },
+  });
 }
 
 /** Substitui o armazenamento global (testes). */

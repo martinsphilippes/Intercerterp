@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
 import { PackageCheck, Pencil, Send } from "lucide-react";
 import { requireSession } from "@/lib/server/session";

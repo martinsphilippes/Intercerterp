@@ -9,7 +9,7 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
 import { useToast } from "@/components/ui/toast";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { saveCustomerAction, checkDocAction } from "./actions";
 import type { Address } from "@/domain/customers";
 

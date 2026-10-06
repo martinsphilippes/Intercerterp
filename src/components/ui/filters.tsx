@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Search } from "lucide-react";
 import { buttonClass } from "./button";
 import { inputClass } from "./form";

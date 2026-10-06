@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Field, Input, Select } from "@/components/ui/form";

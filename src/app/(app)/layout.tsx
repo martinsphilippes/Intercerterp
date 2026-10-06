@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Bell } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { NAV } from "@/components/shell/nav";
@@ -14,9 +14,10 @@ import { accessibleUnits } from "@/lib/auth/users";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireSession();
   const groups = NAV.map((g) => ({ ...g, items: g.items.filter((i) => can(s.user, i.module)) })).filter((g) => g.items.length);
-  const userDoc = await getStore().get("users", s.user.id);
-  const units = await accessibleUnits(getStore(), userDoc!);
-  const unread = await s.ctx.store.list("notifications", { filters: [["eq", "userId", s.user.id], ["isNull", "readAt"], ["isNull", "archivedAt"], ["eq", "companyId", s.ctx.companyId]], limit: 1 });
+  const [units, unread] = await Promise.all([
+    getStore().get("users", s.user.id).then((userDoc) => accessibleUnits(getStore(), userDoc!)),
+    s.ctx.store.list("notifications", { filters: [["eq", "userId", s.user.id], ["isNull", "readAt"], ["isNull", "archivedAt"], ["eq", "companyId", s.ctx.companyId]], limit: 1 }),
+  ]);
   const companyName = s.company.tradeName || s.company.name;
   const label = `${companyName} · ${s.consolidated ? "Consolidado" : s.branch?.name}`;
   const backend = configuredBackend();

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Download, PieChart } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
@@ -6,7 +6,7 @@ import { Card, Stat } from "@/components/ui/card";
 import { LinkTabs } from "@/components/ui/tabs";
 import { LinkButton, buttonClass } from "@/components/ui/button";
 import { EmptyState, Notice } from "@/components/ui/empty";
-import { RevenueChart } from "@/components/charts/revenue-chart";
+import { RevenueChart } from "@/components/charts/lazy";
 import { BarList } from "@/components/charts/bars";
 import { can, canDo } from "@/lib/permissions";
 import { formatBps, formatMoney, roundDiv } from "@/lib/money";

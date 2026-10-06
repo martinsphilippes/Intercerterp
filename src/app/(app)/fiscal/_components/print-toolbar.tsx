@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Printer, ArrowLeft, FileText } from "lucide-react";
 import { Button, buttonClass } from "@/components/ui/button";
 

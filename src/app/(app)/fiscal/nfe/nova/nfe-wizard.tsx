@@ -3,7 +3,7 @@
 import { formatTime } from "@/lib/dates";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, FileSearch, Plus, Save, Send, Trash2, RefreshCw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FormGrid, Input, Select, Textarea, Checkbox } from "@/components/ui/form";

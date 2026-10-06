@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Ban, FileDown, FileText, Mail, Pencil, Printer, RefreshCw, Search, Send, Wrench, FilePen } from "lucide-react";
 import { ActionButton } from "@/components/ui/action-form";
 import { buttonClass } from "@/components/ui/button";

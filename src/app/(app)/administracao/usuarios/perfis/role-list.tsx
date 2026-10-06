@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { Plus } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { AlertTriangle, ArrowLeft, Banknote, CheckCircle2, Copy, CreditCard, FileText, Gift, Landmark, Loader2, QrCode, RefreshCcw, Trash2, Wallet, XCircle } from "lucide-react";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { LogOut, UserCircle2 } from "lucide-react";
 import { logoutAction } from "@/app/actions/session";
 

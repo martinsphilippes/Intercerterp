@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
 import { canViewBranch } from "../../queries";
 import { AlertTriangle, CheckCircle2, Eye, LogOut, Printer } from "lucide-react";

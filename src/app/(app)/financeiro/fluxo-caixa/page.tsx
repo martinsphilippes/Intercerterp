@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/ui/link";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, Stat } from "@/components/ui/card";
@@ -16,7 +16,7 @@ import { lookups, nameMap } from "@/lib/server/lookups";
 import { computeCashflow, computeCompetence } from "@/domain/cashflow";
 import { ACCOUNT_KIND_LABEL } from "@/domain/finance";
 import { CASHFLOW_PRESETS, cashflowFilter, queryCashflowMovements } from "../queries";
-import { CashflowCharts } from "./charts";
+import { CashflowCharts } from "@/components/charts/lazy";
 import { NewEntryDialog, TransferDialog } from "../_components/account-forms";
 
 export const metadata = { title: "Fluxo de caixa" };
