@@ -15,6 +15,16 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] Publicado: https://intercerterp.vercel.app (Vercel, região fra1, acesso público) com Appwrite Cloud (fra) provisionado — 83 tabelas, bucket único, demonstração carregada e administrador geral criado pela instalação em etapas (`/api/setup/run`, encerrada com `step=finish`).
 - [x] PWA: manifesto, ícones (inclusive maskable e Apple), service worker (estáticos em cache, dados sempre pela rede, página offline), botão “Instalar app” e atalhos (PDV, Painel, Produtos, Receber).
 
+## Gestão contábil — Fase 0 (fundação) · 06/10/2026
+- [x] Decisões do dono: produto para vários escritórios; cliente contábil é cadastro próprio do escritório, com vínculo opcional à empresa que usa o ERP (XMLs e situação fiscal chegam sozinhos); infraestrutura paga depois.
+- [x] Núcleo: `companies.kind` (retail | accounting), 9 tabelas novas, módulo `accounting` + ações, perfis do escritório, parametrização enxuta, menu e painel por tipo de empresa.
+- [x] Domínio (`src/domain/accounting`): clientes PF/PJ com consulta de CNPJ ampliada (CNAEs, natureza, porte, QSA), situação com transições, regime com vigência, pessoas, estabelecimentos, grupos, departamentos/membros/responsáveis, carteira restrita por responsável, código de vínculo + aceite pela empresa (consentimento), leitura somente-consulta da empresa vinculada, entrega automática do pacote mensal na caixa de entrada, download por entrega.
+- [x] Testes: `tests/accounting.test.ts` (12 cenários: parametrização, unicidade por escritório, isolamento entre escritórios, regime com vigência, transições, sócios ≤100%, raiz do CNPJ, carteira restrita, código/aceite/revogação, somente leitura, entrega idempotente e obrigação concluída).
+- [x] Produção: 92 tabelas provisionadas; escritório de demonstração carregado (`step=demo-update`), usuários `contador`/`analista` no acesso rápido.
+- [ ] Telas `/contabil` (painel, clientes, 360°, grupos, entregas, equipe) e vínculo na integração da empresa — em construção paralela com revisão independente.
+- [ ] Varredura de navegação como `contador` e `analista`, build e publicação; matriz de cobertura da área.
+- Próximas fases (ver `docs/analise-gestao-contabil.md`): 1 obrigações da carteira, trabalhos recorrentes, revisão, documentos; 2 contratos, honorários, NFS-e, cobrança; 3 portal do cliente e atendimento com SLA; 4 horas, rentabilidade, comercial; 5 BPO, regularidade, migração, IA.
+
 ## Pendente (depende de terceiros)
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).
 
