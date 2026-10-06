@@ -45,8 +45,18 @@ export async function GET(req: NextRequest) {
     const { seedDemo } = await import("@/domain/seed");
     const days = Math.max(1, Math.min(45, Number(req.nextUrl.searchParams.get("days") ?? process.env.DEMO_HISTORY_DAYS ?? 7)));
     // deixa folga dentro dos 300 s da função; repita a chamada até done=true
-    const r = await seedDemo(store, { historyDays: days, deadline: started + 170000 });
+    const r = await seedDemo(store, { historyDays: days, deadline: started + 150000 });
     return NextResponse.json({ ok: true, step, done: r.done, companyId: r.companyId, ms: Date.now() - started });
+  }
+
+  if (step === "status") {
+    const count = async (t: string, filters: any[] = []) => (await store.list(t as any, { filters, limit: 1 })).total;
+    return NextResponse.json({
+      ok: true, step,
+      companies: await count("companies"), users: await count("users"), products: await count("products"),
+      sales: await count("sales"), cashSessions: await count("cash_sessions"), openCashSessions: await count("cash_sessions", [["eq", "status", "open"]]),
+      fiscalDocuments: await count("fiscal_documents"), settings: await count("settings"),
+    });
   }
 
   if (step === "owner") {
@@ -72,5 +82,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, step, completed: true });
   }
 
-  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | owner | finish)." }, { status: 400 });
+  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | status | owner | finish)." }, { status: 400 });
 }

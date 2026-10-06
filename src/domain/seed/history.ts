@@ -58,6 +58,7 @@ export async function seedHistory(refs: DemoRefs, days = 45, deadline = Infinity
         const at = new Date(dayStart + (10 + i * 1.5) * 3600000).toISOString();
         const idemKey = `demo-hist-${termKey}-${date}-${i}`;
         if (await store.get("sales", detId("sale", idemKey))) continue; // já gravada numa carga interrompida
+        if (Date.now() > deadline) return { partial: true, created }; // o caixa do dia fica aberto e é retomado na próxima chamada
         // total para montar pagamentos
         const { prepareSale } = await import("../sales");
         const customerKey = rand() < 0.35 ? pick(Object.keys(refs.customers)) : null;
@@ -87,6 +88,7 @@ export async function seedHistory(refs: DemoRefs, days = 45, deadline = Infinity
       await closeSession(ctx, { sessionId: session.id, counted, justification: divergence ? "Diferença de R$ 12,50 em dinheiro — conferência repetida, valor não localizado (demonstração)." : undefined, checklist: { cashCounted: true, cardReportPrinted: true, pixConferred: true } });
       await store.update("cash_sessions", session.id, { closedAt: new Date(dayStart + 20 * 3600000).toISOString() });
       await setSetting(store, companyId, null, dayKey, true);
+      console.log(`[demo] histórico ${termKey} ${date} concluído`);
     }
   }
   await runDueJobs(store, { limit: 2000 });

@@ -9,10 +9,12 @@ import * as admin from "./modules/admin";
 import * as reports from "./modules/reports";
 
 /** Cenários de demonstração por módulo (ordem de dependência). */
-export async function seedModules(refs: DemoRefs) {
+export async function seedModules(refs: DemoRefs, deadline = Infinity) {
   const out: Record<string, unknown> = {};
   for (const [k, m] of Object.entries({ products, stock, sales, purchases, finance, fiscal, admin, reports })) {
-    out[k] = await m.seed(refs);
+    if (Date.now() > deadline) return { out, done: false };
+    out[k] = await m.seed(refs); // cada módulo é idempotente: reexecutar continua de onde parou
+    console.log(`[demo] módulo ${k} pronto`);
   }
-  return out;
+  return { out, done: true };
 }
