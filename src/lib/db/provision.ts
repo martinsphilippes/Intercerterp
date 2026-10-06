@@ -110,8 +110,10 @@ export async function provisionAppwrite(
     try {
       await ignore409(storage.createBucket({ bucketId: b, name: b, permissions: [], fileSecurity: false, enabled: true, maximumFileSize: 30000000, encryption: true, antivirus: false }));
     } catch (e) {
-      if (/maximum number of buckets/i.test(String((e as Error).message)))
-        throw new Error("O plano do Appwrite não permite mais buckets. Defina APPWRITE_BUCKET_ID com o id de um bucket (existente ou novo) para guardar todos os arquivos nele.");
+      if (/maximum number of buckets/i.test(String((e as Error).message))) {
+        const existing = await storage.listBuckets().then((r) => r.buckets.map((x) => x.$id)).catch(() => [] as string[]);
+        throw new Error(`O plano do Appwrite não permite mais buckets. Defina APPWRITE_BUCKET_ID com o id de um bucket existente${existing.length ? ` (${existing.join(", ")})` : ""} para guardar todos os arquivos nele.`);
+      }
       throw e;
     }
     log(`bucket ${b} ok`);
