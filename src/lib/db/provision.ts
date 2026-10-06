@@ -1,6 +1,6 @@
 import { AppwriteException, Client, IndexType, Query, Storage, TablesDB } from "node-appwrite";
 import { COLLECTIONS, type FieldDef } from "./schema";
-import { BUCKETS } from "../core/files";
+import { BUCKETS, physicalBucket } from "../core/files";
 
 /**
  * Provisiona (de forma idempotente) banco, tabelas, colunas, índices e buckets no Appwrite
@@ -106,8 +106,14 @@ export async function provisionAppwrite(
     log(`tabela ${c.id} ok (${Object.keys(c.fields).length} colunas, ${(c.indexes ?? []).length} índices)`);
     tablesOk++;
   }
-  for (const b of Object.values(BUCKETS)) {
-    await ignore409(storage.createBucket({ bucketId: b, name: b, permissions: [], fileSecurity: false, enabled: true, maximumFileSize: 30000000, encryption: true, antivirus: false }));
+  for (const b of new Set(Object.values(BUCKETS).map(physicalBucket))) {
+    try {
+      await ignore409(storage.createBucket({ bucketId: b, name: b, permissions: [], fileSecurity: false, enabled: true, maximumFileSize: 30000000, encryption: true, antivirus: false }));
+    } catch (e) {
+      if (/maximum number of buckets/i.test(String((e as Error).message)))
+        throw new Error("O plano do Appwrite não permite mais buckets. Defina APPWRITE_BUCKET_ID com o id de um bucket (existente ou novo) para guardar todos os arquivos nele.");
+      throw e;
+    }
     log(`bucket ${b} ok`);
   }
   // aguarda índices

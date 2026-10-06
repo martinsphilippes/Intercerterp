@@ -15,6 +15,14 @@ export interface FileStorage {
 
 export const BUCKETS = { documents: "documents", attachments: "attachments", backups: "backups", images: "images" } as const;
 
+/**
+ * Bucket físico no Appwrite. Planos com limite de buckets (o gratuito permite um) definem APPWRITE_BUCKET_ID e todos os
+ * buckets lógicos passam a usar esse único bucket; o metadado do arquivo continua guardando o bucket lógico.
+ */
+export function physicalBucket(bucket: string) {
+  return process.env.APPWRITE_BUCKET_ID?.trim() || bucket;
+}
+
 class LocalFileStorage implements FileStorage {
   readonly kind: "local" | "memory";
   private mem = new Map<string, Buffer>();
@@ -54,16 +62,16 @@ class AppwriteFileStorage implements FileStorage {
   }
   async put(bucket: string, name: string, data: Buffer) {
     const id = newId();
-    await this.storage.createFile({ bucketId: bucket, fileId: id, file: InputFile.fromBuffer(data, name) });
+    await this.storage.createFile({ bucketId: physicalBucket(bucket), fileId: id, file: InputFile.fromBuffer(data, name) });
     return id;
   }
   async get(bucket: string, id: string) {
-    const ab = await this.storage.getFileDownload({ bucketId: bucket, fileId: id });
+    const ab = await this.storage.getFileDownload({ bucketId: physicalBucket(bucket), fileId: id });
     return Buffer.from(ab as ArrayBuffer);
   }
   async remove(bucket: string, id: string) {
     try {
-      await this.storage.deleteFile({ bucketId: bucket, fileId: id });
+      await this.storage.deleteFile({ bucketId: physicalBucket(bucket), fileId: id });
     } catch (e) {
       if (!(e instanceof AppwriteException && e.code === 404)) throw e;
     }
