@@ -26,8 +26,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="lg:pl-64">
         <header className="no-print sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-line bg-white/95 px-4 pl-14 backdrop-blur lg:pl-4">
           <UnitSwitcher
-            companies={units.companies.map((c) => ({ id: c.id, name: c.tradeName || c.name, isDemo: c.isDemo }))}
-            branches={units.branches.map((b) => ({ id: b.id, name: b.name, companyId: b.companyId }))}
+            companies={units.companies.map((c) => ({ id: c.id, name: c.tradeName || c.name, isDemo: c.isDemo, inactive: c.status === "inactive" }))}
+            branches={units.branches.map((b) => ({ id: b.id, name: b.name, companyId: b.companyId, inactive: b.status === "inactive" }))}
             current={{ companyId: s.ctx.companyId, branchId: s.ctx.branchId, consolidated: s.consolidated, label }}
             canConsolidate={s.canConsolidate}
           />

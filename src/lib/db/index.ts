@@ -13,6 +13,8 @@ export function configuredBackend(): Backend {
   const explicit = process.env.DATA_BACKEND as Backend | undefined;
   if (explicit) return explicit;
   if (process.env.APPWRITE_ENDPOINT && process.env.APPWRITE_PROJECT_ID && process.env.APPWRITE_API_KEY) return "appwrite";
+  // Vercel sem Appwrite: o layout raiz mostra "configuração pendente" (src/lib/server/deploy-config.ts);
+  // a demonstração em memória só é usada quando pedida explicitamente (DATA_BACKEND=memory).
   if (process.env.VERCEL) return "memory";
   return "local";
 }

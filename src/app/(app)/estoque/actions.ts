@@ -4,7 +4,6 @@ import { runAction, fstr, fopt, fint, fjson } from "@/lib/server/action";
 import { listAll } from "@/lib/db";
 import { normalizeSearch } from "@/lib/list";
 import { BusinessError } from "@/lib/core/errors";
-import { getSetting } from "@/lib/core/settings";
 import { DEFAULT_TZ } from "@/lib/dates";
 import { adjustStock, balanceId, localDateTimeToIso, type ManualType } from "@/domain/stock";
 import { transferCode, createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, type TransferReceiptLine } from "@/domain/transfers";
@@ -57,8 +56,8 @@ export async function adjustStockAction(fd: FormData) {
     const occurred = fopt(fd, "occurredAt");
     let occurredAt: string | undefined;
     if (occurred) {
-      // campo datetime-local = horário de parede da filial (não do servidor, que roda em UTC)
-      const tz = (s.branch?.timezone as string | undefined) || (await getSetting(s.ctx.store, s.ctx.companyId, s.ctx.branchId, "timezone", DEFAULT_TZ));
+      // campo datetime-local = horário de parede no fuso único da instalação (o servidor roda em UTC)
+      const tz = DEFAULT_TZ;
       const iso = /(Z|[+-]\d{2}:\d{2})$/.test(occurred) ? (Number.isNaN(Date.parse(occurred)) ? null : new Date(occurred).toISOString()) : localDateTimeToIso(occurred, tz);
       if (!iso) return { ok: false as const, error: "Data do movimento inválida. Use dia e hora completos (ex.: 05/10/2026 10:00)." };
       occurredAt = iso;

@@ -11,7 +11,7 @@ Princípios: contratos independentes de fornecedor, adaptador real + adaptador d
 | Fiscal — simulação | `SimulatedFiscalProvider` (rotulado, valida NCM/CFOP, simula rejeição) | Demonstração | Comprovado | — | — |
 | Pix — Mercado Pago | `MercadoPagoProvider` (`X-Idempotency-Key` = referência; consulta por `external_reference`; estorno) | PDV → pagamento | Contrato coberto por testes de intenção (pendente/confirmado/falha com consulta da referência anterior) usando o provedor de simulação | **Não executado** (sem `MERCADOPAGO_ACCESS_TOKEN`) | Não |
 | Cartões | Registro manual de NSU/autorização (maquininha); recebível contra adquirente; liquidação com taxa | PDV, Financeiro → cartões | Comprovado | — | — |
-| TEF | Conector local (contrato HTTP abaixo) | Terminais / PDV | Teste do conector com servidor de teste local (HTTP 200) e falha real registrada | Depende do software do conector | Não |
+| TEF | Conector local (contrato HTTP abaixo) | Terminais / PDV | Teste feito **pelo navegador do caixa** (o servidor nunca acessa o conector); a Central de integrações mostra o resultado medido dos terminais — `tests/integrations.test.ts`, `tests/admin-access.test.ts` | Depende do software do conector | Não |
 | Banco — arquivos | Parsers OFX, CSV (mapeável), CNAB 240 (FEBRABAN T/U), CNAB 400 (Itaú, Bradesco) | Conciliação | Comprovado com arquivos de exemplo (`tests/fixtures`) | Layouts devem ser homologados com arquivos reais dos bancos | — |
 | Banco — API/Open Finance | Não implementado (estado “indisponível” na central) | — | — | — | — |
 | E-mail | Resend (API) e Appwrite Messaging | Convites, recuperação local, cobrança, documentos, chamados, contabilidade | Sem canal configurado: todas as telas registram “não enviado / canal não configurado” (comprovado) | Não executado (sem chave) | Não |
@@ -51,7 +51,7 @@ O PDV roda no navegador. Impressoras térmicas, leitores HID e pinpads TEF, por�
 ```
 
 - O endereço do conector é configurado por terminal (Administração → Terminais → *URL do conector local*).
-- Como o conector escuta em `127.0.0.1`, **somente o navegador daquele computador** o alcança. Por isso o teste em *Periféricos e testes* é feito pelo navegador e o resultado medido é gravado no terminal e no histórico de auditoria. O botão "Testar a partir do servidor" só serve para conectores expostos em endereço de rede alcançável pelo servidor.
+- Como o conector escuta em `127.0.0.1`, **somente o navegador daquele computador** o alcança. Por isso o teste em *Periféricos e testes* é feito pelo navegador e o resultado medido é gravado no terminal e no histórico de auditoria. **O servidor nunca faz requisições à URL do conector** (evita SSRF); a Central de integrações (Cartões/TEF → TEF via conector local) deriva o estado das verificações recentes (7 dias) registradas pelos navegadores dos terminais.
 - Sem URL configurada, o teste registra **"não verificado"** — o ERP nunca presume periférico funcionando.
 
 ### Requisitos HTTP
@@ -108,5 +108,5 @@ Resposta final (síncrona ou via `GET /tef/transactions/{reference}`): `{ "refer
 
 ### Situação nesta versão
 
-- Implementado no ERP: cadastro da URL por terminal, teste real do `/status` (pelo navegador e pelo servidor) com registro do resultado, página de teste de impressão pelo navegador.
+- Implementado no ERP: cadastro da URL por terminal (sem usuário/senha, parâmetros ou fragmento), teste real do `/status` pelo navegador do caixa com registro do resultado, estado do TEF na Central derivado dessas verificações, página de teste de impressão pelo navegador.
 - O conector em si é um componente externo a ser instalado nas máquinas de caixa (não incluído neste repositório). Enquanto não houver conector, use impressão pelo navegador, leitor em modo teclado e maquininha avulsa com registro manual de NSU.

@@ -383,7 +383,7 @@ Sem filiais marcadas, o usuário acessa todas as filiais das empresas vinculadas
   },
   {
     slug: "empresas-filiais-e-parametros",
-    summary: "Cadastre empresas e filiais, defina tabela de preço, depósito e fuso e ajuste os parâmetros.",
+    summary: "Cadastre empresas e filiais, defina tabela de preço e depósito e ajuste os parâmetros.",
     area: "administracao",
     title: "Empresas, filiais e parâmetros da operação",
     tags: ["empresa", "filial", "cnpj", "depósito", "tabela de preço", "fuso", "parâmetros"],
@@ -392,7 +392,7 @@ Sem filiais marcadas, o usuário acessa todas as filiais das empresas vinculadas
 Cria a matriz, depósitos, perfis padrão, tabela de preço, contas, meios e condições de pagamento. A configuração fiscal fica **pendente** até ser feita.
 
 ## Nova filial
-Cria automaticamente os depósitos **principal** e **avarias** e a conta caixa da filial. Defina a tabela de preço padrão, o depósito padrão e o fuso horário — são usados pelo PDV e pelos relatórios.
+Cria automaticamente os depósitos **principal** e **avarias** e a conta caixa da filial. Defina a tabela de preço padrão e o depósito padrão — são usados pelo PDV e pelos relatórios. O fuso horário é único para toda a instalação (definido pelo administrador do servidor) e aparece na filial apenas para consulta.
 
 ## Alterações cadastrais
 Mudar endereço, razão social ou IE **não altera documentos já emitidos**: vendas e notas guardam os dados da época.

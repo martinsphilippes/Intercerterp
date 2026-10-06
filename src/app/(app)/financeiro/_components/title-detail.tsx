@@ -50,6 +50,8 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
   const canApprove = canDo(s.user, "finance.approve_payable");
   const pendingApproval = !rec && t.approvalStatus !== "approved";
   const activeSettlements = d.settlements.filter((x) => x.kind === "settlement" && x.status === "active");
+  // marcadores técnicos de renegociação (valor zero) não são baixas: ficam fora da lista
+  const shownSettlements = d.settlements.filter((x) => x.kind !== "renegotiation" && x.kind !== "renegotiation_undo");
   const principalPaid = d.installments.reduce((a, i) => a + (i.paid ?? 0), 0);
   const extras = d.installments.reduce((a, i) => a + (i.interest ?? 0) + (i.fine ?? 0), 0);
   const discounts = d.installments.reduce((a, i) => a + (i.discount ?? 0), 0);
@@ -314,7 +316,7 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
             </div>
           </Card>
           <Card title={rec ? "Recebimentos (baixas)" : "Pagamentos (baixas)"} description="Valor movimentado = principal − desconto + juros + multa; tarifa gera lançamento separado. Estorno gera lançamento inverso vinculado." bodyClass="p-0">
-            {d.settlements.length === 0 ? (
+            {shownSettlements.length === 0 ? (
               <EmptyState title="Nenhuma baixa registrada" description={settleBlock ?? `Use “${rec ? "Receber" : "Pagar"}” na parcela para registrar baixa total ou parcial.`} />
             ) : (
               <div className="overflow-x-auto">
@@ -334,7 +336,7 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                     </tr>
                   </thead>
                   <tbody>
-                    {d.settlements.map((x) => {
+                    {shownSettlements.map((x) => {
                       const inst = d.installments.find((i) => i.id === x.installmentId);
                       const instLocked = inst && (inst.status === "renegotiated" || inst.status === "cancelled");
                       const reneg = inst ? d.renegOf.get(inst.id) : undefined;
@@ -342,6 +344,7 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                       const btx = d.bankTxBySettlement.get(x.id);
                       const file = x.attachmentFileId ? d.files.get(x.attachmentFileId) : null;
                       const isRev = x.kind === "reversal";
+                      const isAbate = x.kind === "abatement";
                       return (
                         <tr key={x.id} className={isRev ? "bg-slate-50 text-slate-500" : undefined}>
                           <td>{formatDate(x.date)}</td>
@@ -394,6 +397,10 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                           <td className="text-xs">
                             {isRev ? (
                               <Badge>Estorno</Badge>
+                            ) : isAbate ? (
+                              <span title="Saldo abatido pela devolução de mercadoria (sem movimentação em conta).">
+                                <Badge tone="info">Abatimento por devolução</Badge>
+                              </span>
                             ) : x.status === "reversed" ? (
                               <span title={x.reversalReason ?? ""}>
                                 <Badge tone="bad">Estornada</Badge>
@@ -405,7 +412,7 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                             {x.notes && !isRev && <div className="mt-0.5 max-w-[220px] truncate text-slate-500" title={x.notes}>{x.notes}</div>}
                           </td>
                           <td className="no-print text-right">
-                            {!isRev && x.status === "active" && canReverse && (
+                            {!isRev && !isAbate && x.status === "active" && canReverse && (
                               instLocked ? (
                                 inst?.status === "renegotiated" && reneg ? (
                                   <Link href={`/financeiro/receber/${reneg.id}`} className="text-xs text-amber-700 underline" title={`Parcela renegociada no título nº ${reneg.number}: desfaça a renegociação antes de estornar esta baixa (estorno direto reabriria a dívida em duplicidade).`}>

@@ -150,3 +150,90 @@ Ver `docs/arquitetura.md`. Resumo: ids determinísticos por efeito, sequência �
 - Backup: JSON compactado (gzip) com checksum por coleção e geral; partes de até 25 MB; restauração em base de teste ou nova base, com verificação de contagens e checksums; retenção sem nunca remover a cópia mais recente.
 - Filial “Em implantação” = ativa sem configuração fiscal.
 - Notificações: ler ≠ resolver; arquivar só notificação informativa ou com ocorrência resolvida; crítica ignora silêncio por tipo.
+
+## 18. Regras consolidadas após a revisão adversarial [Decisão]
+
+Resultado da revisão independente (achados confirmados corrigidos com testes de regressão). Complementam e, quando conflitam, substituem as seções anteriores.
+
+#### Clientes, metas e painel
+- Cliente: id não deriva do CPF/CNPJ; unicidade pelo índice (empresa, documento atual) — trocar/remover o documento libera o antigo na mesma gravação; cadastro idempotente pela chave do formulário.
+- Conceder/alterar limite de crédito exige a ação “Conceder limite de crédito” (customer.credit_limit; Gerente e Administrador); demais usuários veem somente leitura e o servidor preserva o valor.
+- Meta: id determinístico pela chave; se a posição estiver ocupada por meta cuja chave mudou, usa a próxima posição determinística.
+- Metas da empresa (sem filial) só aparecem — inclusive na exportação — para quem tem acesso a todas as filiais.
+- Detalhamento do painel/gerenciais só abre uma listagem operacional quando ela mostra exatamente o mesmo recorte; caso contrário, leva às operações do gerencial.
+- Painel: “autorizados” exclui documentos do provedor de simulação, mostrados à parte com o selo SIMULAÇÃO.
+
+#### Financeiro
+- Baixa de parcela renegociada/cancelada não é estornada diretamente: desfaça antes a renegociação (exige título novo sem recebimentos ativos).
+- Desfazer renegociação cancela o título novo e devolve as parcelas originais com saldo = valor − principal pago (sem lançamento em conta).
+- Renegociação limitada a 49 parcelas no total (selecionadas + novas) — cabe no limite de 100 operações por transação; parcelas repetidas são recusadas.
+- Toda movimentação exige conta financeira da empresa ativa e ativa.
+- Recebível de cartão é liquidado somente pela tela de Cartões (com a taxa da adquirente).
+- Nosso número é gravado sem carteira, dígito verificador e zeros à esquerda (retorno CNAB casa em qualquer formato).
+- Juros da condição = total × juros%, somado ao valor parcelado.
+- Limites de cadastro: taxa do meio de pagamento ≤ 20%; juros da condição ≤ 50%. Percentual aceita vírgula ou ponto decimal.
+- Categoria “Sem categoria” é filtrável; detalhamentos e listas usam a categoria efetiva.
+
+#### Fiscal
+- Uma operação → um documento fiscal ativo (venda, transferência, devolução, pedido). Encerrados: cancelado, denegado, inutilizado, descartado. Nova emissão após cancelamento usa referência `-r<n>`.
+- Escritas fiscais exigem a filial do documento (consolidado é consulta).
+- Documento já enviado é sempre consultado no provedor antes de qualquer decisão: só volta a “pendente” quando é certo que não há autorização; descartar exige essa consulta; origem cancelada nunca reenvia.
+- Faturamento fiscal exclui transferências e CFOP de saída que não são receita (x15x, x408/x409, x552–x557, x20x/x21x/x41x e x9xx, exceto x922/x933) — total mostrado à parte. **Validar com a contabilidade.**
+- CST 20: base = valor × (1 − redução do grupo); sem redução cadastrada → pendência. PIS/COFINS CST 01/02 sem alíquota → pendência; CST 03 não suportado.
+- Inutilização: repetição idempotente; faixa sobreposta recusada; documentos da faixa passam a “inutilizado”.
+- Pacote contábil: gerar exige “Exportar dados”; enviar exige “Configurar fiscal”; a obrigação de entrega de XML só se conclui com pacote de todas as filiais enviado ao e-mail da contabilidade.
+- Envio ao provedor com reivindicação por tentativa (envios simultâneos → um único envio); reivindicação parada > 5 min conta como envio interrompido.
+
+#### Compras
+- Recebimento sem XML: IPI por linha e desconto geral proporcionais ao recebido; frete, seguro e outras despesas entram inteiros uma única vez por pedido (marca de cobrança gravada na confirmação; cancelar libera). Alterar esses valores na conferência desliga o cálculo automático.
+- Total faturado × devido: divergência acima de `purchase.receiptValueTolerance` (padrão R$ 0,00) exige justificativa (sem XML sempre; com XML quando o devido supera o faturado).
+- NF-e do fornecedor: denegada é recusada; homologação (sem valor fiscal) só é aceita em empresa de demonstração; sem protocolo só com justificativa.
+- Cancelar recebimento libera a chave da NF-e para nova importação; a duplicidade de recebimento ativo é barrada por índice único.
+- Decisões de aprovação: sequência por solicitação com vaga única (aprovar e rejeitar simultâneos → só uma vence); a tela envia etapa e revisão, página desatualizada é recusada.
+- Edição de pedido acima de 100 gravações por transação é recusada com orientação (salvar em duas etapas); SKU repetido no pedido só com o mesmo custo (IPI/quantidade/desconto somados).
+- Escritas de compras exigem a filial do documento; consolidado só consulta.
+- Fornecedor: id independente do CNPJ (unicidade por empresa + documento atual); idempotência pela chave do formulário. Reposição e cotação ignoram fornecedores bloqueados, inativos ou em rascunho (exibidos como indisponíveis).
+
+#### Produtos e estoque
+- No máximo um inventário em andamento por depósito (inclui inventário em preparação); abertura grava as contagens em lotes idempotentes e só então fica “aberto” — “Retomar abertura” completa uma abertura interrompida.
+- Transferência ganhou o estado “Expedição incompleta”: expedição que falha no meio pode ser concluída ou cancelada; o cancelamento devolve à origem o que já saiu. Receber/resolver exige expedição concluída. Consumo do trânsito por item limitado ao expedido (recebimentos simultâneos não passam do expedido).
+- Saída manual, ajuste de saída e perda não consomem o reservado (disponível = físico − reservado).
+- Referência do documento da transferência editável só na filial de origem.
+- Data/hora do movimento manual interpretada no fuso da instalação.
+- Cadastro de produto valida tudo (preço, parâmetros, saldo inicial e permissões) antes de gravar; repetição completa o que faltou.
+- Consultas de estoque respeitam as filiais permitidas ao usuário.
+
+#### Administração e acesso
+- Perfil é por empresa (`roleByCompany`); sem perfil explícito vale o perfil legado se for da empresa ou o perfil de sistema de mesma chave daquela empresa; perfil personalizado de outra empresa não concede nada.
+- Administrar outra empresa exige acesso a ela e perfil de administração nela. Não administrador não altera administrador global, não concede administração e não altera o próprio vínculo/perfil/limite.
+- Edição de usuário preserva vínculos e filiais das empresas fora do alcance do editor. Limite de desconto individual e filiais permanecem globais por usuário.
+- Último administrador ativo protegido também sob operações simultâneas (conferência após gravar, com desfazer).
+- Empresa inativa não é selecionável (nem no consolidado); filial inativa só aparece no consolidado para consulta; sessão em unidade inativada volta à seleção.
+- Teste do conector de periféricos é feito pelo navegador do caixa (o servidor nunca acessa a URL do conector — sem SSRF).
+- Fuso horário único por instalação (`APP_TIMEZONE`, padrão America/Sao_Paulo); parâmetro e fuso da filial são somente leitura.
+- Perfis de sistema recebem automaticamente operações novas dos modelos (sem remover o que o administrador configurou), com histórico.
+- Login: o parâmetro `next` só aceita caminho interno.
+- Chamado de suporte: anexos validados antes de criar; cada nova mensagem do solicitante notifica o atendimento.
+
+#### Vendas e caixa
+- Devolução de venda a prazo abate primeiro o saldo em aberto do título da venda (da última parcela para a primeira); reembolso/vale só sobre o que já foi pago e ainda não devolvido; título sem baixa real zerado pela devolução é cancelado. O abatimento é uma baixa do tipo “abatimento” (sem lançamento em conta). Na troca, o crédito é o valor compensado em vale (a parte abatida não vira crédito).
+- Efeitos pós-confirmação de venda, cancelamento e devolução: tarefa durável com id determinístico gravada na mesma transação; repetir a operação completa os efeitos.
+- Cada transação usa no máximo 95 escritas; venda limitada a 200 linhas (itens excedentes gravados pela tarefa); parcelas a prazo limitadas pela condição/meio.
+- Travas otimistas com id determinístico: uso único de cobrança Pix por venda, vínculo único de troca, crédito por cliente, devolução por venda, sangria por sessão.
+- Gaveta (sangria, suprimento, fechamento, saída de dinheiro em cancelamento/devolução): somente o operador da sessão ou quem pode “Reabrir caixa”, e somente na filial ativa.
+- Recolhimento do fechamento: conta de destino da empresa, ativa e diferente do Caixa; valor ≤ dinheiro contado; fechamento interrompido é concluído pela repetição (“Concluir recolhimento”).
+- Conferência cega imposta pelo servidor: a contagem é registrada na primeira apuração de cada versão e não pode ser refeita; o previsto fica oculto para não supervisores até a contagem.
+- Pix: “cancelada” só com confirmação do provedor; estorno de Pix integrado fica “pendente no provedor” até a confirmação (repetido por tarefa); Pix manual → “Devolver ao cliente (manual)”.
+- Estorno em cartão fica “em processamento” até a confirmação manual (NSU/protocolo da adquirente).
+- Consulta da situação fiscal a partir da venda é feita pela tarefa durável (não exige permissão fiscal do usuário).
+
+#### Drill-down do painel
+- As listagens operacionais respeitam a filial da sessão (o consolidado só existe para quem tem acesso a todas as filiais). Um indicador só abre a listagem quando ela mostra exatamente o mesmo recorte; caso contrário, leva às operações do relatório gerencial no mesmo período.
+
+#### Publicação
+- Publicação na Vercel sem as variáveis do Appwrite mostra a página “configuração pendente” (nenhum dado é gravado); a demonstração em memória só existe se pedida explicitamente (`DATA_BACKEND=memory`).
+
+#### Riscos residuais conhecidos
+- Reserva de estoque e saída manual simultâneas no mesmo saldo podem passar juntas (a reserva não usa a sequência do saldo; o limite atômico cobre reservas concorrentes entre si).
+- Títulos a receber criados fora da venda (manuais, renegociação) não disputam a trava de crédito do cliente; o limite do crediário é garantido entre vendas.
+- Juros da condição de parcelamento são aplicados em títulos manuais; vendas a prazo não aplicam juros (decisão pendente: como tratar juros de itens devolvidos).

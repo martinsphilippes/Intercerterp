@@ -180,7 +180,7 @@ export const COMMON_DEFINITIONS: Array<[string, React.ReactNode]> = [
   ["Markup", "(Preço − custo) ÷ custo × 100. Indicador diferente da margem; exibido separadamente quando aplicável."],
   ["Ticket médio", "Receita líquida ÷ número de vendas concluídas no recorte. Vendas canceladas são excluídas; devoluções reduzem a receita, mas não o número de vendas."],
   ["Devoluções", "Entram na data do movimento da devolução (e na filial onde foram registradas), mesmo quando a venda original é anterior ao período — por isso um dia pode ter receita negativa. Contam devoluções concluídas e em processamento de estorno; canceladas não."],
-  ["Período", "Datas no fuso America/Sao_Paulo. O intervalo técnico vai de 00:00 do primeiro dia até 00:00 do dia seguinte ao último (o último dia entra inteiro). “Mês atual” vai do dia 1º até hoje."],
+  ["Período", "Datas no fuso horário da instalação (padrão America/Sao_Paulo). O intervalo técnico vai de 00:00 do primeiro dia até 00:00 do dia seguinte ao último (o último dia entra inteiro). “Mês atual” vai do dia 1º até hoje."],
   ["Comparação", "Período imediatamente anterior com a mesma quantidade de dias (ex.: 01–05/10 compara com 26–30/09; setembro inteiro compara com 02/08–31/08)."],
   ["Filial", "Contexto atual da sessão; no consolidado, todas as filiais acessíveis, com o resultado de cada unidade."],
 ];
