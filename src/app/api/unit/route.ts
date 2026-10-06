@@ -11,7 +11,8 @@ export async function GET(req: NextRequest) {
   const b = req.nextUrl.searchParams.get("b") ?? "";
   const userDoc = await getStore().get("users", s.user.id);
   const { companies, branches } = await accessibleUnits(getStore(), userDoc!);
-  const ok = companies.some((x) => x.id === c) && (b === "all" || branches.some((x) => x.id === b && x.companyId === c));
+  const canAll = Boolean(userDoc!.isAdmin) || !(userDoc!.branchIds ?? []).length;
+  const ok = companies.some((x) => x.id === c) && ((b === "all" && canAll) || branches.some((x) => x.id === b && x.companyId === c));
   const res = NextResponse.redirect(new URL(ok ? "/dashboard" : "/selecionar-unidade", req.url));
   if (ok) res.cookies.set(UNIT_COOKIE, `${c}:${b}`, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 31536000 });
   return res;

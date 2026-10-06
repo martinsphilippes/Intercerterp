@@ -12,7 +12,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   await ensureBootstrap();
   const s = await getSession();
   if (s?.ctx.companyId) redirect("/dashboard");
-  if (await isEmptyInstallation()) redirect("/primeiro-acesso");
+  if (await isEmptyInstallation().catch(() => false)) redirect("/primeiro-acesso");
   const { next } = await searchParams;
   const demo = configuredBackend() === "memory" || process.env.SHOW_DEMO_LOGIN === "1";
   return (

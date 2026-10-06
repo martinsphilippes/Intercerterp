@@ -117,7 +117,7 @@ export async function seedBase(store: Store): Promise<DemoRefs> {
   const auth = getAuth();
   const users: Record<string, Doc> = {};
   const userDefs = [
-    { key: "admin", name: "Ana Administradora", email: "admin@demo.intercert.local", login: "admin", role: "admin", isAdmin: true, branches: [] as string[] },
+    { key: "admin", name: "Ana Administradora", email: "admin@demo.intercert.local", login: "admin", role: "admin", isAdmin: false, branches: [] as string[] },
     { key: "manager", name: "Gustavo Gerente", email: "gerente@demo.intercert.local", login: "gerente", role: "manager", isAdmin: false, branches: [] },
     { key: "cashier", name: "Carla Caixa", email: "caixa@demo.intercert.local", login: "caixa", role: "cashier", isAdmin: false, branches: ["matriz"] },
     { key: "stockist", name: "Eduardo Estoquista", email: "estoque@demo.intercert.local", login: "estoque", role: "stockist", isAdmin: false, branches: ["matriz", "shopping"] },

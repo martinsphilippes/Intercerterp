@@ -19,7 +19,7 @@ const fiscalLabel: Record<string, [string, "good" | "warn" | "sim" | "neutral"]>
 const fmtCnpj = (v: string) => (v?.length === 14 ? v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : v || "");
 
 /** Duas etapas: empresa → unidade (pula a 1ª quando há uma única empresa). */
-export function UnitPicker({ companies, branches }: { companies: C[]; branches: B[] }) {
+export function UnitPicker({ companies, branches, canConsolidate = true }: { companies: C[]; branches: B[]; canConsolidate?: boolean }) {
   const [companyId, setCompanyId] = useState<string | null>(companies.length === 1 ? companies[0].id : null);
   const [q, setQ] = useState("");
   const [pending, start] = useTransition();
@@ -97,13 +97,13 @@ export function UnitPicker({ companies, branches }: { companies: C[]; branches: 
               );
             })}
             {units.length === 0 && <p className="py-4 text-center text-sm text-slate-500">Nenhuma unidade autorizada para você nesta empresa.</p>}
-            <button disabled={pending} onClick={() => choose(company.id, "all")} className="focus-ring flex items-center gap-3 rounded-lg border border-dashed border-line p-3 text-left text-sm hover:border-brand-300">
+            {canConsolidate && <button disabled={pending} onClick={() => choose(company.id, "all")} className="focus-ring flex items-center gap-3 rounded-lg border border-dashed border-line p-3 text-left text-sm hover:border-brand-300">
               <Layers className="size-5 text-slate-400" />
               <span>
                 <span className="block font-medium">Consolidado da empresa</span>
                 <span className="block text-xs text-slate-500">Todas as unidades autorizadas — consulta e relatórios (operações exigem uma filial).</span>
               </span>
-            </button>
+            </button>}
           </div>
         </div>
       )}

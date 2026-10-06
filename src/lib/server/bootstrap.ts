@@ -20,14 +20,19 @@ export function ensureBootstrap() {
   return booting;
 }
 
+/**
+ * Instalação vazia = nenhum usuário com credencial criada. Somente "banco/tabela inexistente" conta como vazio;
+ * qualquer outro erro (timeout, 5xx) é propagado — nunca abre a instalação por falha transitória.
+ */
 export async function isEmptyInstallation() {
   const store = getStore();
   try {
-    const res = await store.list("users", { limit: 1 });
+    const res = await store.list("users", { filters: [["notNull", "authId"]], limit: 1 });
     return res.items.length === 0;
-  } catch {
-    // banco ainda não provisionado (tabelas inexistentes) também é instalação vazia
-    return true;
+  } catch (e) {
+    const { AppwriteException } = await import("node-appwrite");
+    if (e instanceof AppwriteException && e.code === 404) return true;
+    throw e;
   }
 }
 

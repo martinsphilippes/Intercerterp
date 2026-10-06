@@ -8,6 +8,7 @@ import { accessibleUnits, findUserByAuthId, toCtxUser } from "../auth/users";
 import type { Ctx } from "../core/ctx";
 import { can, type Crud, type ModuleKey } from "../permissions";
 import { ensureBootstrap } from "./bootstrap";
+import { scopeStore } from "../db/scoped-store";
 
 export const SESSION_COOKIE = "ic_session";
 export const UNIT_COOKIE = "ic_unit";
@@ -20,6 +21,7 @@ export interface SessionInfo {
   companies: Record<string, any>[];
   branches: Record<string, any>[];
   consolidated: boolean;
+  canConsolidate: boolean;
 }
 
 /** Sessão do usuário autenticado (ou null). Cacheada por requisição. */
@@ -40,7 +42,9 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   const company = companies.find((c) => c.id === cid) ?? null;
   const companyBranches = company ? branches.filter((b) => b.companyId === company.id) : [];
   const branch = bid && bid !== "all" ? (companyBranches.find((b) => b.id === bid) ?? null) : null;
-  const consolidated = bid === "all";
+  // Consolidado só para quem acessa todas as filiais (usuário restrito escolhe uma filial)
+  const canConsolidate = Boolean(userDoc.isAdmin) || !(userDoc.branchIds ?? []).length;
+  const consolidated = bid === "all" && canConsolidate;
   const user = await toCtxUser(store, userDoc);
   const h = await headers();
   if (!company || (!branch && !consolidated)) {
@@ -53,16 +57,18 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
       companies,
       branches,
       consolidated: false,
+      canConsolidate,
     };
   }
   return {
-    ctx: { store, user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined },
+    ctx: { store: scopeStore(store, company.id), user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined },
     user,
     company,
     branch,
     companies,
     branches: companyBranches,
     consolidated,
+    canConsolidate,
   };
 });
 

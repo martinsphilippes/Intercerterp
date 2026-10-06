@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Building2, ChevronDown, Check } from "lucide-react";
 import { switchUnitAction } from "@/app/actions/session";
 
-export function UnitSwitcher({ companies, branches, current }: { companies: Array<{ id: string; name: string; isDemo?: boolean }>; branches: Array<{ id: string; name: string; companyId: string }>; current: { companyId: string; branchId: string | null; consolidated: boolean; label: string } }) {
+export function UnitSwitcher({ companies, branches, current, canConsolidate = true }: { companies: Array<{ id: string; name: string; isDemo?: boolean }>; branches: Array<{ id: string; name: string; companyId: string }>; current: { companyId: string; branchId: string | null; consolidated: boolean; label: string }; canConsolidate?: boolean }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -27,10 +27,12 @@ export function UnitSwitcher({ companies, branches, current }: { companies: Arra
           {companies.map((c) => (
             <div key={c.id} className="mb-2">
               <p className="px-2 py-1 text-xs font-semibold text-slate-500">{c.name}</p>
-              <button type="button" onClick={() => choose(c.id, "all")} className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-slate-50">
-                <span>Consolidado (todas as filiais — consulta)</span>
-                {current.companyId === c.id && current.consolidated && <Check className="size-4 text-brand-700" />}
-              </button>
+              {canConsolidate && (
+                <button type="button" onClick={() => choose(c.id, "all")} className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-slate-50">
+                  <span>Consolidado (todas as filiais — consulta)</span>
+                  {current.companyId === c.id && current.consolidated && <Check className="size-4 text-brand-700" />}
+                </button>
+              )}
               {branches
                 .filter((b) => b.companyId === c.id)
                 .map((b) => (

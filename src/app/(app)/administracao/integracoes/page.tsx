@@ -1,3 +1,4 @@
+import { isStale } from "@/lib/core/jobs";
 import Link from "next/link";
 import { Play, AlertTriangle } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
@@ -73,7 +74,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
                       <td className="tabular text-right">{j.attempts ?? 0}/{j.maxAttempts ?? 8}</td>
                       <td className="text-xs">{j.status === "dead" ? "—" : formatDateTime(j.runAt)}</td>
                       <td className="max-w-sm truncate text-xs text-red-800" title={j.lastError ?? ""}>{j.lastError ?? "—"}</td>
-                      <td>{canManage && j.status !== "running" && <ActionButton action={requeueJobAction.bind(null, j.id)} label="Reprocessar" size="sm" />}</td>
+                      <td>{canManage && (j.status !== "running" || isStale(j)) && <ActionButton action={requeueJobAction.bind(null, j.id)} label="Reprocessar" size="sm" />}</td>
                     </tr>
                   ))}
                 </tbody>

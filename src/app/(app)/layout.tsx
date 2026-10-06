@@ -29,6 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             companies={units.companies.map((c) => ({ id: c.id, name: c.tradeName || c.name, isDemo: c.isDemo }))}
             branches={units.branches.map((b) => ({ id: b.id, name: b.name, companyId: b.companyId }))}
             current={{ companyId: s.ctx.companyId, branchId: s.ctx.branchId, consolidated: s.consolidated, label }}
+            canConsolidate={s.canConsolidate}
           />
           <div className="hidden flex-1 justify-center md:flex">
             <GlobalSearch />

@@ -735,7 +735,7 @@ export const COLLECTIONS: CollectionDef[] = [
       companyId: id(), type: s(60, true), payload: json, status: s(20), runAt: dt, attempts: int, maxAttempts: int,
       lastError: txt, dedupeKey: s(200, true), lockedUntil: dt, result: json, finishedAt: dt, createdBy: id(),
     },
-    indexes: [u("u_dedupe", "dedupeKey"), k("i_status_run", "status", "runAt")],
+    indexes: [u("u_dedupe", "dedupeKey"), k("i_status_run", "status", "runAt"), k("i_status_lock", "status", "lockedUntil")],
   },
   {
     id: "operations",

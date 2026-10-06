@@ -147,7 +147,10 @@ describe("suspensão e último administrador", () => {
   });
 
   it("ninguém altera o próprio acesso e o último administrador ativo é protegido", async () => {
-    const a = refs.users.admin;
+    // a demonstração não tem administrador global: promove explicitamente para este cenário
+    await store.update("users", refs.users.admin.id, { isAdmin: true });
+    const a = (await store.get("users", refs.users.admin.id))!;
+    const admin = await ctxOfUser(a.id);
     await expect(setUserStatus(admin, a.id, "inactive")).rejects.toThrow(/próprio acesso/);
     await expect(updateUser(admin, a.id, { name: a.name, email: a.email, login: a.login, roleId: a.roleId, isAdmin: false, companyIds: a.companyIds, branchIds: [] })).rejects.toThrow(/último administrador/);
     // gestor de usuários (sem ser administrador) também não consegue suspender o último administrador

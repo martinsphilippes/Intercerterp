@@ -131,18 +131,22 @@ export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName
     const all = await listAll(ctx.store, "companies");
     if (all.some((c) => c.name.toLowerCase() === data.name.toLowerCase())) throw new BusinessError("Já existe empresa com esta razão social; informe o CNPJ para diferenciá-las.", "duplicate");
   }
-  const { company, branch } = await createCompanyWithDefaults(ctx.store, {
+  const { unscoped } = await import("@/lib/db/scoped-store");
+  const { newId } = await import("@/lib/db");
+  const { company, branch } = await createCompanyWithDefaults(unscoped(ctx.store), {
+    key: newId(),
     name: data.name, tradeName: data.tradeName, cnpj: data.cnpj ?? undefined, regime: data.regime, uf: data.address.uf, cityName: data.address.cityName,
     cityCode: data.address.cityCode, branchName: input.branchName?.trim() || "Matriz", createdBy: ctx.user.id,
   });
-  const updated = await ctx.store.update("companies", company.id, { ...data, status: "active" });
-  await ctx.store.update("branches", branch.id, { ie: data.ie, im: data.im, address: data.address, phone: data.phone, email: data.email });
+  const store = unscoped(ctx.store);
+  const updated = await store.update("companies", company.id, { ...data, status: "active" });
+  await store.update("branches", branch.id, { ie: data.ie, im: data.im, address: data.address, phone: data.phone, email: data.email });
   // quem cria passa a ter acesso (administradores já enxergam todas as empresas)
   if (!ctx.user.isAdmin) {
     const me = await ctx.store.get("users", ctx.user.id);
     if (me) await ctx.store.update("users", me.id, { companyIds: [...new Set([...(me.companyIds ?? []), company.id])] });
   }
-  await audit({ ...ctx, companyId: company.id, branchId: null }, { module: "admin", action: "company.create", entityType: "company", entityId: company.id, summary: `Empresa ${data.name} criada com filial ${branch.name} e parametrização inicial`, after: data, related: [`branch:${branch.id}`] });
+  await audit({ ...ctx, store, companyId: company.id, branchId: null }, { module: "admin", action: "company.create", entityType: "company", entityId: company.id, summary: `Empresa ${data.name} criada com filial ${branch.name} e parametrização inicial`, after: data, related: [`branch:${branch.id}`] });
   await audit(ctx, { module: "admin", action: "company.create", entityType: "company", entityId: company.id, summary: `Empresa ${data.name} criada (a partir de ${ctx.companyId ? "outra empresa" : "instalação"})`, related: [`branch:${branch.id}`] });
   return { company: updated, branch };
 }

@@ -52,10 +52,17 @@ function cell(v: any, type?: ExportColumn["type"]): string {
   }
 }
 
+/** Neutraliza fórmulas em texto (injeção de fórmula no Excel/planilhas). Números formatados não são afetados. */
+function neutralize(s: string, numeric: boolean): string {
+  if (numeric || !s) return s;
+  return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+}
+
 /** CSV compatível com Excel pt-BR (UTF-8 com BOM, separador ;). */
 export function toCsv(columns: ExportColumn[], rows: Record<string, any>[]): string {
   const esc = (s: string) => (/[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  const lines = [columns.map((c) => esc(c.label)).join(";")];
-  for (const r of rows) lines.push(columns.map((c) => esc(cell(r[c.key], c.type))).join(";"));
+  const isNum = (t?: ExportColumn["type"]) => t === "money" || t === "qty" || t === "number" || t === "bps";
+  const lines = [columns.map((c) => esc(neutralize(c.label, false))).join(";")];
+  for (const r of rows) lines.push(columns.map((c) => esc(neutralize(cell(r[c.key], c.type), isNum(c.type)))).join(";"));
   return "﻿" + lines.join("\r\n");
 }

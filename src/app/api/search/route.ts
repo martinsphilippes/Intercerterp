@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
   if (digits.length === 44 && can(s.user, "fiscal")) {
     tasks.push(
       (async () => {
-        const r = await listAll(store, "fiscal_documents", { filters: [["eq", "accessKey", digits]] }, 3);
+        const r = (await store.list("fiscal_documents", { filters: [["eq", "companyId", cid], ["eq", "accessKey", digits]], limit: 3 })).items;
         for (const x of r) hits.push({ group: "Documento", label: `${x.model.toUpperCase()} ${x.number ?? ""}`, sub: digits, href: `/fiscal/${x.model}/${x.id}` });
       })(),
     );

@@ -35,7 +35,9 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
   const ip = h0.get("x-forwarded-for")?.split(",")[0] ?? undefined;
   // Bloqueio temporário após tentativas inválidas (registradas no histórico de auditoria)
   const { detId } = await import("@/lib/db");
-  const loginKey = detId("login", login.toLowerCase());
+  // contador único por usuário (qualquer apelido: login ou e-mail); texto normalizado quando o usuário não existe
+  const userForKey = await findUserByLogin(store, login);
+  const loginKey = userForKey ? detId("login", "user", userForKey.id) : detId("login", "text", login.toLowerCase());
   const since = new Date(Date.now() - LOCK_WINDOW_MIN * 60000).toISOString();
   const recent = await store.list("audit_logs", { filters: [["eq", "entityType", "login"], ["eq", "entityId", loginKey], ["gte", "occurredAt", since]], orderBy: [{ field: "occurredAt", dir: "desc" }], limit: MAX_FAILED + 1 });
   const lastSuccess = recent.items.findIndex((e) => e.result === "success");
@@ -48,7 +50,7 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
         entityType: "login", entityId: loginKey, summary, result, ip: ip ?? null, occurredAt: new Date().toISOString(), related: u ? [`user:${u.id}`] : [],
       })
       .catch(() => undefined);
-  const user = await findUserByLogin(store, login);
+  const user = userForKey;
   if (!user) {
     await logAttempt("failure", `Tentativa de login inválida (usuário inexistente: ${login.slice(0, 60)})`);
     return { ok: false, error: "Usuário ou senha inválidos." };
@@ -81,7 +83,8 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
   let unit: string | null = null;
   if (pref?.value && typeof pref.value === "string") {
     const [c, b] = pref.value.split(":");
-    if (companies.some((x) => x.id === c) && (b === "all" || branches.some((x) => x.id === b))) unit = pref.value;
+    const canAll = Boolean(user.isAdmin) || !(user.branchIds ?? []).length;
+    if (companies.some((x) => x.id === c) && ((b === "all" && canAll) || branches.some((x) => x.id === b))) unit = pref.value;
   }
   if (!unit && companies.length === 1 && branches.filter((b) => b.companyId === companies[0].id).length === 1) unit = `${companies[0].id}:${branches.find((b) => b.companyId === companies[0].id)!.id}`;
   await logAttempt("success", `Login de ${user.name}`, user);
@@ -108,6 +111,7 @@ export async function switchUnitAction(companyId: string, branchId: string) {
   const company = s.companies.find((c) => c.id === companyId);
   const allBranches = (await accessibleUnits(getStore(), (await getStore().get("users", s.user.id))!)).branches;
   if (!company) return { ok: false, error: "Empresa não permitida." };
+  if (branchId === "all" && !s.canConsolidate) return { ok: false, error: "O contexto consolidado exige acesso a todas as filiais. Escolha uma filial." };
   if (branchId !== "all" && !allBranches.some((b) => b.id === branchId && b.companyId === companyId)) return { ok: false, error: "Filial não permitida." };
   const value = `${companyId}:${branchId}`;
   const jar = await cookies();

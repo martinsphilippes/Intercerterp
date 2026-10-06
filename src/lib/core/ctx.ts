@@ -1,4 +1,5 @@
 import type { Store } from "../db/types";
+import { scopeStore } from "../db/scoped-store";
 import { can, canDo, type Crud, type ModuleKey, type PermissionMatrix, type SpecialAction } from "../permissions";
 import { PermissionError, BusinessError } from "./errors";
 
@@ -41,10 +42,20 @@ export function requireBranch(ctx: Ctx): string {
   return ctx.branchId;
 }
 
-/** Contexto técnico para tarefas em segundo plano. */
+/**
+ * Contexto de outra empresa à qual o usuário tem acesso (administração multiempresa).
+ * Valida o acesso e devolve um contexto com o Store restrito a essa empresa.
+ */
+export async function ctxForCompany(ctx: Ctx, companyId: string): Promise<Ctx> {
+  if (companyId === ctx.companyId) return ctx;
+  if (!ctx.user.isAdmin && !ctx.user.companyIds.includes(companyId)) throw new PermissionError("Você não tem acesso a esta empresa.");
+  return { ...ctx, companyId, branchId: null, store: scopeStore(ctx.store, companyId) };
+}
+
+/** Contexto técnico para tarefas em segundo plano (Store restrito à empresa da tarefa). */
 export function systemCtx(store: Store, companyId: string, branchId: string | null = null): Ctx {
   return {
-    store,
+    store: companyId ? scopeStore(store, companyId) : store,
     companyId,
     branchId,
     user: { id: "system", name: "Sistema", email: "", isAdmin: true, permissions: {}, actions: [], discountLimitBps: 0, branchIds: [], companyIds: [companyId] },

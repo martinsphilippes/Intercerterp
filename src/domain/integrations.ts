@@ -394,8 +394,8 @@ export async function requeueJob(ctx: Ctx, jobId: string) {
   requireAction(ctx, "admin.integrations");
   const job = await ctx.store.getOrThrow("jobs", jobId);
   assert(job.companyId === ctx.companyId, "Tarefa de outra empresa.");
-  assert(["retry", "dead", "pending"].includes(job.status), "Somente tarefas pendentes, em retentativa ou com falha podem ser reprocessadas.");
-  const { requeue } = await import("@/lib/core/jobs");
+  const { requeue, isStale } = await import("@/lib/core/jobs");
+  assert(["retry", "dead", "pending"].includes(job.status) || isStale(job), "Somente tarefas pendentes, em retentativa, com falha ou travadas podem ser reprocessadas.");
   await requeue(ctx.store, jobId);
   await audit(ctx, { module: "admin", action: "job.requeue", entityType: "job", entityId: jobId, summary: `Tarefa ${job.type} reenfileirada manualmente (antes: ${job.status}, ${job.attempts ?? 0} tentativa(s))` });
   const { runDueJobs } = await import("./jobs-registry");

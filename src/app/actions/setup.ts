@@ -1,6 +1,7 @@
 "use server";
 
-import { getStore } from "@/lib/db";
+import { getStore, configuredBackend } from "@/lib/db";
+import { timingSafeEqual } from "node:crypto";
 import { isEmptyInstallation } from "@/lib/server/bootstrap";
 import { getAuth } from "@/lib/auth/provider";
 import { createCompanyWithDefaults } from "@/domain/setup";
@@ -9,13 +10,27 @@ import type { ActionResult } from "@/lib/server/action";
 
 function checkSetupToken(fd: FormData): string | null {
   const expected = process.env.SETUP_TOKEN;
-  if (!expected) return null;
-  return String(fd.get("setupToken") ?? "") === expected ? null : "Token de instalação inválido (variável SETUP_TOKEN do servidor).";
+  if (!expected) {
+    // Em produção com Appwrite a instalação exige token (evita que um visitante crie o administrador)
+    return process.env.NODE_ENV === "production" && configuredBackend() === "appwrite" ? "Defina a variável SETUP_TOKEN no servidor para concluir a instalação." : null;
+  }
+  const got = Buffer.from(String(fd.get("setupToken") ?? ""));
+  const exp = Buffer.from(expected);
+  return got.length === exp.length && timingSafeEqual(got, exp) ? null : "Token de instalação inválido (variável SETUP_TOKEN do servidor).";
+}
+
+async function emptyOrError(): Promise<string | null> {
+  try {
+    return (await isEmptyInstallation()) ? null : "A instalação já foi inicializada.";
+  } catch (e: any) {
+    return `Banco de dados indisponível: ${e?.message ?? e}`;
+  }
 }
 
 /** Cria tabelas/índices/buckets no Appwrite. Retomável: cada chamada continua de onde parou. */
 export async function provisionAction(fd: FormData): Promise<ActionResult<{ done: boolean; tables: number; total: number; log: string[] }>> {
-  if (!(await isEmptyInstallation())) return { ok: false, error: "A instalação já foi inicializada." };
+  const closed = await emptyOrError();
+  if (closed) return { ok: false, error: closed };
   const bad = checkSetupToken(fd);
   if (bad) return { ok: false, error: bad };
   const { configuredBackend, appwriteConfig } = await import("@/lib/db");
@@ -32,7 +47,8 @@ export async function provisionAction(fd: FormData): Promise<ActionResult<{ done
 
 /** Instalação inicial: somente quando ainda não existe nenhum usuário. */
 export async function setupInstallationAction(fd: FormData): Promise<ActionResult> {
-  if (!(await isEmptyInstallation())) return { ok: false, error: "A instalação já foi inicializada." };
+  const closed = await emptyOrError();
+  if (closed) return { ok: false, error: closed };
   const bad = checkSetupToken(fd);
   if (bad) return { ok: false, error: bad };
   const store = getStore();
@@ -53,8 +69,16 @@ export async function setupInstallationAction(fd: FormData): Promise<ActionResul
   const { company } = await createCompanyWithDefaults(store, {
     name, cnpj, regime: String(fd.get("regime") ?? "simples"), uf: String(fd.get("uf") ?? ""), cityName: String(fd.get("city") ?? ""), cityCode: String(fd.get("cityCode") ?? ""),
   });
-  const user = await store.create("users", { name: adminName, email, login: email.split("@")[0], status: "active", isAdmin: true, companyIds: [company.id], branchIds: [], firstAccessAt: new Date().toISOString() });
-  const authId = await getAuth().createUser(email, password, adminName);
-  await store.update("users", user.id, { authId });
+  const { findOne } = await import("@/lib/db");
+  // reaproveita a linha de uma tentativa anterior sem credencial (mesmo e-mail)
+  const prev = await findOne(store, "users", [["eq", "email", email]]);
+  const user = prev && !prev.authId ? prev : await store.create("users", { name: adminName, email, login: email.split("@")[0], status: "active", isAdmin: true, companyIds: [company.id], branchIds: [], firstAccessAt: new Date().toISOString() });
+  try {
+    const authId = await getAuth().createUser(email, password, adminName);
+    await store.update("users", user.id, { authId, companyIds: [company.id] });
+  } catch (e: any) {
+    if (!prev) await store.delete("users", user.id).catch(() => undefined);
+    return { ok: false, error: `Não foi possível criar a credencial do administrador: ${e?.message ?? e}` };
+  }
   return { ok: true, message: "Instalação concluída. Entre com o e-mail e a senha cadastrados.", redirect: "/login" };
 }

@@ -12,9 +12,10 @@ import { setSetting } from "@/lib/core/settings";
  */
 export async function createCompanyWithDefaults(
   store: Store,
-  input: { name: string; tradeName?: string; cnpj?: string; regime?: string; uf?: string; cityName?: string; cityCode?: string; branchName?: string; createdBy?: string },
+  input: { name: string; tradeName?: string; cnpj?: string; regime?: string; uf?: string; cityName?: string; cityCode?: string; branchName?: string; createdBy?: string; key?: string },
 ): Promise<{ company: Doc; branch: Doc; roles: Record<string, Doc> }> {
-  const key = onlyDigits(input.cnpj) || input.name;
+  // chave dos ids: única por empresa nova (key) — CNPJ/nome só na instalação (retomável)
+  const key = input.key ?? (onlyDigits(input.cnpj) || input.name);
   const put = async (collection: string, k: string, data: Record<string, any>) => {
     const id = detId("setup", key, collection, k);
     const ex = await store.get(collection, id);
@@ -30,6 +31,11 @@ export async function createCompanyWithDefaults(
     name: input.name, tradeName: input.tradeName ?? input.name, cnpj: onlyDigits(input.cnpj) || null, regime: input.regime ?? "simples", crt: input.regime === "simples" || !input.regime ? "1" : "3",
     status: "active", isDemo: false, createdBy: input.createdBy ?? null, address: { uf: input.uf ?? "", cityName: input.cityName ?? "", cityCode: input.cityCode ?? "" },
   });
+  // nunca devolver/atualizar uma empresa de terceiros por colisão de identificador
+  if ((onlyDigits(input.cnpj) || null) !== (company.cnpj ?? null) || (!input.cnpj && company.name !== input.name)) {
+    const { BusinessError } = await import("@/lib/core/errors");
+    throw new BusinessError("Conflito de identificador com uma empresa existente. Tente novamente.", "duplicate");
+  }
   const base = { companyId: company.id, createdBy: input.createdBy ?? null };
   const whId = detId("setup", key, "warehouses", "main");
   const branch = await put("branches", "matriz", {

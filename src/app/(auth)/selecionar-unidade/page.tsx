@@ -28,7 +28,7 @@ export default async function Page() {
           <button type="submit" className="text-xs text-slate-500 hover:text-red-700 hover:underline">Sair</button>
         </form>
       </div>
-      <UnitPicker companies={companies} branches={branches} />
+      <UnitPicker companies={companies} branches={branches} canConsolidate={s.user.isAdmin || !s.user.branchIds.length} />
     </div>
   );
 }
