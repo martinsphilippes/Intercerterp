@@ -16,7 +16,10 @@ export function ensureBootstrap() {
     if (companies.length) return;
     const { seedDemo } = await import("@/domain/seed");
     await seedDemo(store, { historyDays: 30 });
-  })();
+  })().catch((e) => {
+    booting = null; // falha transitória: a próxima requisição tenta novamente
+    throw e;
+  });
   return booting;
 }
 

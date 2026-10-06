@@ -305,10 +305,17 @@ export class MemoryStore implements Store {
 type TxOp = { kind: "create" | "update" | "delete" | "increment"; collection: string; id: string; data?: Record<string, any>; field?: string; by?: number; bounds?: { min?: number; max?: number } };
 
 /** Visão de transação com escritas pendentes até o commit (semântica Appwrite). */
+/** Limite de operações por transação do Appwrite (TablesDB), reproduzido no modo deferred. */
+export const TX_MAX_OPS = 100;
+
 class DeferredTx implements Store {
   readonly backend = "memory" as const;
   readonly ops: TxOp[] = [];
   constructor(private readonly base: MemoryStore) {}
+  private push(op: TxOp) {
+    if (this.ops.length >= TX_MAX_OPS) throw new Error("Operação excede o limite de 100 escritas por transação do Appwrite.");
+    this.ops.push(op);
+  }
   get<T = any>(collection: string, id: string) {
     return this.base.get<T>(collection, id);
   }
@@ -321,21 +328,21 @@ class DeferredTx implements Store {
   async create<T = any>(collection: string, data: Record<string, any>, id?: string): Promise<Doc<T>> {
     const docId = id ?? newId();
     toStored(collection, data); // valida tipos já no staging
-    this.ops.push({ kind: "create", collection, id: docId, data });
+    this.push({ kind: "create", collection, id: docId, data });
     const now = new Date().toISOString();
     return { id: docId, createdAt: now, updatedAt: now, ...fromStored(collection, toStored(collection, data)) } as Doc<T>;
   }
   async update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
     toStored(collection, patch);
-    this.ops.push({ kind: "update", collection, id, data: patch });
+    this.push({ kind: "update", collection, id, data: patch });
     const cur = (await this.base.get(collection, id)) ?? ({ id } as any);
     return { ...cur, ...patch } as Doc<T>;
   }
   async delete(collection: string, id: string) {
-    this.ops.push({ kind: "delete", collection, id });
+    this.push({ kind: "delete", collection, id });
   }
   async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }) {
-    this.ops.push({ kind: "increment", collection, id, field, by, bounds });
+    this.push({ kind: "increment", collection, id, field, by, bounds });
     const cur = (await this.base.get(collection, id)) ?? ({ id } as any);
     return { ...cur, [field]: (cur[field] ?? 0) + by } as Doc;
   }
