@@ -107,6 +107,12 @@ export async function provisionAppwrite(
     tablesOk++;
   }
   for (const b of new Set(Object.values(BUCKETS).map(physicalBucket))) {
+    // o Appwrite responde "limite do plano" antes de "já existe": consulta primeiro
+    const exists = await storage.getBucket({ bucketId: b }).then(() => true, () => false);
+    if (exists) {
+      log(`bucket ${b} ok`);
+      continue;
+    }
     try {
       await ignore409(storage.createBucket({ bucketId: b, name: b, permissions: [], fileSecurity: false, enabled: true, maximumFileSize: 30000000, encryption: true, antivirus: false }));
     } catch (e) {
