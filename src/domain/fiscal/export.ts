@@ -301,8 +301,9 @@ export async function runScheduledAccountingExport(ctx: Ctx, ref = today()) {
   return { period, delivered: r.delivered, message: r.message };
 }
 
-/** Pacotes gerados (arquivos) — histórico com download. */
+/** Pacotes gerados (arquivos) — histórico com download: exige "Exportar dados" (mesma regra de gerar o pacote). */
 export async function packageHistory(ctx: Ctx) {
+  requireAction(ctx, "data.export");
   const files = await listAll(ctx.store, "files", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "accounting_package"]], orderBy: [{ field: "createdAt", dir: "desc" }] }, 50);
   return files.map((f) => ({ id: f.id, name: f.name, sizeBytes: f.sizeBytes, createdAt: f.createdAt, period: f.entityId, date: toLocalDate(f.createdAt) }));
 }

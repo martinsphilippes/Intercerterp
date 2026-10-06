@@ -51,7 +51,7 @@ describe("Central de integrações — estados medidos", () => {
     const t = await testIntegration(c, "card_tef", null);
     expect(t.status).toBe("configured_untested");
     expect(t.message).toMatch(/não há conexão remota/);
-    await saveIntegration(c, { kind: "bank", branchId: null, provider: "open_finance", config: { baseUrl: "https://api.banco.example" }, secretRefs: { clientId: "BANK_ID_X", clientSecret: "BANK_SECRET_X" } });
+    await saveIntegration(c, { kind: "bank", branchId: null, provider: "open_finance", secretRefs: { clientId: "BANK_ID_X", clientSecret: "BANK_SECRET_X" } });
     const b = await testIntegration(c, "bank", null);
     expect(b.status).toBe("error"); // credenciais ausentes medidas antes de qualquer coisa
     process.env.BANK_ID_X = "x";

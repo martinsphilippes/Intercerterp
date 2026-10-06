@@ -263,7 +263,7 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                   <div className="flex items-center justify-between gap-3"><dt>Desconto</dt><dd className="w-32"><MoneyInput value={discount} onChange={(v) => { setDirty(true); setDiscount(v); }} ariaLabel="Desconto" /></dd></div>
                   {!r.hasXml && r.chargesAuto != null && <p className="text-xs text-slate-500">{r.chargesAuto ? "Frete, seguro, outras despesas, IPI e desconto geral vêm do pedido, proporcionais ao recebido (recalculados ao salvar). Alterar um desses valores passa a usar o informado." : "Frete, despesas e desconto informados na conferência (não são mais recalculados pelo pedido)."}</p>}
                   {!r.hasXml && r.chargesAuto === false && (
-                    <SubmitButton pending={pending} variant="secondary" size="sm" name="intent" value="recalcCharges">Recalcular encargos pelo pedido</SubmitButton>
+                    <div><SubmitButton pending={pending} variant="secondary" size="sm" name="intent" value="recalcCharges">Recalcular encargos pelo pedido</SubmitButton></div>
                   )}
                   {!r.hasXml && r.chargesAuto === false && (r.chargesLost ?? []).length > 0 && (
                     <div className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">

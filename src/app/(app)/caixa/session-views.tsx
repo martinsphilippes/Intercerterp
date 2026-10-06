@@ -52,6 +52,12 @@ export function SessionVersions({ history }: { history: any[] }) {
             <div className="mt-2 space-y-2">
               <ClosureTable expected={h.expected} counted={h.counted} differences={h.differences} />
               {h.justification && <p className="text-sm text-slate-700">Justificativa: {h.justification}</p>}
+              {Array.isArray(h.blindCount?.superseded) && h.blindCount.superseded.length > 0 && (
+                <p className="text-xs text-amber-800">
+                  Contagem cega refeita por vendas/movimentos posteriores — contagens anteriores preservadas:{" "}
+                  {h.blindCount.superseded.map((c: any) => `${formatDateTime(c.at)} ${c.byName ?? ""}: dinheiro ${formatMoney(c.counted?.cash ?? 0)}${c.expected ? ` (previsto então ${formatMoney(c.expected.cash ?? 0)})` : ""}`).join("; ")}.
+                </p>
+              )}
               {h.checklist && <p className="text-xs text-slate-500">Conferências: {Object.entries(h.checklist).map(([k, v]) => `${CHECK_LABEL[k] ?? k} ${v ? "✓" : "✗"}`).join(" · ")}</p>}
             </div>
           )}

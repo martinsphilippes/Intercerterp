@@ -155,6 +155,13 @@ const blankInput = (branchId: string): NfeInput => ({
   effects: { stock: false, financial: false },
 });
 
+/** A NF-e de uma operação é emitida pela filial da operação (a filial ativa é a emitente). */
+async function originBranchBlocker(ctx: Ctx, originBranchId: string | null | undefined, branchId: string, what: string): Promise<string | null> {
+  if ((originBranchId ?? null) === branchId) return null;
+  const b = originBranchId ? await ctx.store.get("branches", originBranchId) : null;
+  return `${what} pertence ${b ? `à filial ${b.name}` : "a outra filial"}: a NF-e deve ser emitida pela filial da operação — selecione-a no topo da tela.`;
+}
+
 /** Pré-preenche a NF-e a partir de uma operação existente (sem repetir os efeitos dela). */
 export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, branchId: string): Promise<OriginPrefill> {
   const warnings: string[] = [];
@@ -174,6 +181,8 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
     const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", id]], orderBy: [{ field: "seq" }] });
     const pays = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", id]] });
     if (sale.status !== "completed") blockers.push(`Venda nº ${sale.number} está ${sale.status === "cancelled" ? "cancelada" : sale.status}.`);
+    const wrongBranch = await originBranchBlocker(ctx, sale.branchId, branchId, `A venda nº ${sale.number}`);
+    if (wrongBranch) blockers.push(wrongBranch);
     // uma operação → um documento fiscal ativo: NFC-e da venda em qualquer estado não encerrado bloqueia a NF-e
     const nfces = (await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "originType", "sale"], ["eq", "originId", id], ["eq", "model", "nfce"]] })).filter((d) => d.companyId === ctx.companyId);
     if (sale.fiscalDocumentId && !nfces.some((d) => d.id === sale.fiscalDocumentId)) {
@@ -238,6 +247,10 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
     const po = await ctx.store.getOrThrow("purchase_orders", id);
     assert(po.companyId === ctx.companyId, "Pedido de outra empresa.");
     const supplier = await ctx.store.getOrThrow("suppliers", po.supplierId);
+    const wrongBranch = await originBranchBlocker(ctx, po.branchId, branchId, `O pedido de compra nº ${po.number}`);
+    if (wrongBranch) blockers.push(wrongBranch);
+    // depósito padrão dos efeitos: o do pedido (se for da filial emitente); senão, o padrão da filial na autorização
+    const poWarehouse = po.warehouseId ? await ctx.store.get("warehouses", po.warehouseId) : null;
     const items = await listAll(ctx.store, "purchase_order_items", { filters: [["eq", "orderId", id]], orderBy: [{ field: "seq" }] });
     const received = items.filter((i) => (i.receivedQty ?? 0) > 0);
     if (!received.length) warnings.push("Nenhum item recebido neste pedido: ajuste as quantidades a devolver.");
@@ -255,7 +268,7 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
       items: (received.length ? received : items).map((i) => ({ skuId: i.skuId, qty: i.receivedQty || i.qty, unitPrice: i.unitCost, discount: 0, description: i.description })),
       payments: [{ kind: "none", amount: 0 }],
       referencedKeys: [...new Set(keys)],
-      effects: { stock: true, financial: false },
+      effects: { stock: true, financial: false, warehouseId: poWarehouse && poWarehouse.companyId === ctx.companyId && poWarehouse.branchId === branchId ? poWarehouse.id : null },
     };
     warnings.push("Devolução a fornecedor: a baixa de estoque é aplicada por este documento na autorização (marque/desmarque abaixo). Abatimento financeiro deve ser tratado em Contas a pagar.");
     return { input, effectsLocked: false, label: `Pedido de compra nº ${po.number}`, href: `/compras/pedidos/${id}`, warnings, blockers, existingDocId: existing?.id ?? null, generation };
@@ -264,6 +277,8 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
     const ret = await ctx.store.getOrThrow("returns", id);
     assert(ret.companyId === ctx.companyId, "Devolução de outra empresa.");
     const sale = await ctx.store.getOrThrow("sales", ret.saleId);
+    const wrongBranch = await originBranchBlocker(ctx, ret.branchId ?? sale.branchId, branchId, `A devolução nº ${ret.number ?? ""}`.trim());
+    if (wrongBranch) blockers.push(wrongBranch);
     const ritems = await listAll(ctx.store, "return_items", { filters: [["eq", "returnId", id]] });
     const original = sale.fiscalDocumentId ? await ctx.store.get("fiscal_documents", sale.fiscalDocumentId) : null;
     if (!original || original.status !== "authorized") warnings.push("A venda não tem documento fiscal autorizado para referenciar: informe a chave referenciada manualmente.");
@@ -365,8 +380,13 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
       opts = { ...opts, draftId: ex.id };
     }
   }
-  const built = await buildNfe(ctx, input);
   const locked = lockedOrigins(input.origin.type);
+  // depósito dos efeitos de estoque: sempre da filial emitente (nunca movimenta estoque de outra filial)
+  if (!locked && input.effects?.stock && input.effects.warehouseId) {
+    const wh = await ctx.store.get("warehouses", input.effects.warehouseId);
+    assert(wh && wh.companyId === ctx.companyId && wh.branchId === input.branchId, "O depósito dos efeitos de estoque deve ser da filial emitente.", "branch_mismatch");
+  }
+  const built = await buildNfe(ctx, input);
   const effects = effectsFor(input, locked);
   const transport = { ...input.transport, mode: input.transport.mode ?? "9" };
   const common = {
