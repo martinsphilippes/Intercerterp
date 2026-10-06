@@ -14,7 +14,9 @@ export async function sendEmail(
   if (!integ) return { delivered: false, channel: "not_configured", message: "Canal de e-mail não configurado." };
   try {
     if (integ.provider === "resend") {
-      const key = process.env[integ.secretRefs?.apiKey ?? "RESEND_API_KEY"];
+      // vínculo removido ("Remover vínculo"): sem recorrer ao nome padrão da variável
+      const ref = integ.secretRefs ? integ.secretRefs.apiKey : "RESEND_API_KEY";
+      const key = ref ? process.env[ref] : undefined;
       if (!key) return { delivered: false, channel: "resend", message: "Credencial do Resend ausente." };
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",

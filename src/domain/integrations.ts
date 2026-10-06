@@ -242,6 +242,7 @@ export async function getIntegration(store: Store, companyId: string, branchId: 
 export async function saveIntegration(
   ctx: Ctx,
   input: { kind: IntegrationKind; branchId: string | null; provider: string; environment?: string; config?: Record<string, any>; secretRefs?: Record<string, string>; enabled?: boolean },
+  opts: { unlinkSecrets?: boolean } = {},
 ) {
   requireAction(ctx, "admin.integrations");
   const cat = INTEGRATION_CATALOG[input.kind];
@@ -255,7 +256,8 @@ export async function saveIntegration(
   }
   const refs: Record<string, string> = {};
   for (const s of prov.secrets) {
-    const v = (input.secretRefs?.[s] ?? prov.defaultRefs?.[s] ?? "").trim();
+    // "Remover vínculo": não repõe o nome padrão da variável (a integração fica sem credencial até novo vínculo)
+    const v = (input.secretRefs?.[s] ?? (opts.unlinkSecrets ? "" : prov.defaultRefs?.[s]) ?? "").trim();
     if (!v) continue;
     const problem = providerSecretProblem(prov, s, v);
     assert(!problem, problem ?? "", "secret_ref");

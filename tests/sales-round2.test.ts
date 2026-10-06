@@ -152,6 +152,46 @@ describe("vendas — rodada 2", () => {
     expect(open).toHaveLength(0);
   });
 
+  it("cancelamento: renegociação com recebimento criada depois do commit não trava os efeitos (renegociação e origem viram pendência)", async () => {
+    const s = await sale({ idemKey: "cr-1", customerId: refs.customers.joao.id, items: [{ skuId: refs.skus["bone-u"].id, qty: 1000 }], payments: [{ methodId: refs.methods.crediario.id, amount: 4490 }] });
+    const before = await avail("bone-u");
+    restore = crashAfterCommit(async () => (await store.get("sales", s.id))?.status === "cancelled");
+    await cancelSale(manager, s.id, "desistiu").catch(() => null);
+    restore();
+    restore = null;
+    const title = await saleTitle(s.id);
+    const insts = await instsOf(title.id);
+    const nt = await renegotiate(manager, { titleId: title.id, installmentIds: insts.map((i) => i.id), charges: 0, discount: 0, installments: [{ dueDate: addDays(today(), 60), amount: 4490 }], reason: "prazo", idemKey: "cr-reneg" });
+    const [ni] = await instsOf(nt.id);
+    await settleInstallment(manager, { installmentId: ni.id, date: today(), principal: 1000, accountId: refs.accounts.banco.id, idemKey: "cr-pay" });
+    await runDueJobs(store, { limit: 50 });
+    const after = await store.getOrThrow("sales", s.id);
+    expect(after.cancelEffectsStatus).toBe("done");
+    expect(await avail("bone-u")).toBe(before + 1000);
+    expect((after.cancelPending as any[]).map((p) => p.titleId).sort()).toEqual([title.id, nt.id].sort());
+    expect((await store.getOrThrow("titles", nt.id)).status).not.toBe("cancelled");
+    expect((await store.getOrThrow("titles", title.id)).status).not.toBe("cancelled");
+    expect((await store.getOrThrow("jobs", detId("job", `sale-cancel-effects:${s.id}`))).status).toBe("done");
+  });
+
+  it("devolução que zera título com renegociação vigente: o título não é cancelado e os efeitos concluem", async () => {
+    const s = await sale({ idemKey: "rr-1", customerId: refs.customers.joao.id, items: [{ skuId: refs.skus["meia-u"].id, qty: 2000 }], payments: [{ methodId: refs.methods.crediario.id, amount: 5980, paymentTermId: refs.terms["30-60"].id }] });
+    const title = await saleTitle(s.id);
+    const insts = await instsOf(title.id);
+    // só a 2ª parcela é renegociada; a devolução de 1 unidade abate a 1ª e zera o título de origem
+    const nt = await renegotiate(manager, { titleId: title.id, installmentIds: [insts[1].id], charges: 0, discount: 0, installments: [{ dueDate: addDays(today(), 90), amount: insts[1].amount }], reason: "prazo", idemKey: "rr-reneg" });
+    const [line] = await returnableItems(store, s.id);
+    const r = await processReturn(cashier, { saleId: s.id, idemKey: "rr-r", reason: "defeito", compensation: "store_credit", items: [{ saleItemId: line.id, qty: 1000, condition: "resellable" }] });
+    expect(r.abatedAmount).toBe(insts[0].amount);
+    expect(r.effectsStatus).toBe("done");
+    const t = await store.getOrThrow("titles", title.id);
+    expect(t.balance).toBe(0);
+    expect(t.status).not.toBe("cancelled");
+    expect((await store.getOrThrow("titles", nt.id)).status).toBe("open");
+    // a dívida renegociada continua: a venda segue "a receber"
+    expect((await store.getOrThrow("sales", s.id)).paymentStatus).toBe("pending");
+  });
+
   it("devolução que zera o título a prazo tira a venda de 'a receber'; devolução parcial mantém", async () => {
     const s = await sale({ idemKey: "ps-1", customerId: refs.customers.joao.id, items: [{ skuId: refs.skus["meia-u"].id, qty: 2000 }], payments: [{ methodId: refs.methods.crediario.id, amount: 5980 }] });
     expect(s.paymentStatus).toBe("pending");

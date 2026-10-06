@@ -12,7 +12,7 @@ import { getSetting } from "@/lib/core/settings";
 import { notify, resolveOccurrence } from "@/lib/core/notify";
 import { calcSale, DEFERRED_KINDS, PAYMENT_KIND_LABEL } from "./pricing-calc";
 import { availableMap, defaultWarehouse, postMovements, damageWarehouse, type MovementInput } from "./stock";
-import { buildSchedule, cancelTitle, createTitle, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
+import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
 import { cashAccountFor, currentSession } from "./cash";
 import { resolvePrices } from "./pricing";
 import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
@@ -871,7 +871,8 @@ async function cancelSaleTitles(ctx: Ctx, sale: Doc, why: string): Promise<Cance
       continue;
     }
     try {
-      await cancelTitle(ctx, cur.id, why);
+      // renegociação criada depois da leitura da cadeia também é cancelada (ou recusada, se tiver recebimento)
+      await cancelTitle(ctx, cur.id, why, { cascadeRenegotiations: true });
     } catch (e) {
       // regra do Financeiro (baixa concorrente, renegociação etc.): pendência, não falha técnica a repetir
       if (!(e instanceof BusinessError)) throw e;
@@ -1287,7 +1288,16 @@ export async function applyReturnEffects(ctx: Ctx, returnId: string) {
       for (const i of insts) if (!["open", "partial"].includes(i.status)) await resolveOccurrence(ctx.store, `overdue:${i.id}`);
       // nada pago de fato e saldo zerado pela devolução: o título deixa de existir como dívida (cancelado)
       const paidSettlements = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", tt.id], ["eq", "kind", "settlement"], ["eq", "status", "active"]] });
-      if (refreshed.balance === 0 && refreshed.status !== "cancelled" && paidSettlements.length === 0) await cancelTitle(ctx, tt.id, `Devolução integral da venda nº ${sale.number} (devolução nº ${ret.number})`);
+      // título com renegociação vigente não é cancelado: a dívida renegociada continua valendo
+      if (refreshed.balance === 0 && refreshed.status !== "cancelled" && paidSettlements.length === 0 && (await liveRenegotiationsOf(ctx, tt.id)).length === 0) {
+        try {
+          await cancelTitle(ctx, tt.id, `Devolução integral da venda nº ${sale.number} (devolução nº ${ret.number})`);
+        } catch (e) {
+          // baixa/renegociação concorrente: o título (já zerado) permanece; não é falha técnica a repetir
+          if (!(e instanceof BusinessError)) throw e;
+          await audit(ctx, { module: "sales", action: "return.effects", entityType: "return", entityId: returnId, summary: `Título nº ${tt.number} zerado pela devolução nº ${ret.number} mantido: ${e.message}`, related: [`title:${tt.id}`] });
+        }
+      }
     }
     // nada mais a receber do cliente (título zerado/cancelado pela devolução, inclusive renegociações): sai de "a receber"
     if (sale.paymentStatus === "pending") {

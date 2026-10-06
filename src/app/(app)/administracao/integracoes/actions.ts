@@ -66,7 +66,7 @@ export async function unlinkCredentialAction(kind: IntegrationKind, scope: "bran
       assert(integ, "Integração não configurada.");
       const config: Record<string, any> = { ...(integ!.config ?? {}) };
       delete config.baseUrl; // URL base não é mais configurável (endereço oficial do provedor)
-      await saveIntegration(s.ctx, { kind, branchId: integ!.branchId ?? null, provider: integ!.provider, environment: integ!.environment, config, secretRefs: {}, enabled: integ!.enabled !== false });
+      await saveIntegration(s.ctx, { kind, branchId: integ!.branchId ?? null, provider: integ!.provider, environment: integ!.environment, config, secretRefs: {}, enabled: integ!.enabled !== false }, { unlinkSecrets: true });
     }
     return { ok: true as const, message: "Vínculo de credencial removido. A integração não opera até um novo vínculo." };
   });

@@ -593,6 +593,10 @@ export async function fetchXmlByKey(ctx: Ctx, key: string): Promise<{ ok: true; 
   const branchId = requireBranch(ctx);
   const cfg = await ctx.store.get("fiscal_configs", detId("fiscalcfg", `${ctx.companyId}|${branchId}`));
   if (!cfg || cfg.provider !== "focusnfe") return { ok: false, message: "Nenhuma integração capaz de baixar XML pela chave está configurada (requer Focus NFe com manifestação do destinatário). Importe o arquivo XML recebido do fornecedor." };
+  // vínculo de credencial com nome não permitido (ex.: variável do sistema) nunca é lido
+  const { fiscalTokenRefProblem } = await import("./integrations");
+  const refProblem = fiscalTokenRefProblem(cfg.tokenRef || "FOCUSNFE_TOKEN");
+  if (refProblem) return { ok: false, message: `Integração Focus NFe com vínculo de credencial inválido: ${refProblem} Importe o arquivo XML.` };
   const token = process.env[cfg.tokenRef || "FOCUSNFE_TOKEN"];
   if (!token) return { ok: false, message: `Integração Focus NFe sem credencial (${cfg.tokenRef || "FOCUSNFE_TOKEN"}). Importe o arquivo XML.` };
   const base = cfg.environment === "producao" ? "https://api.focusnfe.com.br" : "https://homologacao.focusnfe.com.br";

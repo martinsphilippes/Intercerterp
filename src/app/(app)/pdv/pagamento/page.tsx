@@ -100,7 +100,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       customer={customer ? { id: customer.id, name: customer.name, doc: customer.doc ?? null, email: customer.email ?? null, creditLimit: customer.creditLimit ?? 0, creditAvailable } : null}
       cpfOnInvoice={cart.cpfOnInvoice ?? null}
       methods={methods.map((m) => ({ id: m.id, name: m.name, kind: m.kind, maxInstallments: m.maxInstallments ?? 1, requiresCustomer: Boolean(m.requiresCustomer), allowsChange: Boolean(m.allowsChange) || m.kind === "cash", feeBps: m.feeBps ?? 0, hasAccount: Boolean(m.accountId) }))}
-      terms={terms.map((t) => ({ id: t.id, name: t.name, installments: t.installments ?? 1, firstDueDays: t.firstDueDays ?? 30, intervalDays: t.intervalDays ?? 30 }))}
+      terms={terms.map((t) => ({ id: t.id, name: t.name, installments: t.installments ?? 1, firstDueDays: t.firstDueDays ?? 30, intervalDays: t.intervalDays ?? 30, interestBps: t.interestBps ?? 0 }))}
       pix={{ configured: Boolean(pixProvider), provider: pixInteg?.provider ?? null, simulated: Boolean(pixProvider?.simulated), status: pixInteg?.status ?? "not_configured", label: pixProvider?.label ?? null }}
       card={{ provider: cardInteg?.provider ?? null, acquirer: cardInteg?.config?.acquirer ?? null }}
       intents={intents.map((i) => ({ id: i.id, status: i.status, amount: i.amount, reference: i.reference, qrCode: i.qrCode ?? null, qrCodeImage: i.qrCodeImage ?? null, expiresAt: i.expiresAt ?? null, isSimulated: Boolean(i.isSimulated), saleId: i.saleId ?? null }))}

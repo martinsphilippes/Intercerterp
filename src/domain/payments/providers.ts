@@ -217,6 +217,8 @@ export function simulatedPix() {
 export function pixProviderFrom(integration: Record<string, any> | null): PaymentProvider | null {
   if (!integration?.provider) return null;
   if (integration.provider === "mercadopago") {
+    // vínculo removido ("Remover vínculo" grava secretRefs sem o token): não configurado — sem recorrer ao nome padrão
+    if (integration.secretRefs && !integration.secretRefs.accessToken) return null;
     const ref = String(integration.secretRefs?.accessToken ?? "MERCADOPAGO_ACCESS_TOKEN").trim();
     if (!ENV_REF.test(ref)) return null;
     const token = process.env[ref];

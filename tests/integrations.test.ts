@@ -132,4 +132,17 @@ describe("Central de integrações — estados medidos", () => {
     const other = (await store.get("jobs", detId("job", "email-teste-outra")))!;
     expect(other.status).toBe("pending");
   });
+
+  it("“Remover vínculo” deixa a integração sem credencial (não recorre ao nome padrão da variável)", async () => {
+    const c = await ctx();
+    const { pixProviderFrom } = await import("@/domain/payments/providers");
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "token-padrao-de-teste";
+    await saveIntegration(c, { kind: "pix", branchId: null, provider: "mercadopago", secretRefs: { accessToken: "MERCADOPAGO_ACCESS_TOKEN" } });
+    expect(pixProviderFrom((await getIntegration(store, refs.company.id, null, "pix"))!)).not.toBeNull();
+    await saveIntegration(c, { kind: "pix", branchId: null, provider: "mercadopago", secretRefs: {} }, { unlinkSecrets: true });
+    const after = (await getIntegration(store, refs.company.id, null, "pix"))!;
+    expect(after.secretRefs).toEqual({});
+    expect(pixProviderFrom(after)).toBeNull();
+    delete process.env.MERCADOPAGO_ACCESS_TOKEN;
+  });
 });

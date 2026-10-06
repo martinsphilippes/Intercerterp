@@ -19,7 +19,7 @@ import { changeFor, previewSchedule } from "@/domain/cart-calc";
 import { cancelPixAction, createPixAction, finalizeCartAction, saveCartAction, simulatePixAction } from "../actions";
 
 interface Method { id: string; name: string; kind: string; maxInstallments: number; requiresCustomer: boolean; allowsChange: boolean; feeBps: number; hasAccount: boolean }
-interface Term { id: string; name: string; installments: number; firstDueDays: number; intervalDays: number }
+interface Term { id: string; name: string; installments: number; firstDueDays: number; intervalDays: number; interestBps?: number }
 interface Intent { id: string; status: string; amount: number; reference: string; qrCode: string | null; qrCodeImage: string | null; expiresAt: string | null; isSimulated: boolean; saleId: string | null }
 interface Draft {
   key: string;
@@ -592,7 +592,7 @@ function DeferredForm({ method, remaining, onAdd, props }: { method: Method; rem
       <p className="sm:col-span-2 text-sm">Cliente: <b>{c.name}</b>{isCred && <> · limite {formatMoney(c.creditLimit)} · disponível <b className="tabular">{formatMoney(c.creditAvailable)}</b></>}</p>
       {noLimit && <div className="sm:col-span-2"><Notice tone="warn">Cliente sem limite de crédito no cadastro: o crediário não é concedido automaticamente. Ajuste o limite em Clientes.</Notice></div>}
       <Field label="Valor a prazo" hint={<button type="button" className="text-brand-700 underline" onClick={() => setAmount(remaining)}>Valor restante</button>}><MoneyInput value={amount} onChange={setAmount} autoFocus ariaLabel="Valor a prazo" /></Field>
-      <Field label="Condição de pagamento"><Select value={termId} onChange={(e) => setTermId(e.target.value)} options={props.terms.map((t) => ({ value: t.id, label: t.name }))} /></Field>
+      <Field label="Condição de pagamento" hint={term?.interestBps ? "Sem juros na venda: os juros cadastrados nesta condição só valem em títulos manuais (Financeiro)." : undefined}><Select value={termId} onChange={(e) => setTermId(e.target.value)} options={props.terms.map((t) => ({ value: t.id, label: t.name }))} /></Field>
       <div className="sm:col-span-2 rounded-md border border-line">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-1.5 text-left">Parcela</th><th className="px-3 py-1.5 text-left">Vencimento</th><th className="px-3 py-1.5 text-right">Valor</th></tr></thead>
