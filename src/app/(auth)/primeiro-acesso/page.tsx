@@ -5,6 +5,8 @@ import { SetupForm, ProvisionPanel } from "./form";
 
 export const metadata = { title: "Primeiro acesso" };
 export const maxDuration = 300;
+// estado da instalação muda durante o provisionamento: nunca pré-renderizar no build
+export const dynamic = "force-dynamic";
 
 export default async function Page() {
   if (!(await isEmptyInstallation())) redirect("/login");
