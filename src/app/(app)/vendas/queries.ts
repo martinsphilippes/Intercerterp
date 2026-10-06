@@ -7,6 +7,7 @@ import { onlyDigits } from "@/lib/core/text";
 import { normalizeSearch, type ListParams } from "@/lib/list";
 import { nameMap } from "@/lib/server/lookups";
 import { PAYMENT_KIND_LABEL } from "@/domain/pricing-calc";
+import { saleTitleChain } from "@/domain/sales";
 
 /** Período padrão do histórico: últimos 30 dias (inclui hoje). */
 export function salesPeriod(f: Record<string, string>) {
@@ -156,7 +157,9 @@ export async function saleDetail(ctx: Ctx, id: string) {
   const returnIds = returns.map((r) => r.id);
   const returnItems = returnIds.length ? await listAll(store, "return_items", { filters: [["eq", "returnId", returnIds]] }) : [];
   const returnTitles = returnIds.length ? await listAll(store, "titles", { filters: [["eq", "originId", returnIds]] }) : [];
-  const allTitles = [...titles, ...returnTitles];
+  // títulos gerados por renegociação do título da venda (o saldo a receber passa a estar neles)
+  const renegTitles = titles.length ? (await saleTitleChain(store, id)).filter((t) => t.originType === "renegotiation") : [];
+  const allTitles = [...titles, ...renegTitles, ...returnTitles];
   const titleIds = allTitles.map((t) => t.id);
   const installments = titleIds.length ? await listAll(store, "installments", { filters: [["eq", "titleId", titleIds]], orderBy: [{ field: "dueDate" }] }) : [];
   const settlements = titleIds.length ? await listAll(store, "settlements", { filters: [["eq", "titleId", titleIds]], orderBy: [{ field: "date" }] }) : [];
