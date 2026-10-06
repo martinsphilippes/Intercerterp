@@ -4,6 +4,14 @@ import { runAction } from "@/lib/server/action";
 import { listAll } from "@/lib/db";
 import { searchable } from "@/lib/core/text";
 import { availableMap } from "@/domain/stock";
+import type { Store } from "@/lib/db/types";
+
+/** O fornecedor vem do cliente: só vale se for da empresa ativa (senão, nenhum dado do vínculo é lido). */
+async function ownSupplierId(store: Store, companyId: string, supplierId?: string | null) {
+  if (!supplierId) return null;
+  const sup = await store.get("suppliers", supplierId);
+  return sup && sup.companyId === companyId ? sup.id : null;
+}
 
 export interface SkuHit {
   id: string;
@@ -30,15 +38,16 @@ export async function searchSkusAction(q: string, supplierId?: string | null) {
     const store = s.ctx.store;
     const res = await store.list("skus", { filters: [["eq", "companyId", s.ctx.companyId], ["or", [["contains", "searchText", searchable(term)], ["eq", "barcode", term], ["eq", "sku", term.toUpperCase()]]]], limit: 15 });
     const items = [...res.items];
-    if (supplierId) {
-      const byCode = await store.list("supplier_products", { filters: [["eq", "supplierId", supplierId], ["eq", "supplierCode", term]], limit: 5 });
+    const sid = await ownSupplierId(store, s.ctx.companyId, supplierId);
+    if (sid) {
+      const byCode = await store.list("supplier_products", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "supplierId", sid], ["eq", "supplierCode", term]], limit: 5 });
       for (const sp of byCode.items) if (!items.some((i) => i.id === sp.skuId)) {
         const sku = await store.get("skus", sp.skuId);
-        if (sku) items.unshift(sku);
+        if (sku && sku.companyId === s.ctx.companyId) items.unshift(sku);
       }
     }
     if (!items.length) return [] as SkuHit[];
-    const sps = supplierId ? await listAll(store, "supplier_products", { filters: [["eq", "supplierId", supplierId], ["eq", "skuId", items.map((i) => i.id)]] }) : [];
+    const sps = sid ? await listAll(store, "supplier_products", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "supplierId", sid], ["eq", "skuId", items.map((i) => i.id)]] }) : [];
     const avail = s.ctx.branchId ? await availableMap(store, s.ctx.branchId, items.map((i) => i.id)) : new Map();
     const bals = s.ctx.branchId ? await listAll(store, "stock_balances", { filters: [["eq", "branchId", s.ctx.branchId], ["eq", "skuId", items.map((i) => i.id)]] }) : [];
     const products = new Map((await listAll(store, "products", { filters: [["eq", "id", [...new Set(items.map((i) => i.productId))]]] })).map((p) => [p.id, p]));
@@ -54,8 +63,9 @@ export async function searchSkusAction(q: string, supplierId?: string | null) {
 /** Último custo/código do fornecedor para uma lista de SKUs (sugestão de custo no pedido). */
 export async function supplierCostsAction(supplierId: string, skuIds: string[]) {
   return runAction({ module: "purchases" }, async (s) => {
-    if (!supplierId || !skuIds.length) return {} as Record<string, { lastCost: number | null; supplierCode: string | null; leadTimeDays: number | null }>;
-    const sps = await listAll(s.ctx.store, "supplier_products", { filters: [["eq", "supplierId", supplierId], ["eq", "skuId", skuIds]] });
+    const sid = await ownSupplierId(s.ctx.store, s.ctx.companyId, supplierId);
+    if (!sid || !skuIds.length) return {} as Record<string, { lastCost: number | null; supplierCode: string | null; leadTimeDays: number | null }>;
+    const sps = await listAll(s.ctx.store, "supplier_products", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "supplierId", sid], ["eq", "skuId", skuIds]] });
     return Object.fromEntries(sps.map((sp) => [sp.skuId, { lastCost: sp.lastCost ?? null, supplierCode: sp.supplierCode ?? null, leadTimeDays: sp.leadTimeDays ?? null }]));
   });
 }

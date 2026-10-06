@@ -11,7 +11,7 @@ import { paginate, parseList, qs, type SearchParams } from "@/lib/list";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, formatQty } from "@/lib/money";
 import { lookups } from "@/lib/server/lookups";
-import { queryBalances, branchScope, type BalanceRow } from "./queries";
+import { queryBalances, branchScope, branchOptions, warehouseOptions, type BalanceRow } from "./queries";
 
 export const metadata = { title: "Saldos de estoque" };
 
@@ -22,7 +22,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const all = await queryBalances(s.ctx, p);
   const { rows, total } = paginate(all, p);
   const scope = branchScope(s.ctx, p.f);
-  const [branches, warehouses, categories] = await Promise.all([lookups.branches(s.ctx), lookups.warehouses(s.ctx, scope), lookups.categories(s.ctx)]);
+  const branches = branchOptions(s.branches);
+  const [warehouses, categories] = await Promise.all([warehouseOptions(s.ctx, scope), lookups.categories(s.ctx)]);
   const columns: Column<BalanceRow>[] = [
     { key: "productName", label: "Produto / SKU", sortable: true, fixed: true, cell: (r) => <span className="block min-w-48">{r.skuName}{!r.productActive && <Badge className="ml-2">Inativo</Badge>}<span className="block font-mono text-xs font-normal text-slate-500">{r.skuCode}</span></span> },
     { key: "warehouseName", label: "Filial · depósito", sortable: true, cell: (r) => <span className="block whitespace-nowrap text-xs">{r.branchName}<span className="block text-slate-500">{r.warehouseName}{r.warehouseKind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</span></span> },

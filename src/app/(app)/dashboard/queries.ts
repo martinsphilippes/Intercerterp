@@ -30,6 +30,8 @@ export async function latestSales(ctx: Ctx, branchIds: string[], limit = 8) {
       paymentLabel: [...new Set(ps.map((p) => p.methodName || p.methodKind))].join(" + ") || "—",
       documentModel: doc?.model ?? null,
       documentNumber: doc?.number ?? null,
+      /** documento gerado pelo provedor de simulação: exibido com o selo SIMULAÇÃO (sem validade fiscal) */
+      documentSimulated: Boolean(doc?.isSimulated),
     };
   });
 }
@@ -127,7 +129,8 @@ export type FiscalBucket = keyof typeof FISCAL_BUCKETS;
 
 /**
  * Resumo fiscal: autorizados no período (quantidade e valor, por modelo) e documentos que exigem
- * atenção (situação atual, independente do período).
+ * atenção (situação atual, independente do período). Documentos do provedor de SIMULAÇÃO não contam
+ * como autorizados: vêm separados (`simulatedCount`/`simulatedTotal`) e são exibidos com o selo SIMULAÇÃO.
  */
 export async function fiscalSnapshot(ctx: Ctx, branchIds: string[], period: { from: string; to: string }) {
   const { start, end } = dayRange(period.from, period.to);
@@ -141,8 +144,12 @@ export async function fiscalSnapshot(ctx: Ctx, branchIds: string[], period: { fr
       (Object.keys(FISCAL_BUCKETS) as FiscalBucket[]).map((k) => [k, ofModel.filter((d) => (FISCAL_BUCKETS[k].statuses as readonly string[]).includes(d.status)).length]),
     ) as Record<FiscalBucket, number>;
     const auth = authorized.filter((d) => d.model === m);
-    return { model: m, counts, authorizedCount: auth.length, authorizedTotal: auth.reduce((a, d) => a + (d.total ?? 0), 0) };
+    const real = auth.filter((d) => !d.isSimulated);
+    const sim = auth.filter((d) => d.isSimulated);
+    const sum = (rows: Doc[]) => rows.reduce((a, d) => a + (d.total ?? 0), 0);
+    return { model: m, counts, authorizedCount: real.length, authorizedTotal: sum(real), simulatedCount: sim.length, simulatedTotal: sum(sim) };
   });
   const totals = Object.fromEntries((Object.keys(FISCAL_BUCKETS) as FiscalBucket[]).map((k) => [k, grid.reduce((a, g) => a + g.counts[k], 0)])) as Record<FiscalBucket, number>;
-  return { grid, totals };
+  const simulatedCount = grid.reduce((a, g) => a + g.simulatedCount, 0);
+  return { grid, totals, simulatedCount };
 }

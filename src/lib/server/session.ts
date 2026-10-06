@@ -39,13 +39,15 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   if (companies.length === 0) return null;
   const unit = jar.get(UNIT_COOKIE)?.value ?? "";
   const [cid, bid] = unit.split(":");
-  const company = companies.find((c) => c.id === cid) ?? null;
+  // empresa/filial inativa não é contexto de trabalho (volta para a seleção de unidade)
+  const company = companies.find((c) => c.id === cid && c.status !== "inactive") ?? null;
   const companyBranches = company ? branches.filter((b) => b.companyId === company.id) : [];
-  const branch = bid && bid !== "all" ? (companyBranches.find((b) => b.id === bid) ?? null) : null;
+  const branch = bid && bid !== "all" ? (companyBranches.find((b) => b.id === bid && b.status !== "inactive") ?? null) : null;
   // Consolidado só para quem acessa todas as filiais (usuário restrito escolhe uma filial)
   const canConsolidate = Boolean(userDoc.isAdmin) || !(userDoc.branchIds ?? []).length;
   const consolidated = bid === "all" && canConsolidate;
-  const user = await toCtxUser(store, userDoc);
+  // perfil da empresa ativa (perfil por empresa)
+  const user = await toCtxUser(store, userDoc, company?.id ?? null);
   const h = await headers();
   if (!company || (!branch && !consolidated)) {
     // contexto incompleto: as páginas internas redirecionam para a seleção de unidade

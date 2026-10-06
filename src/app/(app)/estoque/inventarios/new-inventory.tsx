@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
@@ -11,9 +12,11 @@ import { createInventoryAction } from "../actions";
 
 type Opt = { value: string; label: string };
 
-export function NewInventoryButton({ warehouses, categories, locations, users, currentUserId }: { warehouses: Opt[]; categories: Opt[]; locations: string[]; users: Opt[]; currentUserId: string }) {
+export function NewInventoryButton({ warehouses, busy = {}, categories, locations, users, currentUserId }: { warehouses: Opt[]; busy?: Record<string, { id: string; code: string }>; categories: Opt[]; locations: string[]; users: Opt[]; currentUserId: string }) {
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState("all");
+  const [wh, setWh] = useState(warehouses[0]?.value ?? "");
+  const holder = busy[wh];
   return (
     <>
       <Button type="button" variant="accent" onClick={() => setOpen(true)}>
@@ -25,7 +28,7 @@ export function NewInventoryButton({ warehouses, categories, locations, users, c
             <>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Depósito" required>
-                  <Select name="warehouseId" options={warehouses} />
+                  <Select name="warehouseId" value={wh} onChange={(e) => setWh(e.target.value)} options={warehouses} />
                 </Field>
                 <Field label="Responsável">
                   <Select name="responsibleId" defaultValue={currentUserId} options={users} />
@@ -51,6 +54,11 @@ export function NewInventoryButton({ warehouses, categories, locations, users, c
               <Notice tone="info">
                 Ao abrir, o sistema registra a <strong>base</strong> (saldo e sequência de movimentos de cada item neste instante). A loja continua operando: vendas e entradas após a base entram no esperado de cada item até o momento da sua contagem.
               </Notice>
+              {holder && (
+                <Notice tone="warn" title="Depósito com inventário em andamento">
+                  O inventário <Link className="underline" href={`/estoque/inventarios/${holder.id}`}>{holder.code}</Link> ainda está em andamento neste depósito. Conclua ou cancele-o antes de abrir outro — dois inventários simultâneos lançariam o mesmo ajuste duas vezes.
+                </Notice>
+              )}
               {error && <Notice tone="bad">{error}</Notice>}
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>

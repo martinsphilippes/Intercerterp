@@ -15,8 +15,8 @@ import { formatMoney, formatQty } from "@/lib/money";
 import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { balanceId } from "@/domain/stock";
-import { queryInventoryItems } from "../../queries";
-import { cancelInventoryAction } from "../../actions";
+import { canSeeBranch, queryInventoryItems } from "../../queries";
+import { cancelInventoryAction, resumeInventoryAction } from "../../actions";
 import { CountSheet } from "./count-sheet";
 
 export const metadata = { title: "Inventário" };
@@ -26,7 +26,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const { id } = await params;
   const ctx = s.ctx;
   const inv = await ctx.store.get("inventories", id);
-  if (!inv || inv.companyId !== ctx.companyId) notFound();
+  if (!inv || inv.companyId !== ctx.companyId || !canSeeBranch(ctx, inv.branchId)) notFound();
   const [items, branches, warehouses, users, categories] = await Promise.all([
     queryInventoryItems(ctx, id, { q: "", f: {} }),
     nameMap(ctx, "branches"),
@@ -38,6 +38,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const live = new Map(bals.map((b) => [b.id, b.physical]));
   const code = inv.code ?? `nº ${inv.number}`;
   const active = ["open", "counting"].includes(inv.status) && !inv.closingAt;
+  const preparing = inv.status === "preparing";
   const here = ctx.branchId === inv.branchId;
   const editable = active && here && can(s.user, "stock", "edit");
   const counted = items.filter((i) => i.counted).length;
@@ -56,7 +57,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <LinkButton href="/estoque/inventarios"><History className="size-4" /> Inventários anteriores</LinkButton>
             <a className={buttonClass("secondary")} href={`/api/export/inventory-items?id=${id}`}>Relatório de diferenças (CSV)</a>
             {inv.status === "completed" && <LinkButton href={`/estoque/movimentos?origem=inventory:${id}&filial=all`}>Ajustes lançados</LinkButton>}
-            {active && here && can(s.user, "stock", "edit") && <ActionButton action={cancelInventoryAction.bind(null, id)} label="Cancelar inventário" variant="ghost" askReason="Motivo do cancelamento (nenhum ajuste será lançado):" />}
+            {preparing && here && can(s.user, "stock", "create") && <ActionButton action={resumeInventoryAction.bind(null, id)} label="Retomar abertura" variant="accent" />}
+            {(active || preparing) && here && can(s.user, "stock", "edit") && <ActionButton action={cancelInventoryAction.bind(null, id)} label="Cancelar inventário" variant="ghost" askReason="Motivo do cancelamento (nenhum ajuste será lançado):" />}
           </>
         }
       />
@@ -74,6 +76,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </div>
       )}
       {inv.status === "cancelled" && <div className="mb-4"><Notice tone="warn" title="Inventário cancelado">{inv.cancelReason}</Notice></div>}
+      {preparing && (
+        <div className="mb-4">
+          <Notice tone="warn" title="Abertura não concluída">
+            {items.length} de {inv.itemsCount ?? items.length} item(ns) com base registrada. {here ? "Use \"Retomar abertura\" para registrar os itens que faltam (ou cancele o inventário). Enquanto isso, o depósito fica reservado para este inventário." : `Retome ou cancele no contexto da filial ${branches.get(inv.branchId)}.`}
+          </Notice>
+        </div>
+      )}
       {active && !here && <div className="mb-4"><Notice tone="info">Para contar ou concluir, selecione a filial {branches.get(inv.branchId)} no topo.</Notice></div>}
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card title="Itens do inventário" description="Divergência = contagem física − saldo esperado. Recontagem substitui a contagem do item.">

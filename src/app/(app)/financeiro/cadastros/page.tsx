@@ -139,7 +139,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <Field label="Intervalo (dias)" required hint="30 = mensal (mesmo dia do mês)">
           <Input type="number" name="intervalDays" min={1} max={365} defaultValue={t?.intervalDays ?? 30} required />
         </Field>
-        <Field label="Juros (% sobre o total)">
+        <Field label="Juros (% sobre o total)" hint="Acrescido ao valor parcelado quando as parcelas de um título manual são geradas por esta condição (total + juros%).">
           <BpsInput name="interestBps" value={t?.interestBps ?? 0} />
         </Field>
         <Field label="Uso">

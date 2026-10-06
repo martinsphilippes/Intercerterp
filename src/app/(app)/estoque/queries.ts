@@ -11,11 +11,47 @@ import { pendingQty, transferCode, type TransferItem } from "@/domain/transfers"
 
 type P = Pick<ListParams, "q" | "f">;
 
-/** Filial do recorte: no consolidado (ou `filial=all`) todas; senão a escolhida ou a atual. */
+/** Filiais que o usuário pode consultar: null = todas da empresa (administrador ou sem filiais marcadas). */
+export function allowedBranchIds(ctx: Ctx): string[] | null {
+  return ctx.user.isAdmin || !(ctx.user.branchIds ?? []).length ? null : ctx.user.branchIds;
+}
+
+export function canSeeBranch(ctx: Ctx, branchId: string | null | undefined): boolean {
+  const allowed = allowedBranchIds(ctx);
+  return !allowed || (branchId != null && allowed.includes(branchId));
+}
+
+/**
+ * Filial do recorte: `filial=all` (ou consolidado) = todas as filiais PERMITIDAS ao usuário (null);
+ * senão a escolhida — só se o usuário tiver acesso a ela — ou a atual.
+ */
 export function branchScope(ctx: Ctx, f: Record<string, string>): string | null {
   if (f.filial === "all") return null;
-  if (f.filial) return f.filial;
-  return ctx.branchId;
+  if (f.filial && canSeeBranch(ctx, f.filial)) return f.filial;
+  return ctx.branchId && canSeeBranch(ctx, ctx.branchId) ? ctx.branchId : null;
+}
+
+/** Filtro de filial já restrito às filiais permitidas. */
+export function branchFilters(ctx: Ctx, f: Record<string, string>): any[] {
+  const bid = branchScope(ctx, f);
+  if (bid) return [["eq", "branchId", bid]];
+  const allowed = allowedBranchIds(ctx);
+  return allowed ? [["eq", "branchId", allowed.length ? allowed : ["__none__"]]] : [];
+}
+
+/** Opções do filtro "Filial": só as filiais acessíveis ao usuário (as da sessão já vêm restritas). */
+export function branchOptions(branches: Array<Record<string, any>>) {
+  return branches.map((b) => ({ value: String(b.id), label: String(b.name) })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+}
+
+/** Opções do filtro "Depósito": da filial do recorte ou, em "todas", das filiais permitidas. */
+export async function warehouseOptions(ctx: Ctx, scope: string | null) {
+  const allowed = allowedBranchIds(ctx);
+  const filters: any[] = [["eq", "companyId", ctx.companyId]];
+  if (scope) filters.push(["eq", "branchId", scope]);
+  else if (allowed) filters.push(["eq", "branchId", allowed.length ? allowed : ["__none__"]]);
+  const rows = await listAll(ctx.store, "warehouses", { filters });
+  return rows.map((w) => ({ value: String(w.id), label: String(w.name) })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
 }
 
 async function maps(ctx: Ctx) {
@@ -55,9 +91,7 @@ export type BalanceRow = Awaited<ReturnType<typeof queryBalances>>[number];
 
 export async function queryBalances(ctx: Ctx, p: P) {
   const m = await maps(ctx);
-  const filters: any[] = [["eq", "companyId", ctx.companyId]];
-  const bid = branchScope(ctx, p.f);
-  if (bid) filters.push(["eq", "branchId", bid]);
+  const filters: any[] = [["eq", "companyId", ctx.companyId], ...branchFilters(ctx, p.f)];
   if (p.f.deposito) filters.push(["eq", "warehouseId", p.f.deposito]);
   if (p.f.sku) filters.push(["eq", "skuId", p.f.sku]);
   if (p.f.produto) filters.push(["eq", "productId", p.f.produto]);
@@ -152,9 +186,7 @@ export function movementPeriod(f: Record<string, string>, hasOrigin: boolean) {
 
 export async function queryMovements(ctx: Ctx, p: P) {
   const m = await maps(ctx);
-  const filters: any[] = [["eq", "companyId", ctx.companyId]];
-  const bid = branchScope(ctx, p.f);
-  if (bid) filters.push(["eq", "branchId", bid]);
+  const filters: any[] = [["eq", "companyId", ctx.companyId], ...branchFilters(ctx, p.f)];
   if (p.f.deposito) filters.push(["eq", "warehouseId", p.f.deposito]);
   if (p.f.sku) filters.push(["eq", "skuId", p.f.sku]);
   if (p.f.produto) filters.push(["eq", "productId", p.f.produto]);
@@ -215,6 +247,7 @@ export async function queryTransfers(ctx: Ctx, p: P) {
   const bid = branchScope(ctx, p.f);
   const q = p.q.trim();
   return list
+    .filter((t) => canSeeBranch(ctx, t.fromBranchId) || canSeeBranch(ctx, t.toBranchId))
     .filter((t) => {
       if (p.f.direcao === "enviadas") return t.fromBranchId === (bid ?? ctx.branchId);
       if (p.f.direcao === "recebidas") return t.toBranchId === (bid ?? ctx.branchId);
@@ -246,9 +279,7 @@ export type InventoryRow = Awaited<ReturnType<typeof queryInventories>>[number];
 
 export async function queryInventories(ctx: Ctx, p: P) {
   const m = await maps(ctx);
-  const filters: any[] = [["eq", "companyId", ctx.companyId]];
-  const bid = branchScope(ctx, p.f);
-  if (bid) filters.push(["eq", "branchId", bid]);
+  const filters: any[] = [["eq", "companyId", ctx.companyId], ...branchFilters(ctx, p.f)];
   if (p.f.status) filters.push(["eq", "status", p.f.status.split(",")]);
   if (p.f.deposito) filters.push(["eq", "warehouseId", p.f.deposito]);
   const list = await listAll(ctx.store, "inventories", { filters, orderBy: [{ field: "createdAt", dir: "desc" }] });
@@ -286,7 +317,7 @@ export type InventoryItemRow = Awaited<ReturnType<typeof queryInventoryItems>>[n
 /** Itens (contagens) de um inventário com dados do SKU — tela e relatório de diferenças. */
 export async function queryInventoryItems(ctx: Ctx, inventoryId: string, p: P) {
   const inv = await ctx.store.get("inventories", inventoryId);
-  if (!inv || inv.companyId !== ctx.companyId) return [];
+  if (!inv || inv.companyId !== ctx.companyId || !canSeeBranch(ctx, inv.branchId)) return [];
   const m = await maps(ctx);
   const users = new Map((await listAll(ctx.store, "users")).map((u) => [u.id, u.name]));
   const counts = await listAll(ctx.store, "inventory_counts", { filters: [["eq", "inventoryId", inventoryId]] });

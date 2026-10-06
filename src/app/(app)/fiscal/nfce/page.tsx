@@ -63,7 +63,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "total", label: "Valor", align: "right", sortable: true, cell: (r) => formatMoney(r.total) },
     { key: "protocol", label: "Protocolo", hidden: true, cell: (r) => r.protocol ?? "—" },
     { key: "status", label: "Situação", cell: (r) => <DocStatus d={r} /> },
-    { key: "actions", label: "Ações", fixed: true, cell: (r) => <RowActions d={r} canIssue={canFix} /> },
+    { key: "actions", label: "Ações", fixed: true, cell: (r) => <RowActions d={r} canIssue={canFix} branchId={s.ctx.branchId} /> },
   ];
   return (
     <>
@@ -147,7 +147,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           { type: "date", name: "to", label: "Até" },
           { type: "text", name: "sale", label: "Venda nº", placeholder: "Número" },
           { type: "select", name: "operator", label: "Operador", options: users },
-          { type: "select", name: "contingency", label: "Contingência", options: [{ value: "1", label: "Emitidas em contingência" }] },
+          { type: "select", name: "contingency", label: "Contingência", options: [{ value: "1", label: "Em contingência (retidas na fila ou emitidas offline pelo provedor)" }] },
           { type: "select", name: "sim", label: "Ambiente", options: [{ value: "0", label: "Somente reais" }, { value: "1", label: "Somente simulação" }] },
           ...(s.consolidated ? [{ type: "select" as const, name: "branch", label: "Filial", options: branches }] : []),
         ]}

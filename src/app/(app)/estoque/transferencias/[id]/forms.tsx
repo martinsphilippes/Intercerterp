@@ -23,12 +23,19 @@ export function PrintButton({ auto }: { auto?: boolean }) {
   );
 }
 
-/** Conferência do recebimento no destino: bom, avariado e falta (o que não chegou continua em trânsito). */
+/**
+ * Conferência do recebimento no destino: bom, avariado e falta (o que não chegou continua em trânsito).
+ * As edições ficam por SKU (não por posição): após um recebimento parcial, a lista de pendentes muda e
+ * cada linha continua ligada ao seu produto; o envio usa só os itens pendentes atuais.
+ */
 export function ReceiveForm({ transferId, items }: { transferId: string; items: Array<{ skuId: string; sku: string; name: string; unitCode: string; pending: number }> }) {
-  const [lines, setLines] = useState(items.map((i) => ({ skuId: i.skuId, receivedQty: i.pending, damagedQty: 0, note: "" })));
-  const set = (i: number, patch: Partial<(typeof lines)[number]>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  type Line = { receivedQty: number; damagedQty: number; note: string };
+  const [edits, setEdits] = useState<Record<string, Line>>({});
+  const lineOf = (it: { skuId: string; pending: number }): Line => edits[it.skuId] ?? { receivedQty: it.pending, damagedQty: 0, note: "" };
+  const set = (it: { skuId: string; pending: number }, patch: Partial<Line>) => setEdits((e) => ({ ...e, [it.skuId]: { ...(e[it.skuId] ?? { receivedQty: it.pending, damagedQty: 0, note: "" }), ...patch } }));
+  const lines = items.map((it) => ({ skuId: it.skuId, ...lineOf(it) }));
   return (
-    <ActionForm action={receiveTransferAction} className="space-y-3">
+    <ActionForm action={receiveTransferAction} onSuccess={() => setEdits({})} className="space-y-3">
       {({ pending, error }) => (
         <>
           <input type="hidden" name="id" value={transferId} />
@@ -39,16 +46,17 @@ export function ReceiveForm({ transferId, items }: { transferId: string; items: 
                 <tr><th>Produto</th><th className="text-right">Pendente</th><th className="w-32 text-right">Recebido (bom)</th><th className="w-32 text-right">Avariado</th><th className="text-right">Falta</th><th>Observação</th></tr>
               </thead>
               <tbody>
-                {items.map((it, i) => {
-                  const miss = it.pending - lines[i].receivedQty - lines[i].damagedQty;
+                {items.map((it) => {
+                  const l = lineOf(it);
+                  const miss = it.pending - l.receivedQty - l.damagedQty;
                   return (
                     <tr key={it.skuId}>
                       <td><span className="block">{it.name}</span><span className="font-mono text-xs text-slate-500">{it.sku}</span></td>
                       <td className="tabular text-right">{fmt(it.pending)} {it.unitCode}</td>
-                      <td><QtyInput ariaLabel={`Recebido de ${it.sku}`} value={lines[i].receivedQty} min={0} onChange={(v) => set(i, { receivedQty: v })} /></td>
-                      <td><QtyInput ariaLabel={`Avariado de ${it.sku}`} value={lines[i].damagedQty} min={0} onChange={(v) => set(i, { damagedQty: v })} /></td>
+                      <td><QtyInput key={`r-${it.skuId}-${it.pending}`} ariaLabel={`Recebido de ${it.sku}`} value={l.receivedQty} min={0} onChange={(v) => set(it, { receivedQty: v })} /></td>
+                      <td><QtyInput key={`d-${it.skuId}-${it.pending}`} ariaLabel={`Avariado de ${it.sku}`} value={l.damagedQty} min={0} onChange={(v) => set(it, { damagedQty: v })} /></td>
                       <td className={`tabular text-right font-semibold ${miss < 0 ? "text-red-700" : miss > 0 ? "text-amber-700" : "text-slate-400"}`}>{fmt(miss)}</td>
-                      <td><Input aria-label="Observação" value={lines[i].note} onChange={(e) => set(i, { note: e.target.value })} placeholder={miss > 0 || lines[i].damagedQty > 0 ? "Descreva a divergência" : ""} /></td>
+                      <td><Input aria-label="Observação" value={l.note} onChange={(e) => set(it, { note: e.target.value })} placeholder={miss > 0 || l.damagedQty > 0 ? "Descreva a divergência" : ""} /></td>
                     </tr>
                   );
                 })}

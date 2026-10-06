@@ -1,18 +1,20 @@
-import { listAll } from "@/lib/db";
+import { detId, listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import { today } from "@/lib/dates";
 import { allocate, roundDiv, QTY } from "@/lib/money";
 import { BusinessError, assert } from "@/lib/core/errors";
-import { requireAction, type Ctx } from "@/lib/core/ctx";
+import { requireAction, requireBranch, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { onlyDigits } from "@/lib/core/text";
 import {
   addEvent,
+  assertDocScope,
   buildItems,
   computeTotals,
   createDocument,
   DOC_STATUS_LABEL,
   getFiscalConfig,
+  INACTIVE,
   submitDraft,
   validateDocument,
   type DocEffects,
@@ -83,7 +85,10 @@ export interface OriginPrefill {
   href: string;
   warnings: string[];
   blockers: string[];
+  /** documento ATIVO (não cancelado/denegado/inutilizado/descartado) já existente para a operação */
   existingDocId?: string | null;
+  /** quantidade de NF-e anteriores da operação já encerradas (canceladas, denegadas, inutilizadas, descartadas) */
+  generation: number;
 }
 
 function operationKind(input: Pick<NfeInput, "origin" | "operationType" | "purpose">): OperationKind {
@@ -94,7 +99,12 @@ function operationKind(input: Pick<NfeInput, "origin" | "operationType" | "purpo
   return input.operationType === "entrada" ? "purchase" : "sale";
 }
 
-export const nfeRefFor = (origin: { type: NfeOriginType; id?: string | null }, idemKey: string) => (origin.type !== "manual" && origin.id ? `nfe-${origin.type}-${origin.id}` : `nfe-${idemKey}`);
+/**
+ * Referência da NF-e: avulsa pela chave do formulário; de origem, determinística pela operação e pela geração
+ * (1ª emissão `nfe-<tipo>-<id>`; após cancelamento/descarte, `nfe-<tipo>-<id>-r<n+1>`) — duplo clique calcula a mesma ref.
+ */
+export const nfeRefFor = (origin: { type: NfeOriginType; id?: string | null }, idemKey: string, generation = 0) =>
+  origin.type !== "manual" && origin.id ? `nfe-${origin.type}-${origin.id}${generation > 0 ? `-r${generation + 1}` : ""}` : `nfe-${idemKey}`;
 
 async function branchRecipient(ctx: Ctx, branchId: string): Promise<NfeRecipient> {
   const b = await ctx.store.getOrThrow("branches", branchId);
@@ -149,7 +159,14 @@ const blankInput = (branchId: string): NfeInput => ({
 export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, branchId: string): Promise<OriginPrefill> {
   const warnings: string[] = [];
   const blockers: string[] = [];
-  const existing = (await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "originType", type], ["eq", "originId", id], ["eq", "model", "nfe"]] })).find((d) => d.status !== "discarded");
+  const nfes = await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "originType", type], ["eq", "originId", id], ["eq", "model", "nfe"]] });
+  const mine = nfes.filter((d) => d.companyId === ctx.companyId);
+  // somente documento ATIVO bloqueia/reaproveita; encerrados (cancelado, denegado, inutilizado, descartado) permitem nova emissão
+  const existing = mine.find((d) => !INACTIVE.includes(d.status));
+  const prior = mine.filter((d) => INACTIVE.includes(d.status));
+  const generation = prior.length;
+  const lastCancelled = prior.filter((d) => d.status === "cancelled").sort((a, b) => String(a.cancelledAt ?? "").localeCompare(String(b.cancelledAt ?? ""))).pop();
+  if (!existing && lastCancelled) warnings.push(`NF-e anterior nº ${lastCancelled.number ?? "—"} desta operação foi cancelada: esta é uma nova emissão (nova referência e numeração).`);
   const base = blankInput(branchId);
   if (type === "sale") {
     const sale = await ctx.store.getOrThrow("sales", id);
@@ -157,8 +174,20 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
     const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", id]], orderBy: [{ field: "seq" }] });
     const pays = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", id]] });
     if (sale.status !== "completed") blockers.push(`Venda nº ${sale.number} está ${sale.status === "cancelled" ? "cancelada" : sale.status}.`);
-    const nfce = sale.fiscalDocumentId ? await ctx.store.get("fiscal_documents", sale.fiscalDocumentId) : null;
-    if (nfce && ["authorized", "processing"].includes(nfce.status)) blockers.push(`A venda já possui NFC-e ${nfce.status === "authorized" ? "autorizada" : "em processamento"} (nº ${nfce.number ?? "—"}). Cancele a NFC-e dentro do prazo antes de emitir NF-e para a mesma operação.`);
+    // uma operação → um documento fiscal ativo: NFC-e da venda em qualquer estado não encerrado bloqueia a NF-e
+    const nfces = (await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "originType", "sale"], ["eq", "originId", id], ["eq", "model", "nfce"]] })).filter((d) => d.companyId === ctx.companyId);
+    if (sale.fiscalDocumentId && !nfces.some((d) => d.id === sale.fiscalDocumentId)) {
+      const linked = await ctx.store.get("fiscal_documents", sale.fiscalDocumentId);
+      if (linked && linked.model === "nfce" && linked.companyId === ctx.companyId) nfces.push(linked);
+    }
+    for (const n of nfces) {
+      if (INACTIVE.includes(n.status)) continue;
+      const label = `NFC-e ${n.number ? "nº " + n.number : n.ref}`;
+      if (n.status === "authorized") blockers.push(`A venda já possui ${label} autorizada. Cancele a NFC-e dentro do prazo antes de emitir NF-e para a mesma operação.`);
+      else if (n.status === "processing" || ((n.attempts ?? 0) > 0 && ["error", "queued", "pending"].includes(n.status)))
+        blockers.push(`A venda possui ${label} já enviada ao provedor (${DOC_STATUS_LABEL[n.status]}) que pode estar autorizada. Consulte a situação da NFC-e e cancele-a, se autorizada, antes de emitir NF-e.`);
+      else blockers.push(`A venda possui ${label} ${DOC_STATUS_LABEL[n.status].toLowerCase()} (sem autorização). Descarte a NFC-e (Fiscal → NFC-e → Descartar) antes de emitir NF-e para a mesma operação.`);
+    }
     const customer = sale.customerId ? await ctx.store.get("customers", sale.customerId) : null;
     if (!customer) warnings.push("Venda sem cliente identificado: informe o destinatário (CPF/CNPJ e endereço são obrigatórios na NF-e).");
     const lines = items.filter((i) => (i.qty ?? 0) - (i.returnedQty ?? 0) > 0);
@@ -177,25 +206,33 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
       other: lines.reduce((a, i) => a + (i.surcharge ?? 0), 0),
       payments: pays.filter((p) => !["cancelled", "refunded"].includes(p.status)).map((p) => ({ kind: p.methodKind, amount: p.amount })),
     };
-    return { input, effectsLocked: true, label: `Venda nº ${sale.number}`, href: `/vendas/${id}`, warnings, blockers, existingDocId: existing?.id ?? null };
+    return { input, effectsLocked: true, label: `Venda nº ${sale.number}`, href: `/vendas/${id}`, warnings, blockers, existingDocId: existing?.id ?? null, generation };
   }
   if (type === "transfer") {
     const t = await ctx.store.getOrThrow("transfers", id);
     assert(t.companyId === ctx.companyId, "Transferência de outra empresa.");
     if (t.status === "draft" || t.status === "cancelled") warnings.push(`Transferência nº ${t.number} está ${t.status === "draft" ? "em rascunho" : "cancelada"}.`);
-    if (t.fromBranchId !== branchId) warnings.push("A NF-e de transferência deve ser emitida pela filial de origem — selecione a filial de origem no topo.");
+    if (t.fromBranchId !== branchId) blockers.push("A NF-e de transferência deve ser emitida pela filial de origem: selecione a filial de origem no topo da tela.");
+    // filial de destino validada no servidor: mesma empresa, ativa e diferente da origem
+    const dest = t.toBranchId ? await ctx.store.get("branches", t.toBranchId) : null;
+    const destOk = Boolean(dest && dest.companyId === ctx.companyId);
+    if (!destOk) blockers.push("Filial de destino da transferência não encontrada nesta empresa.");
+    else {
+      if (dest!.id === t.fromBranchId) blockers.push("Filial de destino igual à filial de origem: não há transferência entre estabelecimentos a documentar.");
+      if (dest!.status === "inactive") blockers.push(`Filial de destino ${dest!.name} está inativa.`);
+    }
     const items = (t.items ?? []) as Array<{ skuId: string; qty: number; shippedQty?: number; unitCost?: number; name?: string }>;
     const input: NfeInput = {
       ...base,
-      branchId: t.fromBranchId ?? branchId,
+      branchId,
       origin: { type, id },
       nature: "Transferência de mercadoria entre filiais",
       presence: "9",
-      recipient: await branchRecipient(ctx, t.toBranchId),
+      recipient: destOk ? await branchRecipient(ctx, dest!.id) : base.recipient,
       items: await Promise.all(items.map(async (i) => ({ skuId: i.skuId, qty: i.shippedQty || i.qty, unitPrice: i.unitCost ?? (await ctx.store.get("skus", i.skuId))?.costTotal ?? 0, discount: 0, description: i.name }))),
       payments: [{ kind: "none", amount: 0 }],
     };
-    return { input, effectsLocked: true, label: `Transferência nº ${t.number}`, href: `/estoque/transferencias/${id}`, warnings, blockers, existingDocId: existing?.id ?? null };
+    return { input, effectsLocked: true, label: `Transferência nº ${t.number}`, href: `/estoque/transferencias/${id}`, warnings, blockers, existingDocId: existing?.id ?? null, generation };
   }
   if (type === "purchase_order") {
     const po = await ctx.store.getOrThrow("purchase_orders", id);
@@ -221,7 +258,7 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
       effects: { stock: true, financial: false },
     };
     warnings.push("Devolução a fornecedor: a baixa de estoque é aplicada por este documento na autorização (marque/desmarque abaixo). Abatimento financeiro deve ser tratado em Contas a pagar.");
-    return { input, effectsLocked: false, label: `Pedido de compra nº ${po.number}`, href: `/compras/pedidos/${id}`, warnings, blockers, existingDocId: existing?.id ?? null };
+    return { input, effectsLocked: false, label: `Pedido de compra nº ${po.number}`, href: `/compras/pedidos/${id}`, warnings, blockers, existingDocId: existing?.id ?? null, generation };
   }
   if (type === "return") {
     const ret = await ctx.store.getOrThrow("returns", id);
@@ -244,7 +281,7 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
       payments: [{ kind: "none", amount: 0 }],
       referencedKeys: original?.accessKey ? [original.accessKey] : [],
     };
-    return { input, effectsLocked: true, label: `Devolução nº ${ret.number ?? ""} (venda nº ${sale.number})`, href: `/vendas/devolucoes/${id}`, warnings, blockers, existingDocId: (existingRet && existingRet.status !== "discarded" ? existingRet.id : existing?.id) ?? null };
+    return { input, effectsLocked: true, label: `Devolução nº ${ret.number ?? ""} (venda nº ${sale.number})`, href: `/vendas/devolucoes/${id}`, warnings, blockers, existingDocId: (existingRet && existingRet.companyId === ctx.companyId && !INACTIVE.includes(existingRet.status) ? existingRet.id : existing?.id) ?? null, generation };
   }
   throw new BusinessError("Origem não suportada.");
 }
@@ -254,6 +291,7 @@ export async function buildNfe(ctx: Ctx, input: NfeInput) {
   assert(input.items.length > 0, "Inclua ao menos um item.");
   for (const it of input.items) assert(it.qty > 0, "Quantidade deve ser maior que zero.");
   const branch = await ctx.store.getOrThrow("branches", input.branchId);
+  assert(branch.companyId === ctx.companyId, "Filial emitente de outra empresa.");
   const company = await ctx.store.getOrThrow("companies", ctx.companyId);
   const emitUf = branch.uf ?? branch.address?.uf ?? company.address?.uf;
   const interstate = Boolean(input.recipient.address?.uf && emitUf && input.recipient.address.uf !== emitUf);
@@ -311,10 +349,16 @@ const lockedOrigins = (t: NfeOriginType) => ["sale", "transfer", "return"].inclu
 /** Cria (ou atualiza o rascunho) da NF-e; com `transmit`, envia em seguida. Idempotente pela chave do formulário/origem. */
 export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string; draftId?: string | null; transmit: boolean }) {
   requireAction(ctx, "fiscal.issue");
+  // emitente = filial ativa (o identificador vindo do formulário nunca escolhe outra filial/empresa)
+  assert(input.branchId === requireBranch(ctx), "A NF-e deve ser emitida pela filial ativa: selecione a filial no topo da tela.", "branch_mismatch");
+  let generation = 0;
   if (input.origin.type !== "manual") {
     assert(input.origin.id, "Origem sem identificador.");
     const pre = await loadOrigin(ctx, input.origin.type, input.origin.id!, input.branchId);
     if (pre.blockers.length) throw new BusinessError(pre.blockers.join(" "));
+    generation = pre.generation;
+    // transferência: destinatário é sempre a filial de destino da própria transferência (não o enviado pelo formulário)
+    if (input.origin.type === "transfer") input = { ...input, recipient: pre.input.recipient };
     if (pre.existingDocId && pre.existingDocId !== opts.draftId) {
       const ex = await ctx.store.getOrThrow("fiscal_documents", pre.existingDocId);
       if (!["draft", "pending", "rejected"].includes(ex.status)) throw new BusinessError(`Já existe NF-e para esta operação (${DOC_STATUS_LABEL[ex.status]}).`, "duplicate_origin");
@@ -346,15 +390,20 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
   if (opts.draftId) {
     const cur = await ctx.store.getOrThrow("fiscal_documents", opts.draftId);
     assert(cur.companyId === ctx.companyId && cur.model === "nfe", "NF-e não encontrada.");
+    assertDocScope(ctx, cur);
+    assert((cur.originType ?? "manual") === input.origin.type && (cur.originId ?? null) === (input.origin.id ?? null), "O rascunho pertence a outra operação de origem.");
     assert(["draft", "pending", "rejected"].includes(cur.status), `NF-e ${DOC_STATUS_LABEL[cur.status]} não pode ser alterada.`);
     if (cur.effects?.appliedAt) throw new BusinessError("Efeitos já aplicados: documento não pode ser alterado.");
     doc = await ctx.store.update("fiscal_documents", cur.id, { ...common, recipientName: common.recipient.name || null, recipientDoc: common.recipient.doc || null });
     await addEvent(ctx, cur.id, "edit", cur.status, `Dados ${cur.status === "rejected" ? "corrigidos" : "alterados"} por ${ctx.user.name} (mesma referência ${cur.ref})`);
     await audit(ctx, { module: "fiscal", action: "nfe.edit", entityType: "fiscal_document", entityId: cur.id, summary: `NF-e ${cur.number ? "nº " + cur.number : cur.ref} alterada (${DOC_STATUS_LABEL[cur.status]})`, branchId: cur.branchId });
   } else {
+    const ref = nfeRefFor(input.origin, opts.idemKey, generation);
+    const prev = await ctx.store.get("fiscal_documents", detId("fiscaldoc", ref));
+    if (prev && INACTIVE.includes(prev.status)) throw new BusinessError(`A referência ${ref} já pertence a um documento ${DOC_STATUS_LABEL[prev.status].toLowerCase()}. Atualize a página e emita novamente.`, "duplicate_origin");
     doc = await createDocument(ctx, {
       model: "nfe",
-      ref: nfeRefFor(input.origin, opts.idemKey),
+      ref,
       branchId: input.branchId,
       originType: input.origin.type,
       originId: input.origin.id ?? null,
@@ -374,7 +423,7 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
 export async function refreshFromCatalog(ctx: Ctx, documentId: string) {
   requireAction(ctx, "fiscal.issue");
   const doc = await ctx.store.getOrThrow("fiscal_documents", documentId);
-  assert(doc.companyId === ctx.companyId, "Documento de outra empresa.");
+  assertDocScope(ctx, doc);
   assert(doc.model !== "nfse", "NFS-e: edite os dados do serviço.");
   assert(["draft", "pending", "rejected"].includes(doc.status), `Documento ${DOC_STATUS_LABEL[doc.status]} não pode ser atualizado.`);
   const old = (doc.items ?? []) as DocItem[];

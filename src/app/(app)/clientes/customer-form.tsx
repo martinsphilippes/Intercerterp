@@ -14,7 +14,7 @@ import type { Address } from "@/domain/customers";
 
 type Opt = { value: string; label: string };
 
-export function CustomerForm({ customer, sellers, priceTables, terms }: { customer?: Record<string, any> | null; sellers: Opt[]; priceTables: Opt[]; terms: Opt[] }) {
+export function CustomerForm({ customer, sellers, priceTables, terms, canGrantCredit = false }: { customer?: Record<string, any> | null; sellers: Opt[]; priceTables: Opt[]; terms: Opt[]; canGrantCredit?: boolean }) {
   const c = customer ?? {};
   const [personType, setPersonType] = useState<"PF" | "PJ">(c.personType ?? "PF");
   const [addresses, setAddresses] = useState<Address[]>(c.addresses?.length ? c.addresses : [{ type: "principal" }]);
@@ -220,8 +220,12 @@ export function CustomerForm({ customer, sellers, priceTables, terms }: { custom
 
           <FormSection id="credito" title="Condições comerciais e crédito" description="O limite de crédito é concedido manualmente por usuário autorizado; não há concessão automática.">
             <FormGrid cols={4}>
-              <Field label="Limite de crédito (crediário)">
-                <MoneyInput name="creditLimit" defaultValue={c.creditLimit ?? 0} />
+              <Field label="Limite de crédito (crediário)" hint={canGrantCredit ? undefined : "Somente leitura: conceder ou alterar o limite requer a permissão “Conceder/alterar limite de crédito”."}>
+                {canGrantCredit ? (
+                  <MoneyInput name="creditLimit" defaultValue={c.creditLimit ?? 0} />
+                ) : (
+                  <MoneyInput defaultValue={c.creditLimit ?? 0} disabled ariaLabel="Limite de crédito (somente leitura)" />
+                )}
               </Field>
               <Field label="Prazo padrão (dias)">
                 <Input name="paymentTermDays" type="number" min={0} defaultValue={c.paymentTermDays ?? 0} />

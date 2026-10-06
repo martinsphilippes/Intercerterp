@@ -47,6 +47,17 @@ export async function getOrder(ctx: Ctx, id: string) {
   return o;
 }
 
+/** Escrita no pedido: exige filial definida (não consolidado) e que o pedido seja da filial ativa. */
+export async function getOrderForWrite(ctx: Ctx, id: string) {
+  const branchId = requireBranch(ctx);
+  const o = await getOrder(ctx, id);
+  if (o.branchId !== branchId) throw new BusinessError(`Pedido nº ${o.number} é de outra filial: selecione a filial do pedido para alterá-lo.`, "other_branch");
+  return o;
+}
+
+/** Limite de gravações por transação do Appwrite. */
+const TX_MAX_WRITES = 100;
+
 /** Saldo a receber por item (pedido − recebido). */
 export function remainingQty(item: { qty: number; receivedQty?: number | null }) {
   return Math.max(0, item.qty - (item.receivedQty ?? 0));
@@ -92,9 +103,11 @@ async function normalizeItems(ctx: Ctx, supplierId: string, items: OrderItemInpu
     assert(Number.isInteger(it.unitCost) && it.unitCost >= 0, "Custo unitário inválido.");
     const cur = merged.get(it.skuId);
     if (cur) {
-      // mesmo SKU duas vezes: soma quantidades mantendo o custo da primeira linha
+      // mesmo SKU duas vezes: soma quantidade, desconto e IPI das linhas — só com o mesmo custo unitário
+      if (cur.unitCost !== it.unitCost) throw new BusinessError(`${it.description?.trim() || cur.description?.trim() || "Produto"} aparece mais de uma vez no pedido com custos diferentes (${formatMoney(cur.unitCost)} × ${formatMoney(it.unitCost)}). Use uma única linha por produto.`, "duplicate_item");
       cur.qty += it.qty;
       cur.discount = (cur.discount ?? 0) + (it.discount ?? 0);
+      cur.ipi = (cur.ipi ?? 0) + (it.ipi ?? 0);
     } else merged.set(it.skuId, { ...it });
   }
   const out: OrderItemInput[] = [];
@@ -252,7 +265,7 @@ export async function revisionMode(store: Store, companyId: string): Promise<"al
  */
 export async function updateOrder(ctx: Ctx, id: string, input: OrderInput & { revisionReason?: string | null }) {
   requirePerm(ctx, "purchases", "edit");
-  const before = await getOrder(ctx, id);
+  const before = await getOrderForWrite(ctx, id);
   const status = before.status as OrderStatus;
   const revising = REVISABLE.includes(status);
   if (!EDITABLE.includes(status) && !revising) throw new BusinessError(`Pedido ${ORDER_STATUS_LABEL[status]} não pode ser alterado.`, "invalid_state");
@@ -283,6 +296,24 @@ export async function updateOrder(ctx: Ctx, id: string, input: OrderInput & { re
   for (const it of items) skuDocs.set(it.skuId, (await ctx.store.get("skus", it.skuId))!);
   const rows = itemRows(ctx, before.branchId, id, totals);
   const keepIds = new Set(rows.map((r) => r.id));
+  // gravações dos itens: remove os que saíram, cria os novos e só atualiza os que mudaram
+  const oldById = new Map(oldItems.map((o) => [o.id, o]));
+  const toDelete = oldItems.filter((o) => !keepIds.has(o.id));
+  const itemWrites: Array<{ kind: "create" | "update"; id: string; data: Record<string, any> }> = [];
+  for (const r of rows) {
+    const data = { ...r.data, productId: skuDocs.get(r.data.skuId)?.productId ?? null };
+    const old = oldById.get(r.id);
+    if (!old) {
+      itemWrites.push({ kind: "create", id: r.id, data });
+      continue;
+    }
+    const { companyId: _c, createdBy: _u, orderId: _o, receivedQty: _r, ...patch } = data;
+    if (Object.entries(patch).some(([k, v]) => (old[k] ?? null) !== (v ?? null))) itemWrites.push({ kind: "update", id: r.id, data: patch });
+  }
+  const writes = (revising ? 1 : 0) + 1 + toDelete.length + itemWrites.length;
+  if (writes > TX_MAX_WRITES) {
+    throw new BusinessError(`Alteração grande demais para um único salvamento: ${writes} gravações (o limite por operação é ${TX_MAX_WRITES}). Salve primeiro as remoções de itens e, depois, as inclusões.`, "too_many_changes");
+  }
   await retryOnConflict(() =>
     ctx.store.transaction(async (t) => {
       if (revising) {
@@ -299,14 +330,10 @@ export async function updateOrder(ctx: Ctx, id: string, input: OrderInput & { re
         ...(needsReview ? { status: "in_review" } : {}),
         ...(revising && !needsReview ? { approvedRevision: newRevision } : {}),
       });
-      for (const o of oldItems) if (!keepIds.has(o.id)) await t.delete("purchase_order_items", o.id);
-      const existing = new Set(oldItems.map((o) => o.id));
-      for (const r of rows) {
-        const data = { ...r.data, productId: skuDocs.get(r.data.skuId)?.productId ?? null };
-        if (existing.has(r.id)) {
-          const { companyId: _c, createdBy: _u, orderId: _o, receivedQty: _r, ...patch } = data;
-          await t.update("purchase_order_items", r.id, patch);
-        } else await t.create("purchase_order_items", data, r.id);
+      for (const o of toDelete) await t.delete("purchase_order_items", o.id);
+      for (const w of itemWrites) {
+        if (w.kind === "update") await t.update("purchase_order_items", w.id, w.data);
+        else await t.create("purchase_order_items", w.data, w.id);
       }
     }),
   );
@@ -330,26 +357,34 @@ export async function updateOrder(ctx: Ctx, id: string, input: OrderInput & { re
   return { order: await ctx.store.getOrThrow("purchase_orders", id), revised: revising, needsReview, mode };
 }
 
-/** Atualiza o estado de um conjunto de pedidos aplicando a máquina de estados. */
-export async function setOrdersStatus(ctx: Ctx, orderIds: string[], to: OrderStatus, patch: Record<string, any> = {}, opts: { summary?: (o: Doc) => string; reason?: string | null; action?: string } = {}) {
-  const updated: Doc[] = [];
-  for (const id of orderIds) {
-    const o = await getOrder(ctx, id);
-    if (o.status === to && to !== "sent") {
-      updated.push(o);
-      continue;
-    }
+export interface OrderStatusOpts {
+  summary?: (o: Doc) => string;
+  reason?: string | null;
+  action?: string;
+}
+
+/** Pedidos (já lidos) que mudam de estado para `to`, validando a máquina de estados — sem gravar. */
+export function planOrdersStatus(orders: Doc[], to: OrderStatus) {
+  const changes: Doc[] = [];
+  for (const o of orders) {
+    if (o.status === to && to !== "sent") continue;
     assertTransition(o.status, to);
-    const u = await ctx.store.update("purchase_orders", id, { status: to, ...patch });
-    updated.push(u);
+    changes.push(o);
+  }
+  return changes;
+}
+
+/** Efeitos posteriores à gravação da mudança de estado: pendências resolvidas na origem e auditoria. */
+export async function afterOrdersStatus(ctx: Ctx, changed: Doc[], to: OrderStatus, opts: OrderStatusOpts = {}) {
+  for (const o of changed) {
     // pendências de acompanhamento deixam de existir na origem
-    if (to === "sent" || to === "cancelled") await resolveOccurrence(ctx.store, `po_unsent:${id}`);
-    if (["received", "cancelled"].includes(to)) await resolveOccurrence(ctx.store, `po_late:${id}`);
+    if (to === "sent" || to === "cancelled") await resolveOccurrence(ctx.store, `po_unsent:${o.id}`);
+    if (["received", "cancelled"].includes(to)) await resolveOccurrence(ctx.store, `po_late:${o.id}`);
     await audit(ctx, {
       module: "purchases",
       action: opts.action ?? `purchase_order.${to}`,
       entityType: "purchase_order",
-      entityId: id,
+      entityId: o.id,
       summary: opts.summary?.(o) ?? `Pedido nº ${o.number}: ${ORDER_STATUS_LABEL[o.status as OrderStatus]} → ${ORDER_STATUS_LABEL[to]}`,
       before: { status: o.status },
       after: { status: to },
@@ -357,13 +392,28 @@ export async function setOrdersStatus(ctx: Ctx, orderIds: string[], to: OrderSta
       related: [`supplier:${o.supplierId}`, ...(o.requestId ? [`purchase_request:${o.requestId}`] : [])],
     });
   }
+}
+
+/** Atualiza o estado de um conjunto de pedidos aplicando a máquina de estados. */
+export async function setOrdersStatus(ctx: Ctx, orderIds: string[], to: OrderStatus, patch: Record<string, any> = {}, opts: OrderStatusOpts = {}) {
+  const updated: Doc[] = [];
+  for (const id of orderIds) {
+    const o = await getOrder(ctx, id);
+    if (!planOrdersStatus([o], to).length) {
+      updated.push(o);
+      continue;
+    }
+    const u = await ctx.store.update("purchase_orders", id, { status: to, ...patch });
+    updated.push(u);
+    await afterOrdersStatus(ctx, [o], to, opts);
+  }
   return updated;
 }
 
 export async function cancelOrder(ctx: Ctx, id: string, reason: string) {
   requirePerm(ctx, "purchases", "edit");
   assert(reason?.trim(), "Informe o motivo do cancelamento.");
-  const o = await getOrder(ctx, id);
+  const o = await getOrderForWrite(ctx, id);
   const items = await orderItems(ctx.store, id);
   assert(!items.some((i) => (i.receivedQty ?? 0) > 0), "Pedido com recebimento não pode ser cancelado — use Encerrar saldo.");
   const drafts = await listAll(ctx.store, "receipts", { filters: [["contains", "orderIds", id], ["eq", "status", "draft"]] });
@@ -380,7 +430,7 @@ export async function cancelOrder(ctx: Ctx, id: string, reason: string) {
 export async function closeOrderBalance(ctx: Ctx, id: string, reason: string) {
   requirePerm(ctx, "purchases", "edit");
   assert(reason?.trim(), "Informe o motivo do encerramento do saldo.");
-  const o = await getOrder(ctx, id);
+  const o = await getOrderForWrite(ctx, id);
   assert(o.status === "partial", "Somente pedidos parcialmente recebidos podem ter o saldo encerrado.");
   const items = await orderItems(ctx.store, id);
   const pending = items.reduce((a, i) => a + remainingQty(i), 0);
@@ -404,7 +454,7 @@ export function orderEmailHtml(o: Doc, items: Doc[], company: Doc | null, branch
 <h2 style="margin:0 0 8px">Pedido de compra nº ${o.number} (revisão ${o.revision ?? 1})</h2>
 <p>${company?.name ?? ""} — CNPJ ${branch?.cnpj ?? company?.cnpj ?? ""}<br/>Entrega: ${branch?.name ?? ""} ${addr}<br/>Previsão de entrega: ${o.expectedDate ?? "a combinar"}</p>
 <table cellpadding="6" style="border-collapse:collapse;border:1px solid #cbd5e1" border="1"><thead><tr><th>Cód. fornecedor</th><th>Produto</th><th>Qtd.</th><th>Custo unit.</th><th>Desconto</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table>
-<p>Subtotal: ${formatMoney(o.subtotal)} · Descontos: ${formatMoney(o.discountTotal)} · Frete: ${formatMoney(o.freight)} · Outras despesas: ${formatMoney(o.otherExpenses)}<br/><b>Total: ${formatMoney(o.total)}</b><br/>Condição de pagamento: ${o.paymentTermsText ?? "—"}</p>
+<p>Subtotal: ${formatMoney(o.subtotal)} · Descontos: ${formatMoney(o.discountTotal)}${o.ipiTotal ? ` · IPI: ${formatMoney(o.ipiTotal)}` : ""} · Frete: ${formatMoney(o.freight)}${o.insurance ? ` · Seguro: ${formatMoney(o.insurance)}` : ""} · Outras despesas: ${formatMoney(o.otherExpenses)}<br/><b>Total: ${formatMoney(o.total)}</b><br/>Condição de pagamento: ${o.paymentTermsText ?? "—"}</p>
 ${o.notes ? `<p>Observações: ${String(o.notes).replace(/</g, "&lt;")}</p>` : ""}
 <p style="color:#64748b">Favor confirmar o recebimento deste pedido respondendo a este e-mail.</p></div>`;
 }
@@ -415,7 +465,7 @@ ${o.notes ? `<p>Observações: ${String(o.notes).replace(/</g, "&lt;")}</p>` : "
  */
 export async function registerOrderSent(ctx: Ctx, id: string, input: { method: "manual" | "email"; channel?: string | null; contact?: string | null; to?: string | null; sentDate?: string | null; notes?: string | null }) {
   requirePerm(ctx, "purchases", "edit");
-  const o = await getOrder(ctx, id);
+  const o = await getOrderForWrite(ctx, id);
   assert(orderNeedsSending(o), o.status === "sent" ? "O pedido já foi enviado nesta revisão." : `Pedido ${ORDER_STATUS_LABEL[o.status as OrderStatus]} não pode ser enviado — é preciso estar aprovado.`);
   let info: Record<string, any>;
   if (input.method === "email") {

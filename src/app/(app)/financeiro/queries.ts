@@ -6,7 +6,7 @@ import { normalizeSearch, type ListParams } from "@/lib/list";
 import { addDays, diffDays, monthEnd, monthStart, today } from "@/lib/dates";
 import { nameMap } from "@/lib/server/lookups";
 import { cardFeeByInstallment, dueState, type TitleKind } from "@/domain/finance";
-import { categoryDefaults, computeCashflow, entrySide, methodAccountMap, resolveCategory, type CashflowFilter, type Granularity } from "@/domain/cashflow";
+import { categoryDefaults, categoryFilterValue, computeCashflow, entrySide, isSettlementFeeReversal, methodAccountMap, resolveCategory, type CashflowFilter, type Granularity } from "@/domain/cashflow";
 import { roundDiv } from "@/lib/money";
 
 type P = Pick<ListParams, "q" | "f">;
@@ -83,19 +83,25 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
   if (p.f.compFrom) filters.push(["gte", "competenceDate", p.f.compFrom]);
   if (p.f.compTo) filters.push(["lte", "competenceDate", p.f.compTo]);
   if (p.f.party) filters.push(["eq", "partyId", p.f.party]);
-  if (p.f.category) filters.push(["eq", "categoryId", p.f.category]);
   if (p.f.costCenter) filters.push(["eq", "costCenterId", p.f.costCenter]);
   if (p.f.method) filters.push(["eq", "methodKind", p.f.method]);
   if (p.f.title) filters.push(["eq", "titleId", p.f.title]);
   const insts = await listAll(ctx.store, "installments", { filters, orderBy: [{ field: "dueDate", dir: "asc" }] });
   const titles = await titlesMap(ctx, insts.map((i) => i.titleId));
   const [cats, ccs, branches] = await Promise.all([nameMap(ctx, "fin_categories"), nameMap(ctx, "cost_centers"), nameMap(ctx, "branches")]);
+  // categoria efetiva (mesma regra do fluxo de caixa/competência): títulos de venda/compra sem categoria caem na padrão
+  const catFilter = categoryFilterValue(p.f.category);
+  const defaults = await categoryDefaults(ctx.store, ctx.companyId);
   const q = p.q ? normalizeSearch(p.q) : "";
   const rows = [];
   for (const i of insts) {
     const t = titles.get(i.titleId);
     if (!t) continue;
     if (p.f.origin && t.originType !== p.f.origin) continue;
+    // "títulos que compõem a competência": renegociações não entram (receita já reconhecida no título original)
+    if (p.f.competence === "1" && (t.originType === "renegotiation" || t.status === "cancelled")) continue;
+    const catId = resolveCategory({ categoryId: i.categoryId, kind: "", originType: t.originType }, t, defaults);
+    if (catFilter !== undefined && catId !== catFilter) continue;
     if (p.f.approval && kind === "payable" && (t.approvalStatus ?? "pending") !== p.f.approval) continue;
     if (q) {
       const hay = normalizeSearch(`${t.number} ${i.partyName ?? ""} ${i.description ?? ""} ${t.documentNumber ?? ""} ${i.ourNumber ?? ""}`);
@@ -123,8 +129,8 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
       status: i.status as string,
       state: dueState(i, t0),
       daysLate: i.status !== "paid" && i.status !== "cancelled" && i.dueDate < t0 ? Math.round((Date.parse(t0) - Date.parse(i.dueDate)) / 86400000) : 0,
-      categoryId: i.categoryId as string | null,
-      category: i.categoryId ? (cats.get(i.categoryId) ?? "—") : "—",
+      categoryId: catId,
+      category: catId ? (cats.get(catId) ?? "—") : "—",
       costCenter: i.costCenterId ? (ccs.get(i.costCenterId) ?? "—") : "—",
       branch: t.branchId ? (branches.get(t.branchId) ?? "—") : "—",
       originType: t.originType as string,
@@ -190,7 +196,17 @@ export async function titleDetail(ctx: Ctx, id: string) {
   const files = fileIds.length ? await listAll(ctx.store, "files", { filters: [["eq", "id", fileIds]] }) : [];
   let cardFee = new Map<string, number>();
   if (title.originType === "sale_card") cardFee = await cardFeeByInstallment(ctx.store, [title]);
-  return { title, installments, settlements, entries, bankTxBySettlement, accounts, methods, users, cats, ccs, branches, files: new Map(files.map((f) => [f.id, f])), cardFee };
+  // parcela renegociada → título da renegociação (marcador mais recente na sequência da parcela)
+  const renegOf = new Map<string, { id: string; number: number }>();
+  const marks = settlements.filter((x) => x.kind === "renegotiation" && x.operationId).sort((a, b) => a.seq - b.seq);
+  const renegTitles = marks.length ? await titlesMap(ctx, marks.map((m) => m.operationId)) : new Map<string, Doc>();
+  for (const m of marks) {
+    const nt = renegTitles.get(m.operationId);
+    if (nt && nt.companyId === ctx.companyId) renegOf.set(m.installmentId, { id: nt.id, number: nt.number });
+  }
+  // baixas e estornos (marcadores de renegociação/cancelamento não são movimentos)
+  const moves = settlements.filter((x) => x.kind === "settlement" || x.kind === "reversal");
+  return { title, installments, settlements: moves, entries, bankTxBySettlement, accounts, methods, users, cats, ccs, branches, files: new Map(files.map((f) => [f.id, f])), cardFee, renegOf };
 }
 
 /** Lançamentos que compõem os números do fluxo de caixa (mesma classificação de computeCashflow). */
@@ -214,10 +230,11 @@ export async function queryCashflowEntries(ctx: Ctx, p: P) {
     if (p.f.side && p.f.side !== side) continue;
     const title = e.titleId ? titles.get(e.titleId) : null;
     const categoryId = side === "transfer" ? null : resolveCategory(e, title, defaults);
-    if (p.f.category && categoryId !== (p.f.category === "none" ? null : p.f.category)) continue;
+    // transferências não têm categoria e ficam fora do resultado filtrado (mesmo critério de computeCashflow)
+    if (p.f.category && (side === "transfer" || categoryId !== categoryFilterValue(p.f.category))) continue;
     const cc = e.costCenterId ?? title?.costCenterId ?? null;
     if (p.f.costCenter && cc !== p.f.costCenter) continue;
-    if (p.f.direct === "1" && (e.titleId || e.settlementId) && e.kind !== "fee") continue;
+    if (p.f.direct === "1" && (e.titleId || e.settlementId) && e.kind !== "fee" && !isSettlementFeeReversal(e)) continue;
     if (q && !normalizeSearch(`${e.description} ${title?.partyName ?? ""} ${title?.number ?? ""}`).includes(q)) continue;
     rows.push({
       id: e.id,
@@ -419,8 +436,8 @@ export async function queryCashflowMovements(ctx: Ctx, p: P) {
   if (!f.accountId && status !== "realized" && type !== "transfer") {
     const filters: any[] = [["eq", "companyId", ctx.companyId], ["eq", "status", ["open", "partial"]], ["lte", "dueDate", f.to]];
     if (f.branchId) filters.push(["eq", "branchId", f.branchId]);
-    if (f.categoryId) filters.push(["eq", "categoryId", f.categoryId]);
-    if (f.costCenterId) filters.push(["eq", "costCenterId", f.costCenterId]);
+    // categoria/centro de custo filtrados depois de resolver a categoria efetiva (mesmo critério de computeCashflow)
+    const catFilter = categoryFilterValue(f.categoryId);
     const open = await listAll(ctx.store, "installments", { filters });
     const titles = await titlesMap(ctx, open.map((i) => i.titleId));
     const cardTitles = [...titles.values()].filter((t) => t.originType === "sale_card");
@@ -442,7 +459,8 @@ export async function queryCashflowMovements(ctx: Ctx, p: P) {
       const side = amount > 0 ? "in" : "out";
       if (type && type !== side) continue;
       const catId = resolveCategory({ categoryId: i.categoryId, kind: "", originType: t.originType }, t, defaults);
-      if (!f.categoryId && p.f.category === "none" && catId) continue;
+      if (catFilter !== undefined && catId !== catFilter) continue;
+      if (f.costCenterId && (i.costCenterId ?? t.costCenterId ?? null) !== f.costCenterId) continue;
       if (q && !normalizeSearch(`${i.description} ${i.partyName ?? ""} ${t.documentNumber ?? ""} ${t.number}`).includes(q)) continue;
       const accId = i.kind === "receivable" && i.methodKind ? (mAcc.get(i.methodKind) ?? null) : null;
       rows.push({

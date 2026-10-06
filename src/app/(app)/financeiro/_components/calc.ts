@@ -43,6 +43,11 @@ export function lateCharges(dueDate: string, payDate: string, principal: number,
   return { daysLate, fine: roundDiv(principal * p.fineBps, 10000), interest: roundDiv(principal * p.interestMonthlyBps * daysLate, 10000 * 30) };
 }
 
+/** Valor parcelado com os juros da condição (% sobre o total, bps) — mesma regra de termFinancedTotal (domínio). */
+export function financedTotal(total: number, interestBps: number | null | undefined) {
+  return interestBps && interestBps > 0 ? total + roundDiv(total * interestBps, 10000) : total;
+}
+
 /** Parcelas iguais (diferença de centavos na 1ª); intervalo de 30 dias com 1º vencimento múltiplo de 30 usa meses-calendário. */
 export function schedule(total: number, n: number, firstDue: string, intervalDays: number) {
   const count = Math.max(1, Math.min(60, n));

@@ -96,7 +96,6 @@ defineExport("admin.branches", {
     { key: "managerName", label: "Responsável" },
     { key: "priceTableName", label: "Tabela de preço padrão" },
     { key: "warehouseName", label: "Depósito padrão" },
-    { key: "timezone", label: "Fuso" },
     { key: "terminalsCount", label: "Terminais", type: "number" },
     { key: "situation", label: "Situação" },
   ],

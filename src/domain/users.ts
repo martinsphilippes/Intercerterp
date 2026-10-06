@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { detId, findOne, isConflict, listAll, sha256 } from "@/lib/db";
-import type { Doc, Store } from "@/lib/db/types";
-import { BusinessError, assert } from "@/lib/core/errors";
+import { NotFoundError, type Doc, type Store } from "@/lib/db/types";
+import { unscoped } from "@/lib/db/scoped-store";
+import { BusinessError, PermissionError, assert } from "@/lib/core/errors";
 import { requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit, diff } from "@/lib/core/audit";
 import { sendEmail } from "@/lib/core/email";
@@ -9,8 +10,9 @@ import { getSetting } from "@/lib/core/settings";
 import { onlyDigits } from "@/lib/core/text";
 import { nowIso } from "@/lib/dates";
 import { getAuth } from "@/lib/auth/provider";
-import { findUserByLogin } from "@/lib/auth/users";
+import { findUserByLogin, toCtxUser, userRoleIn } from "@/lib/auth/users";
 import { resolveOccurrence } from "@/lib/core/notify";
+import { can, canDo } from "@/lib/permissions";
 import { auditedGuard } from "./roles";
 
 /**
@@ -21,7 +23,13 @@ import { auditedGuard } from "./roles";
  *  - convite: token aleatório (somente o hash é gravado) com validade; link /convite/<token>;
  *    envio pelo canal de e-mail configurado com resultado real; sem canal, o link é exibido ao administrador;
  *  - suspensão/inativação bloqueia o login (no Appwrite Auth também via setBlocked) e encerra sessões locais;
- *  - nunca deixar a instalação sem administrador ativo (último administrador protegido).
+ *  - nunca deixar a instalação sem administrador ativo (último administrador protegido, também sob concorrência:
+ *    a gravação é conferida depois de feita e desfeita se deixar o sistema sem administrador);
+ *  - alcance do gestor: só gerencia usuários vinculados à empresa em uso; quem não é administrador não gerencia
+ *    administradores, não concede administrador, só vincula às empresas em que também administra usuários e não altera
+ *    o próprio vínculo/perfil; vínculos do usuário com empresas fora do alcance do gestor são preservados;
+ *  - perfil por empresa: o perfil escolhido vale na empresa em uso (`roleByCompany`); os perfis nas demais empresas
+ *    do usuário não mudam.
  */
 
 export type UserStatus = "active" | "invited" | "inactive" | "suspended";
@@ -73,9 +81,47 @@ export async function activeAdmins(store: Store) {
 async function assertNotLastAdmin(store: Store, user: Doc, what: string) {
   if (!user.isAdmin || user.status !== "active") return;
   const admins = await activeAdmins(store);
-  if (admins.filter((a) => a.id !== user.id).length === 0) {
-    throw new BusinessError(`Operação bloqueada: ${user.name} é o último administrador ativo. ${what} deixaria o sistema sem administrador. Conceda acesso de administrador a outro usuário antes.`, "last_admin");
+  if (admins.filter((a) => a.id !== user.id).length === 0) throw lastAdminError(user, what);
+}
+
+function lastAdminError(user: Doc, what: string) {
+  return new BusinessError(`Operação bloqueada: ${user.name} é o último administrador ativo. ${what} deixaria o sistema sem administrador. Conceda acesso de administrador a outro usuário antes.`, "last_admin");
+}
+
+/**
+ * Usuário-alvo de uma ação administrativa. Precisa estar vinculado à empresa em uso (administradores globais aparecem
+ * em todas); quem não é administrador não gerencia o cadastro, a senha nem a situação de um administrador.
+ */
+async function loadManagedUser(ctx: Ctx, id: string): Promise<Doc> {
+  const u = await ctx.store.get("users", id);
+  if (!u || !(u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId))) throw new NotFoundError("users", id);
+  if (u.isAdmin && !ctx.user.isAdmin) throw new PermissionError("Somente administradores podem gerenciar o cadastro, a senha ou a situação de outro administrador.");
+  return u;
+}
+
+/**
+ * O gestor só altera vínculos (inclusão ou remoção) de empresas em que ele mesmo administra usuários
+ * (acesso à empresa + perfil daquela empresa com admin/editar e "admin.users"). Administradores: todas.
+ */
+async function assertCanManageCompanies(ctx: Ctx, companyIds: string[]) {
+  if (ctx.user.isAdmin) return;
+  const me = ctx.user.id !== "system" ? await unscoped(ctx.store).get("users", ctx.user.id) : null;
+  for (const c of new Set(companyIds)) {
+    if (!(ctx.user.companyIds ?? []).includes(c)) throw new PermissionError("Empresa fora do seu acesso: você só pode vincular usuários às empresas a que tem acesso.");
+    if (c === ctx.companyId) continue;
+    const u = me ? await toCtxUser(ctx.store, me, c) : null;
+    if (!u || !can(u, "admin", "edit") || !canDo(u, "admin.users")) throw new PermissionError("Seu perfil na outra empresa não permite gerenciar usuários: o vínculo com ela não pode ser alterado por você.");
   }
+}
+
+/** Mapa empresa → perfil explícito com o perfil efetivo atual de cada empresa (congela o que hoje vem do perfil legado). */
+async function materializeRoles(store: Store, u: Record<string, any>, companyIds: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const c of companyIds) {
+    const r = await userRoleIn(store, u, c);
+    if (r) out[c] = r.id;
+  }
+  return out;
 }
 
 async function validateInput(ctx: Ctx, input: UserInput, selfId?: string) {
@@ -84,6 +130,7 @@ async function validateInput(ctx: Ctx, input: UserInput, selfId?: string) {
   assert(email && EMAIL_RE.test(email), "Informe um e-mail válido.");
   const login = input.login?.trim().toLowerCase() || null;
   if (login) assert(/^[a-z0-9._-]{3,40}$/.test(login), "Login deve ter de 3 a 40 caracteres (letras, números, ponto, hífen ou sublinhado).");
+  if (input.isAdmin && !ctx.user.isAdmin) throw new BusinessError("Somente administradores podem conceder acesso de administrador.", "forbidden");
   const dupEmail = await findOne(ctx.store, "users", [["eq", "email", email]]);
   if (dupEmail && dupEmail.id !== selfId) throw new BusinessError(`E-mail já usado pelo usuário ${dupEmail.name}.`, "duplicate");
   if (login) {
@@ -92,9 +139,13 @@ async function validateInput(ctx: Ctx, input: UserInput, selfId?: string) {
   }
   const companyIds = [...new Set(input.companyIds.filter(Boolean))];
   assert(input.isAdmin || companyIds.length > 0, "Vincule o usuário a pelo menos uma empresa.");
-  const companies = await listAll(ctx.store, "companies");
+  // o perfil escolhido é da empresa em uso: o usuário precisa estar vinculado a ela
+  assert(input.isAdmin || companyIds.includes(ctx.companyId), "O usuário precisa continuar vinculado à empresa em uso (o perfil escolhido vale nela). Para remover o vínculo com esta empresa, use Empresas → Usuários a partir de outra empresa ou inative o usuário.");
+  // leitura de cadastro (empresas/filiais de qualquer empresa) para validar os vínculos
+  const base = unscoped(ctx.store);
+  const companies = await listAll(base, "companies");
   for (const c of companyIds) assert(companies.some((x) => x.id === c), "Empresa inválida.");
-  const branches = await listAll(ctx.store, "branches");
+  const branches = await listAll(base, "branches");
   const branchIds = [...new Set(input.branchIds.filter(Boolean))];
   for (const b of branchIds) {
     const br = branches.find((x) => x.id === b);
@@ -102,14 +153,14 @@ async function validateInput(ctx: Ctx, input: UserInput, selfId?: string) {
     assert(input.isAdmin || companyIds.includes(br.companyId), `A filial ${br.name} não pertence às empresas vinculadas.`);
   }
   if (input.roleId) {
-    const role = await ctx.store.get("roles", input.roleId);
+    const role = await base.get("roles", input.roleId);
     assert(role, "Perfil inválido.");
+    assert(role.companyId === ctx.companyId, "Perfil de outra empresa: escolha um perfil da empresa em uso.");
     assert(role.active !== false, "Perfil inativo.");
   } else {
     assert(input.isAdmin, "Selecione o perfil de acesso.");
   }
   if (input.discountLimitBps != null) assert(Number.isInteger(input.discountLimitBps) && input.discountLimitBps >= 0 && input.discountLimitBps <= 10000, "Limite de desconto deve estar entre 0% e 100%.");
-  if (input.isAdmin && !ctx.user.isAdmin) throw new BusinessError("Somente administradores podem conceder acesso de administrador.", "forbidden");
   return {
     name: input.name.trim(),
     email,
@@ -160,11 +211,14 @@ export async function createUser(
     if (prev) return { user: prev };
   }
   const data = await validateInput(ctx, input);
+  await assertCanManageCompanies(ctx, data.companyIds);
+  // perfil por empresa: o escolhido vale na empresa em uso; nas demais vinculadas, o perfil de sistema equivalente
+  const roleByCompany = data.isAdmin || !data.roleId ? {} : { ...(await materializeRoles(ctx.store, { roleId: data.roleId }, data.companyIds)), [ctx.companyId]: data.roleId };
   if (input.mode === "password") {
     assert((input.password ?? "").length >= 8, "A senha inicial deve ter ao menos 8 caracteres.");
     let user: Doc;
     try {
-      user = await ctx.store.create("users", { ...data, status: "active", createdBy: ctx.user.id }, id);
+      user = await ctx.store.create("users", { ...data, roleByCompany, status: "active", createdBy: ctx.user.id }, id);
     } catch (e) {
       if (isConflict(e)) throw new BusinessError("E-mail já cadastrado.", "duplicate");
       throw e;
@@ -184,7 +238,7 @@ export async function createUser(
   const expiresAt = new Date(Date.now() + Math.max(1, days) * 86400000).toISOString();
   let user: Doc;
   try {
-    user = await ctx.store.create("users", { ...data, status: "invited", inviteTokenHash: sha256(token), inviteExpiresAt: expiresAt, invitedBy: ctx.user.id, createdBy: ctx.user.id }, id);
+    user = await ctx.store.create("users", { ...data, roleByCompany, status: "invited", inviteTokenHash: sha256(token), inviteExpiresAt: expiresAt, invitedBy: ctx.user.id, createdBy: ctx.user.id }, id);
   } catch (e) {
     if (isConflict(e)) throw new BusinessError("E-mail já cadastrado.", "duplicate");
     throw e;
@@ -199,13 +253,55 @@ export async function createUser(
   return { user, invite: { link: r.link, delivered: r.delivered, channel: r.channel, message: r.message, expiresAt } };
 }
 
+const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
+
 export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
   await guard(ctx, "edit", `alterar usuário ${input.email}`, id);
-  const before = await ctx.store.getOrThrow("users", id);
-  const data = await validateInput(ctx, input, id);
+  const before = await loadManagedUser(ctx, id);
+  const base = unscoped(ctx.store);
+  const currentRole = before.isAdmin ? null : await userRoleIn(ctx.store, before, ctx.companyId);
+  let merged: UserInput = { ...input };
+  if (!ctx.user.isAdmin) {
+    // vínculos com empresas (e filiais delas) fora do alcance do gestor são preservados — merge no servidor
+    const mine = new Set(ctx.user.companyIds ?? []);
+    const branchCompany = new Map((await listAll(base, "branches")).map((b) => [b.id, b.companyId as string]));
+    const keptCompanies = (before.companyIds ?? []).filter((c: string) => !mine.has(c));
+    const keptBranches = (before.branchIds ?? []).filter((b: string) => !mine.has(branchCompany.get(b) ?? ""));
+    merged = { ...input, companyIds: [...new Set([...input.companyIds, ...keptCompanies])], branchIds: [...new Set([...input.branchIds, ...keptBranches])] };
+    if (id === ctx.user.id) {
+      const changed =
+        !sameSet([...new Set(merged.companyIds.filter(Boolean))], before.companyIds ?? []) ||
+        !sameSet([...new Set(merged.branchIds.filter(Boolean))], before.branchIds ?? []) ||
+        (merged.roleId || null) !== (currentRole?.id ?? null) ||
+        (merged.discountLimitBps ?? null) !== (before.discountLimitBps ?? null);
+      if (changed) throw new PermissionError("Você não pode alterar o próprio vínculo, perfil ou limite de desconto. Peça a outro gestor de usuários.");
+    }
+  }
+  const data = await validateInput(ctx, merged, id);
+  const added = data.companyIds.filter((c) => !(before.companyIds ?? []).includes(c));
+  const removed = (before.companyIds ?? []).filter((c: string) => !data.companyIds.includes(c));
+  await assertCanManageCompanies(ctx, [...added, ...removed]);
+  // perfil por empresa: só o perfil da empresa em uso muda; os das outras empresas ficam explícitos e preservados
+  const others = data.companyIds.filter((c) => c !== ctx.companyId);
+  const roleByCompany: Record<string, string> = data.isAdmin ? { ...(before.roleByCompany ?? {}) } : await materializeRoles(ctx.store, before, others);
+  if (!data.isAdmin) {
+    for (const c of Object.keys(roleByCompany)) if (!data.companyIds.includes(c)) delete roleByCompany[c];
+    if (data.roleId) roleByCompany[ctx.companyId] = data.roleId;
+  }
+  const legacy = before.roleId ? await base.get("roles", before.roleId) : null;
+  // perfil legado (roleId): segue o perfil desta empresa quando era daqui (ou não havia); se é de outra empresa vinculada, fica
+  const roleId = legacy && legacy.companyId !== ctx.companyId && data.companyIds.includes(legacy.companyId) ? before.roleId : data.roleId;
+  const patch = { ...data, roleId, roleByCompany };
+
   if (before.isAdmin && !data.isAdmin) {
     if (!ctx.user.isAdmin) throw new BusinessError("Somente administradores podem revogar acesso de administrador.", "forbidden");
     await assertNotLastAdmin(ctx.store, before, "Remover o acesso de administrador");
+    // rebaixamento primeiro e conferido depois de gravado (dois administradores rebaixando um ao outro ao mesmo tempo)
+    await ctx.store.update("users", id, { isAdmin: false, roleId, roleByCompany });
+    if (before.status === "active" && (await activeAdmins(ctx.store)).length === 0) {
+      await ctx.store.update("users", id, { isAdmin: true, roleId: before.roleId ?? null, roleByCompany: before.roleByCompany ?? null });
+      throw lastAdminError(before, "Remover o acesso de administrador");
+    }
   }
   const auth = getAuth();
   if (auth.kind === "appwrite" && before.authId && (data.email !== before.email || data.name !== before.name)) {
@@ -217,13 +313,14 @@ export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
       if (data.email !== before.email) await users.updateEmail({ userId: before.authId, email: data.email });
       if (data.name !== before.name) await users.updateName({ userId: before.authId, name: data.name });
     } catch (e: any) {
+      if (before.isAdmin && !data.isAdmin) await ctx.store.update("users", id, { isAdmin: true, roleId: before.roleId ?? null, roleByCompany: before.roleByCompany ?? null });
       throw new BusinessError(`O serviço de autenticação recusou a alteração: ${e?.message ?? e}`, "auth_failed");
     }
   }
-  const after = await ctx.store.update("users", id, data);
+  const after = await ctx.store.update("users", id, patch);
   const d = diff(before, after);
   if (Object.keys(d.after).length) {
-    await audit(ctx, { module: "admin", action: "user.update", entityType: "user", entityId: id, summary: `Cadastro/acesso de ${after.name} alterado`, before: d.before, after: d.after, related: [before.roleId, after.roleId].filter(Boolean).map((r) => `role:${r}`) });
+    await audit(ctx, { module: "admin", action: "user.update", entityType: "user", entityId: id, summary: `Cadastro/acesso de ${after.name} alterado`, before: d.before, after: d.after, related: [currentRole?.id, data.roleId].filter(Boolean).map((r) => `role:${r}`) });
   }
   return after;
 }
@@ -237,22 +334,27 @@ async function endLocalSessions(store: Store, userId: string) {
 /** Ativa, inativa ou suspende (com motivo). Suspensão e inativação bloqueiam o login imediatamente. */
 export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "inactive" | "suspended", reason?: string | null) {
   await guard(ctx, "edit", `alterar situação de usuário para ${status}`, id);
-  const u = await ctx.store.getOrThrow("users", id);
+  const u = await loadManagedUser(ctx, id);
   assert(u.id !== ctx.user.id, "Você não pode alterar a situação do seu próprio acesso.");
   if (status === "suspended") assert(reason?.trim(), "Informe o motivo da suspensão.");
   if (status === u.status) return u;
-  if (status !== "active") await assertNotLastAdmin(ctx.store, u, status === "suspended" ? "Suspender" : "Inativar");
+  const what = status === "suspended" ? "Suspender" : "Inativar";
+  if (status !== "active") await assertNotLastAdmin(ctx.store, u, what);
   const auth = getAuth();
-  let patch: Record<string, any>;
+  let after: Doc;
   if (status === "active") {
     if (!u.authId) throw new BusinessError("Este usuário ainda não definiu senha. Reenvie o convite para que ele ative o acesso.", "no_credentials");
-    patch = { status: "active", suspendedReason: null, suspendedAt: null };
     await auth.setBlocked(u.authId, false);
+    after = await ctx.store.update("users", id, { status: "active", suspendedReason: null, suspendedAt: null });
   } else {
-    patch = { status, suspendedReason: reason?.trim() || null, suspendedAt: status === "suspended" ? nowIso() : null, inviteTokenHash: null, inviteExpiresAt: null };
+    after = await ctx.store.update("users", id, { status, suspendedReason: reason?.trim() || null, suspendedAt: status === "suspended" ? nowIso() : null, inviteTokenHash: null, inviteExpiresAt: null });
+    // conferência depois da gravação: sob concorrência (dois administradores suspendendo um ao outro), desfaz e recusa
+    if (u.isAdmin && u.status === "active" && (await activeAdmins(ctx.store)).length === 0) {
+      await ctx.store.update("users", id, { status: u.status, suspendedReason: u.suspendedReason ?? null, suspendedAt: u.suspendedAt ?? null, inviteTokenHash: u.inviteTokenHash ?? null, inviteExpiresAt: u.inviteExpiresAt ?? null });
+      throw lastAdminError(u, what);
+    }
     if (u.authId) await auth.setBlocked(u.authId, true);
   }
-  const after = await ctx.store.update("users", id, patch);
   const ended = status !== "active" ? await endLocalSessions(ctx.store, id) : 0;
   const label = { active: "reativado", inactive: "inativado", suspended: "suspenso" }[status];
   await audit(ctx, {
@@ -265,7 +367,7 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
 /** Gera novo token (o anterior deixa de valer) e reenvia o convite. Também reativa convite cancelado/expirado. */
 export async function resendInvite(ctx: Ctx, id: string, origin: string): Promise<{ user: Doc; invite: InviteResult }> {
   await guard(ctx, "edit", "reenviar convite", id);
-  const u = await ctx.store.getOrThrow("users", id);
+  const u = await loadManagedUser(ctx, id);
   assert(!u.authId || u.status === "invited", "Este usuário já ativou o acesso; use “Definir nova senha” se ele esqueceu a senha.");
   assert(u.status !== "suspended", "Usuário suspenso: reative antes de reenviar o convite.");
   const days = await getSetting<number>(ctx.store, ctx.companyId, null, "users.inviteExpiryDays", DEFAULT_INVITE_DAYS);
@@ -280,7 +382,7 @@ export async function resendInvite(ctx: Ctx, id: string, origin: string): Promis
 
 export async function cancelInvite(ctx: Ctx, id: string) {
   await guard(ctx, "edit", "cancelar convite", id);
-  const u = await ctx.store.getOrThrow("users", id);
+  const u = await loadManagedUser(ctx, id);
   assert(u.status === "invited", "Não há convite pendente para este usuário.");
   const after = await ctx.store.update("users", id, { status: "inactive", inviteTokenHash: null, inviteExpiresAt: null });
   await audit(ctx, { module: "admin", action: "user.invite_cancel", entityType: "user", entityId: id, summary: `Convite de ${u.name} cancelado (link invalidado)` });
@@ -291,7 +393,7 @@ export async function cancelInvite(ctx: Ctx, id: string) {
 export async function adminSetPassword(ctx: Ctx, id: string, password: string) {
   await guard(ctx, "edit", "redefinir senha de usuário", id);
   assert(password.length >= 8, "A senha deve ter ao menos 8 caracteres.");
-  const u = await ctx.store.getOrThrow("users", id);
+  const u = await loadManagedUser(ctx, id);
   assert(u.status === "active", "Somente usuários ativos podem ter a senha redefinida.");
   const auth = getAuth();
   if (u.authId) {
@@ -315,8 +417,7 @@ export async function acceptInvite(store: Store, token: string, password: string
   if (u.authId) await auth.setPassword(u.authId, password);
   if (auth.kind === "local") await auth.createUser(u.email, password, u.name);
   const after = await store.update("users", u.id, { authId, status: "active", inviteTokenHash: null, inviteExpiresAt: null, firstAccessAt: nowIso() });
-  const { toCtxUser } = await import("@/lib/auth/users");
-  await audit({ store, user: await toCtxUser(store, after), companyId: u.companyIds?.[0] ?? "", branchId: null }, { module: "admin", action: "user.invite_accept", entityType: "user", entityId: u.id, summary: `${u.name} aceitou o convite e definiu a senha (primeiro acesso)` });
+  await audit({ store, user: await toCtxUser(store, after, u.companyIds?.[0] ?? null), companyId: u.companyIds?.[0] ?? "", branchId: null }, { module: "admin", action: "user.invite_accept", entityType: "user", entityId: u.id, summary: `${u.name} aceitou o convite e definiu a senha (primeiro acesso)` });
   await resolveOccurrence(store, `user:${u.id}:invite`).catch(() => 0);
   return after;
 }
@@ -335,8 +436,7 @@ export async function authenticate(store: Store, login: string, password: string
   const user = await findUserByLogin(store, login);
   if (!user) throw new BusinessError("Usuário ou senha inválidos.", "invalid_credentials");
   const attempt = async (why: string) => {
-    const { toCtxUser } = await import("@/lib/auth/users");
-    await audit({ store, user: await toCtxUser(store, user), companyId: user.companyIds?.[0] ?? "", branchId: null, ip }, { module: "admin", action: "auth.login_failed", entityType: "user", entityId: user.id, summary: `Tentativa de login recusada para ${user.name}: ${why}`, result: "failure" });
+    await audit({ store, user: await toCtxUser(store, user, user.companyIds?.[0] ?? null), companyId: user.companyIds?.[0] ?? "", branchId: null, ip }, { module: "admin", action: "auth.login_failed", entityType: "user", entityId: user.id, summary: `Tentativa de login recusada para ${user.name}: ${why}`, result: "failure" });
   };
   const blocked = loginBlockReason(user);
   if (blocked) {

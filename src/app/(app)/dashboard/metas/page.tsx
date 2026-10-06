@@ -13,7 +13,8 @@ import { can, canDo } from "@/lib/permissions";
 import { formatBps } from "@/lib/money";
 import { addMonths, formatMonth, today } from "@/lib/dates";
 import { qs, sp, type SearchParams } from "@/lib/list";
-import { formatGoalValue, GOAL_METRICS, GOAL_STATUS_LABEL, goalsProgress, type GoalMetric, type GoalProgress } from "@/domain/goals";
+import { formatGoalValue, GOAL_METRICS, GOAL_STATUS_LABEL, goalsScreen, hasAllBranches, type GoalMetric, type GoalProgress } from "@/domain/goals";
+import { commercialOpsHref, salesListHref } from "../../relatorios/params";
 import { GoalForm } from "./goal-form";
 import { copyGoalsAction, deleteGoalAction } from "./actions";
 
@@ -27,11 +28,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const mesParam = sp(params, "mes");
   const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(mesParam) ? mesParam : today().slice(0, 7);
   const accessible = [...s.branches].sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
-  const filialParam = sp(params, "filial");
-  const filial = accessible.some((b) => b.id === filialParam) ? filialParam : "";
-  const fullAccess = s.user.isAdmin || (s.user.branchIds ?? []).length === 0;
-  const all = await goalsProgress(s.ctx, mes, { branchIds: accessible.map((b) => b.id) });
-  const goals = filial ? all.filter((g) => g.goal.branchId === filial) : all;
+  // mesma regra da exportação (goalsScreen): metas da empresa só para quem tem acesso a todas as filiais
+  const fullAccess = hasAllBranches(s.user);
+  const view = await goalsScreen(s.ctx, mes, { accessibleBranchIds: accessible.map((b) => b.id), filial: sp(params, "filial") });
+  const filial = view.filial ?? "";
+  const { all, goals } = view;
   const editId = sp(params, "editar");
   const editing = editId ? (all.find((g) => g.goal.id === editId)?.goal ?? null) : null;
   const canCreate = can(s.user, "dashboard", "create");
@@ -80,7 +81,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             <label className="flex min-w-[200px] flex-col gap-1 text-xs font-medium text-slate-600">
               Filial
               <select name="filial" defaultValue={filial} className="focus-ring h-9 rounded-md border border-line bg-white px-3 text-sm">
-                <option value="">Todas (inclui metas da empresa)</option>
+                <option value="">{fullAccess ? "Todas (inclui metas da empresa)" : "Todas as suas filiais"}</option>
                 {accessible.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
@@ -107,7 +108,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       </div>
 
       <section aria-label="Resumo das metas" className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Metas no mês" value={goals.length} hint={filial ? accessible.find((b) => b.id === filial)?.name : "Todas as filiais"} />
+        <Stat label="Metas no mês" value={goals.length} hint={filial ? accessible.find((b) => b.id === filial)?.name : fullAccess ? "Todas as filiais e a empresa" : `Suas filiais (${accessible.length})`} />
         <Stat label="Atingidas" value={achieved} tone={achieved ? "good" : "default"} />
         <Stat label="Abaixo do ritmo / não atingidas" value={behind} tone={behind ? "warn" : "default"} />
         <Stat label="Realizado até" value={!ref ? "—" : ref.status === "not_started" ? "Não iniciado" : ref.to.split("-").reverse().join("/")} hint={!ref ? "Sem metas no mês" : ref.status === "not_started" ? "O mês ainda não começou" : `dia ${ref.elapsedDays} de ${ref.monthDays} do mês`} />
@@ -134,7 +135,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 <tbody>
                   {goals.map((g) => {
                     const expectedBps = g.metric === "ticket" || !g.target ? null : Math.round(((g.expected ?? 0) * 10000) / g.target);
-                    const salesLink = `/vendas?de=${g.from}&ate=${g.to}${g.goal.branchId ? `&filial=${g.goal.branchId}` : ""}`;
+                    // vendas que compõem o realizado (mesmo período e filial da meta); fora do contexto, operações dos relatórios gerenciais
+                    const gScope = { period: { from: g.from, to: g.to }, single: Boolean(g.goal.branchId), filial: g.goal.branchId ?? "todas" };
+                    const salesLink = salesListHref(s, gScope, { situacao: "completed" }) ?? commercialOpsHref(s, gScope, gScope.period);
                     return (
                       <tr key={g.goal.id} className={editId === g.goal.id ? "bg-brand-50/60" : undefined}>
                         <td>{g.branchName}</td>
@@ -146,10 +149,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                         <td className="tabular whitespace-nowrap text-right">
                           {g.status === "not_started" ? (
                             "—"
-                          ) : (
+                          ) : salesLink ? (
                             <Link href={salesLink} className="text-brand-700 hover:underline" title="Abrir as vendas que compõem o realizado">
                               {formatGoalValue(g.metric, g.actual)}
                             </Link>
+                          ) : (
+                            formatGoalValue(g.metric, g.actual)
                           )}
                           {g.metric !== "ticket" && g.status !== "not_started" && <span className="block text-xs text-slate-500">esperado {formatGoalValue(g.metric, g.expected)}</span>}
                         </td>

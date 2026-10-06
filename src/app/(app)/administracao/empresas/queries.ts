@@ -2,16 +2,20 @@ import "server-only";
 import { listAll } from "@/lib/db";
 import type { SessionInfo } from "@/lib/server/session";
 import { normalizeSearch, type ListParams } from "@/lib/list";
+import { unscoped } from "@/lib/db/scoped-store";
 import { REGIMES, branchKind, branchSituation } from "@/domain/companies";
+import { companyView } from "./access";
 
 /** Empresas acessíveis ao usuário, com contagem de filiais e usuários (tela e exportação). */
 export async function queryCompanies(s: SessionInfo, p: Pick<ListParams, "q" | "f">) {
   const allowed = new Set(s.companies.map((c) => c.id));
+  // contagens de todas as empresas autorizadas (somente leitura; o resultado é filtrado por `allowed`)
+  const base = unscoped(s.ctx.store);
   const [companies, branches, users, terminals] = await Promise.all([
-    listAll(s.ctx.store, "companies"),
-    listAll(s.ctx.store, "branches"),
-    listAll(s.ctx.store, "users"),
-    listAll(s.ctx.store, "terminals"),
+    listAll(base, "companies"),
+    listAll(base, "branches"),
+    listAll(base, "users"),
+    listAll(base, "terminals"),
   ]);
   let rows = companies
     .filter((c) => allowed.has(c.id))
@@ -38,14 +42,17 @@ export async function queryCompanies(s: SessionInfo, p: Pick<ListParams, "q" | "
 
 /** Unidades (filiais) de uma empresa: tela e exportação. */
 export async function queryBranches(s: SessionInfo, companyId: string, p: Pick<ListParams, "q" | "f"> = { q: "", f: {} }) {
+  // empresa ativa ou outra autorizada: lê pelo contexto da empresa (acesso validado)
+  const c = await companyView(s, companyId);
+  if (!c) return [];
   const [branches, warehouses, tables, terminals, sessions, fiscal, users] = await Promise.all([
-    listAll(s.ctx.store, "branches", { filters: [["eq", "companyId", companyId]] }),
-    listAll(s.ctx.store, "warehouses", { filters: [["eq", "companyId", companyId]] }),
-    listAll(s.ctx.store, "price_tables", { filters: [["eq", "companyId", companyId]] }),
-    listAll(s.ctx.store, "terminals", { filters: [["eq", "companyId", companyId]] }),
-    listAll(s.ctx.store, "cash_sessions", { filters: [["eq", "companyId", companyId], ["eq", "status", ["open", "reopened"]]] }),
-    listAll(s.ctx.store, "fiscal_configs", { filters: [["eq", "companyId", companyId]] }),
-    listAll(s.ctx.store, "users"),
+    listAll(c.store, "branches", { filters: [["eq", "companyId", companyId]] }),
+    listAll(c.store, "warehouses", { filters: [["eq", "companyId", companyId]] }),
+    listAll(c.store, "price_tables", { filters: [["eq", "companyId", companyId]] }),
+    listAll(c.store, "terminals", { filters: [["eq", "companyId", companyId]] }),
+    listAll(c.store, "cash_sessions", { filters: [["eq", "companyId", companyId], ["eq", "status", ["open", "reopened"]]] }),
+    listAll(c.store, "fiscal_configs", { filters: [["eq", "companyId", companyId]] }),
+    listAll(c.store, "users"),
   ]);
   const fiscalIds = new Set(fiscal.map((f) => f.branchId as string));
   let rows = branches.map((b) => ({

@@ -75,12 +75,20 @@ export async function getTicketFor(ctx: Ctx, id: string) {
   return t;
 }
 
-async function storeAttachments(ctx: Ctx, ticketId: string, files: Attachment[]) {
-  const out: Array<{ fileId: string; name: string; mime: string; sizeBytes: number }> = [];
+/** Valida tamanho e tipo de TODOS os anexos antes de qualquer gravação (sem chamado/mensagem órfãos). */
+export function validateAttachments(files: Attachment[] = []) {
   for (const f of files) {
     if (!f.data?.length) continue;
     assert(f.data.length <= MAX_FILE, `Anexo "${f.name}" excede 8 MB.`);
     assert(ALLOWED_MIME.test(f.mime || ""), `Tipo de arquivo não aceito: ${f.name} (${f.mime || "desconhecido"}). Use imagem, PDF, texto, XML ou ZIP.`);
+  }
+}
+
+async function storeAttachments(ctx: Ctx, ticketId: string, files: Attachment[]) {
+  validateAttachments(files);
+  const out: Array<{ fileId: string; name: string; mime: string; sizeBytes: number }> = [];
+  for (const f of files) {
+    if (!f.data?.length) continue;
     const saved = await saveFile(ctx, { bucket: "attachments", name: f.name.slice(0, 200), mime: f.mime, data: f.data, entityType: "ticket", entityId: ticketId, kind: "ticket_attachment" });
     out.push({ fileId: saved.id, name: saved.name, mime: saved.mime, sizeBytes: saved.sizeBytes });
   }
@@ -96,10 +104,15 @@ export async function createTicket(
   assert(TICKET_PRIORITIES.some((c) => c.value === input.priority), "Selecione a prioridade.");
   assert(input.subject?.trim().length >= 5, "Informe um assunto (mín. 5 caracteres).");
   assert(input.message?.trim().length >= 10, "Descreva o problema (mín. 10 caracteres).");
+  validateAttachments(input.attachments);
   const id = input.idemKey ? detId("ticket", ctx.companyId, input.idemKey) : undefined;
   if (id) {
     const ex = await ctx.store.get("tickets", id);
-    if (ex) return ex;
+    // reenvio: devolve o chamado e completa o que faltou (mensagem inicial, anexos, histórico, aviso ao suporte)
+    if (ex) {
+      await finishTicket(ctx, ex, input);
+      return ex;
+    }
   }
   const number = await nextNumber(ctx.store, `ticket:${ctx.companyId}`);
   const now = nowIso();
@@ -115,18 +128,52 @@ export async function createTicket(
       id,
     );
   } catch (e) {
-    if (isConflict(e) && id) return (await ctx.store.get("tickets", id))!;
+    if (isConflict(e) && id) {
+      const ex = (await ctx.store.get("tickets", id))!;
+      await finishTicket(ctx, ex, input);
+      return ex;
+    }
     throw e;
   }
+  await finishTicket(ctx, t, input);
+  return t;
+}
+
+const initialMessageId = (ticketId: string) => detId("ticketmsg", ticketId, "initial");
+
+/**
+ * Conclui a abertura: anexos, mensagem inicial (id determinístico), histórico e aviso ao suporte.
+ * Idempotente: se a mensagem inicial já existe, nada é refeito; em corrida, só quem cria a mensagem audita e notifica.
+ */
+async function finishTicket(ctx: Ctx, t: Doc, input: { priority: string; message: string; context: TicketContext; attachments?: Attachment[] }) {
+  const msgId = initialMessageId(t.id);
+  if (await ctx.store.get("ticket_messages", msgId)) return;
   const attachments = await storeAttachments(ctx, t.id, input.attachments ?? []);
-  await ctx.store.create("ticket_messages", { companyId: ctx.companyId, branchId: t.branchId, createdBy: ctx.user.id, ticketId: t.id, userId: ctx.user.id, userName: ctx.user.name, body: input.message.trim(), attachments, internal: false });
-  await audit(ctx, { module: "support", action: "ticket.create", entityType: "ticket", entityId: t.id, summary: `Chamado nº ${number} aberto: ${t.subject}`, after: { category: t.category, priority: t.priority, route: input.context.route ?? null, attachments: attachments.length } });
+  try {
+    await ctx.store.create("ticket_messages", { companyId: t.companyId, branchId: t.branchId, createdBy: ctx.user.id, ticketId: t.id, userId: ctx.user.id, userName: ctx.user.name, body: input.message.trim(), attachments, internal: false }, msgId);
+  } catch (e) {
+    if (isConflict(e)) return;
+    throw e;
+  }
+  await audit(ctx, { module: "support", action: "ticket.create", entityType: "ticket", entityId: t.id, summary: `Chamado nº ${t.number} aberto: ${t.subject}`, after: { category: t.category, priority: t.priority, route: input.context?.route ?? t.context?.route ?? null, attachments: attachments.length } });
   await notify(ctx.store, {
-    companyId: ctx.companyId, branchId: t.branchId, type: "ticket", priority: input.priority === "critical" ? "critical" : input.priority === "high" ? "high" : "normal",
-    title: `Novo chamado nº ${number}: ${t.subject}`, body: `${ctx.user.name} — ${TICKET_CATEGORIES.find((c) => c.value === t.category)?.label}`, link: `/ajuda/chamados/${t.id}`,
+    companyId: ctx.companyId, branchId: t.branchId, type: "ticket", priority: t.priority === "critical" ? "critical" : t.priority === "high" ? "high" : "normal",
+    title: `Novo chamado nº ${t.number}: ${t.subject}`, body: `${ctx.user.name} — ${TICKET_CATEGORIES.find((c) => c.value === t.category)?.label}`, link: `/ajuda/chamados/${t.id}`,
     originType: "ticket", originId: t.id, occurrenceKey: `ticket:${t.id}:triage`, responsibleName: "Equipe de suporte", audience: { action: "support.manage" },
   }).catch(() => 0);
-  return t;
+}
+
+/** Ocorrências "aguardando suporte" do chamado (uma por mensagem do solicitante) marcadas como resolvidas. */
+async function resolveAwaitingSupport(store: Store, ticketId: string) {
+  const prefix = `ticket:${ticketId}:awaiting-support`;
+  const open = await listAll(store, "notifications", { filters: [["eq", "originId", ticketId], ["eq", "occurrenceStatus", "open"]] });
+  let n = 0;
+  for (const x of open) {
+    if (!String(x.occurrenceKey ?? "").startsWith(prefix)) continue;
+    await store.update("notifications", x.id, { occurrenceStatus: "resolved" });
+    n++;
+  }
+  return n;
 }
 
 /** Resposta (usuário ou suporte) ou nota interna (somente suporte). */
@@ -143,6 +190,7 @@ export async function replyTicket(
   const agent = isSupportAgent(ctx);
   const isRequester = t.userId === ctx.user.id;
   if (input.internal) assert(agent, "Somente o suporte registra notas internas.");
+  validateAttachments(input.attachments);
   if (input.idemKey) {
     const ex = await ctx.store.get("ticket_messages", detId("ticketmsg", id, input.idemKey));
     if (ex) return { ticket: t, message: ex, delivery: null };
@@ -165,7 +213,7 @@ export async function replyTicket(
   let delivery: { delivered: boolean; channel: string; message?: string } | null = null;
   if (agent && !isRequester && !input.internal) {
     await resolveOccurrence(ctx.store, `ticket:${id}:triage`).catch(() => 0);
-    await resolveOccurrence(ctx.store, `ticket:${id}:awaiting-support`).catch(() => 0);
+    await resolveAwaitingSupport(ctx.store, id).catch(() => 0);
     const to: string | null = t.context?.userEmail ?? t.context?.email ?? null;
     if (to) {
       delivery = await sendEmail(t.companyId === "public" ? ctx.companyId : t.companyId, {
@@ -185,7 +233,8 @@ export async function replyTicket(
   if (isRequester && !agent) {
     await notify(ctx.store, {
       companyId: ctx.companyId, branchId: t.branchId ?? null, type: "ticket", title: `Nova mensagem no chamado nº ${t.number}`, body: input.body.trim().slice(0, 300), link: `/ajuda/chamados/${id}`,
-      originType: "ticket", originId: id, occurrenceKey: `ticket:${id}:awaiting-support`, responsibleName: "Equipe de suporte", audience: t.assigneeId ? { userIds: [t.assigneeId] } : { action: "support.manage" },
+      // uma ocorrência por mensagem: cada nova mensagem do solicitante avisa o atendente (resolvidas na resposta do suporte)
+      originType: "ticket", originId: id, occurrenceKey: `ticket:${id}:awaiting-support:${msg.id}`, responsibleName: "Equipe de suporte", audience: t.assigneeId ? { userIds: [t.assigneeId] } : { action: "support.manage" },
     }).catch(() => 0);
   }
   const after = await ctx.store.update("tickets", id, patch);
@@ -235,7 +284,7 @@ export async function updateTicket(ctx: Ctx, id: string, input: { status?: strin
   const after = await ctx.store.update("tickets", id, patch);
   if (patch.status === "resolved" || patch.status === "closed") {
     await resolveOccurrence(ctx.store, `ticket:${id}:triage`).catch(() => 0);
-    await resolveOccurrence(ctx.store, `ticket:${id}:awaiting-support`).catch(() => 0);
+    await resolveAwaitingSupport(ctx.store, id).catch(() => 0);
   }
   if (patch.assigneeId) await resolveOccurrence(ctx.store, `ticket:${id}:triage`).catch(() => 0);
   const before = Object.fromEntries(Object.keys(patch).map((k) => [k, t[k] ?? null]));

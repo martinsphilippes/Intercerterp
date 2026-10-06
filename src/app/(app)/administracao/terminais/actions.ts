@@ -1,7 +1,7 @@
 "use server";
 
 import { runAction, fstr, fopt, fbool, fint } from "@/lib/server/action";
-import { createTerminal, updateTerminal, setTerminalStatus, recordBrowserPrintPage, checkConnectorFromServer, recordConnectorCheck, describeConnectorBody, type TerminalInput, type ConnectorStatus } from "@/domain/terminals";
+import { createTerminal, updateTerminal, setTerminalStatus, recordBrowserPrintPage, recordConnectorNotConfigured, recordConnectorCheck, describeConnectorBody, type TerminalInput, type ConnectorStatus } from "@/domain/terminals";
 
 function parse(fd: FormData): TerminalInput {
   const series = fstr(fd, "nfceSeries");
@@ -42,19 +42,22 @@ export async function recordPrintPageAction(id: string, userAgent: string) {
   return runAction({ module: "admin" }, async (s) => ({ message: await recordBrowserPrintPage(s.ctx, id, { userAgent }) }));
 }
 
-export async function checkConnectorServerAction(id: string) {
+/** Terminal sem conector: registra "não verificado" (o servidor nunca contata a URL do conector). */
+export async function recordNoConnectorAction(id: string) {
   return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
-    const r = await checkConnectorFromServer(s.ctx, id);
-    return { ok: true as const, data: r, message: r.verified ? (r.ok ? `Conector respondeu: ${r.message}` : `Falha: ${r.message}`) : r.message };
+    const r = await recordConnectorNotConfigured(s.ctx, id);
+    return { ok: true as const, data: r, message: r.message };
   });
 }
 
 /** Resultado medido no navegador do terminal (o conector local só é alcançável a partir da própria máquina). */
 export async function recordBrowserConnectorAction(id: string, status: { ok: boolean; httpStatus?: number; latencyMs?: number; error?: string; body?: unknown }) {
   return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
-    const message = status.error ? `Falha ao contatar o conector a partir do navegador: ${String(status.error).slice(0, 200)}` : `HTTP ${status.httpStatus} em ${status.latencyMs} ms — ${describeConnectorBody(status.body)}`;
+    const httpStatus = Number.isInteger(status.httpStatus) ? status.httpStatus : undefined;
+    const latencyMs = Number.isFinite(status.latencyMs) ? Math.round(status.latencyMs!) : undefined;
+    const message = status.error ? `Falha ao contatar o conector a partir do navegador: ${String(status.error).slice(0, 200)}` : `HTTP ${httpStatus ?? "?"} em ${latencyMs ?? "?"} ms — ${describeConnectorBody(status.body).slice(0, 300)}`;
     const ok = !status.error && Boolean(status.ok) && (status.body as any)?.ok !== false;
-    const r: ConnectorStatus = { ok, verified: true, origin: "browser", httpStatus: status.httpStatus, latencyMs: status.latencyMs, message };
+    const r: ConnectorStatus = { ok, verified: true, origin: "browser", httpStatus, latencyMs, message };
     await recordConnectorCheck(s.ctx, id, r);
     return { ok: true as const, data: r };
   });

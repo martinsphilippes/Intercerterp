@@ -1,7 +1,7 @@
 "use server";
 
 import { runAction, fstr, fopt, fbool, fint, fjson } from "@/lib/server/action";
-import { requireBranch } from "@/lib/core/ctx";
+import { requireAction, requireBranch } from "@/lib/core/ctx";
 import { assert } from "@/lib/core/errors";
 import { formatMoney } from "@/lib/money";
 import {
@@ -33,49 +33,50 @@ const docPath = (model: string, id: string) => `/fiscal/${model}/${id}`;
 // ───────────────────────────── Ações sobre documentos
 
 export async function transmitAction(id: string) {
-  return runAction({ module: "fiscal", op: "create", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "create", requireBranch: true, revalidate: R }, async (s) => {
     const d = await submitDraft(s.ctx, id);
     return { ok: true as const, message: `Resultado: ${DOC_STATUS_LABEL[d.status]}${d.statusMessage ? ` — ${d.statusMessage}` : ""}`.slice(0, 300) };
   });
 }
 
 export async function retransmitAction(id: string) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await retransmit(s.ctx, id);
     return { ok: true as const, message: `Retransmitido (mesma referência). Resultado: ${DOC_STATUS_LABEL[d.status]}${d.statusMessage ? ` — ${d.statusMessage}` : ""}`.slice(0, 300) };
   });
 }
 
+/** A consulta altera a situação e aplica efeitos (estoque/financeiro): exige emissão e o documento da filial ativa. */
 export async function queryAction(id: string) {
-  return runAction({ module: "fiscal", op: "view", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await queryDocument(s.ctx, id);
     return { ok: true as const, message: `Consulta ao provedor: ${DOC_STATUS_LABEL[d.status]}${d.statusMessage ? ` — ${d.statusMessage}` : ""}`.slice(0, 300) };
   });
 }
 
 export async function refreshAction(id: string) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const r = await refreshFromCatalog(s.ctx, id);
     return { ok: true as const, message: r.changes.length ? `Atualizado do cadastro: ${r.changes.join("; ")}`.slice(0, 300) : "Nenhuma diferença em relação ao cadastro." };
   });
 }
 
 export async function cancelAction(id: string, fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await cancelDocument(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: d.status === "cancelled" ? "Cancelamento homologado pelo provedor." : `Documento ${DOC_STATUS_LABEL[d.status].toLowerCase()}.` };
   });
 }
 
 export async function cceAction(id: string, fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await correctionLetter(s.ctx, id, fstr(fd, "text"));
     return { ok: true as const, message: `CC-e nº ${d.correctionCount} registrada.` };
   });
 }
 
 export async function emailAction(id: string, fd: FormData) {
-  return runAction({ module: "fiscal", op: "view", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const r = await shareByEmail(s.ctx, id, fstr(fd, "to"));
     if (!r.delivered) return { ok: false as const, error: `E-mail não enviado (${r.channel}): ${r.message ?? "falha"}` };
     return { ok: true as const, message: `E-mail entregue ao canal ${r.channel}.` };
@@ -83,16 +84,16 @@ export async function emailAction(id: string, fd: FormData) {
 }
 
 export async function batchRetransmitAction(model: "nfe" | "nfce" | "nfse", fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const ids = fd.getAll("ids").map(String).filter(Boolean);
-    const out = await retransmitBatch(s.ctx, { model, branchId: s.ctx.branchId, ids: ids.length ? ids : undefined });
+    const out = await retransmitBatch(s.ctx, { model, branchId: requireBranch(s.ctx), ids: ids.length ? ids : undefined });
     const ok = out.filter((o) => o.after === "authorized").length;
     return { ok: true as const, message: out.length ? `${out.length} documento(s) processado(s): ${ok} autorizado(s); demais: ${[...new Set(out.filter((o) => o.after !== "authorized").map((o) => DOC_STATUS_LABEL[o.after] ?? o.after))].join(", ") || "—"}.` : "Nenhum documento pendente no recorte." };
   });
 }
 
 export async function disableAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const branchId = requireBranch(s.ctx);
     const doc = await disableNumbers(s.ctx, { branchId, model: (fstr(fd, "model") as "nfe" | "nfce") || "nfe", series: fstr(fd, "series") || "1", from: fint(fd, "from"), to: fint(fd, "to"), justification: fstr(fd, "justification") });
     return { ok: true as const, message: `Inutilização homologada (protocolo ${doc.protocol ?? "—"}).`, redirect: docPath(doc.model, doc.id) };
@@ -119,8 +120,8 @@ export async function previewNfeAction(fd: FormData) {
 export async function saveNfeAction(fd: FormData) {
   return runAction({ module: "fiscal", op: "create", revalidate: R }, async (s) => {
     const input = parseNfe(fd);
-    const branchId = requireBranch(s.ctx);
-    if (input.origin.type !== "transfer") input.branchId = branchId;
+    // emitente sempre a filial ativa (inclusive transferência: emitida pela filial de origem, validada em loadOrigin)
+    input.branchId = requireBranch(s.ctx);
     const transmit = fstr(fd, "intent") === "transmit";
     const doc = await saveNfe(s.ctx, input, { idemKey: fstr(fd, "_idem"), draftId: fopt(fd, "draftId"), transmit });
     if (fstr(fd, "stay") === "1") return { ok: true as const, message: `Rascunho salvo às ${new Date().toLocaleTimeString("pt-BR", { timeZone: process.env.APP_TIMEZONE || "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })}.`, data: { id: doc.id, updatedAt: doc.updatedAt } };
@@ -313,12 +314,15 @@ export async function deleteTaxGroupAction(id: string) {
 
 // ───────────────────────────── Relatórios, exportação e obrigações (Tela 35)
 
+/** Pacote com todos os XML/CSV do período: gerar exige "Exportar dados"; enviar por e-mail exige "Configurar fiscal". */
 export async function generatePackageAction(fd: FormData) {
   return runAction({ module: "fiscal", op: "view", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+    requireAction(s.ctx, "data.export");
     const f = normalizeFilter({ from: fstr(fd, "from"), to: fstr(fd, "to"), branch: fstr(fd, "branch") || undefined });
     const send = fstr(fd, "intent") === "send";
     if (send) {
-      const r = await sendAccountingPackage(s.ctx, f, { to: fopt(fd, "to"), reason: "manual" });
+      requireAction(s.ctx, "fiscal.configure");
+      const r = await sendAccountingPackage(s.ctx, f, { to: fopt(fd, "email"), reason: "manual" });
       if (!r.delivered) return { ok: false as const, error: r.message };
       return { ok: true as const, message: r.message };
     }

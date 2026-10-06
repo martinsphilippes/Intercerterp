@@ -42,6 +42,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   const cfg = await getFiscalConfig(s.ctx.store, s.ctx.companyId, branch?.id ?? null);
   const own = cfg ? (cfg.branchId ?? null) === (branch?.id ?? null) : false;
   const canEdit = can(s.user, "fiscal", "edit") && canDo(s.user, "fiscal.configure");
+  const canCfgCert = canDo(s.user, "fiscal.configure");
   const company = s.company;
   const checklist = issuerChecklist(company as any, branch as any);
   const validated = checklist.every((c) => c.ok);
@@ -129,8 +130,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                   { label: "CNPJ no certificado", value: cfg.certificate.cnpj ? formatDoc(cfg.certificate.cnpj) : "Não identificado" },
                   { label: "Emissor (AC)", value: cfg.certificate.issuer },
                   { label: "Validade", value: <span>{formatDate(cfg.certificate.validFrom)} a {formatDate(cfg.certificate.validTo)} <Badge tone={days! < 0 ? "bad" : days! <= 30 ? "warn" : "good"}>{days! < 0 ? "vencido" : `${days} dia(s) restantes`}</Badge></span> },
-                  { label: "Arquivo", value: <a className="text-brand-700 underline" href={`/api/files/${cfg.certificate.fileId}`}>{cfg.certificate.fileName}</a> },
-                  { label: "Senha (referência)", value: <span>variável <code>{cfg.certificate.passwordRef}</code> — {process.env[cfg.certificate.passwordRef] ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida</Badge>}</span> },
+                  // .pfx contém a chave privada: download e nome da variável da senha só para quem configura o fiscal
+                  { label: "Arquivo", value: canCfgCert ? <a className="text-brand-700 underline" href={`/api/files/${cfg.certificate.fileId}`}>{cfg.certificate.fileName}</a> : <span>{cfg.certificate.fileName}{cfg.certificate.sha256 ? <span className="block font-mono text-xs text-slate-500">SHA-256 {String(cfg.certificate.sha256).slice(0, 16)}…</span> : null}</span> },
+                  { label: "Senha (referência)", value: <span>{canCfgCert ? <>variável <code>{cfg.certificate.passwordRef}</code> — </> : null}{process.env[cfg.certificate.passwordRef] ? <Badge tone="good">definida no servidor</Badge> : <Badge tone="warn">não definida</Badge>}</span> },
                   { label: "Carregado em", value: `${formatDateTime(cfg.certificate.uploadedAt)} por ${cfg.certificate.uploadedBy}` },
                   (cfg.certificate.warnings ?? []).length > 0 && { label: "Alertas", value: <span className="text-amber-800">{cfg.certificate.warnings.join(" ")}</span> },
                 ]}

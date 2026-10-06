@@ -29,7 +29,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   if (!b || b.companyId !== s.ctx.companyId) notFound();
   const [branches, jobs, requester] = await Promise.all([
     listAll(s.ctx.store, "branches", { filters: [["eq", "companyId", s.ctx.companyId]] }),
-    listAll(s.ctx.store, "restore_jobs", { filters: [["eq", "backupId", id]], orderBy: [{ field: "createdAt", dir: "desc" }] }),
+    listAll(s.ctx.store, "restore_jobs", { filters: [["eq", "backupId", id], ["eq", "companyId", s.ctx.companyId]], orderBy: [{ field: "createdAt", dir: "desc" }] }),
     b.createdBy ? s.ctx.store.get("users", b.createdBy) : Promise.resolve(null),
   ]);
   const manage = canDo(s.user, "admin.backup");

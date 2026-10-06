@@ -35,8 +35,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const skus = new Map((await Promise.all([...itemsBy.values()].flat().map((i) => store.get("skus", i.skuId)))).filter(Boolean).map((k) => [k!.id, k!]));
   const check = await canDecide(s.ctx, r);
   const t = today();
-  const products = orders.reduce((a, o) => a + (o.total - (o.freight ?? 0)), 0);
+  // produtos líquidos (subtotal − descontos) e acréscimos (IPI, seguro, outras despesas) separados do frete
+  const netProducts = (o: any) => (o.subtotal ?? 0) - (o.discountTotal ?? 0);
+  const extras = (o: any) => (o.ipiTotal ?? 0) + (o.insurance ?? 0) + (o.otherExpenses ?? 0);
+  const products = orders.reduce((a, o) => a + netProducts(o), 0);
   const freight = orders.reduce((a, o) => a + (o.freight ?? 0), 0);
+  const additions = orders.reduce((a, o) => a + extras(o), 0);
   const policy = await activePolicy(store, s.ctx.companyId);
   // etapas da política que não se aplicam a este valor (“dispensada pela alçada”)
   const allStepNames = [...new Set(((policy?.rules ?? DEFAULT_POLICY.rules).tiers as any[]).flatMap((x) => x.steps.map((st: any) => st.name)))];
@@ -61,7 +65,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       />
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-line bg-white p-4"><p className="text-xs text-slate-500">Solicitante</p><p className="mt-1 font-semibold">{users.get(r.requesterId) ?? "—"}</p><p className="text-xs text-slate-500">{formatDateTime(r.createdAt)}</p></div>
-        <div className="rounded-lg border border-line bg-white p-4"><p className="text-xs text-slate-500">Produtos / fretes</p><p className="tabular mt-1 font-semibold">{formatMoney(products)} / {formatMoney(freight)}</p><p className="text-xs text-slate-500">{orders.length} pedido(s)</p></div>
+        <div className="rounded-lg border border-line bg-white p-4"><p className="text-xs text-slate-500">Produtos / fretes{additions ? " / IPI, seguro e outras" : ""}</p><p className="tabular mt-1 font-semibold">{formatMoney(products)} / {formatMoney(freight)}{additions ? ` / ${formatMoney(additions)}` : ""}</p><p className="text-xs text-slate-500">{orders.length} pedido(s)</p></div>
         <div className="rounded-lg border border-line bg-white p-4"><p className="text-xs text-slate-500">Total para alçada (com frete)</p><p className="tabular mt-1 text-xl font-semibold text-brand-800">{formatMoney(r.total)}</p><p className="text-xs text-slate-500">Política “{snap.name ?? "—"}” · alçada acima de {formatMoney(snap.tierAbove ?? 0)}</p></div>
       </div>
       <div className="mb-4 grid gap-3 rounded-lg bg-slate-100 p-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -114,14 +118,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   })}
                 </tbody>
               </table>
-              <p className="flex justify-end gap-6 border-t border-line px-4 py-2 text-sm"><span>Produtos <b className="tabular">{formatMoney(o.total - (o.freight ?? 0))}</b></span><span>Frete <b className="tabular">{formatMoney(o.freight)}</b></span><span>Total <b className="tabular">{formatMoney(o.total)}</b></span></p>
+              <p className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t border-line px-4 py-2 text-sm"><span>Produtos <b className="tabular">{formatMoney(netProducts(o))}</b></span>{(o.ipiTotal ?? 0) > 0 && <span>IPI <b className="tabular">{formatMoney(o.ipiTotal)}</b></span>}<span>Frete <b className="tabular">{formatMoney(o.freight)}</b></span>{(o.insurance ?? 0) > 0 && <span>Seguro <b className="tabular">{formatMoney(o.insurance)}</b></span>}{(o.otherExpenses ?? 0) > 0 && <span>Outras despesas <b className="tabular">{formatMoney(o.otherExpenses)}</b></span>}<span>Total <b className="tabular">{formatMoney(o.total)}</b></span></p>
             </Card>
           );
         })}
       </div>
       <Card className="mt-4" title="Registrar decisão" description="A aprovação interna é distinta do envio ao fornecedor: após a última etapa, o pedido aguarda “Registrar envio”.">
         {r.status === "in_review" ? (
-          <DecisionPanel requestId={id} stepName={step?.name ?? "—"} canDecide={check.ok} reason={check.reason ?? null} requiresNote={Boolean(check.requiresNote)} expiredBlocks={Boolean(check.expired) && snap.expiredProposalAction === "block"} total={formatMoney(r.total)} nextStep={nextStep} />
+          <DecisionPanel requestId={id} currentStep={r.currentStep ?? 0} revision={r.revision ?? 1} stepName={step?.name ?? "—"} canDecide={check.ok} reason={check.reason ?? null} requiresNote={Boolean(check.requiresNote)} expiredBlocks={Boolean(check.expired) && snap.expiredProposalAction === "block"} total={formatMoney(r.total)} nextStep={nextStep} />
         ) : (
           <p className="text-sm text-slate-600">Solicitação {r.status === "approved" ? "aprovada" : r.status === "adjust" ? "devolvida para ajuste" : r.status === "rejected" ? "rejeitada" : "cancelada"}{r.decidedAt ? ` em ${formatDateTime(r.decidedAt)}` : ""}.</p>
         )}

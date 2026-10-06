@@ -48,10 +48,22 @@ export interface CreateTitleInput {
   branchId?: string | null;
 }
 
-/** Gera vencimentos a partir de uma condição de pagamento. */
-export function buildSchedule(total: number, term: { installments: number; firstDueDays: number; intervalDays: number } | null, base = today()): InstallmentInput[] {
+/**
+ * Valor parcelado com os juros da condição de pagamento (% sobre o total, em bps): total + total × juros%,
+ * arredondado em centavos (half-up). Sem juros, devolve o próprio total.
+ */
+export function termFinancedTotal(total: number, interestBps: number | null | undefined): number {
+  return interestBps && interestBps > 0 ? total + pct(total, interestBps) : total;
+}
+
+/**
+ * Gera vencimentos a partir de uma condição de pagamento.
+ * `opts.interestBps` (opcional, explícito): aplica os juros da condição ao total antes de dividir as parcelas
+ * (ver termFinancedTotal). Sem a opção, o total é dividido como informado.
+ */
+export function buildSchedule(total: number, term: { installments: number; firstDueDays: number; intervalDays: number } | null, base = today(), opts?: { interestBps?: number | null }): InstallmentInput[] {
   const n = Math.max(1, term?.installments ?? 1);
-  const parts = splitInstallments(total, n);
+  const parts = splitInstallments(termFinancedTotal(total, opts?.interestBps), n);
   const first = term?.firstDueDays ?? 0;
   const interval = term?.intervalDays ?? 30;
   return parts.map((amount, i) => ({
@@ -192,7 +204,9 @@ export async function postEntry(ctx: Ctx, t: Store, e: EntryInput, cache = new M
   const id = detId("entry", e.idemKey);
   const existing = await ctx.store.get("account_entries", id);
   if (existing) return existing;
-  const acc = cache.get(e.accountId) ?? (await ctx.store.getOrThrow("financial_accounts", e.accountId));
+  const acc = cache.get(e.accountId) ?? (e.accountId ? await ctx.store.get("financial_accounts", e.accountId) : null);
+  // toda movimentação (baixa, estorno, transferência, avulso) só entra em conta da empresa ativa
+  assert(acc && acc.companyId === ctx.companyId, "Conta financeira inválida: selecione uma conta desta empresa.", "invalid_account");
   assert(acc.active !== false, `Conta ${acc.name} está inativa.`);
   const seq = (acc.seq ?? 0) + 1;
   const balanceAfter = (acc.balance ?? 0) + e.amount;
@@ -228,6 +242,17 @@ export async function postEntry(ctx: Ctx, t: Store, e: EntryInput, cache = new M
   await t.update("financial_accounts", e.accountId, { seq, balance: balanceAfter });
   cache.set(e.accountId, { ...acc, seq, balance: balanceAfter });
   return entry;
+}
+
+/**
+ * Conta financeira utilizável para movimentar: existe, é da empresa ativa e está ativa.
+ * Use antes de gravar anexos/arquivos para recusar cedo uma conta inválida (postEntry confere de novo).
+ */
+export async function assertUsableAccount(ctx: Ctx, accountId: string | null | undefined): Promise<Doc> {
+  const acc = accountId ? await ctx.store.get("financial_accounts", accountId) : null;
+  assert(acc && acc.companyId === ctx.companyId, "Selecione uma conta financeira válida desta empresa.", "invalid_account");
+  assert(acc.active !== false, `A conta ${acc.name} está inativa. Selecione uma conta ativa.`, "inactive_account");
+  return acc;
 }
 
 /** Lançamento avulso (tarifa, ajuste) com auditoria. */
@@ -282,8 +307,14 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
     }
     const inst = await ctx.store.getOrThrow("installments", input.installmentId);
     const title = await ctx.store.getOrThrow("titles", inst.titleId);
-    assert(title.companyId === ctx.companyId, "Título de outra empresa.");
+    assert(title.companyId === ctx.companyId && inst.companyId === ctx.companyId, "Título de outra empresa.");
     assert(title.status !== "cancelled", "Título cancelado não pode ser baixado.");
+    // parcela quitada cai na regra de saldo (over_settlement) logo abaixo
+    assert(
+      inst.status !== "renegotiated" && inst.status !== "cancelled",
+      inst.status === "renegotiated" ? `A parcela ${inst.number} foi renegociada: registre o recebimento no título da renegociação.` : `A parcela ${inst.number} está cancelada.`,
+      "installment_not_open",
+    );
     if (title.kind === "payable" && !input.skipApprovalCheck) {
       assert(title.approvalStatus !== "pending", "Conta a pagar ainda não autorizada. Autorize a obrigação antes do pagamento.", "payable_not_approved");
     }
@@ -375,7 +406,19 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
     return settlement;
   };
 
-  const settlement = tx ? await run(tx) : await retryOnConflict(() => ctx.store.transaction(run));
+  let settlement: Doc;
+  try {
+    settlement = tx ? await run(tx) : await retryOnConflict(() => ctx.store.transaction(run));
+  } catch (e) {
+    // cancelamento/renegociação gravado entre a leitura e o commit: o limite do saldo (ou a sequência) recusa a baixa
+    if (!tx && isConflict(e)) {
+      const inst = await ctx.store.get("installments", input.installmentId);
+      const title = inst ? await ctx.store.get("titles", inst.titleId) : null;
+      if (title?.status === "cancelled" || inst?.status === "cancelled") throw new BusinessError("Título cancelado não pode ser baixado.", "title_cancelled");
+      if (inst?.status === "renegotiated") throw new BusinessError(`A parcela ${inst.number} foi renegociada por outra operação. Atualize a tela.`, "installment_not_open");
+    }
+    throw e;
+  }
   if (!tx && !reused) {
     await refreshTitleStatus(ctx.store, settlement.titleId);
     await audit(ctx, {
@@ -410,18 +453,60 @@ export async function refreshTitleStatus(store: Store, titleId: string) {
   return title;
 }
 
+/**
+ * Título gerado pela renegociação que incluiu a parcela (marcador "renegotiation" mais recente na sequência da parcela;
+ * dados antigos sem marcador: único título de renegociação ativo do título original).
+ */
+export async function renegotiationTitleOf(ctx: Ctx, inst: Doc): Promise<Doc | null> {
+  const marks = await listAll(ctx.store, "settlements", { filters: [["eq", "installmentId", inst.id], ["eq", "kind", "renegotiation"]], orderBy: [{ field: "seq", dir: "desc" }] });
+  for (const m of marks) {
+    const t = m.operationId ? await ctx.store.get("titles", m.operationId) : null;
+    if (t && t.companyId === ctx.companyId) return t;
+  }
+  const legacy = (await listAll(ctx.store, "titles", { filters: [["eq", "originType", "renegotiation"], ["eq", "originId", inst.titleId]] })).filter((t) => t.companyId === ctx.companyId && t.status !== "cancelled");
+  return legacy.length === 1 ? legacy[0] : null;
+}
+
+/**
+ * Regra: baixa de parcela renegociada/cancelada não é estornada diretamente — reabrir a parcela cobraria a dívida
+ * em duplicidade (o saldo já foi transferido ao título da renegociação). Desfaça antes a renegociação.
+ */
+async function assertInstallmentReversible(ctx: Ctx, inst: Doc) {
+  if (inst.status === "renegotiated") {
+    const nt = await renegotiationTitleOf(ctx, inst);
+    throw new BusinessError(
+      `A parcela ${inst.number} foi renegociada${nt ? ` no título nº ${nt.number}` : ""}; estornar esta baixa reabriria a dívida em duplicidade. Desfaça antes a renegociação${nt ? ` (no título nº ${nt.number}, estornando eventuais recebimentos dele)` : ""} e então estorne a baixa.`,
+      "installment_renegotiated",
+    );
+  }
+  if (inst.status === "cancelled") throw new BusinessError(`A parcela ${inst.number} está cancelada; a baixa não pode ser estornada.`, "installment_cancelled");
+}
+
 /** Estorna uma baixa: recompõe o saldo e gera lançamento inverso vinculado. */
 export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: string, tx?: Store) {
   assert(reason?.trim(), "Informe o motivo do estorno.");
   const s = await ctx.store.getOrThrow("settlements", settlementId);
+  // antes de qualquer outra leitura: não revela o estado de baixas de outra empresa
+  assert(s.companyId === ctx.companyId, "Baixa de outra empresa.", "cross_company");
   if (s.status === "reversed") return s;
   assert(s.kind === "settlement", "Somente baixas podem ser estornadas.");
   const entry = s.accountEntryId ? await ctx.store.get("account_entries", s.accountEntryId) : null;
+  assert(!entry || entry.companyId === ctx.companyId, "Lançamento de outra empresa.", "cross_company");
   if (entry?.reconciled) throw new BusinessError("A baixa está conciliada com o extrato. Desfaça a conciliação antes de estornar.", "reconciled");
   const feeEntryCheck = s.fee > 0 ? await ctx.store.get("account_entries", settlementFeeEntryId(s)) : null;
   if (feeEntryCheck?.reconciled) throw new BusinessError("A tarifa desta baixa está conciliada com o extrato. Desfaça a conciliação antes de estornar.", "reconciled");
+  await assertInstallmentReversible(ctx, await ctx.store.getOrThrow("installments", s.installmentId));
+  let already = false;
   const run = async (t: Store) => {
+    // estorno concorrente da mesma baixa: o primeiro vence, o segundo apenas devolve o resultado
+    if ((await ctx.store.getOrThrow("settlements", s.id)).status === "reversed") {
+      already = true;
+      return;
+    }
     const inst = await ctx.store.getOrThrow("installments", s.installmentId);
+    assert(inst.companyId === ctx.companyId, "Parcela de outra empresa.", "cross_company");
+    // relido dentro da tentativa: renegociação/cancelamento concorrente grava na mesma sequência (installmentId, seq) e gera conflito
+    await assertInstallmentReversible(ctx, inst);
     const seq = inst.seq + 1;
     const cache = new Map<string, Doc>();
     if (entry) {
@@ -478,6 +563,7 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
   };
   if (tx) await run(tx);
   else await retryOnConflict(() => ctx.store.transaction(run));
+  if (already) return ctx.store.getOrThrow("settlements", s.id);
   await refreshTitleStatus(ctx.store, s.titleId);
   await audit(ctx, { module: "finance", action: "settlement.reverse", entityType: "title", entityId: s.titleId, summary: `Estorno de baixa (${(s.total / 100).toFixed(2)})`, reason, related: [`settlement:${s.id}`, `installment:${s.installmentId}`] });
   const inst = await ctx.store.get("installments", s.installmentId);
@@ -485,17 +571,53 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
   return ctx.store.getOrThrow("settlements", s.id);
 }
 
-/** Cancela título sem baixas ativas (ex.: venda cancelada). */
+/** Limite de escritas por transação do Appwrite. */
+const TX_LIMIT = 100;
+
+/**
+ * Cancela título sem baixas ativas (ex.: venda cancelada).
+ * Concorrência com baixa: o saldo do título é lido ANTES de conferir as baixas e zerado com decremento limitado a 0 —
+ * uma baixa gravada depois da leitura reduz o saldo e faz o decremento violar o limite (o cancelamento é recusado);
+ * uma baixa que tente gravar depois do cancelamento viola o mesmo limite (saldo 0) e é recusada.
+ * Repetir o cancelamento conclui parcelas que tenham ficado pendentes (idempotente).
+ */
 export async function cancelTitle(ctx: Ctx, id: string, reason: string) {
   const title = await ctx.store.getOrThrow("titles", id);
-  if (title.status === "cancelled") return title;
-  const active = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
-  if (active.length) throw new BusinessError("Título possui baixas ativas. Estorne as baixas antes de cancelar.", "has_settlements");
-  const insts = await listAll(ctx.store, "installments", { filters: [["eq", "titleId", id]] });
-  await ctx.store.transaction(async (t) => {
-    for (const i of insts) await t.update("installments", i.id, { status: "cancelled", balance: 0 });
-    await t.update("titles", id, { status: "cancelled", balance: 0, notes: [title.notes, `Cancelado: ${reason}`].filter(Boolean).join("\n") });
-  });
+  assert(title.companyId === ctx.companyId, "Título de outra empresa.", "cross_company");
+  const activeSettlements = () => listAll(ctx.store, "settlements", { filters: [["eq", "titleId", id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
+  const hasSettlements = () => new BusinessError("Título possui baixas ativas. Estorne as baixas antes de cancelar.", "has_settlements");
+  const instsOf = () => listAll(ctx.store, "installments", { filters: [["eq", "titleId", id]] });
+  let changed = false;
+  if (title.status !== "cancelled") {
+    if ((await activeSettlements()).length) throw hasSettlements();
+    try {
+      await retryOnConflict(() =>
+        ctx.store.transaction(async (t) => {
+          changed = false;
+          const cur = await ctx.store.getOrThrow("titles", id);
+          if (cur.status === "cancelled") return;
+          if ((await activeSettlements()).length) throw hasSettlements();
+          const pending = (await instsOf()).filter((i) => i.status !== "cancelled");
+          if (cur.balance > 0) await t.increment("titles", id, "balance", -cur.balance, { min: 0 });
+          // títulos muito longos: parcelas concluídas logo abaixo, fora desta transação (baixa já é recusada pelo título cancelado)
+          if (pending.length + 2 <= TX_LIMIT) for (const i of pending) await t.update("installments", i.id, { status: "cancelled", balance: 0 });
+          await t.update("titles", id, { status: "cancelled", balance: 0, notes: [cur.notes, `Cancelado: ${reason}`].filter(Boolean).join("\n") });
+          changed = true;
+        }),
+      );
+    } catch (e) {
+      if (isConflict(e) && (await activeSettlements()).length) throw hasSettlements();
+      throw e;
+    }
+  }
+  const insts = await instsOf();
+  const rest = insts.filter((i) => i.status !== "cancelled");
+  for (let k = 0; k < rest.length; k += TX_LIMIT) {
+    await ctx.store.transaction(async (t) => {
+      for (const i of rest.slice(k, k + TX_LIMIT)) await t.update("installments", i.id, { status: "cancelled", balance: 0 });
+    });
+  }
+  if (!changed) return ctx.store.getOrThrow("titles", id);
   for (const i of insts) {
     await resolveOccurrence(ctx.store, `overdue:${i.id}`);
     await resolveOccurrence(ctx.store, `payable_due:${i.id}`);
@@ -506,8 +628,11 @@ export async function cancelTitle(ctx: Ctx, id: string, reason: string) {
 
 export async function approvePayable(ctx: Ctx, id: string, note?: string) {
   const title = await ctx.store.getOrThrow("titles", id);
+  assert(title.companyId === ctx.companyId, "Título inválido: pertence a outra empresa.", "cross_company");
   assert(title.kind === "payable", "Somente contas a pagar exigem autorização.");
+  assert(title.status !== "cancelled", "Título cancelado não pode ser autorizado.");
   if (title.approvalStatus === "approved") return title;
+  assert(title.status !== "paid", "Título já quitado: não há pagamento a autorizar.");
   const updated = await ctx.store.update("titles", id, { approvalStatus: "approved", approvedBy: ctx.user.id, approvedAt: new Date().toISOString() });
   await audit(ctx, { module: "finance", action: "payable.approve", entityType: "title", entityId: id, summary: `Obrigação nº ${title.number} conferida/autorizada para pagamento`, reason: note ?? null });
   return updated;
@@ -709,7 +834,12 @@ export async function updateInstallment(ctx: Ctx, id: string, patch: { dueDate?:
     assert(reason?.trim(), "Informe o motivo da alteração do vencimento.");
     next.dueDate = patch.dueDate;
   }
-  if (patch.ourNumber !== undefined && (patch.ourNumber || null) !== (inst.ourNumber || null)) next.ourNumber = patch.ourNumber?.trim() || null;
+  if (patch.ourNumber !== undefined) {
+    const raw = patch.ourNumber?.trim() || null;
+    const norm = raw ? normalizeOurNumber(raw) : null;
+    if (raw) assert(norm, "Nosso número inválido: informe os dígitos do boleto.");
+    if ((norm || null) !== (inst.ourNumber || null)) next.ourNumber = norm;
+  }
   if (!Object.keys(next).length) return inst;
   const updated = await ctx.store.update("installments", id, next);
   if (next.dueDate && next.dueDate >= today()) await resolveOccurrence(ctx.store, `overdue:${id}`);
@@ -971,7 +1101,7 @@ const DIRECT_KINDS = ["pix", "other", "voucher", "transfer"];
 export async function savePaymentMethod(ctx: Ctx, id: string | null, input: PaymentMethodInput) {
   assert(input.name?.trim(), "Informe o nome do meio de pagamento.");
   assert(METHOD_KINDS.some((k) => k.value === input.kind), "Tipo de meio inválido.");
-  assert(input.feeBps >= 0 && input.feeBps <= 10000, "Taxa deve estar entre 0% e 100%.");
+  assert(Number.isInteger(input.feeBps) && input.feeBps >= 0 && input.feeBps <= 2000, "Taxa deve estar entre 0% e 20% (confira a vírgula decimal: 1,5% = um e meio por cento).");
   assert(input.settlementDays >= 0 && input.settlementDays <= 400, "Prazo de liquidação inválido.");
   assert(input.maxInstallments >= 1 && input.maxInstallments <= 48, "Parcelas máximas entre 1 e 48.");
   if (DIRECT_KINDS.includes(input.kind)) assert(input.accountId, "Informe a conta de destino (o valor é lançado direto nela).");
@@ -1001,7 +1131,7 @@ export async function savePaymentTerm(ctx: Ctx, id: string | null, input: Paymen
   assert(input.installments >= 1 && input.installments <= 60, "Parcelas entre 1 e 60.");
   assert(input.firstDueDays >= 0 && input.firstDueDays <= 365, "1º vencimento entre 0 e 365 dias.");
   assert(input.intervalDays >= 1 && input.intervalDays <= 365, "Intervalo entre 1 e 365 dias.");
-  assert(input.interestBps >= 0 && input.interestBps <= 10000, "Juros inválidos.");
+  assert(Number.isInteger(input.interestBps) && input.interestBps >= 0 && input.interestBps <= 5000, "Juros da condição devem estar entre 0% e 50% sobre o total.");
   return saveSimple(ctx, "payment_terms", id, { name: input.name.trim(), installments: input.installments, firstDueDays: input.firstDueDays, intervalDays: input.intervalDays, interestBps: input.interestBps, kind: input.kind, active: input.active !== false }, "Condição de parcelamento");
 }
 
@@ -1088,10 +1218,25 @@ export async function cardFeeByInstallment(store: Store, titles: Doc[]): Promise
   return out;
 }
 
+/**
+ * Forma canônica do nosso número (a mesma que os leitores CNAB devolvem): sem a carteira antes da barra
+ * ("109/00054321-5"), sem o dígito verificador após hífen ("12345678-9" → "12345678"), sem espaços/pontuação
+ * e sem zeros à esquerda ("00054321" → "54321").
+ */
+export function normalizeOurNumber(v: string | null | undefined): string {
+  let s = String(v ?? "").trim();
+  if (s.includes("/")) s = s.slice(s.lastIndexOf("/") + 1);
+  s = s.replace(/-\s*[0-9A-Za-z]$/, "").replace(/[^0-9A-Za-z]/g, "");
+  return s.replace(/^0+/, "");
+}
+
 /** Localiza a parcela a receber de um evento de cobrança: nosso número cadastrado ou "seu número" = nºtítulo/nºparcela. */
 export async function findInstallmentByCollectionRef(store: Store, companyId: string, ref: { ourNumber?: string | null; yourNumber?: string | null }) {
   if (ref.ourNumber) {
-    const variants = [ref.ourNumber, ref.ourNumber.replace(/^0+/, "")].filter(Boolean);
+    const norm = normalizeOurNumber(ref.ourNumber);
+    // gravações antigas guardavam o número como digitado (com zeros à esquerda): também procura as formas preenchidas
+    const padded = norm && /^\d+$/.test(norm) ? Array.from({ length: Math.max(0, 20 - norm.length) }, (_, k) => norm.padStart(norm.length + k + 1, "0")) : [];
+    const variants = [...new Set([ref.ourNumber, norm, ...padded].filter(Boolean))];
     const hit = await store.list("installments", { filters: [["eq", "companyId", companyId], ["eq", "kind", "receivable"], ["eq", "ourNumber", variants]], limit: 1, total: false });
     if (hit.items[0]) return hit.items[0];
   }
@@ -1110,6 +1255,12 @@ export async function findInstallmentByCollectionRef(store: Store, companyId: st
 export const collectionYourNumber = (titleNumber: number, instNumber: number) => `${titleNumber}/${instNumber}`;
 
 // ───────────────────────────── Renegociação de crediário (Tela 22 — ação "Negociar")
+
+/**
+ * Parcelas selecionadas + novas parcelas por renegociação. Mantém a renegociação (2·sel + novas + 2 escritas) e o
+ * seu desfazimento (2·sel + 2·novas + 2 escritas) dentro do limite de 100 escritas por transação do Appwrite.
+ */
+export const RENEG_MAX_ITEMS = 49;
 
 export interface RenegotiateInput {
   titleId: string;
@@ -1130,14 +1281,24 @@ export interface RenegotiateInput {
 export async function renegotiate(ctx: Ctx, input: RenegotiateInput) {
   const branchId = requireBranch(ctx);
   assert(input.reason?.trim(), "Informe o motivo/condições da renegociação.");
-  assert(input.installmentIds.length > 0, "Selecione as parcelas a renegociar.");
+  const ids = (input.installmentIds ?? []).map((x) => String(x ?? "").trim()).filter(Boolean);
+  assert(ids.length > 0, "Selecione as parcelas a renegociar.");
+  // recusa (não corrige em silêncio): o valor acordado foi calculado sobre a lista enviada
+  assert(new Set(ids).size === ids.length, "Parcela repetida na seleção. Atualize a tela e selecione as parcelas novamente.", "duplicate_installment");
   assert(input.charges >= 0 && input.discount >= 0, "Encargos e desconto não podem ser negativos.");
+  assert(input.installments.length > 0, "Gere as novas parcelas.");
+  assert(
+    ids.length + input.installments.length <= RENEG_MAX_ITEMS,
+    `Renegociação limitada a ${RENEG_MAX_ITEMS} parcelas no total (selecionadas + novas): reduza para no máximo ${Math.max(1, RENEG_MAX_ITEMS - ids.length)} nova(s) parcela(s) ou renegocie em etapas.`,
+    "too_many_installments",
+  );
   const title = await ctx.store.getOrThrow("titles", input.titleId);
   assert(title.companyId === ctx.companyId && title.kind === "receivable", "Somente títulos a receber podem ser renegociados.");
+  assert(title.status !== "cancelled", "Título cancelado não pode ser renegociado.");
   const newId = titleId(`reneg:${input.idemKey}`);
   const existing = await ctx.store.get("titles", newId);
   if (existing) return existing;
-  const insts = await Promise.all(input.installmentIds.map((id) => ctx.store.getOrThrow("installments", id)));
+  const insts = await Promise.all(ids.map((id) => ctx.store.getOrThrow("installments", id)));
   for (const i of insts) {
     assert(i.titleId === title.id, "Parcela de outro título.");
     assert(["open", "partial"].includes(i.status), `Parcela ${i.number} não está em aberto.`);
@@ -1153,7 +1314,19 @@ export async function renegotiate(ctx: Ctx, input: RenegotiateInput) {
       for (const i of insts) {
         const cur = await ctx.store.getOrThrow("installments", i.id);
         assert(cur.balance === i.balance && ["open", "partial"].includes(cur.status), "A parcela foi alterada por outra operação. Atualize e tente novamente.");
-        await t.update("installments", i.id, { status: "renegotiated", balance: 0, seq: cur.seq + 1 });
+        const seq = cur.seq + 1;
+        // marcador na sequência da parcela (índice único installmentId+seq): baixa/estorno concorrente gera conflito no commit
+        // e a operação perdedora relê o estado; também registra qual título recebeu o saldo (operationId)
+        const key = `reneg:${input.idemKey}:${cur.id}`;
+        await t.create(
+          "settlements",
+          {
+            companyId: ctx.companyId, branchId: title.branchId ?? branchId, createdBy: ctx.user.id, installmentId: cur.id, titleId: title.id, kind: "renegotiation", seq, date: today(),
+            principal: 0, interest: 0, fine: 0, discount: 0, fee: 0, total: 0, status: "active", operationId: newId, notes: `Saldo ${formatMoney(cur.balance)} renegociado`, idemKey: key,
+          },
+          detId("settle", key),
+        );
+        await t.update("installments", i.id, { status: "renegotiated", balance: 0, seq });
       }
       await t.increment("titles", title.id, "balance", -base, { min: 0 });
       return createTitle(
@@ -1174,6 +1347,110 @@ export async function renegotiate(ctx: Ctx, input: RenegotiateInput) {
   await audit(ctx, { module: "finance", action: "title.renegotiate", entityType: "title", entityId: title.id, summary: `Parcelas ${insts.map((i) => i.number).join(", ")} renegociadas → título nº ${created.number} (${formatMoney(total)} em ${input.installments.length} parcela(s))`, reason: input.reason, related: [`title:${created.id}`, ...insts.map((i) => `installment:${i.id}`)] });
   await audit(ctx, { module: "finance", action: "title.create", entityType: "title", entityId: created.id, summary: `Título nº ${created.number} criado por renegociação do título nº ${title.number}`, related: [`title:${title.id}`] });
   return created;
+}
+
+/** Parcelas do título original que uma renegociação incluiu (marcadores; dados antigos: todas as renegociadas do título). */
+async function renegotiatedInstallments(ctx: Ctx, nt: Doc, orig: Doc): Promise<Doc[]> {
+  const marks = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", orig.id], ["eq", "kind", "renegotiation"], ["eq", "operationId", nt.id]] });
+  if (marks.length) {
+    const ids = [...new Set(marks.map((m) => m.installmentId as string))];
+    return Promise.all(ids.map((x) => ctx.store.getOrThrow("installments", x)));
+  }
+  const siblings = (await listAll(ctx.store, "titles", { filters: [["eq", "originType", "renegotiation"], ["eq", "originId", orig.id]] })).filter((t) => t.companyId === ctx.companyId && t.status !== "cancelled");
+  assert(siblings.length === 1 && siblings[0].id === nt.id, "Renegociação registrada antes do controle por parcela e com outras renegociações do mesmo título: desfaça manualmente (lançamento de ajuste).", "legacy_renegotiation");
+  return (await listAll(ctx.store, "installments", { filters: [["eq", "titleId", orig.id]] })).filter((i) => i.status === "renegotiated");
+}
+
+/**
+ * Desfaz uma renegociação: cancela o título gerado (somente sem recebimentos ativos) e devolve as parcelas originais
+ * ao saldo (aberta/parcial, saldo = valor − principal já baixado), recompondo o saldo do título original.
+ * Tudo numa transação; marcadores na sequência das parcelas serializam com baixas concorrentes.
+ */
+export async function undoRenegotiation(ctx: Ctx, renegTitleId: string, reason: string) {
+  const branchId = requireBranch(ctx);
+  assert(reason?.trim(), "Informe o motivo para desfazer a renegociação.");
+  const nt = await ctx.store.getOrThrow("titles", renegTitleId);
+  assert(nt.companyId === ctx.companyId, "Título de outra empresa.", "cross_company");
+  assert(nt.originType === "renegotiation" && nt.originId, "Este título não foi gerado por renegociação.");
+  if (nt.status === "cancelled") return nt;
+  const orig = await ctx.store.getOrThrow("titles", nt.originId);
+  assert(orig.companyId === ctx.companyId, "Título original de outra empresa.", "cross_company");
+  assert(orig.status !== "cancelled", `O título original nº ${orig.number} foi cancelado; a renegociação não pode ser desfeita.`);
+  const active = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", nt.id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
+  if (active.length) throw new BusinessError(`O título nº ${nt.number} já possui recebimento(s). Estorne-os antes de desfazer a renegociação.`, "has_settlements");
+  const origInsts = await renegotiatedInstallments(ctx, nt, orig);
+  assert(origInsts.length > 0, "Não foram encontradas as parcelas renegociadas do título original.");
+  let already = false;
+  let restored: Doc[] = [];
+  let newInsts: Doc[] = [];
+  await retryOnConflict(() =>
+    ctx.store.transaction(async (t) => {
+      already = false;
+      const cur = await ctx.store.getOrThrow("titles", nt.id);
+      if (cur.status === "cancelled") {
+        already = true;
+        return;
+      }
+      newInsts = await listAll(ctx.store, "installments", { filters: [["eq", "titleId", nt.id]], orderBy: [{ field: "number", dir: "asc" }] });
+      const live = newInsts.filter((i) => i.status !== "cancelled");
+      for (const i of live) {
+        if (i.status === "renegotiated") {
+          const next = await renegotiationTitleOf(ctx, i);
+          throw new BusinessError(`A parcela ${i.number} deste título foi renegociada novamente${next ? ` (título nº ${next.number})` : ""}: desfaça primeiro a renegociação mais recente.`, "renegotiated_again");
+        }
+        if (i.paid > 0 || i.status !== "open") throw new BusinessError(`O título nº ${nt.number} já possui recebimento(s). Estorne-os antes de desfazer a renegociação.`, "has_settlements");
+      }
+      const origCur = await Promise.all(origInsts.map((i) => ctx.store.getOrThrow("installments", i.id)));
+      for (const i of origCur) assert(i.status === "renegotiated", `A parcela ${i.number} do título nº ${orig.number} não está mais renegociada. Atualize a tela.`);
+      assert(2 * (live.length + origCur.length) + 2 <= TX_LIMIT, `Renegociação com muitas parcelas (${live.length + origCur.length}) para desfazer numa única operação. Cancele o título nº ${nt.number} manualmente com lançamento de ajuste.`);
+      const day = today();
+      const note = `Renegociação desfeita: ${reason.trim()}`;
+      for (const i of live) {
+        const seq = i.seq + 1;
+        const key = `reneg-undo:${nt.id}:${i.id}`;
+        await t.create(
+          "settlements",
+          { companyId: ctx.companyId, branchId: nt.branchId ?? branchId, createdBy: ctx.user.id, installmentId: i.id, titleId: nt.id, kind: "renegotiation_undo", seq, date: day, principal: 0, interest: 0, fine: 0, discount: 0, fee: 0, total: 0, status: "active", operationId: nt.id, notes: note.slice(0, 500), idemKey: key },
+          detId("settle", key),
+        );
+        await t.update("installments", i.id, { status: "cancelled", balance: 0, seq });
+      }
+      await t.update("titles", nt.id, { status: "cancelled", balance: 0, notes: [cur.notes, note].filter(Boolean).join("\n") });
+      let back = 0;
+      restored = [];
+      for (const i of origCur) {
+        const seq = i.seq + 1;
+        const balance = i.amount - (i.paid ?? 0);
+        const key = `reneg-undo:${nt.id}:${i.id}`;
+        await t.create(
+          "settlements",
+          { companyId: ctx.companyId, branchId: orig.branchId ?? branchId, createdBy: ctx.user.id, installmentId: i.id, titleId: orig.id, kind: "renegotiation_undo", seq, date: day, principal: 0, interest: 0, fine: 0, discount: 0, fee: 0, total: 0, status: "active", operationId: nt.id, notes: note.slice(0, 500), idemKey: key },
+          detId("settle", key),
+        );
+        await t.update("installments", i.id, { status: (i.paid ?? 0) > 0 ? "partial" : "open", balance, seq });
+        back += balance;
+        restored.push({ ...i, balance });
+      }
+      if (back > 0) await t.increment("titles", orig.id, "balance", back);
+    }),
+  );
+  if (already) return ctx.store.getOrThrow("titles", nt.id);
+  if ((await ctx.store.getOrThrow("titles", orig.id)).status === "cancelled") {
+    // título original cancelado em paralelo: as parcelas devolvidas acompanham o cancelamento
+    await cancelTitle(ctx, orig.id, "Cancelamento concluído após desfazer renegociação");
+    await ctx.store.update("titles", orig.id, { balance: 0 });
+  }
+  await refreshTitleStatus(ctx.store, orig.id);
+  const t0 = today();
+  for (const i of newInsts) {
+    await resolveOccurrence(ctx.store, `overdue:${i.id}`);
+    await resolveOccurrence(ctx.store, `payable_due:${i.id}`);
+  }
+  for (const i of restored) if (i.dueDate < t0) await reopenOccurrence(ctx.store, `overdue:${i.id}`);
+  const nums = restored.map((i) => i.number).join(", ");
+  await audit(ctx, { module: "finance", action: "title.renegotiation_undo", entityType: "title", entityId: nt.id, summary: `Renegociação desfeita: título nº ${nt.number} cancelado; parcelas ${nums} do título nº ${orig.number} restauradas`, reason, related: [`title:${orig.id}`, ...restored.map((i) => `installment:${i.id}`)] });
+  await audit(ctx, { module: "finance", action: "title.renegotiation_undo", entityType: "title", entityId: orig.id, summary: `Parcelas ${nums} voltaram ao saldo (renegociação nº ${nt.number} desfeita)`, reason, related: [`title:${nt.id}`] });
+  return ctx.store.getOrThrow("titles", nt.id);
 }
 
 // ───────────────────────────── Aviso de cobrança por e-mail (Tela 22 — "Enviar cobrança")

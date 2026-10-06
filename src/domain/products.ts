@@ -9,7 +9,7 @@ import { onlyDigits, searchable } from "@/lib/core/text";
 import { saveFile } from "@/lib/core/files";
 import { formatMoney, QTY } from "@/lib/money";
 import { balanceId, ensureBalance, postMovements } from "./stock";
-import { defaultPriceTableId, recordPriceHistory, savePrice } from "./pricing";
+import { defaultPriceTableId, priceScopeKey, recordPriceHistory, savePrice, validatePrice } from "./pricing";
 
 /**
  * Produtos e serviços (Telas 15–16 e visões complementares 1 e 2).
@@ -407,17 +407,68 @@ function buildProductData(input: ProductInput, fiscal: ReturnType<typeof normali
   };
 }
 
+type PlannedVariant = VariantInput & { sku: string; barcode: string | null; extraBarcodes: string[] };
+
+/** SKUs a criar a partir dos eixos/variações informados (ou do próprio produto, na retomada). */
+function planVariants(input: ProductInput, extras: CreateExtras, code: string, product?: Doc | null): { axes: Axis[]; planned: PlannedVariant[] } {
+  let axes = (extras.axes ?? []).filter((a) => a.name && a.values.length);
+  if (!axes.length && !extras.variants?.length && product?.hasVariants) axes = ((product.variantAxes ?? []) as Axis[]).filter((a) => a.name && a.values.length);
+  const variants: VariantInput[] = axes.length
+    ? (extras.variants?.length ? extras.variants : generateVariantCombos(axes).map((attributes) => ({ attributes })))
+    : [{ attributes: {}, sku: extras.sku || code, barcode: input.gtin || product?.gtin || null }];
+  const planned = variants.map((v) => ({ ...v, sku: normalizeSkuCode(v.sku?.trim() || variantSkuCode(code, v.attributes)), barcode: v.barcode?.trim() || null, extraBarcodes: (v.extraBarcodes ?? []).map((x) => x.trim()).filter(Boolean) }));
+  return { axes, planned };
+}
+
+interface CreateEffects {
+  tableId: string | null;
+  stock: { wh: Doc; params: boolean; initialQty: number } | null;
+}
+
+/**
+ * Valida, ANTES de gravar qualquer coisa, tudo o que o cadastro fará depois: preço na tabela padrão
+ * (tabela existente, permissão e valores), parâmetros de estoque e saldo inicial (permissões, filial,
+ * depósito e quantidades). Assim uma falha não deixa produto/SKU gravados sem o restante.
+ */
+async function validateCreateEffects(ctx: Ctx, input: ProductInput, extras: CreateExtras, skuCount: number): Promise<CreateEffects> {
+  let tableId: string | null = null;
+  if (extras.price != null && extras.price > 0) {
+    assert(can(ctx.user, "products", "edit"), "Você não tem permissão para definir preços (alteração de produtos). Deixe o preço em branco ou peça a quem tem a permissão.");
+    tableId = await defaultPriceTableId(ctx.store, ctx.companyId);
+    assert(tableId, "Cadastre uma tabela de preço padrão em Cadastros auxiliares.");
+    validatePrice({ price: extras.price, wholesalePrice: extras.wholesalePrice ?? null, wholesaleMinQty: extras.wholesaleMinQty ?? null, maxDiscountBps: extras.maxDiscountBps ?? null });
+  }
+  let stock: CreateEffects["stock"] = null;
+  const st = extras.stock;
+  if (st && input.type === "product") {
+    const params = { minQty: st.minQty ?? 0, maxQty: st.maxQty ?? 0, safetyQty: st.safetyQty ?? 0, reorderMultiple: st.reorderMultiple ?? 0 };
+    const wantsParams = Boolean(params.minQty || params.maxQty || params.safetyQty || params.reorderMultiple || st.location?.trim());
+    const initialQty = st.qty && st.qty > 0 && skuCount === 1 ? st.qty : 0;
+    if (wantsParams) assert(canEditStockParams(ctx), "Você não tem permissão para alterar parâmetros de estoque.");
+    if (initialQty) {
+      assert(canPostInitial(ctx), "Você não tem permissão para lançar saldo inicial. Deixe o saldo inicial em branco ou peça a quem tem a permissão de estoque.");
+      assert(Number.isInteger(initialQty), "Informe a quantidade inicial.");
+    }
+    const doParams = wantsParams || canEditStockParams(ctx);
+    if (doParams || initialQty) {
+      validateStockParams(params);
+      stock = { wh: await branchWarehouse(ctx, st.warehouseId), params: doParams, initialQty };
+    }
+  }
+  return { tableId, stock };
+}
+
 /**
  * Cria produto com seus SKUs, custos, preço padrão e (opcional) saldo inicial e parâmetros de estoque.
- * Idempotente por `idemKey` (duplo envio do formulário devolve o mesmo produto).
+ * Tudo é validado antes da primeira gravação. Idempotente por `idemKey`: o reenvio devolve o mesmo
+ * produto e completa o que tiver faltado (SKUs, preço, parâmetros, saldo inicial) — nunca responde
+ * "cadastrado" com o cadastro pela metade.
  */
 export async function createProduct(ctx: Ctx, input: ProductInput, extras: CreateExtras = {}) {
   requirePerm(ctx, "products", "create");
   const pid = extras.idemKey ? detId("product", ctx.companyId, extras.idemKey) : undefined;
-  if (pid) {
-    const existing = await ctx.store.get("products", pid);
-    if (existing) return existing;
-  }
+  const existing = pid ? await ctx.store.get("products", pid) : null;
+  if (existing) return completeProduct(ctx, existing, input, extras, true);
   await validateGeneral(ctx, input);
   const regime = companyRegime(await companyDoc(ctx));
   const fiscal = normalizeFiscal(input.type, input, regime);
@@ -425,18 +476,12 @@ export async function createProduct(ctx: Ctx, input: ProductInput, extras: Creat
   const dupCode = await findOne(ctx.store, "products", [["eq", "companyId", ctx.companyId], ["eq", "code", code]]);
   if (dupCode) throw new BusinessError(`Já existe produto com o código ${code}: ${dupCode.name}.`, "duplicate");
 
-  // SKUs planejados (validação completa antes de gravar)
-  const axes = (extras.axes ?? []).filter((a) => a.name && a.values.length);
-  const variants: VariantInput[] = axes.length
-    ? (extras.variants?.length ? extras.variants : generateVariantCombos(axes).map((attributes) => ({ attributes })))
-    : [{ attributes: {}, sku: extras.sku || code, barcode: input.gtin || null }];
-  const planned = variants.map((v) => ({ ...v, sku: normalizeSkuCode(v.sku?.trim() || variantSkuCode(code, v.attributes)), barcode: v.barcode?.trim() || null, extraBarcodes: (v.extraBarcodes ?? []).map((x) => x.trim()).filter(Boolean) }));
+  // SKUs planejados e efeitos (validação completa antes de gravar)
+  const { axes, planned } = planVariants(input, extras, code);
   await assertSkuCodesFree(ctx, planned.map((v) => v.sku));
   await assertBarcodesFree(ctx, planned.flatMap((v) => [v.barcode ?? "", ...v.extraBarcodes]));
   for (const v of planned) for (const b of [v.barcode, ...v.extraBarcodes]) if (b && /^\d+$/.test(b)) assert(isValidGtin(b), `Código de barras ${b} inválido.`);
-  const additional = (extras.additionalCosts ?? []).filter((c) => c.name?.trim() && c.amount);
-  const costAcq = Math.max(0, extras.costAcquisition ?? 0);
-  const costAdd = additional.reduce((a, c) => a + c.amount, 0);
+  const effects = await validateCreateEffects(ctx, input, extras, planned.length);
 
   let product: Doc;
   try {
@@ -449,24 +494,59 @@ export async function createProduct(ctx: Ctx, input: ProductInput, extras: Creat
     if (isConflict(e)) {
       if (pid) {
         const again = await ctx.store.get("products", pid);
-        if (again) return again;
+        if (again) return completeProduct(ctx, again, input, extras, true);
       }
       throw new BusinessError(`Já existe produto com o código ${code}.`, "duplicate");
     }
     throw e;
   }
-  const skus: Doc[] = [];
-  for (const v of planned) {
-    const sku = await ctx.store.create(
-      "skus",
-      {
-        companyId: ctx.companyId, createdBy: ctx.user.id, productId: product.id, sku: v.sku, barcode: v.barcode, extraBarcodes: v.extraBarcodes, attributes: v.attributes,
-        name: variantName(product.name, v.attributes), unitCode: product.unitCode, active: v.active ?? true, costAcquisition: costAcq, costAdditional: costAdd, costTotal: costAcq + costAdd,
-        additionalCosts: additional, searchText: searchable(variantName(product.name, v.attributes), v.sku, v.barcode, ...v.extraBarcodes),
-      },
-      detId("sku", product.id, v.sku),
-    );
+  return completeProduct(ctx, product, input, extras, false, effects);
+}
+
+/**
+ * Grava (ou completa, na repetição) SKUs, preço padrão, parâmetros de estoque e saldo inicial do produto.
+ * Cada efeito é idempotente: SKU por id determinístico, preço por escopo (tabela × SKU), parâmetros por
+ * comparação e saldo inicial pela chave `initial:<saldo>`.
+ */
+async function completeProduct(ctx: Ctx, product: Doc, input: ProductInput, extras: CreateExtras, resumed: boolean, validated?: CreateEffects) {
+  const code = product.code as string;
+  const existingSkus = await listAll(ctx.store, "skus", { filters: [["eq", "productId", product.id]] });
+  const { planned } = planVariants(input, extras, code, product);
+  const sameAttrs = (a: Record<string, string> | null | undefined, b: Record<string, string>) => JSON.stringify(Object.entries(a ?? {}).sort()) === JSON.stringify(Object.entries(b ?? {}).sort());
+  const missing = planned.filter((v) => !existingSkus.some((s) => s.id === detId("sku", product.id, v.sku) || s.sku === v.sku || sameAttrs(s.attributes, v.attributes)));
+  if (resumed && missing.length) {
+    await assertSkuCodesFree(ctx, missing.map((v) => v.sku));
+    await assertBarcodesFree(ctx, missing.flatMap((v) => [v.barcode ?? "", ...v.extraBarcodes]));
+  }
+  const effects = validated ?? (await validateCreateEffects(ctx, input, extras, existingSkus.length + missing.length));
+  const additional = (extras.additionalCosts ?? []).filter((c) => c.name?.trim() && c.amount);
+  const costAcq = Math.max(0, extras.costAcquisition ?? 0);
+  const costAdd = additional.reduce((a, c) => a + c.amount, 0);
+  const done: string[] = [];
+
+  const skus: Doc[] = [...existingSkus];
+  for (const v of missing) {
+    const skuId = detId("sku", product.id, v.sku);
+    let sku: Doc;
+    try {
+      sku = await ctx.store.create(
+        "skus",
+        {
+          companyId: ctx.companyId, createdBy: ctx.user.id, productId: product.id, sku: v.sku, barcode: v.barcode, extraBarcodes: v.extraBarcodes, attributes: v.attributes,
+          name: variantName(product.name, v.attributes), unitCode: product.unitCode, active: v.active ?? true, costAcquisition: costAcq, costAdditional: costAdd, costTotal: costAcq + costAdd,
+          additionalCosts: additional, searchText: searchable(variantName(product.name, v.attributes), v.sku, v.barcode, ...v.extraBarcodes),
+        },
+        skuId,
+      );
+    } catch (e) {
+      if (!isConflict(e)) throw e;
+      const again = await ctx.store.get("skus", skuId);
+      if (!again) throw e;
+      skus.push(again);
+      continue;
+    }
     skus.push(sku);
+    done.push(`SKU ${v.sku}`);
     if (costAcq || costAdd) {
       await recordPriceHistory(ctx, [
         { skuId: sku.id, productId: product.id, field: "costAcquisition", oldValue: null, newValue: costAcq, reason: "Custo inicial do cadastro" },
@@ -474,33 +554,44 @@ export async function createProduct(ctx: Ctx, input: ProductInput, extras: Creat
       ]);
     }
   }
-  await ctx.store.update("products", product.id, { searchText: await productSearchText(ctx.store, product, skus) });
+  if (done.length) await ctx.store.update("products", product.id, { searchText: await productSearchText(ctx.store, product, skus) });
 
-  // preço padrão na tabela padrão da empresa
-  if (extras.price != null && extras.price > 0) {
-    const tableId = await defaultPriceTableId(ctx.store, ctx.companyId);
-    assert(tableId, "Cadastre uma tabela de preço padrão em Cadastros auxiliares.");
+  // preço padrão na tabela padrão da empresa (SKUs ainda sem preço geral nessa tabela)
+  if (effects.tableId && extras.price != null && extras.price > 0) {
     for (const sku of skus) {
-      await savePrice(ctx, { priceTableId: tableId!, skuId: sku.id, price: extras.price, wholesalePrice: extras.wholesalePrice ?? null, wholesaleMinQty: extras.wholesaleMinQty ?? null, maxDiscountBps: extras.maxDiscountBps ?? null, reason: "Preço inicial do cadastro" });
+      if (await ctx.store.get("prices", detId("price", priceScopeKey(effects.tableId, sku.id, null, null)))) continue;
+      await savePrice(ctx, { priceTableId: effects.tableId, skuId: sku.id, price: extras.price, wholesalePrice: extras.wholesalePrice ?? null, wholesaleMinQty: extras.wholesaleMinQty ?? null, maxDiscountBps: extras.maxDiscountBps ?? null, reason: "Preço inicial do cadastro" });
+      done.push(`preço de ${sku.sku}`);
     }
   }
   // estoque: parâmetros e saldo inicial (movimento identificado)
-  if (extras.stock && input.type === "product") {
+  const st = extras.stock;
+  if (effects.stock && st) {
     for (const sku of skus) {
-      await saveStockParams(ctx, { warehouseId: extras.stock.warehouseId, skuId: sku.id, minQty: extras.stock.minQty ?? 0, maxQty: extras.stock.maxQty ?? 0, safetyQty: extras.stock.safetyQty ?? 0, reorderMultiple: extras.stock.reorderMultiple ?? 0, location: extras.stock.location ?? null });
-      if (extras.stock.qty && extras.stock.qty > 0 && skus.length === 1) {
-        await postInitialBalance(ctx, { warehouseId: extras.stock.warehouseId, skuId: sku.id, qty: extras.stock.qty, unitCost: extras.stock.unitCost ?? costAcq + costAdd });
+      if (effects.stock.params) {
+        await saveStockParams(ctx, { warehouseId: effects.stock.wh.id, skuId: sku.id, minQty: st.minQty ?? 0, maxQty: st.maxQty ?? 0, safetyQty: st.safetyQty ?? 0, reorderMultiple: st.reorderMultiple ?? 0, location: st.location ?? null });
+      }
+      if (effects.stock.initialQty && skus.length === 1) {
+        const bal = await ensureBalance(ctx.store, ctx, effects.stock.wh.id, sku.id);
+        if (!(await ctx.store.get("stock_movements", detId("mov", `initial:${bal.id}`)))) {
+          await postInitialBalance(ctx, { warehouseId: effects.stock.wh.id, skuId: sku.id, qty: effects.stock.initialQty, unitCost: st.unitCost ?? costAcq + costAdd });
+          done.push("saldo inicial");
+        }
       }
     }
   }
-  await audit(ctx, {
-    module: "products",
-    action: "product.create",
-    entityType: "product",
-    entityId: product.id,
-    summary: `${input.type === "service" ? "Serviço" : "Produto"} ${code} — ${product.name} ${input.draft ? "salvo como rascunho" : "cadastrado"} (${skus.length} SKU${skus.length > 1 ? "s" : ""})`,
-    after: { code, name: product.name, skus: skus.map((s) => s.sku) },
-  });
+  if (!resumed) {
+    await audit(ctx, {
+      module: "products",
+      action: "product.create",
+      entityType: "product",
+      entityId: product.id,
+      summary: `${input.type === "service" ? "Serviço" : "Produto"} ${code} — ${product.name} ${input.draft ? "salvo como rascunho" : "cadastrado"} (${skus.length} SKU${skus.length > 1 ? "s" : ""})`,
+      after: { code, name: product.name, skus: skus.map((s) => s.sku) },
+    });
+  } else if (done.length) {
+    await audit(ctx, { module: "products", action: "product.create_completed", entityType: "product", entityId: product.id, summary: `Cadastro de ${code} — ${product.name} completado na nova tentativa: ${done.join(", ")}` });
+  }
   return (await ctx.store.get("products", product.id))!;
 }
 
@@ -753,20 +844,31 @@ function canEditStockParams(ctx: Ctx) {
 }
 
 /** Mínimo, máximo/alvo, estoque de segurança, múltiplo de compra e localização (não altera saldo). */
-export async function saveStockParams(ctx: Ctx, input: { warehouseId: string; skuId: string; minQty: number; maxQty: number; safetyQty: number; reorderMultiple: number; location?: string | null }) {
-  assert(canEditStockParams(ctx), "Você não tem permissão para alterar parâmetros de estoque.");
-  const branchId = requireBranch(ctx);
-  const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
-  assert(wh.companyId === ctx.companyId && wh.branchId === branchId, "O depósito não pertence à filial selecionada.");
+function validateStockParams(input: { minQty: number; maxQty: number; safetyQty: number; reorderMultiple: number }) {
   for (const [k, v] of Object.entries({ mínimo: input.minQty, máximo: input.maxQty, segurança: input.safetyQty, múltiplo: input.reorderMultiple })) assert(Number.isInteger(v) && v >= 0, `Quantidade de ${k} inválida.`);
   if (input.maxQty > 0) assert(input.maxQty >= input.minQty, "O máximo/alvo deve ser maior ou igual ao mínimo.");
-  const bal = await ensureBalance(ctx.store, ctx, input.warehouseId, input.skuId);
+}
+
+/** Depósito da filial ativa (empresa e filial conferidas). */
+async function branchWarehouse(ctx: Ctx, warehouseId: string) {
+  const branchId = requireBranch(ctx);
+  const wh = await ctx.store.get("warehouses", warehouseId);
+  assert(wh && wh.companyId === ctx.companyId && wh.branchId === branchId, "O depósito não pertence à filial selecionada.");
+  return wh!;
+}
+
+export async function saveStockParams(ctx: Ctx, input: { warehouseId: string; skuId: string; minQty: number; maxQty: number; safetyQty: number; reorderMultiple: number; location?: string | null }) {
+  assert(canEditStockParams(ctx), "Você não tem permissão para alterar parâmetros de estoque.");
+  const wh = await branchWarehouse(ctx, input.warehouseId);
+  validateStockParams(input);
+  const sku = await ctx.store.get("skus", input.skuId);
+  assert(sku && sku.companyId === ctx.companyId, "SKU não encontrado nesta empresa.");
+  const bal = await ensureBalance(ctx.store, ctx, input.warehouseId, sku!.id);
   const patch = { minQty: input.minQty, maxQty: input.maxQty, safetyQty: input.safetyQty, reorderMultiple: input.reorderMultiple, location: input.location?.trim() || null };
   const d = diff(bal, patch);
   if (!Object.keys(d.after).length) return bal;
   const u = await ctx.store.update("stock_balances", bal.id, patch);
-  const sku = await ctx.store.get("skus", input.skuId);
-  await audit(ctx, { module: "products", action: "stock.params", entityType: "product", entityId: sku?.productId, summary: `Parâmetros de estoque de ${sku?.sku} em ${wh.name} alterados`, before: d.before, after: d.after, related: [`sku:${input.skuId}`] });
+  await audit(ctx, { module: "products", action: "stock.params", entityType: "product", entityId: sku!.productId, summary: `Parâmetros de estoque de ${sku!.sku} em ${wh.name} alterados`, before: d.before, after: d.after, related: [`sku:${sku!.id}`] });
   return u;
 }
 
@@ -774,8 +876,12 @@ export async function saveStockParams(ctx: Ctx, input: { warehouseId: string; sk
  * Saldo inicial: movimento identificado do tipo `initial` (uma única vez por saldo, só antes de qualquer
  * outro movimento). Depois disso, correções são feitas por ajuste (Tela 17) ou inventário.
  */
+function canPostInitial(ctx: Ctx) {
+  return canDo(ctx.user, "stock.adjust") || can(ctx.user, "stock", "create");
+}
+
 export async function postInitialBalance(ctx: Ctx, input: { warehouseId: string; skuId: string; qty: number; unitCost?: number | null }) {
-  assert(canDo(ctx.user, "stock.adjust") || can(ctx.user, "stock", "create"), "Você não tem permissão para lançar saldo inicial.");
+  assert(canPostInitial(ctx), "Você não tem permissão para lançar saldo inicial.");
   const branchId = requireBranch(ctx);
   assert(Number.isInteger(input.qty) && input.qty > 0, "Informe a quantidade inicial.");
   const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
@@ -843,6 +949,9 @@ export async function saveCategory(ctx: Ctx, input: { id?: string | null; name: 
   const name = input.name?.trim();
   assert(name, "Informe o nome da categoria.");
   const all = await listAll(ctx.store, "categories", { filters: [["eq", "companyId", ctx.companyId]] });
+  // alteração só de categoria da própria empresa (a lista já é da empresa ativa)
+  const before = input.id ? all.find((c) => c.id === input.id) : null;
+  if (input.id) assert(before, "Categoria não encontrada.");
   const dup = all.find((c) => c.name.toLowerCase() === name.toLowerCase() && (c.parentId ?? null) === (input.parentId || null) && c.id !== input.id);
   assert(!dup, "Já existe categoria com este nome no mesmo nível.");
   if (input.parentId) {
@@ -855,8 +964,9 @@ export async function saveCategory(ctx: Ctx, input: { id?: string | null; name: 
     }
   }
   const data = { name, parentId: input.parentId || null, status: input.status ?? "active" };
-  const doc = input.id ? await ctx.store.update("categories", input.id, data) : await ctx.store.create("categories", { companyId: ctx.companyId, createdBy: ctx.user.id, ...data });
-  await audit(ctx, { module: "products", action: input.id ? "category.update" : "category.create", entityType: "category", entityId: doc.id, summary: `Categoria ${name} ${input.id ? "alterada" : "cadastrada"}` });
+  const doc = before ? await ctx.store.update("categories", before.id, data) : await ctx.store.create("categories", { companyId: ctx.companyId, createdBy: ctx.user.id, ...data });
+  const d = diff(before ?? null, data);
+  await audit(ctx, { module: "products", action: before ? "category.update" : "category.create", entityType: "category", entityId: doc.id, summary: `Categoria ${name} ${before ? "alterada" : "cadastrada"}`, before: before ? d.before : undefined, after: d.after });
   return doc;
 }
 
@@ -916,11 +1026,16 @@ export async function saveBrand(ctx: Ctx, input: { id?: string | null; name: str
   requirePerm(ctx, "products", input.id ? "edit" : "create");
   const name = input.name?.trim();
   assert(name, "Informe o nome da marca.");
-  const dup = (await listAll(ctx.store, "brands", { filters: [["eq", "companyId", ctx.companyId]] })).find((b) => b.name.toLowerCase() === name.toLowerCase() && b.id !== input.id);
+  const all = await listAll(ctx.store, "brands", { filters: [["eq", "companyId", ctx.companyId]] });
+  // alteração só de marca da própria empresa (a lista já é da empresa ativa)
+  const before = input.id ? all.find((b) => b.id === input.id) : null;
+  if (input.id) assert(before, "Marca não encontrada.");
+  const dup = all.find((b) => b.name.toLowerCase() === name.toLowerCase() && b.id !== input.id);
   assert(!dup, "Já existe marca com este nome.");
   const data = { name, status: input.status ?? "active" };
-  const doc = input.id ? await ctx.store.update("brands", input.id, data) : await ctx.store.create("brands", { companyId: ctx.companyId, createdBy: ctx.user.id, ...data });
-  await audit(ctx, { module: "products", action: input.id ? "brand.update" : "brand.create", entityType: "brand", entityId: doc.id, summary: `Marca ${name} ${input.id ? "alterada" : "cadastrada"}` });
+  const doc = before ? await ctx.store.update("brands", before.id, data) : await ctx.store.create("brands", { companyId: ctx.companyId, createdBy: ctx.user.id, ...data });
+  const d = diff(before ?? null, data);
+  await audit(ctx, { module: "products", action: before ? "brand.update" : "brand.create", entityType: "brand", entityId: doc.id, summary: `Marca ${name} ${before ? "alterada" : "cadastrada"}`, before: before ? d.before : undefined, after: d.after });
   return doc;
 }
 

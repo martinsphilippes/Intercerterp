@@ -48,14 +48,15 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
       {!company ? (
         <div className="grid gap-2">
           {filteredCompanies.map((c) => {
-            const count = branches.filter((b) => b.companyId === c.id).length;
+            const count = branches.filter((b) => b.companyId === c.id && b.status !== "inactive").length;
+            const inactive = c.status === "inactive";
             return (
-              <button key={c.id} onClick={() => { setCompanyId(c.id); setQ(""); }} className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50/40">
+              <button key={c.id} disabled={inactive} title={inactive ? "Empresa inativa: não pode ser selecionada. Um administrador pode reativá-la em Administração → Empresas." : undefined} onClick={() => { setCompanyId(c.id); setQ(""); }} className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white">
                 <span className="flex items-center gap-3">
                   <Building2 className="size-5 text-brand-700" />
                   <span>
-                    <span className="flex items-center gap-2 text-sm font-medium">{c.name}{c.isDemo && <Badge tone="sim">DEMO</Badge>}</span>
-                    <span className="block text-xs text-slate-500">{c.legal !== c.name ? `${c.legal} · ` : ""}CNPJ {fmtCnpj(c.cnpj) || "—"} · {count} unidade{count === 1 ? "" : "s"} disponíve{count === 1 ? "l" : "is"}</span>
+                    <span className="flex items-center gap-2 text-sm font-medium">{c.name}{c.isDemo && <Badge tone="sim">DEMO</Badge>}{inactive && <Badge tone="neutral">Inativa</Badge>}</span>
+                    <span className="block text-xs text-slate-500">{c.legal !== c.name ? `${c.legal} · ` : ""}CNPJ {fmtCnpj(c.cnpj) || "—"} · {inactive ? "empresa inativa — seleção bloqueada" : `${count} unidade${count === 1 ? "" : "s"} disponíve${count === 1 ? "l" : "is"}`}</span>
                   </span>
                 </span>
                 <ChevronRight className="size-4 text-slate-400" />
@@ -81,7 +82,7 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
             {units.map((b) => {
               const f = fiscalLabel[b.fiscalStatus] ?? ["Fiscal não configurado", "neutral"];
               return (
-                <button key={b.id} disabled={pending || b.status !== "active"} onClick={() => choose(company.id, b.id)} className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50/40 disabled:opacity-60">
+                <button key={b.id} disabled={pending || b.status === "inactive"} title={b.status === "inactive" ? "Filial inativa: não pode ser selecionada nem operar. Consulte pelo consolidado da empresa." : undefined} onClick={() => choose(company.id, b.id)} className="focus-ring flex items-center justify-between gap-3 rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50/40 disabled:opacity-60">
                   <span className="flex items-center gap-3">
                     <Store className="size-5 text-slate-400" />
                     <span>
@@ -90,7 +91,7 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
                     </span>
                   </span>
                   <span className="flex flex-col items-end gap-1">
-                    <Badge tone={b.status === "active" ? "good" : "neutral"}>{b.status === "active" ? "Operando" : "Inativa"}</Badge>
+                    <Badge tone={b.status !== "inactive" ? "good" : "neutral"}>{b.status !== "inactive" ? "Operando" : "Inativa — seleção bloqueada"}</Badge>
                     <Badge tone={f[1]}>{f[0]}</Badge>
                   </span>
                 </button>

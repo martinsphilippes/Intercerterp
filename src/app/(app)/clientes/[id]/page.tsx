@@ -27,7 +27,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const { tab = "resumo" } = await searchParams;
   const c = await s.ctx.store.get("customers", id);
   if (!c || c.companyId !== s.ctx.companyId) notFound();
-  const sum = await customerSummary(s.ctx.store, id);
+  const sum = await customerSummary(s.ctx, id);
   const users = await nameMap(s.ctx, "users");
   const addr = c.addresses?.[0];
   const base = `/clientes/${id}`;

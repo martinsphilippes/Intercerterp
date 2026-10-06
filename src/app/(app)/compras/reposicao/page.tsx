@@ -119,6 +119,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           confirmedInHorizon: r.confirmedInHorizon, confirmedOutside: r.confirmedOutside, draftQty: r.draftQty, grossNeed: r.grossNeed, suggested: r.suggested, situation: r.situation, limitation: r.limitation,
           hasHistory: r.hasHistory, avgDaily: r.avgDaily, horizonDays: r.horizonDays, supplierId: r.supplierId, supplierName: r.supplierName, unitCost: r.unitCost, supplierMinQty: r.supplierMinQty, multiple: r.multiple,
           stockoutDate: r.stockoutDate, nextArrival: r.nextArrival, supplierOptions: r.supplierOptions.map((o) => ({ supplierId: o.supplierId, name: o.name, lastCost: o.lastCost, leadTimeDays: o.leadTimeDays })),
+          unavailableSuppliers: r.unavailableSuppliers.map((u) => ({ name: u.name, statusLabel: u.statusLabel, statusReason: u.statusReason })),
         }))}
       />
       <details className="mt-4 rounded-lg border border-line bg-white p-4 text-sm">

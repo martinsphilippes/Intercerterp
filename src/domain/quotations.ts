@@ -8,7 +8,7 @@ import { onlyDigits } from "@/lib/core/text";
 import { addDays, nowIso, parseDateInput, today } from "@/lib/dates";
 import { formatMoney, parseBps, parseMoney, parseQty } from "@/lib/money";
 import { evaluateSelection, suggestSelection, type QuoteItem, type QuoteProposal, type ProposalItem } from "./purchase-calc";
-import { createOrder } from "./purchases";
+import { cancelOrder, createOrder, orderItems, updateOrder, ORDER_STATUS_LABEL, type OrderInput, type OrderStatus } from "./purchases";
 import { assertSupplierUsable, supplierLabel } from "./suppliers";
 import type { QuoteOptions } from "./purchase-calc";
 
@@ -35,6 +35,31 @@ export async function getQuotation(ctx: Ctx, id: string) {
   const q = await ctx.store.getOrThrow("quotations", id);
   assert(q.companyId === ctx.companyId, "Cotação de outra empresa.");
   return q;
+}
+
+/** Escrita na cotação: exige filial definida (não consolidado) e que a cotação seja da filial ativa. */
+async function getQuotationForWrite(ctx: Ctx, id: string) {
+  const branchId = requireBranch(ctx);
+  const q = await getQuotation(ctx, id);
+  if (q.branchId !== branchId) throw new BusinessError(`Cotação nº ${q.number} é de outra filial: selecione a filial da cotação para alterá-la.`, "other_branch");
+  return q;
+}
+
+/** Fornecedor da própria empresa (o id vem do formulário/cliente). */
+async function companySupplier(ctx: Ctx, supplierId: string) {
+  const s = await ctx.store.get("suppliers", supplierId);
+  if (!s || s.companyId !== ctx.companyId) throw new BusinessError("Fornecedor não encontrado nesta empresa.", "not_found");
+  return s;
+}
+
+/** Fornecedores utilizáveis (da empresa e ativos) entre os informados. */
+async function usableSupplierIds(ctx: Ctx, ids: string[]) {
+  const out = new Set<string>();
+  for (const id of new Set(ids)) {
+    const s = await ctx.store.get("suppliers", id);
+    if (s && s.companyId === ctx.companyId && s.status === "active") out.add(id);
+  }
+  return out;
 }
 
 async function buildItems(ctx: Ctx, items: QuotationInput["items"]): Promise<QuoteItem[]> {
@@ -86,12 +111,16 @@ export async function createQuotation(ctx: Ctx, input: QuotationInput & { idemKe
 /** Altera itens/fornecedores enquanto aberta e sem pedidos gerados. */
 export async function updateQuotation(ctx: Ctx, id: string, input: QuotationInput) {
   requirePerm(ctx, "purchases", "edit");
-  const q = await getQuotation(ctx, id);
+  const q = await getQuotationForWrite(ctx, id);
   assert(q.status === "open" && !q.ordersCreated, "Cotação encerrada não pode ser alterada.");
   const items = await buildItems(ctx, input.items);
   const supplierIds = [...new Set(input.supplierIds.filter(Boolean))];
   assert(supplierIds.length >= 1, "Selecione ao menos um fornecedor.");
-  for (const sid of supplierIds.filter((x) => !(q.supplierIds ?? []).includes(x))) assertSupplierUsable(await ctx.store.getOrThrow("suppliers", sid));
+  // todos os fornecedores precisam ser da empresa; os incluídos agora também precisam estar utilizáveis
+  for (const sid of supplierIds) {
+    const s = await companySupplier(ctx, sid);
+    if (!(q.supplierIds ?? []).includes(sid)) assertSupplierUsable(s);
+  }
   const u = await ctx.store.update("quotations", id, { title: input.title?.trim() || q.title, items, supplierIds, responseDue: input.responseDue || null, notes: input.notes ?? null, selection: null, selectionMode: null });
   const d = diff(q, u);
   await audit(ctx, { module: "purchases", action: "quotation.update", entityType: "quotation", entityId: id, summary: `Cotação nº ${q.number} alterada (seleção reiniciada)`, before: d.before, after: d.after });
@@ -101,7 +130,7 @@ export async function updateQuotation(ctx: Ctx, id: string, input: QuotationInpu
 export async function cancelQuotation(ctx: Ctx, id: string, reason: string) {
   requirePerm(ctx, "purchases", "edit");
   assert(reason?.trim(), "Informe o motivo.");
-  const q = await getQuotation(ctx, id);
+  const q = await getQuotationForWrite(ctx, id);
   assert(q.status === "open" && !q.ordersCreated, "Somente cotação aberta sem pedidos pode ser cancelada.");
   await ctx.store.update("quotations", id, { status: "cancelled", closedAt: nowIso() });
   await audit(ctx, { module: "purchases", action: "quotation.cancel", entityType: "quotation", entityId: id, summary: `Cotação nº ${q.number} cancelada`, reason });
@@ -129,7 +158,7 @@ export async function quotationProposals(store: Store, quotationId: string) {
 /** Registra ou atualiza a proposta do fornecedor (nova versão a cada alteração). */
 export async function saveProposal(ctx: Ctx, quotationId: string, input: ProposalInput) {
   requirePerm(ctx, "purchases", "edit");
-  const q = await getQuotation(ctx, quotationId);
+  const q = await getQuotationForWrite(ctx, quotationId);
   assert(q.status === "open" && !q.ordersCreated, "Cotação encerrada: propostas não podem mais ser alteradas.");
   assert((q.supplierIds ?? []).includes(input.supplierId), "Fornecedor não participa desta cotação.");
   const skuIds = new Set((q.items as QuoteItem[]).map((i) => i.skuId));
@@ -140,8 +169,9 @@ export async function saveProposal(ctx: Ctx, quotationId: string, input: Proposa
   }
   assert(items.length > 0, "Informe o preço de ao menos um item.");
   assert((input.freight ?? 0) >= 0 && (input.minOrderValue ?? 0) >= 0, "Frete e pedido mínimo não podem ser negativos.");
-  const supplier = await ctx.store.getOrThrow("suppliers", input.supplierId);
+  const supplier = await companySupplier(ctx, input.supplierId);
   const term = input.paymentTermId ? await ctx.store.get("payment_terms", input.paymentTermId) : null;
+  assert(!term || term.companyId === ctx.companyId, "Condição de pagamento inválida.");
   const existing = await findOne(ctx.store, "quotation_proposals", [["eq", "quotationId", quotationId], ["eq", "supplierId", input.supplierId]]);
   const data = {
     items: items.map((i) => ({ skuId: i.skuId, unitPrice: i.unitPrice, discountBps: i.discountBps ?? 0, available: i.available !== false, availableQty: i.availableQty ?? null, leadTimeDays: i.leadTimeDays ?? null, deliveryDate: i.deliveryDate || null, notes: i.notes ?? null })),
@@ -172,7 +202,7 @@ export async function saveProposal(ctx: Ctx, quotationId: string, input: Proposa
 
 export async function removeProposal(ctx: Ctx, quotationId: string, supplierId: string) {
   requirePerm(ctx, "purchases", "edit");
-  const q = await getQuotation(ctx, quotationId);
+  const q = await getQuotationForWrite(ctx, quotationId);
   assert(q.status === "open" && !q.ordersCreated, "Cotação encerrada.");
   const p = await findOne(ctx.store, "quotation_proposals", [["eq", "quotationId", quotationId], ["eq", "supplierId", supplierId]]);
   if (!p) return;
@@ -190,7 +220,8 @@ export async function removeProposal(ctx: Ctx, quotationId: string, supplierId: 
  * Campos de cabeçalho da proposta (frete, prazo, mínimo, validade, condição) usam a primeira linha preenchida do fornecedor.
  */
 export async function importProposalsCsv(ctx: Ctx, quotationId: string, csv: string) {
-  const q = await getQuotation(ctx, quotationId);
+  requirePerm(ctx, "purchases", "edit");
+  const q = await getQuotationForWrite(ctx, quotationId);
   const text = csv.replace(/^﻿/, "").trim();
   assert(text, "Arquivo vazio.");
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
@@ -219,7 +250,7 @@ export async function importProposalsCsv(ctx: Ctx, quotationId: string, csv: str
   const col = (...names: string[]) => header.findIndex((h) => names.includes(h));
   const ix = { supplier: col("fornecedor", "cnpj", "supplier"), sku: col("sku", "produto", "codigo"), price: col("preco", "preco_unitario", "precounitario", "valor"), disc: col("desconto", "desconto_", "descontopct"), avail: col("disponivel", "disponibilidade"), availQty: col("qtd_disponivel", "qtddisponivel", "quantidade_disponivel"), lead: col("prazo", "prazo_dias", "prazodias"), freight: col("frete"), min: col("pedido_minimo", "pedidominimo", "minimo"), valid: col("validade", "valido_ate"), term: col("condicao", "condicao_pagamento", "pagamento") };
   assert(ix.supplier >= 0 && ix.sku >= 0 && ix.price >= 0, "Cabeçalho deve conter as colunas fornecedor, sku e preco.");
-  const suppliers = await Promise.all((q.supplierIds ?? []).map((id: string) => ctx.store.get("suppliers", id)));
+  const suppliers = (await Promise.all((q.supplierIds ?? []).map((id: string) => ctx.store.get("suppliers", id)))).filter((s) => s && s.companyId === ctx.companyId);
   const skuByCode = new Map((q.items as QuoteItem[]).map((i) => [String(i.sku ?? "").toUpperCase(), i.skuId]));
   const groups = new Map<string, ProposalInput>();
   const errors: string[] = [];
@@ -272,11 +303,12 @@ export function toQuoteProposals(proposals: Doc[], supplierNames: Map<string, st
   }));
 }
 
-export async function supplierNameMap(store: Store, ids: string[]) {
+export async function supplierNameMap(store: Store, ids: string[], companyId?: string) {
   const out = new Map<string, string>();
   for (const id of ids) {
     const s = await store.get("suppliers", id);
-    if (s) out.set(id, supplierLabel(s));
+    // defesa em profundidade: nunca expõe fornecedor de outra empresa
+    if (s && (!companyId || s.companyId === companyId)) out.set(id, supplierLabel(s));
   }
   return out;
 }
@@ -285,8 +317,8 @@ export async function supplierNameMap(store: Store, ids: string[]) {
 export async function quotationView(ctx: Ctx, id: string, opts: QuoteOptions = {}) {
   const q = await getQuotation(ctx, id);
   const props = await quotationProposals(ctx.store, id);
-  const names = await supplierNameMap(ctx.store, q.supplierIds ?? []);
-  const proposals = toQuoteProposals(props, names);
+  const names = await supplierNameMap(ctx.store, q.supplierIds ?? [], ctx.companyId);
+  const proposals = toQuoteProposals(props.filter((p) => names.has(p.supplierId)), names);
   const items = q.items as QuoteItem[];
   const refDate = today();
   const selItems: Record<string, { supplierId: string; proposalId: string; version: number }> = q.selection?.items ?? {};
@@ -304,13 +336,19 @@ export async function quotationView(ctx: Ctx, id: string, opts: QuoteOptions = {
 /** Grava a seleção (manual ou sugerida) com a versão da proposta escolhida. */
 export async function saveSelection(ctx: Ctx, id: string, assign: Record<string, string | null>, mode: "manual" | "suggested", meta?: Record<string, any>) {
   requirePerm(ctx, "purchases", "edit");
-  const q = await getQuotation(ctx, id);
+  const q = await getQuotationForWrite(ctx, id);
   assert(q.status === "open" && !q.ordersCreated, "Cotação encerrada: a seleção não pode mais ser alterada.");
   const props = await quotationProposals(ctx.store, id);
   const items: Record<string, { supplierId: string; proposalId: string; version: number }> = {};
+  const checked = new Set<string>();
   for (const it of q.items as QuoteItem[]) {
     const sid = assign[it.skuId];
     if (!sid) continue;
+    if (!checked.has(sid)) {
+      // fornecedor bloqueado/inativo/rascunho não pode ser escolhido (a geração dos pedidos falharia)
+      assertSupplierUsable(await companySupplier(ctx, sid));
+      checked.add(sid);
+    }
     const p = props.find((x) => x.supplierId === sid);
     assert(p, `Fornecedor sem proposta para ${it.description}.`);
     assert((p.items ?? []).some((pi: any) => pi.skuId === it.skuId && pi.unitPrice > 0), `${supplierLabel(await ctx.store.get("suppliers", sid))} não cotou ${it.description}.`);
@@ -318,7 +356,7 @@ export async function saveSelection(ctx: Ctx, id: string, assign: Record<string,
   }
   const selection = { items, mode, at: nowIso(), by: ctx.user.name, ...(meta ?? {}) };
   await ctx.store.update("quotations", id, { selection, selectionMode: mode });
-  const names = await supplierNameMap(ctx.store, q.supplierIds ?? []);
+  const names = await supplierNameMap(ctx.store, q.supplierIds ?? [], ctx.companyId);
   const ev = evaluateSelection(q.items, toQuoteProposals(props, names), Object.fromEntries(Object.entries(items).map(([k, v]) => [k, v.supplierId])), today());
   await audit(ctx, { module: "purchases", action: "quotation.selection", entityType: "quotation", entityId: id, summary: `Seleção ${mode === "suggested" ? "sugerida (heurística)" : "manual"} gravada: ${ev.groups.length} fornecedor(es), total ${formatMoney(ev.grandTotal)} com frete` });
   return ev;
@@ -326,8 +364,11 @@ export async function saveSelection(ctx: Ctx, id: string, assign: Record<string,
 
 /** Aplica a sugestão heurística de menor total viável. */
 export async function applySuggestion(ctx: Ctx, id: string, opts: QuoteOptions = {}) {
+  await getQuotationForWrite(ctx, id);
   const v = await quotationView(ctx, id, opts);
-  const s = suggestSelection(v.items, v.proposals, v.refDate, opts);
+  // a sugestão considera só fornecedores utilizáveis (ativos)
+  const usable = await usableSupplierIds(ctx, v.proposals.map((p) => p.supplierId));
+  const s = suggestSelection(v.items, v.proposals.filter((p) => usable.has(p.supplierId)), v.refDate, opts);
   assert(Object.keys(s.assign).length > 0, "Nenhuma proposta viável (válida e disponível) para sugerir.");
   const ev = await saveSelection(ctx, id, s.assign, "suggested", { onTimeOnly: Boolean(opts.onTimeOnly), heuristic: { method: s.method, greedyTotal: s.greedyTotal, total: s.evaluation.grandTotal, rounds: s.rounds, feasible: s.feasible } });
   return { ...s, evaluation: ev };
@@ -336,9 +377,14 @@ export async function applySuggestion(ctx: Ctx, id: string, opts: QuoteOptions =
 /**
  * Gera os pedidos em rascunho (um por fornecedor) UMA única vez, a partir da seleção vigente,
  * preservando proposta/versão/validade em `proposalRef`. Opcionalmente envia todos para análise.
+ *  - Valida todos os fornecedores ANTES de criar qualquer pedido (nada é criado se algum falhar).
+ *  - Reconcilia uma tentativa anterior interrompida: rascunho do mesmo fornecedor é ressincronizado
+ *    com a seleção atual; rascunho de fornecedor que saiu da seleção é cancelado; pedido que já saiu
+ *    de rascunho interrompe com orientação; pedido cancelado não é reaproveitado (nova chave).
  */
 export async function generateOrders(ctx: Ctx, id: string, opts: { submit?: boolean; notes?: string | null } = {}) {
   requirePerm(ctx, "purchases", "create");
+  await getQuotationForWrite(ctx, id);
   const v = await quotationView(ctx, id);
   if (v.q.ordersCreated) return { orders: v.orders, created: false };
   assert(v.q.status === "open", "Cotação não está aberta.");
@@ -346,10 +392,29 @@ export async function generateOrders(ctx: Ctx, id: string, opts: { submit?: bool
   assert(v.evaluation.unassigned.length === 0, "Há itens sem fornecedor selecionado.");
   assert(v.stale.length === 0, "Há propostas alteradas depois da seleção. Revise a seleção (a versão escolhida mudou).");
   for (const g of v.evaluation.groups) for (const it of g.items) assert(it.available, `${it.description}: ${it.reason ?? "indisponível"} em ${g.supplierName}.`);
+  // 1) validação prévia de todos os grupos
+  for (const g of v.evaluation.groups) {
+    assertSupplierUsable(await companySupplier(ctx, g.supplierId));
+    assert(g.items.length <= 90, `${g.supplierName}: limite de 90 produtos por pedido — divida a cotação.`);
+  }
+  // 2) pedidos deixados por uma tentativa anterior (falha parcial)
+  const previous = (await listAll(ctx.store, "purchase_orders", { filters: [["eq", "companyId", ctx.companyId], ["eq", "quotationId", id]], orderBy: [{ field: "number" }] })).filter((o) => o.status !== "cancelled");
+  const selected = new Set(v.evaluation.groups.map((g) => g.supplierId));
+  const keep = new Map<string, Doc>();
+  for (const o of previous) {
+    if (selected.has(o.supplierId) && !keep.has(o.supplierId)) {
+      if (o.status !== "draft") throw new BusinessError(`O pedido nº ${o.number} desta cotação (${supplierLabel(o.supplierSnapshot)}) já está ${ORDER_STATUS_LABEL[o.status as OrderStatus] ?? o.status}. Cancele-o para gerar os pedidos com a seleção atual.`, "quotation_orders");
+      keep.set(o.supplierId, o);
+      continue;
+    }
+    if (o.status !== "draft") throw new BusinessError(`O pedido nº ${o.number} desta cotação (${supplierLabel(o.supplierSnapshot)}) já está ${ORDER_STATUS_LABEL[o.status as OrderStatus] ?? o.status} e não corresponde à seleção atual. Cancele-o antes de gerar os pedidos.`, "quotation_orders");
+    await cancelOrder(ctx, o.id, `Seleção da cotação nº ${v.q.number} alterada antes da geração dos pedidos.`);
+  }
   const orders: Doc[] = [];
   for (const g of v.evaluation.groups) {
     const raw = v.rawProposals.find((p) => p.id === g.proposalId)!;
-    const o = await createOrder(ctx, {
+    const proposalRef = { proposalId: g.proposalId, version: g.version, validUntil: g.validUntil, freight: g.freight, minOrderValue: g.minOrderValue, belowMinimum: g.belowMinimum, leadTimeDays: g.leadTimeDays, paymentTermsText: g.paymentTermsText, quotationNumber: v.q.number };
+    const input: OrderInput = {
       supplierId: g.supplierId,
       expectedDate: g.deliveryDate ?? addDays(today(), g.leadTimeDays ?? 0),
       items: g.items.map((it) => ({ skuId: it.skuId, qty: it.qty, unitCost: it.unitPrice, discount: it.discount, description: it.description, unitCode: it.unitCode })),
@@ -360,9 +425,27 @@ export async function generateOrders(ctx: Ctx, id: string, opts: { submit?: bool
       origin: "quotation",
       originId: id,
       quotationId: id,
-      proposalRef: { proposalId: g.proposalId, version: g.version, validUntil: g.validUntil, freight: g.freight, minOrderValue: g.minOrderValue, belowMinimum: g.belowMinimum, leadTimeDays: g.leadTimeDays, paymentTermsText: g.paymentTermsText, quotationNumber: v.q.number },
-      idemKey: `quotation:${id}:${g.supplierId}`,
-    });
+      proposalRef,
+    };
+    let o: Doc;
+    const prev = keep.get(g.supplierId);
+    if (prev) {
+      // rascunho de tentativa anterior: ressincroniza itens/condições com a seleção atual
+      const its = await orderItems(ctx.store, prev.id);
+      const same = prev.total === g.total && its.length === g.items.length && g.items.every((it) => its.some((x) => x.skuId === it.skuId && x.qty === it.qty && x.unitCost === it.unitPrice && (x.discount ?? 0) === it.discount));
+      if (!same) await updateOrder(ctx, prev.id, input);
+      o = await ctx.store.update("purchase_orders", prev.id, { proposalRef });
+    } else {
+      // chave idempotente por cotação × fornecedor; pedido cancelado com a mesma chave não é reaproveitado
+      const base = `quotation:${id}:${g.supplierId}`;
+      let key = base;
+      for (let k = 1; ; k++) {
+        const ex = await ctx.store.get("purchase_orders", detId("po", key));
+        if (!ex || ex.status !== "cancelled") break;
+        key = `${base}:${k}`;
+      }
+      o = await createOrder(ctx, { ...input, idemKey: key });
+    }
     // conciliação: o pedido gerado deve ter exatamente o total do grupo na revisão
     if (o.total !== g.total) throw new BusinessError(`Divergência de cálculo no pedido de ${g.supplierName}: ${formatMoney(o.total)} ≠ ${formatMoney(g.total)}.`);
     orders.push(o);

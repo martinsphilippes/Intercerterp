@@ -18,7 +18,7 @@ import { addMonths, diffDays, formatDate, formatDateTime, formatMonth, monthStar
 import { canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
 import { DOC_STATUS_LABEL, MODEL_LABEL } from "@/domain/fiscal/service";
-import { isRevenue, periodDocuments, summarize, sumBy } from "@/domain/fiscal/reports";
+import { isRevenue, periodDocuments, revenueAmount, summarize, sumBy } from "@/domain/fiscal/reports";
 import { getAccountingSchedule, packageHistory } from "@/domain/fiscal/export";
 import { displayStatus, getTemplates, listObligations, OBLIGATION_KIND_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_SUPPORT } from "@/domain/fiscal/obligations";
 import { getIntegration } from "@/domain/integrations";
@@ -117,7 +117,7 @@ async function Summary({ s, f, withTab }: { s: any; f: any; withTab: (t: string,
     const md = docs.filter((d) => d.model === m);
     const rej = md.filter((d) => ["rejected", "denied"].includes(d.status)).length;
     const pend = md.filter((d) => ["draft", "pending", "queued", "processing", "error"].includes(d.status)).length;
-    return { m, issued: md.filter((d) => ["authorized", "cancelled"].includes(d.status)).length, value: sumBy(md.filter(isRevenue), (d) => d.total), cancelled: md.filter((d) => d.status === "cancelled").length, rej, pend };
+    return { m, issued: md.filter((d) => ["authorized", "cancelled"].includes(d.status)).length, value: sumBy(md.filter(isRevenue), revenueAmount), cancelled: md.filter((d) => d.status === "cancelled").length, rej, pend };
   });
   const obligations = (await listObligations(s.ctx, {})).filter((o) => o.status !== "done" || (o.deliveredAt ?? "").slice(0, 7) >= f.from.slice(0, 7)).slice(0, 6);
   return (
@@ -194,7 +194,7 @@ async function Summary({ s, f, withTab }: { s: any; f: any; withTab: (t: string,
           </div>
         </Card>
       </div>
-      <Card title="Faturamento autorizado por dia" description={`Notas autorizadas de saída (exceto devoluções), por data de emissão — ${formatDate(f.from)} a ${formatDate(f.to)}`}>
+      <Card title="Faturamento autorizado por dia" description={`Notas autorizadas de saída (exceto devoluções, transferências e remessas), por data de emissão — ${formatDate(f.from)} a ${formatDate(f.to)}`}>
         <StackedByModel data={daily} xKey="day" money height={220} />
       </Card>
       <Card title="Critério dos totais (estados incluídos e excluídos)">
@@ -204,6 +204,10 @@ async function Summary({ s, f, withTab }: { s: any; f: any; withTab: (t: string,
             <p className="text-slate-600">Autorizadas de saída (NF-e, NFC-e, NFS-e), exceto finalidade devolução: {sum.revenueCount} documento(s), {formatMoney(sum.gross)}. Devoluções de venda autorizadas (entrada) são deduzidas no líquido: {formatMoney(sum.net)}.</p>
             <p className="mt-2 font-medium text-slate-700">Ficam fora</p>
             <p className="text-slate-600">Canceladas, rejeitadas, denegadas, descartadas, rascunhos, pendentes, na fila, processando e com erro.</p>
+            <p className="mt-2 text-slate-600">
+              Transferências entre filiais e remessas/outras saídas sem venda (CFOP 515x, 5408/5409, 59xx etc.), mesmo autorizadas:{" "}
+              <Link className="text-brand-700 underline" href={withTab("documentos", { crit: "nonrevenue" })}>{sum.nonRevenueCount} documento(s), {formatMoney(sum.nonRevenue)}</Link> — conciliáveis à parte.
+            </p>
           </div>
           <table className="table-base w-full text-sm">
             <thead><tr><th>Situação</th><th className="text-right">Qtd</th><th className="text-right">Valor</th></tr></thead>
@@ -233,12 +237,13 @@ async function DocsTab({ s, params, p }: { s: any; params: SearchParams; p: any 
     { key: "iss", label: "ISS", align: "right", hidden: true, cell: (r) => formatMoney(r.iss) },
     { key: "approxTax", label: "Trib. aprox.", align: "right", cell: (r) => formatMoney(r.approxTax) },
     { key: "total", label: "Valor", align: "right", sortable: true, cell: (r) => formatMoney(r.total) },
+    { key: "revenueValue", label: "No faturamento", align: "right", hidden: crit !== "revenue", cell: (r) => formatMoney(r.revenueValue) },
   ];
-  const critLabel: Record<string, string> = { revenue: "Faturamento (autorizadas de saída, exceto devolução)", returns: "Devoluções recebidas", pending: "Pendências", issued: "Emitidos (autorizados + cancelados)" };
+  const critLabel: Record<string, string> = { revenue: "Faturamento (autorizadas de saída, exceto devolução, transferência e remessa)", nonrevenue: "Transferências e remessas (fora do faturamento)", returns: "Devoluções recebidas", pending: "Pendências", issued: "Emitidos (autorizados + cancelados)" };
   return (
     <>
       <div className="mb-3 flex flex-wrap gap-2 text-xs">
-        {["", "revenue", "issued", "returns", "pending", "cancelled", "rejected"].map((c) => (
+        {["", "revenue", "nonrevenue", "issued", "returns", "pending", "cancelled", "rejected"].map((c) => (
           <Link key={c} href={`/fiscal/relatorios${qs({ crit: c || null, page: null }, params)}`} className={`rounded-full px-3 py-1 ring-1 ${crit === c ? "bg-brand-800 text-white ring-brand-800" : "bg-white text-slate-600 ring-line"}`}>
             {c ? (critLabel[c] ?? DOC_STATUS_LABEL[c]) : "Todos"}
           </Link>
@@ -363,6 +368,7 @@ async function ExportTab({ s, f }: { s: any; f: any }) {
   const history = await packageHistory(s.ctx);
   const logs = (await listAll(s.ctx.store, "integration_logs", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "kind", "accounting"]], orderBy: [{ field: "occurredAt", dir: "desc" }] }, 30)).slice(0, 15);
   const canCfg = canDo(s.user, "fiscal.configure");
+  const canExport = canDo(s.user, "data.export");
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card title="Pacote do período para a contabilidade" description={`${formatDate(f.from)} a ${formatDate(f.to)}${f.branchId || s.ctx.branchId ? " · filial atual" : " · todas as filiais"}`}>
@@ -371,11 +377,15 @@ async function ExportTab({ s, f }: { s: any; f: any }) {
           <input type="hidden" name="from" value={f.from} />
           <input type="hidden" name="to" value={f.to} />
           {f.branchId && <input type="hidden" name="branch" value={f.branchId} />}
-          <Field label="Enviar para (opcional)" hint={integ?.config?.accountantEmail ? `Padrão: ${integ.config.accountantEmail} (integração Área da contabilidade)` : "Configure o e-mail da contabilidade em Integrações."}><Input type="email" name="to" placeholder={integ?.config?.accountantEmail ?? "contabilidade@exemplo.com.br"} /></Field>
-          <div className="flex flex-wrap justify-end gap-2">
-            <button type="submit" name="intent" value="generate" className={buttonClass("secondary")}><FileArchive className="size-4" /> Gerar pacote (download)</button>
-            <button type="submit" name="intent" value="send" className={buttonClass("accent")}><Send className="size-4" /> Gerar e enviar à contabilidade</button>
-          </div>
+          {canCfg && <Field label="Enviar para (opcional)" hint={integ?.config?.accountantEmail ? `Padrão: ${integ.config.accountantEmail} (integração Área da contabilidade). A obrigação “Entrega de XML” só é concluída pelo envio de todas as filiais a esse e-mail.` : "Configure o e-mail da contabilidade em Integrações."}><Input type="email" name="email" placeholder={integ?.config?.accountantEmail ?? "contabilidade@exemplo.com.br"} /></Field>}
+          {canExport ? (
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="submit" name="intent" value="generate" className={buttonClass("secondary")}><FileArchive className="size-4" /> Gerar pacote (download)</button>
+              {canCfg && <button type="submit" name="intent" value="send" className={buttonClass("accent")}><Send className="size-4" /> Gerar e enviar à contabilidade</button>}
+            </div>
+          ) : (
+            <Notice tone="info">Gerar o pacote exige a permissão “Exportar dados”; enviá-lo por e-mail exige “Configurar fiscal e certificados”.</Notice>
+          )}
         </ActionForm>
       </Card>
       <Card title="Agendamento mensal" description="Rotina diária verifica: a partir do dia configurado, gera o pacote do mês anterior e envia pelo canal da integração “contabilidade”; o resultado real fica no histórico.">

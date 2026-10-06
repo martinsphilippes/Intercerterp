@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 import { freshStore } from "./helpers";
 import { addReturn, addSale, at, baseRefs, BR1, BR2, COMPANY } from "./report-fixtures";
 import { branchOperations, commercialOverview, managerialReport, paymentBreakdown, previousPeriod, reportTotals, resolvePeriod, periodFromPreset, totalsOf, loadFacts } from "@/domain/reports";
@@ -260,5 +261,63 @@ describe("integração com o fluxo real de vendas (seed de demonstração)", () 
     const again = await seedDemo(store, { historyDays: 3 });
     expect((again as any).modules.reports.priorReturn).toBe(modules.priorReturn);
     expect((await listAll(store, "returns")).length).toBe(returns.length);
+  });
+});
+
+describe("painel — resumo fiscal e detalhamento", () => {
+  let store: Store;
+  beforeEach(async () => {
+    store = freshStore();
+    await baseRefs(store);
+  });
+
+  it("documentos de simulação não contam como autorizados e vêm marcados", async () => {
+    const { fiscalSnapshot, latestSales } = await import("@/app/(app)/dashboard/queries");
+    const doc = (id: string, over: Record<string, unknown>) => store.create("fiscal_documents", { companyId: COMPANY, branchId: BR1, model: "nfce", status: "authorized", ref: id, total: 1000, issuedAt: at("2026-09-10"), authorizedAt: at("2026-09-10"), isSimulated: false, ...over }, id);
+    await doc("real-1", { total: 2500 });
+    await doc("sim-1", { isSimulated: true, total: 698000 });
+    await doc("sim-2", { isSimulated: true, total: 2000 });
+    await doc("nfe-rej", { model: "nfe", status: "rejected", authorizedAt: null });
+    const snap = await fiscalSnapshot(adminCtx(store), [BR1, BR2], { from: "2026-09-01", to: "2026-09-30" });
+    const nfce = snap.grid.find((g) => g.model === "nfce")!;
+    expect(nfce).toMatchObject({ authorizedCount: 1, authorizedTotal: 2500, simulatedCount: 2, simulatedTotal: 700000 });
+    expect(snap.simulatedCount).toBe(2);
+    expect(snap.totals.rejected).toBe(1);
+    expect(snap.grid.find((g) => g.model === "nfe")!.counts.rejected).toBe(1);
+
+    await addSale(store, { id: "v1", branchId: BR1, at: at("2026-09-10"), items: [{ skuId: "x", qty: 1000, unitPrice: 1000, cost: 1 }] });
+    await store.update("sales", "v1", { fiscalDocumentId: "sim-1" });
+    await addSale(store, { id: "v2", branchId: BR1, at: at("2026-09-11"), items: [{ skuId: "x", qty: 1000, unitPrice: 1000, cost: 1 }] });
+    await store.update("sales", "v2", { fiscalDocumentId: "real-1" });
+    const latest = await latestSales(adminCtx(store), [BR1]);
+    expect(latest.find((x) => x.id === "v1")).toMatchObject({ documentModel: "nfce", documentSimulated: true });
+    expect(latest.find((x) => x.id === "v2")).toMatchObject({ documentModel: "nfce", documentSimulated: false });
+  });
+
+  it("links de detalhamento só apontam para a listagem quando ela abre o mesmo recorte", async () => {
+    const { salesListHref, commercialOpsHref, contextShowsScope, fiscalShowsScope, moduleQs } = await import("@/app/(app)/relatorios/params");
+    const period = { from: "2026-09-01", to: "2026-09-30" };
+    const inBranch1 = { ctx: adminCtx(store, BR1), user: adminCtx(store).user };
+    const consolidated = { ctx: adminCtx(store, null), user: adminCtx(store).user };
+    const b2 = { period, single: true, filial: BR2 };
+    const b1 = { period, single: true, filial: BR1 };
+    const all = { period, single: false, filial: "todas" };
+    // contexto Filial 1: a listagem de vendas só abre a Filial 1
+    expect(salesListHref(inBranch1, b1, { situacao: "completed" })).toBe(`/vendas${moduleQs(b1, { situacao: "completed" })}`);
+    expect(salesListHref(inBranch1, b2)).toBeNull();
+    expect(salesListHref(inBranch1, all)).toBeNull();
+    // → detalhamento pelas operações da filial / resultado por unidade (mesmo período)
+    expect(commercialOpsHref(inBranch1, b2, period)).toBe(`/relatorios/gerenciais/filial/${BR2}?de=2026-09-01&ate=2026-09-30`);
+    expect(commercialOpsHref(inBranch1, all, period)).toBe("/relatorios/gerenciais?de=2026-09-01&ate=2026-09-30&filial=todas");
+    const noReports = { user: { ...adminCtx(store).user, isAdmin: false, permissions: { dashboard: { view: true } } } };
+    expect(commercialOpsHref(noReports, b2, period)).toBeNull();
+    // consolidado: filial explícita ou todas
+    expect(salesListHref(consolidated, b2)).toBe(`/vendas?de=2026-09-01&ate=2026-09-30&filial=${BR2}`);
+    expect(salesListHref(consolidated, all)).toBe("/vendas?de=2026-09-01&ate=2026-09-30");
+    expect(contextShowsScope(consolidated, all)).toBe(true);
+    // fiscal: filial explícita vale em qualquer contexto; "todas" só no consolidado
+    expect(fiscalShowsScope(inBranch1, b2)).toBe(true);
+    expect(fiscalShowsScope(inBranch1, all)).toBe(false);
+    expect(fiscalShowsScope(consolidated, all)).toBe(true);
   });
 });

@@ -1,7 +1,8 @@
 import { detId, findOne, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { BusinessError, assert } from "@/lib/core/errors";
+import { BusinessError, PermissionError, assert } from "@/lib/core/errors";
 import { requirePerm, type Ctx } from "@/lib/core/ctx";
+import { canDo } from "@/lib/permissions";
 import { audit, diff } from "@/lib/core/audit";
 import { nextNumber } from "@/lib/core/numbering";
 import { isValidCnpj, isValidCpf, onlyDigits, searchable } from "@/lib/core/text";
@@ -105,24 +106,63 @@ function buildData(input: CustomerInput, doc: string | null) {
   };
 }
 
-export async function createCustomer(ctx: Ctx, input: CustomerInput, opts: { quick?: boolean } = {}) {
+/** Limite de crédito do crediário: concessão/alteração exige a ação especial "customer.credit_limit". */
+export function canGrantCredit(ctx: Ctx) {
+  return canDo(ctx.user, "customer.credit_limit");
+}
+
+function requireCreditGrant(ctx: Ctx) {
+  if (!canGrantCredit(ctx)) throw new PermissionError("Você não tem permissão para conceder ou alterar o limite de crédito do cliente.");
+}
+
+/** Cliente da empresa ativa (registro de outra empresa é tratado como inexistente). */
+async function companyCustomer(ctx: Ctx, id: string): Promise<Doc> {
+  const c = await ctx.store.get("customers", id);
+  if (!c || c.companyId !== ctx.companyId) throw new BusinessError("Cliente não encontrado.", "not_found");
+  return c;
+}
+
+function docLabel(personType: "PF" | "PJ" | string | null | undefined) {
+  return personType === "PJ" ? "CNPJ" : "CPF";
+}
+
+/**
+ * Cadastro de cliente. A unicidade do CPF/CNPJ fica com o índice único (companyId, doc) — a chave acompanha o
+ * documento atual do registro (corrigir o documento libera o anterior na mesma gravação). O id NÃO deriva do
+ * documento; a idempotência vem da chave do formulário (`idemKey`): repetir o mesmo envio devolve o cliente já criado.
+ */
+export async function createCustomer(ctx: Ctx, input: CustomerInput, opts: { quick?: boolean; idemKey?: string | null } = {}) {
   requirePerm(ctx, "customers", "create");
+  const cid = opts.idemKey ? detId("customer", ctx.companyId, "idem", opts.idemKey) : undefined;
+  if (cid) {
+    const existing = await ctx.store.get("customers", cid);
+    if (existing && existing.companyId === ctx.companyId) return existing; // repetição do mesmo envio
+  }
   assert(input.name?.trim(), "Informe o nome.");
   const doc = normalizeDoc(input.personType, input.doc);
+  if ((input.creditLimit ?? 0) > 0) requireCreditGrant(ctx);
   if (doc) {
     const dup = await findCustomerByDoc(ctx.store, ctx.companyId, doc);
-    if (dup) throw new BusinessError(`Já existe cliente com este ${input.personType === "PF" ? "CPF" : "CNPJ"}: ${dup.name}.`, "duplicate", { id: dup.id });
+    if (dup) throw new BusinessError(`Já existe cliente com este ${docLabel(input.personType)}: ${dup.name}.`, "duplicate", { id: dup.id });
   }
   const seq = await nextNumber(ctx.store, `customer:${ctx.companyId}`);
   const code = input.code?.trim() || `C${String(seq).padStart(5, "0")}`;
   try {
-    const c = await ctx.store.create("customers", { companyId: ctx.companyId, branchId: ctx.branchId, createdBy: ctx.user.id, code, ...buildData({ ...input, code }, doc) }, doc ? detId("customer", ctx.companyId, doc) : undefined);
+    const c = await ctx.store.create("customers", { companyId: ctx.companyId, branchId: ctx.branchId, createdBy: ctx.user.id, code, ...buildData({ ...input, code }, doc) }, cid);
     await audit(ctx, { module: "customers", action: opts.quick ? "customer.quick_create" : "customer.create", entityType: "customer", entityId: c.id, summary: `Cliente ${c.name} cadastrado${opts.quick ? " (cadastro rápido)" : ""}` });
     return c;
   } catch (e) {
-    if (isConflict(e) && doc) {
-      const dup = await findCustomerByDoc(ctx.store, ctx.companyId, doc);
-      throw new BusinessError(`Já existe cliente com este documento${dup ? `: ${dup.name}` : ""}.`, "duplicate", { id: dup?.id });
+    if (isConflict(e)) {
+      // envio concorrente com a mesma chave: devolve o registro gravado pelo outro envio
+      if (cid) {
+        const again = await ctx.store.get("customers", cid);
+        if (again && again.companyId === ctx.companyId) return again;
+      }
+      // documento gravado ao mesmo tempo por outro cadastro (índice único)
+      if (doc) {
+        const dup = await findCustomerByDoc(ctx.store, ctx.companyId, doc);
+        if (dup) throw new BusinessError(`Já existe cliente com este ${docLabel(input.personType)}: ${dup.name}.`, "duplicate", { id: dup.id });
+      }
     }
     throw e;
   }
@@ -130,21 +170,26 @@ export async function createCustomer(ctx: Ctx, input: CustomerInput, opts: { qui
 
 export async function updateCustomer(ctx: Ctx, id: string, input: CustomerInput) {
   requirePerm(ctx, "customers", "edit");
-  const before = await ctx.store.getOrThrow("customers", id);
-  assert(before.companyId === ctx.companyId, "Cliente de outra empresa.");
+  const before = await companyCustomer(ctx, id);
   const doc = normalizeDoc(input.personType, input.doc);
   if (doc && doc !== before.doc) {
     const dup = await findCustomerByDoc(ctx.store, ctx.companyId, doc);
     if (dup && dup.id !== id) throw new BusinessError(`Documento já usado pelo cliente ${dup.name}.`, "duplicate", { id: dup.id });
   }
-  const data = buildData({ ...input, code: input.code ?? before.code }, doc);
+  // limite não enviado (campo somente leitura para quem não pode conceder crédito) = mantém o atual
+  const creditLimit = input.creditLimit == null ? (before.creditLimit ?? 0) : Math.max(0, input.creditLimit);
+  if (creditLimit !== (before.creditLimit ?? 0)) requireCreditGrant(ctx);
+  const data = buildData({ ...input, creditLimit, code: input.code ?? before.code }, doc);
   try {
     const after = await ctx.store.update("customers", id, { ...data, code: input.code?.trim() || before.code });
     const d = diff(before, after);
     if (Object.keys(d.after).length) await audit(ctx, { module: "customers", action: "customer.update", entityType: "customer", entityId: id, summary: `Cadastro de ${after.name} alterado`, before: d.before, after: d.after });
     return after;
   } catch (e) {
-    if (isConflict(e)) throw new BusinessError("Documento já usado por outro cliente.", "duplicate");
+    if (isConflict(e) && doc) {
+      const dup = await findCustomerByDoc(ctx.store, ctx.companyId, doc);
+      throw new BusinessError(`Documento já usado ${dup && dup.id !== id ? `pelo cliente ${dup.name}` : "por outro cliente"}.`, "duplicate", dup ? { id: dup.id } : undefined);
+    }
     throw e;
   }
 }
@@ -152,7 +197,7 @@ export async function updateCustomer(ctx: Ctx, id: string, input: CustomerInput)
 /** Inativa (preserva referências históricas). Exclusão só quando não há operações. */
 export async function setCustomerStatus(ctx: Ctx, id: string, status: "active" | "inactive") {
   requirePerm(ctx, "customers", "edit");
-  const c = await ctx.store.getOrThrow("customers", id);
+  const c = await companyCustomer(ctx, id);
   const u = await ctx.store.update("customers", id, { status });
   await audit(ctx, { module: "customers", action: `customer.${status}`, entityType: "customer", entityId: id, summary: `Cliente ${c.name} ${status === "inactive" ? "inativado" : "reativado"}` });
   return u;
@@ -160,9 +205,9 @@ export async function setCustomerStatus(ctx: Ctx, id: string, status: "active" |
 
 export async function deleteCustomer(ctx: Ctx, id: string) {
   requirePerm(ctx, "customers", "delete");
-  const c = await ctx.store.getOrThrow("customers", id);
-  const sales = await ctx.store.list("sales", { filters: [["eq", "customerId", id]], limit: 1 });
-  const titles = await ctx.store.list("titles", { filters: [["eq", "partyId", id]], limit: 1 });
+  const c = await companyCustomer(ctx, id);
+  const sales = await ctx.store.list("sales", { filters: [["eq", "companyId", ctx.companyId], ["eq", "customerId", id]], limit: 1 });
+  const titles = await ctx.store.list("titles", { filters: [["eq", "companyId", ctx.companyId], ["eq", "partyId", id]], limit: 1 });
   if (sales.items.length || titles.items.length) throw new BusinessError("Cliente com operações registradas não pode ser excluído; use Inativar.", "in_use");
   await ctx.store.delete("customers", id);
   await audit(ctx, { module: "customers", action: "customer.delete", entityType: "customer", entityId: id, summary: `Cliente ${c.name} excluído (sem operações)`, before: { name: c.name, doc: c.doc } });
@@ -195,16 +240,26 @@ export async function lookupCnpj(cnpj: string) {
   }
 }
 
-/** Resumo do relacionamento: compras, ticket, títulos, créditos — calculado das operações reais. */
-export async function customerSummary(store: Store, customerId: string) {
-  const sales = await listAll(store, "sales", { filters: [["eq", "customerId", customerId]], orderBy: [{ field: "completedAt", dir: "desc" }] });
+/**
+ * Resumo do relacionamento: compras, ticket, títulos, créditos e documentos fiscais — calculado das operações
+ * reais da EMPRESA ATIVA (o mesmo CPF/CNPJ pode ser cliente de outra empresa; os dados dela não aparecem).
+ */
+export async function customerSummary(ctx: Pick<Ctx, "store" | "companyId">, customerId: string) {
+  const { store, companyId } = ctx;
+  const customer = await store.get("customers", customerId);
+  const own = Boolean(customer && customer.companyId === companyId);
+  const cid = own ? customerId : "__none__";
+  const sales = own ? await listAll(store, "sales", { filters: [["eq", "companyId", companyId], ["eq", "customerId", cid]], orderBy: [{ field: "completedAt", dir: "desc" }] }) : [];
   const completed = sales.filter((s) => s.status === "completed");
   const net = completed.reduce((a, s) => a + s.total - (s.returnedTotal ?? 0), 0);
-  const installments = await listAll(store, "installments", { filters: [["eq", "partyId", customerId], ["eq", "kind", "receivable"]], orderBy: [{ field: "dueDate" }] });
+  const installments = own ? await listAll(store, "installments", { filters: [["eq", "companyId", companyId], ["eq", "partyId", cid], ["eq", "kind", "receivable"]], orderBy: [{ field: "dueDate" }] }) : [];
   const open = installments.filter((i) => ["open", "partial"].includes(i.status));
   const t = today();
-  const vouchers = await listAll(store, "credit_vouchers", { filters: [["eq", "customerId", customerId]] });
-  const docs = await listAll(store, "fiscal_documents", { filters: [["eq", "recipientDoc", (await store.get("customers", customerId))?.doc ?? "__none__"]] }, 200);
+  const vouchers = own ? await listAll(store, "credit_vouchers", { filters: [["eq", "companyId", companyId], ["eq", "customerId", cid]] }) : [];
+  // documentos fiscais da empresa ativa: emitidos para o CPF/CNPJ atual do cliente ou vinculados ao cliente (partyId)
+  const byDoc = own && customer!.doc ? await listAll(store, "fiscal_documents", { filters: [["eq", "companyId", companyId], ["eq", "recipientDoc", customer!.doc]] }, 200) : [];
+  const byParty = own ? await listAll(store, "fiscal_documents", { filters: [["eq", "companyId", companyId], ["eq", "partyId", cid]] }, 200) : [];
+  const docs = [...new Map([...byDoc, ...byParty].filter((d) => d.companyId === companyId).map((d) => [d.id, d])).values()].sort((a, b) => String(b.issuedAt ?? b.createdAt ?? "").localeCompare(String(a.issuedAt ?? a.createdAt ?? "")));
   return {
     sales,
     salesCount: completed.length,

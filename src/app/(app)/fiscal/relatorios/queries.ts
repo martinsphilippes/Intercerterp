@@ -1,9 +1,10 @@
 import "server-only";
 import type { Ctx } from "@/lib/core/ctx";
+import type { Doc } from "@/lib/db/types";
 import { addMonths, monthEnd, monthStart, today, diffDays, addDays } from "@/lib/dates";
 import { sp, type SearchParams } from "@/lib/list";
 import { DOC_STATUS_LABEL, MODEL_LABEL } from "@/domain/fiscal/service";
-import { cancellations, normalizeFilter, outputBook, periodDocuments, rejections, servicesSummary, summaryByCfop, taxesByNcm, type FiscalReportFilter } from "@/domain/fiscal/reports";
+import { cancellations, isNonRevenueOut, isReturnIn, isRevenue, normalizeFilter, outputBook, PENDING_STATES, periodDocuments, rejections, revenueAmount, servicesSummary, summaryByCfop, taxesByNcm, type FiscalReportFilter } from "@/domain/fiscal/reports";
 import { docRows } from "@/domain/fiscal/export";
 
 /** Filtro dos relatórios: `period` (AAAA-MM) tem precedência; senão De/Até; padrão = mês corrente. */
@@ -65,13 +66,15 @@ export async function periodDocRows(ctx: Ctx, params: SearchParams) {
   const f = reportFilter(ctx, params);
   const docs = await periodDocuments(ctx, f);
   const crit = sp(params, "crit");
+  // mesmos critérios dos totais (summarize): o detalhamento concilia com os indicadores
   const filtered = docs.filter((d) => {
-    if (crit === "revenue") return d.status === "authorized" && d.operationType !== "entrada" && d.purpose !== "devolucao";
-    if (crit === "returns") return d.status === "authorized" && d.operationType === "entrada" && d.purpose === "devolucao";
-    if (crit === "pending") return ["draft", "pending", "queued", "processing", "rejected", "error"].includes(d.status);
+    if (crit === "revenue") return isRevenue(d);
+    if (crit === "nonrevenue") return isNonRevenueOut(d);
+    if (crit === "returns") return isReturnIn(d);
+    if (crit === "pending") return PENDING_STATES.includes(d.status);
     if (crit === "issued") return ["authorized", "cancelled"].includes(d.status);
     if (crit) return d.status === crit;
     return true;
   });
-  return docRows(filtered).map((d): Record<string, any> & { id: string } => ({ ...d, approxTax: d.totals?.approxTax ?? 0, icms: d.totals?.icms ?? 0, iss: d.service?.iss ?? 0 }));
+  return docRows(filtered).map((d): Record<string, any> & { id: string } => ({ ...d, approxTax: d.totals?.approxTax ?? 0, icms: d.totals?.icms ?? 0, iss: d.service?.iss ?? 0, revenueValue: revenueAmount(d as Doc) }));
 }

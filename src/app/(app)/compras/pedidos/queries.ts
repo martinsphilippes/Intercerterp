@@ -22,6 +22,7 @@ export async function queryOrders(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   if (st) filters.push(["eq", "status", ORDER_STATUS_GROUPS[st] ?? [st]]);
   if (p.f.supplier) filters.push(["eq", "supplierId", p.f.supplier]);
   if (p.f.origin) filters.push(["eq", "origin", p.f.origin]);
+  if (p.f.quotation) filters.push(["eq", "quotationId", p.f.quotation]);
   if (p.f.buyer) filters.push(["eq", "buyerId", p.f.buyer]);
   if (p.f.from || p.f.to) {
     const r = dayRange(p.f.from || "2000-01-01", p.f.to || "2100-12-31");

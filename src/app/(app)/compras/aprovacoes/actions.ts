@@ -11,18 +11,20 @@ const PATHS = ["/compras/aprovacoes", "/compras/pedidos"];
 
 export async function decideAction(fd: FormData) {
   const id = fstr(fd, "requestId");
-  return runAction({ module: "purchases", revalidate: [`/compras/aprovacoes/${id}`, ...PATHS] }, async (s) => {
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/aprovacoes/${id}`, ...PATHS] }, async (s) => {
     const decision = fstr(fd, "decision") as Decision;
     if (!["approve", "adjust", "reject"].includes(decision)) return { ok: false as const, error: "Escolha uma decisão." };
     const note = fstr(fd, "note").slice(0, 500);
-    const r = await decideRequest(s.ctx, id, decision, note || null);
+    // etapa e revisão exibidas na tela: decidir sobre uma página desatualizada é recusado
+    if (fstr(fd, "step") === "" || fstr(fd, "revision") === "") return { ok: false as const, error: "Atualize a página e revise a solicitação antes de decidir." };
+    const r = await decideRequest(s.ctx, id, decision, note || null, { step: fint(fd, "step"), revision: fint(fd, "revision") });
     const msg = decision === "approve" ? (r.request.status === "approved" ? "Solicitação aprovada. Os pedidos aguardam o registro de envio ao fornecedor." : "Etapa aprovada — encaminhada para a próxima etapa.") : decision === "adjust" ? "Devolvida para ajuste." : "Solicitação rejeitada.";
     return { ok: true as const, message: msg };
   });
 }
 
 export async function revokeAction(decisionId: string, requestId: string, fd: FormData) {
-  return runAction({ module: "purchases", revalidate: [`/compras/aprovacoes/${requestId}`, ...PATHS] }, async (s) => {
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/aprovacoes/${requestId}`, ...PATHS] }, async (s) => {
     await revokeDecision(s.ctx, decisionId, fstr(fd, "reason"));
     return { ok: true as const, message: "Decisão revista — a solicitação voltou para análise na mesma etapa." };
   });

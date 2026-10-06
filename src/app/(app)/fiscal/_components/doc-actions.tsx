@@ -16,8 +16,12 @@ export interface DocActionFlags {
   xmlFileId?: string | null;
   danfeUrl?: string | null;
   isSimulated: boolean;
+  /** emissão permitida E documento da filial ativa */
   canIssue: boolean;
+  /** cancelamento permitido E documento da filial ativa */
   canCancel: boolean;
+  /** motivo pelo qual as ações de escrita não aparecem (consolidado ou outra filial) */
+  scopeNote?: string | null;
   cancelAllowed: boolean;
   cancelReason?: string | null;
   defaultEmail?: string | null;
@@ -28,7 +32,9 @@ export interface DocActionFlags {
 export function DocActions(f: DocActionFlags) {
   const editable = ["draft", "pending", "rejected"].includes(f.status);
   const retrans = ["rejected", "error", "pending", "queued"].includes(f.status);
-  const discardable = !f.hasProtocol && (["draft", "pending", "rejected"].includes(f.status) || (["queued", "error"].includes(f.status) && f.attempts === 0));
+  // já enviado (attempts > 0, exceto rejeitado): o servidor consulta o provedor antes de descartar
+  const discardable = !f.hasProtocol && ["draft", "pending", "rejected", "queued", "error"].includes(f.status);
+  const sentUnconfirmed = f.attempts > 0 && f.status !== "rejected";
   const printable = f.model !== "nfse" || ["authorized", "cancelled"].includes(f.status) || ["draft", "pending", "rejected"].includes(f.status);
   return (
     <>
@@ -40,7 +46,7 @@ export function DocActions(f: DocActionFlags) {
       )}
       {f.canIssue && editable && f.model !== "nfse" && <ActionButton action={refreshAction.bind(null, f.id)} label="Atualizar do cadastro" icon={<Wrench className="size-4" />} title="Relê NCM/CEST/CFOP/CST dos produtos (após corrigir o cadastro)" />}
       {f.canIssue && retrans && f.status !== "draft" && <ActionButton action={retransmitAction.bind(null, f.id)} label="Retransmitir" variant={f.status === "rejected" || f.status === "pending" ? "primary" : "secondary"} icon={<RefreshCw className="size-4" />} confirm="Retransmitir com a mesma referência (não cria novo documento)?" />}
-      {f.attempts > 0 && <ActionButton action={queryAction.bind(null, f.id)} label="Consultar" icon={<Search className="size-4" />} title="Consulta a situação no provedor pela referência" />}
+      {f.canIssue && f.attempts > 0 && <ActionButton action={queryAction.bind(null, f.id)} label="Consultar" icon={<Search className="size-4" />} title="Consulta a situação no provedor pela referência" />}
       {printable && (
         <Link href={`/fiscal/${f.model}/${f.id}/imprimir`} className={buttonClass("secondary")} target="_blank">
           <Printer className="size-4" /> {f.status === "authorized" || f.status === "cancelled" ? (f.model === "nfce" ? "DANFCE" : f.model === "nfse" ? "Imprimir" : "DANFE") : "Prévia"}
@@ -56,7 +62,7 @@ export function DocActions(f: DocActionFlags) {
           <FileDown className="size-4" /> XML
         </a>
       )}
-      {["authorized", "cancelled"].includes(f.status) && (
+      {f.canIssue && ["authorized", "cancelled"].includes(f.status) && (
         <FormDialogButton action={emailAction.bind(null, f.id)} label="E-mail" icon={<Mail className="size-4" />} title="Enviar por e-mail" name="to" type="email" fieldLabel="Destinatário" defaultValue={f.defaultEmail ?? ""} description="O envio usa o canal de e-mail configurado em Integrações; o resultado exibido é o retorno real do canal. O XML armazenado vai anexo." submitLabel="Enviar" />
       )}
       {f.model === "nfe" && f.status === "authorized" && f.canIssue && (
@@ -82,8 +88,21 @@ export function DocActions(f: DocActionFlags) {
         </span>
       )}
       {f.canCancel && discardable && (
-        <FormDialogButton action={cancelAction.bind(null, f.id)} label="Descartar" variant="ghost" icon={<Ban className="size-4" />} title="Descartar documento não autorizado" name="reason" fieldLabel="Motivo" min={15} max={255} description="O documento não autorizado é descartado (não há evento na SEFAZ). Se já recebeu número, inutilize-o depois em NF-e/NFC-e → Inutilização." submitLabel="Descartar" />
+        <FormDialogButton
+          action={cancelAction.bind(null, f.id)}
+          label="Descartar"
+          variant="ghost"
+          icon={<Ban className="size-4" />}
+          title="Descartar documento não autorizado"
+          name="reason"
+          fieldLabel="Motivo"
+          min={15}
+          max={255}
+          description={`${sentUnconfirmed ? "Este documento já foi enviado: antes de descartar, o sistema consulta o provedor — se estiver autorizado, a situação é atualizada e o descarte é recusado (use Cancelar). " : ""}O documento não autorizado é descartado (não há evento na SEFAZ). Se já recebeu número, inutilize-o depois em NF-e/NFC-e → Inutilização.`}
+          submitLabel="Descartar"
+        />
       )}
+      {f.scopeNote && <span className="max-w-xs text-xs text-slate-500">{f.scopeNote}</span>}
     </>
   );
 }

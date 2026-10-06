@@ -3,6 +3,7 @@ import type { SessionInfo } from "@/lib/server/session";
 import { resolvePeriod, type Period, type PeriodPreset, type ReportScope } from "@/domain/reports";
 import { qs, sp, type SearchParams } from "@/lib/list";
 import { ABC_CRITERIA, getAbcLimits, parseLimits, type AbcCriterion, type AbcLimits } from "@/domain/abc";
+import { can } from "@/lib/permissions";
 
 export interface ReportParams {
   period: Period;
@@ -34,8 +35,39 @@ export function resolveReportParams(s: SessionInfo, params: SearchParams, fallba
 }
 
 /** Parâmetros de período/filial para links a outros módulos (ex.: /vendas?de=…&ate=…&filial=…). */
-export function moduleQs(p: Pick<ReportParams, "period" | "single" | "filial">, extra: Record<string, string | number | null | undefined> = {}, range: { from: string; to: string } = p.period) {
+export function moduleQs(p: Pick<ReportParams, "single" | "filial"> & { period: { from: string; to: string } }, extra: Record<string, string | number | null | undefined> = {}, range: { from: string; to: string } = p.period) {
   return qs({ de: range.from, ate: range.to, filial: p.single ? p.filial : null, ...extra });
+}
+
+type Scope = Pick<ReportParams, "single" | "filial">;
+
+/**
+ * As listagens operacionais de Vendas, Devoluções, Contas a receber/pagar e Fluxo de caixa mostram a filial do
+ * CONTEXTO da sessão (o filtro de filial da URL só vale no contexto consolidado). O link de detalhamento para elas
+ * só reproduz o recorte do indicador quando o contexto é consolidado ou é a própria filial do recorte.
+ */
+export function contextShowsScope(s: Pick<SessionInfo, "ctx">, p: Scope): boolean {
+  return !s.ctx.branchId || (p.single && p.filial === s.ctx.branchId);
+}
+
+/** Listagens fiscais: filial explícita no link tem precedência; "todas as filiais" só no contexto consolidado. */
+export function fiscalShowsScope(s: Pick<SessionInfo, "ctx">, p: Scope): boolean {
+  return p.single || !s.ctx.branchId;
+}
+
+/** Listagem de vendas do recorte (período + filial + filtros), ou null quando o contexto atual não abre esse recorte. */
+export function salesListHref(s: Pick<SessionInfo, "ctx">, p: Scope & { period: { from: string; to: string } }, extra: Record<string, string | number | null | undefined> = {}, range: { from: string; to: string } = p.period, path = "/vendas") {
+  return contextShowsScope(s, p) ? `${path}${moduleQs(p, extra, range)}` : null;
+}
+
+/**
+ * Operações que compõem os totais comerciais do recorte quando a listagem de vendas não abre o recorte no contexto
+ * atual: filial → resultado detalhado por filial (vendas e devoluções); todas → resultado por unidade.
+ * Exige acesso aos relatórios gerenciais; sem acesso, null.
+ */
+export function commercialOpsHref(s: Pick<SessionInfo, "user">, p: Scope, range: { from: string; to: string }) {
+  if (!can(s.user, "reports")) return null;
+  return p.single ? `/relatorios/gerenciais/filial/${p.filial}${qs({ de: range.from, ate: range.to })}` : `/relatorios/gerenciais${qs({ de: range.from, ate: range.to, filial: "todas" })}`;
 }
 
 /** Preserva período e filial ao navegar entre telas de análise. */

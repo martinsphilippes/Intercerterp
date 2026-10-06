@@ -83,9 +83,10 @@ export function DocStatus({ d }: { d: Doc }) {
 
 const iconBtn = "focus-ring inline-flex size-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-brand-700";
 
-/** Ações por linha conforme o estado (ver, imprimir, XML, consultar, editar, transmitir/retransmitir). */
-export function RowActions({ d, canIssue }: { d: Doc; canIssue: boolean }) {
+/** Ações por linha conforme o estado (ver, imprimir, XML, consultar, editar, transmitir/retransmitir) — escrita só na filial do documento. */
+export function RowActions({ d, canIssue: canIssueAny, branchId }: { d: Doc; canIssue: boolean; branchId: string | null }) {
   const model = d.model as string;
+  const canIssue = canIssueAny && Boolean(branchId) && d.branchId === branchId;
   const editable = ["draft", "pending", "rejected"].includes(d.status) && d.originType !== "disable";
   const editHref = model === "nfe" ? `/fiscal/nfe/nova?rascunho=${d.id}` : model === "nfse" ? `/fiscal/nfse/nova?id=${d.id}` : `/fiscal/nfce/${d.id}`;
   return (

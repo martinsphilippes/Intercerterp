@@ -23,9 +23,18 @@ export interface PaymentProvider {
   readonly simulated: boolean;
   createPix(input: { reference: string; amount: number; description: string; payerEmail?: string; expiresMinutes?: number }): Promise<ProviderCharge>;
   findByReference(reference: string): Promise<ProviderCharge | null>;
+  /**
+   * Estorno de cobrança paga. `status` é o retorno real do provedor ("approved"/"refunded" = estornado;
+   * "simulated_refund" = simulação; outro valor = ainda não confirmado).
+   */
   refund(providerId: string, amount?: number): Promise<{ status: string; raw?: unknown }>;
+  /** Cancela uma cobrança ainda não paga. Devolve o estado informado pelo provedor após o pedido. */
+  cancel(providerId: string): Promise<ProviderCharge>;
   test(): Promise<{ ok: boolean; message: string }>;
 }
+
+/** Estados de estorno que o provedor devolve quando o dinheiro já voltou ao pagador. */
+export const REFUND_DONE_STATUSES = ["approved", "refunded", "simulated_refund"];
 
 function mapMpStatus(s: string): IntentStatus {
   switch (s) {
@@ -109,6 +118,11 @@ export class MercadoPagoProvider implements PaymentProvider {
     return { status: r?.status ?? "unknown", raw: r };
   }
 
+  async cancel(providerId: string) {
+    const p = await this.call(`/v1/payments/${encodeURIComponent(providerId)}`, { method: "PUT", idem: `cancel-${providerId}`, body: JSON.stringify({ status: "cancelled" }) });
+    return this.toCharge(p);
+  }
+
   async test() {
     try {
       await this.call("/v1/payment_methods");
@@ -155,8 +169,17 @@ export class SimulatedPixProvider implements PaymentProvider {
     if (c) c.status = status;
   }
 
-  async refund() {
+  async refund(providerId: string) {
+    for (const c of simulated.values()) if (c.providerId === providerId && c.status === "confirmed") c.status = "refunded";
     return { status: "simulated_refund" };
+  }
+
+  async cancel(providerId: string) {
+    const c = [...simulated.values()].find((x) => x.providerId === providerId);
+    if (!c) throw new Error(`Cobrança de simulação ${providerId} não encontrada no provedor.`);
+    // pago não pode ser cancelado: o provedor devolve o estado atual (confirmado)
+    if (c.status === "pending" || c.status === "unknown") c.status = "cancelled";
+    return c;
   }
 
   async test() {

@@ -34,7 +34,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const v = await quotationView(s.ctx, id, { onTimeOnly });
   const q = v.q;
   const branch = await s.ctx.store.get("branches", q.branchId);
-  const suppliers = await Promise.all((q.supplierIds ?? []).map((sid: string) => s.ctx.store.get("suppliers", sid)));
+  // defesa em profundidade: somente fornecedores da empresa ativa
+  const suppliers = (await Promise.all((q.supplierIds ?? []).map((sid: string) => s.ctx.store.get("suppliers", sid)))).filter((x) => x && x.companyId === s.ctx.companyId);
   const terms = (await listAll(s.ctx.store, "payment_terms", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "active", true]] })).map((t) => ({ value: t.id, label: t.name }));
   const canEdit = can(s.user, "purchases", "edit") && q.status === "open" && !q.ordersCreated;
   const base = `/compras/cotacoes/${id}`;
@@ -50,7 +51,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         description={`${q.title ?? ""} · Filial ${branch?.name ?? "—"} · ${v.items.length} produto(s) ${ORIGIN[q.origin] ?? ""} · ${suppliers.length} fornecedor(es) · posição em ${formatDate(v.refDate)}${q.responseDue ? ` · respostas até ${formatDate(q.responseDue)}` : ""}`}
         actions={
           <>
-            {q.ordersCreated && <Link href={`/compras/pedidos?q=&origin=quotation`} className="rounded-full bg-brand-50 px-3 py-1 text-sm text-brand-800">Rascunhos/pedidos {v.orders.length}</Link>}
+            {q.ordersCreated && <Link href={`/compras/pedidos?quotation=${id}`} className="rounded-full bg-brand-50 px-3 py-1 text-sm text-brand-800">Rascunhos/pedidos {v.orders.length}</Link>}
             {canEdit && <ActionButton variant="danger" action={cancelQuotationAction.bind(null, id)} label="Cancelar cotação" askReason="Motivo do cancelamento:" />}
           </>
         }

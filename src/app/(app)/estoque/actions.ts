@@ -3,9 +3,12 @@
 import { runAction, fstr, fopt, fint, fjson } from "@/lib/server/action";
 import { listAll } from "@/lib/db";
 import { normalizeSearch } from "@/lib/list";
-import { adjustStock, balanceId, type ManualType } from "@/domain/stock";
+import { BusinessError } from "@/lib/core/errors";
+import { getSetting } from "@/lib/core/settings";
+import { DEFAULT_TZ } from "@/lib/dates";
+import { adjustStock, balanceId, localDateTimeToIso, type ManualType } from "@/domain/stock";
 import { transferCode, createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, type TransferReceiptLine } from "@/domain/transfers";
-import { createInventory, saveCounts, concludeInventory, cancelInventory, addInventoryItem, type CountEntry } from "@/domain/inventory";
+import { createInventory, saveCounts, concludeInventory, cancelInventory, addInventoryItem, resumeInventoryOpening, type CountEntry } from "@/domain/inventory";
 
 /** Pesquisa de SKUs para os seletores (nome, SKU, código de barras); traz o saldo do depósito informado. */
 export async function searchSkusAction(q: string, warehouseId?: string | null) {
@@ -32,7 +35,7 @@ export async function skuBalanceAction(skuId: string, warehouseId: string) {
     const sku = await s.ctx.store.get("skus", skuId);
     if (!sku || sku.companyId !== s.ctx.companyId) return null;
     const bal = await s.ctx.store.get("stock_balances", balanceId(warehouseId, skuId));
-    return { physical: bal?.physical ?? 0, available: (bal?.physical ?? 0) - (bal?.reserved ?? 0), avgCost: bal?.avgCost ?? sku.costTotal ?? 0, location: (bal?.location ?? null) as string | null, minQty: (bal?.minQty ?? 0) as number };
+    return { physical: bal?.physical ?? 0, reserved: (bal?.reserved ?? 0) as number, available: (bal?.physical ?? 0) - (bal?.reserved ?? 0), avgCost: bal?.avgCost ?? sku.costTotal ?? 0, location: (bal?.location ?? null) as string | null, minQty: (bal?.minQty ?? 0) as number };
   });
 }
 
@@ -41,6 +44,14 @@ export async function skuBalanceAction(skuId: string, warehouseId: string) {
 export async function adjustStockAction(fd: FormData) {
   return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: ["/estoque/movimentos", "/estoque"] }, async (s) => {
     const occurred = fopt(fd, "occurredAt");
+    let occurredAt: string | undefined;
+    if (occurred) {
+      // campo datetime-local = horário de parede da filial (não do servidor, que roda em UTC)
+      const tz = (s.branch?.timezone as string | undefined) || (await getSetting(s.ctx.store, s.ctx.companyId, s.ctx.branchId, "timezone", DEFAULT_TZ));
+      const iso = /(Z|[+-]\d{2}:\d{2})$/.test(occurred) ? (Number.isNaN(Date.parse(occurred)) ? null : new Date(occurred).toISOString()) : localDateTimeToIso(occurred, tz);
+      if (!iso) return { ok: false as const, error: "Data do movimento inválida. Use dia e hora completos (ex.: 05/10/2026 10:00)." };
+      occurredAt = iso;
+    }
     const m = await adjustStock(s.ctx, {
       warehouseId: fstr(fd, "warehouseId"),
       skuId: fstr(fd, "skuId"),
@@ -49,7 +60,7 @@ export async function adjustStockAction(fd: FormData) {
       unitCost: fopt(fd, "unitCost") ? fint(fd, "unitCost") : null,
       reason: fstr(fd, "reason"),
       idemKey: fstr(fd, "_idem"),
-      occurredAt: occurred ? new Date(occurred).toISOString() : undefined,
+      occurredAt,
       lot: fopt(fd, "lot"),
       lotExpiry: fopt(fd, "lotExpiry"),
       documentRef: fopt(fd, "documentRef"),
@@ -79,9 +90,17 @@ function parseTransfer(fd: FormData) {
 export async function saveTransferAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "stock", op: id ? "edit" : "create", requireBranch: true, revalidate: [T] }, async (s) => {
+    // sem id: o reenvio do mesmo formulário (mesma _idem) reaplica os dados corrigidos ao rascunho já criado
     const t = id ? await updateTransferDraft(s.ctx, id, parseTransfer(fd)) : await createTransfer(s.ctx, parseTransfer(fd), { idemKey: fopt(fd, "_idem") });
     if (fstr(fd, "mode") === "send") {
-      await shipTransfer(s.ctx, t.id);
+      try {
+        await shipTransfer(s.ctx, t.id);
+      } catch (e) {
+        if (!(e instanceof BusinessError)) throw e;
+        const now = await s.ctx.store.get("transfers", t.id);
+        const hint = now?.status === "draft" ? `O rascunho ${transferCode(t.number)} foi salvo: corrija os itens aqui e envie de novo, ou continue em Transferências.` : `A transferência ${transferCode(t.number)} foi salva; continue pela tela dela em Transferências.`;
+        return { ok: false as const, error: `${e.message} ${hint}`, code: e.code };
+      }
       return { ok: true as const, message: `Transferência ${transferCode(t.number)} enviada — em trânsito até o recebimento no destino.`, redirect: `${T}/${t.id}` };
     }
     return { ok: true as const, message: id ? "Rascunho atualizado." : `Transferência ${transferCode(t.number)} salva como rascunho.`, redirect: `${T}/${t.id}` };
@@ -120,15 +139,15 @@ export async function resolveTransferAction(fd: FormData) {
 }
 
 export async function cancelTransferAction(id: string, fd: FormData) {
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T] }, async (s) => {
-    await cancelTransfer(s.ctx, id, fstr(fd, "reason"));
-    return { ok: true as const, message: "Transferência cancelada; reservas liberadas." };
+  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
+    const t = await cancelTransfer(s.ctx, id, fstr(fd, "reason"));
+    return { ok: true as const, message: t.returnedAt ? "Transferência cancelada; o que já tinha saído voltou à origem e as reservas foram liberadas." : "Transferência cancelada; reservas liberadas." };
   });
 }
 
 export async function setTransferDocumentAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "stock", op: "edit", revalidate: [`${T}/${id}`] }, async (s) => {
+  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`] }, async (s) => {
     await setTransferDocument(s.ctx, id, fopt(fd, "documentRef"));
     return { ok: true as const, message: "Referência do documento salva." };
   });
@@ -146,6 +165,13 @@ export async function createInventoryAction(fd: FormData) {
       { idemKey: fopt(fd, "_idem") },
     );
     return { ok: true as const, message: `Inventário ${inv.code ?? inv.number} aberto — base registrada.`, redirect: `${I}/${inv.id}` };
+  });
+}
+
+export async function resumeInventoryAction(id: string) {
+  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: [`${I}/${id}`, I] }, async (s) => {
+    const inv = await resumeInventoryOpening(s.ctx, id);
+    return { ok: true as const, message: `Inventário ${inv.code ?? inv.number} aberto — base registrada.` };
   });
 }
 

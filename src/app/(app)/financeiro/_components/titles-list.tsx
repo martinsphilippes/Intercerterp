@@ -219,7 +219,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
     { type: "date", name: "dueFrom", label: "Vencimento de" },
     { type: "date", name: "dueTo", label: "até" },
     { type: "select", name: "party", label: rec ? "Cliente" : "Fornecedor", options: parties },
-    { type: "select", name: "category", label: "Categoria", options: cats },
+    { type: "select", name: "category", label: "Categoria", options: [...cats, { value: "none", label: "Sem categoria" }] },
     { type: "select", name: "costCenter", label: "Centro de custo", options: ccs, all: "Todos os centros" },
     { type: "select", name: "origin", label: "Origem", options: origins },
   ];
@@ -264,7 +264,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
             <ul className="space-y-2.5">
               {catRows.map((c) => (
                 <li key={c.id ?? "none"}>
-                  <Link href={link({ state: "open", ...(c.id ? { category: c.id } : {}) })} className="group block">
+                  <Link href={link({ state: "open", category: c.id ?? "none" })} className="group block">
                     <div className="flex justify-between gap-2 text-xs">
                       <span className="truncate text-slate-700 group-hover:text-brand-700">{c.name}</span>
                       <span className="tabular font-medium text-ink">{formatMoney(c.amount)}</span>

@@ -13,10 +13,9 @@ import { paginate, parseList, type SearchParams } from "@/lib/list";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatMoney, formatQty } from "@/lib/money";
 import { can, canDo } from "@/lib/permissions";
-import { lookups } from "@/lib/server/lookups";
 import { MOVEMENT_LABEL, ORIGIN_LABEL, balanceId } from "@/domain/stock";
 import { transferCode } from "@/domain/transfers";
-import { queryMovements, branchScope, type MovementRow } from "../queries";
+import { queryMovements, branchScope, branchOptions, canSeeBranch, warehouseOptions, type MovementRow } from "../queries";
 import { MovementForm } from "./movement-form";
 
 export const metadata = { title: "Movimentação de estoque" };
@@ -33,19 +32,22 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const { rows: all, period } = await queryMovements(s.ctx, p);
   const { rows, total } = paginate(all, p);
   const scope = branchScope(s.ctx, p.f);
-  const [branches, warehouses, ownWhDocs] = await Promise.all([lookups.branches(s.ctx), lookups.warehouses(s.ctx, scope), s.ctx.branchId ? listAll(s.ctx.store, "warehouses", { filters: [["eq", "branchId", s.ctx.branchId]] }) : Promise.resolve([])]);
+  const branches = branchOptions(s.branches);
+  const [warehouses, ownWhDocs] = await Promise.all([warehouseOptions(s.ctx, scope), s.ctx.branchId ? listAll(s.ctx.store, "warehouses", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "branchId", s.ctx.branchId]] }) : Promise.resolve([])]);
   // depósito de venda primeiro (avarias por último)
   const ownWarehouses = [...ownWhDocs].sort((a, b) => Number(a.kind !== "available") - Number(b.kind !== "available") || a.name.localeCompare(b.name)).map((w) => ({ value: w.id, label: w.kind === "damaged" ? `${w.name} (avarias)` : w.name }));
   const canAdjust = Boolean(s.ctx.branchId) && canDo(s.user, "stock.adjust") && can(s.user, "stock", "create");
 
-  // contexto do produto selecionado: saldos por local e trânsito
+  // contexto do produto selecionado: saldos por local e trânsito — só SKU da empresa ativa (id de outra
+  // empresa é tratado como inexistente) e só filiais que o usuário pode consultar
   const skuId = p.f.sku || null;
-  const sku = skuId ? await s.ctx.store.get("skus", skuId) : null;
-  const skuBals = sku ? await listAll(s.ctx.store, "stock_balances", { filters: [["eq", "skuId", sku.id]] }) : [];
+  const skuDoc = skuId ? await s.ctx.store.get("skus", skuId) : null;
+  const sku = skuDoc && skuDoc.companyId === s.ctx.companyId ? skuDoc : null;
+  const skuBals = sku ? (await listAll(s.ctx.store, "stock_balances", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "skuId", sku.id]] })).filter((b) => canSeeBranch(s.ctx, b.branchId)) : [];
   const whKind = new Map((await listAll(s.ctx.store, "warehouses", { filters: [["eq", "companyId", s.ctx.companyId]] })).map((w) => [w.id, w.kind]));
-  const inTransitTransfers = sku ? (await listAll(s.ctx.store, "transfers", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "status", ["in_transit", "partial"]]] })).filter((t) => (t.items ?? []).some((i: any) => i.skuId === sku.id)) : [];
+  const inTransitTransfers = sku ? (await listAll(s.ctx.store, "transfers", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "status", ["in_transit", "partial"]]] })).filter((t) => (t.items ?? []).some((i: any) => i.skuId === sku.id) && (canSeeBranch(s.ctx, t.fromBranchId) || canSeeBranch(s.ctx, t.toBranchId))) : [];
   let initialSku = null;
-  if (sku && sku.companyId === s.ctx.companyId && ownWarehouses[0]) {
+  if (sku && ownWarehouses[0]) {
     const b = skuBals.find((x) => x.id === balanceId(ownWarehouses[0].value, sku.id));
     initialSku = { id: sku.id, sku: sku.sku, name: sku.name, unitCode: sku.unitCode, barcode: sku.barcode ?? null, physical: b?.physical ?? 0, available: (b?.physical ?? 0) - (b?.reserved ?? 0), avgCost: b?.avgCost ?? sku.costTotal ?? 0, location: b?.location ?? null, minQty: b?.minQty ?? 0 };
   }

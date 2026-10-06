@@ -76,7 +76,7 @@ function parseUpdate(fd: FormData): ReceiptUpdate {
 export async function saveReceiptAction(fd: FormData) {
   const id = fstr(fd, "id");
   const intent = fstr(fd, "intent") || "save";
-  return runAction({ module: "purchases", revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     await updateReceipt(s.ctx, id, parseUpdate(fd));
     if (intent === "confirm") {
       const r = await confirmReceipt(s.ctx, id);
@@ -88,14 +88,14 @@ export async function saveReceiptAction(fd: FormData) {
 
 /** Retentativa de confirmação interrompida (efeitos idempotentes). */
 export async function resumeConfirmAction(id: string) {
-  return runAction({ module: "purchases", revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     const r = await confirmReceipt(s.ctx, id);
     return { ok: true as const, message: `Recebimento nº ${r.number} confirmado.` };
   });
 }
 
 export async function cancelReceiptAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     await cancelReceipt(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Recebimento cancelado. A chave pode ser importada novamente." };
   });

@@ -4,6 +4,8 @@ import { BusinessError, PermissionError, assert } from "@/lib/core/errors";
 import { requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { searchable } from "@/lib/core/text";
+import { unscoped } from "@/lib/db/scoped-store";
+import { resolveRoleId } from "@/lib/auth/users";
 import { MODULES, SPECIAL_ACTIONS, type Crud, type ModuleKey, type PermissionMatrix, type SpecialAction } from "@/lib/permissions";
 
 /**
@@ -163,8 +165,15 @@ export async function listRoles(store: Store, companyId: string) {
   return roles.sort((a, b) => Number(Boolean(b.system)) - Number(Boolean(a.system)) || String(a.name).localeCompare(String(b.name), "pt-BR"));
 }
 
+/** Usuários cujo perfil NA EMPRESA DO PERFIL é este (perfil por empresa; administradores não usam perfil). */
 export async function roleUsers(store: Store, roleId: string) {
-  return listAll(store, "users", { filters: [["eq", "roleId", roleId]] });
+  const base = unscoped(store);
+  const role = await base.get("roles", roleId);
+  if (!role) return [];
+  const companyId = role.companyId as string;
+  const [users, roles] = await Promise.all([listAll(base, "users"), listAll(base, "roles")]);
+  const rolesById = new Map(roles.map((r) => [r.id, r]));
+  return users.filter((u) => !u.isAdmin && (!companyId || (u.companyIds ?? []).includes(companyId)) && resolveRoleId(u, companyId, rolesById, roles) === roleId);
 }
 
 function validate(input: RoleInput) {

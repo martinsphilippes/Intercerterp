@@ -136,6 +136,8 @@ export interface PackageResult {
 
 /** Gera o ZIP do período e grava no armazenamento (Arquivos), retornando o resumo real do conteúdo. */
 export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): Promise<PackageResult> {
+  // todos os XML e CSV (CPF/CNPJ e valores de clientes) do período: exportação de dados
+  requireAction(ctx, "data.export");
   const docs = await periodDocuments(ctx, { ...f, includeSimulated: true });
   const zip = new JSZip();
   const company = await ctx.store.getOrThrow("companies", ctx.companyId);
@@ -186,9 +188,10 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
     "- Relatórios: CSV (separador ;, UTF-8) — livro de saídas, resumo por CFOP, tributos por NCM, serviços (NFS-e), cancelamentos, rejeições e lista de documentos.",
     "- ESTE PACOTE NÃO É ARQUIVO DE OBRIGAÇÃO ACESSÓRIA (SPED Fiscal/EFD, SINTEGRA, PGDAS-D, DEFIS). Essas obrigações são acompanhadas no sistema, não geradas por ele.",
     "",
-    "TOTAIS (critério: notas AUTORIZADAS de saída, exceto devoluções; canceladas/rejeitadas/pendentes excluídas)",
-    `- Documentos no período: ${summary.count} (autorizadas de saída: ${summary.revenueCount})`,
+    "TOTAIS (critério: notas AUTORIZADAS de saída, exceto devoluções, transferências entre filiais e remessas/outras saídas sem venda; canceladas/rejeitadas/pendentes excluídas)",
+    `- Documentos no período: ${summary.count} (autorizadas de saída no faturamento: ${summary.revenueCount})`,
     `- Faturamento fiscal bruto: ${formatMoney(summary.gross)} · devoluções recebidas: ${formatMoney(summary.returns)} · líquido: ${formatMoney(summary.net)}`,
+    `- Transferências/remessas autorizadas (fora do faturamento): ${summary.nonRevenueCount} documento(s), ${formatMoney(summary.nonRevenue)} — CFOP 515x, 5408/5409, 552–557, 59xx (exceto 5922/5933), devoluções 520x/521x/541x e equivalentes 6xxx/7xxx.`,
     `- ICMS: ${formatMoney(summary.taxes.icms)} · PIS: ${formatMoney(summary.taxes.pis)} · COFINS: ${formatMoney(summary.taxes.cofins)} · ISS: ${formatMoney(summary.taxes.iss)} (retido: ${formatMoney(summary.taxes.issWithheld)})`,
     `- Pendentes/rejeitados (fora dos totais): ${summary.pendingCount}`,
     "",
@@ -209,8 +212,11 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
 
 /** Envia o pacote pelo canal da integração "contabilidade" (e-mail) e registra o resultado real. */
 export async function sendAccountingPackage(ctx: Ctx, f: FiscalReportFilter, opts: { to?: string | null; reason: "manual" | "scheduled" }) {
+  // envio do pacote a um e-mail: somente quem configura o fiscal (a rotina agendada usa o contexto do sistema)
+  requireAction(ctx, "fiscal.configure");
   const integ = await getIntegration(ctx.store, ctx.companyId, null, "accounting");
   const to = (opts.to || integ?.config?.accountantEmail || "").trim();
+  assert(!to || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to), "Informe um e-mail válido para o envio do pacote.");
   if (!integ || !to) {
     const message = !integ ? "Integração Área da contabilidade não configurada (Administração → Integrações)." : "E-mail da contabilidade não informado na integração.";
     await logIntegration(ctx.store, { companyId: ctx.companyId, integrationId: integ?.id ?? null, kind: "accounting", action: "send_package", status: "failure", message });
@@ -229,7 +235,10 @@ export async function sendAccountingPackage(ctx: Ctx, f: FiscalReportFilter, opt
   const message = r.delivered ? `Pacote ${pkg.fileName} entregue ao canal ${r.channel} para ${to}` : `Pacote ${pkg.fileName} gerado, mas NÃO enviado (${r.channel}): ${r.message ?? "falha"}`;
   await logIntegration(ctx.store, { companyId: ctx.companyId, integrationId: integ.id, kind: "accounting", action: opts.reason === "scheduled" ? "scheduled_package" : "send_package", status: r.delivered ? "success" : "failure", message, payload: { fileId: pkg.fileId, from: f.from, to: f.to, xmlCount: pkg.xmlCount, missing: pkg.missingXml.length, to_address: to } });
   await audit(ctx, { module: "fiscal", action: "export.send", entityType: "file", entityId: pkg.fileId, summary: message, result: r.delivered ? "success" : "failure" });
-  if (r.delivered) {
+  // a obrigação "Entrega de XML" é da EMPRESA: só é concluída pelo pacote de todas as filiais enviado ao e-mail da contabilidade
+  const accountant = String(integ.config?.accountantEmail ?? "").trim().toLowerCase();
+  const wholeCompany = (f.branchId ?? ctx.branchId) == null;
+  if (r.delivered && wholeCompany && accountant && to.toLowerCase() === accountant) {
     const { markXmlDelivery } = await import("./obligations");
     await markXmlDelivery(ctx, f, pkg.fileId, to).catch(() => undefined);
   }

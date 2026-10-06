@@ -4,7 +4,8 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getStore } from "@/lib/db";
 import { getAuth } from "@/lib/auth/provider";
-import { accessibleUnits, findUserByLogin, findUserByAuthId, toCtxUser } from "@/lib/auth/users";
+import { accessibleUnits, findUserByLogin, findUserByAuthId, toCtxUser, unitBlockReason } from "@/lib/auth/users";
+import { safeNextPath } from "@/lib/auth/redirect";
 import { SESSION_COOKIE, UNIT_COOKIE, getSession } from "@/lib/server/session";
 import { audit } from "@/lib/core/audit";
 import { nowIso } from "@/lib/dates";
@@ -81,18 +82,21 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
   const { companies, branches } = await accessibleUnits(store, user);
   const pref = await store.get("user_prefs", (await import("@/lib/db")).detId("pref", user.id, "lastUnit"));
   let unit: string | null = null;
+  // unidade lembrada ou única: somente empresa e filial ativas (inativas não são contexto de trabalho)
+  const activeCompanies = companies.filter((c) => !unitBlockReason(c, null));
+  const activeBranches = branches.filter((b) => activeCompanies.some((c) => c.id === b.companyId) && !unitBlockReason(null, b));
   if (pref?.value && typeof pref.value === "string") {
     const [c, b] = pref.value.split(":");
     const canAll = Boolean(user.isAdmin) || !(user.branchIds ?? []).length;
-    if (companies.some((x) => x.id === c) && ((b === "all" && canAll) || branches.some((x) => x.id === b))) unit = pref.value;
+    if (activeCompanies.some((x) => x.id === c) && ((b === "all" && canAll) || activeBranches.some((x) => x.id === b && x.companyId === c))) unit = pref.value;
   }
-  if (!unit && companies.length === 1 && branches.filter((b) => b.companyId === companies[0].id).length === 1) unit = `${companies[0].id}:${branches.find((b) => b.companyId === companies[0].id)!.id}`;
+  if (!unit && activeCompanies.length === 1 && activeBranches.length === 1) unit = `${activeCompanies[0].id}:${activeBranches[0].id}`;
   await logAttempt("success", `Login de ${user.name}`, user);
   void toCtxUser;
   void audit;
   if (unit) {
     jar.set(UNIT_COOKIE, unit, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: 60 * 60 * 24 * 365 });
-    return { ok: true, redirect: String(fd.get("next") || "/dashboard") };
+    return { ok: true, redirect: safeNextPath(fd.get("next")) };
   }
   return { ok: true, redirect: "/selecionar-unidade" };
 }
@@ -111,8 +115,13 @@ export async function switchUnitAction(companyId: string, branchId: string) {
   const company = s.companies.find((c) => c.id === companyId);
   const allBranches = (await accessibleUnits(getStore(), (await getStore().get("users", s.user.id))!)).branches;
   if (!company) return { ok: false, error: "Empresa não permitida." };
+  const companyBlocked = unitBlockReason(company, null);
+  if (companyBlocked) return { ok: false, error: companyBlocked };
   if (branchId === "all" && !s.canConsolidate) return { ok: false, error: "O contexto consolidado exige acesso a todas as filiais. Escolha uma filial." };
-  if (branchId !== "all" && !allBranches.some((b) => b.id === branchId && b.companyId === companyId)) return { ok: false, error: "Filial não permitida." };
+  const branch = branchId !== "all" ? allBranches.find((b) => b.id === branchId && b.companyId === companyId) : null;
+  if (branchId !== "all" && !branch) return { ok: false, error: "Filial não permitida." };
+  const branchBlocked = unitBlockReason(null, branch);
+  if (branchBlocked) return { ok: false, error: branchBlocked };
   const value = `${companyId}:${branchId}`;
   const jar = await cookies();
   jar.set(UNIT_COOKIE, value, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: 60 * 60 * 24 * 365 });

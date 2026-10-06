@@ -11,7 +11,9 @@ import { nowIso } from "@/lib/dates";
  *
  * Impressão pelo navegador: a página de teste é aberta e o diálogo de impressão é acionado; o navegador
  * NÃO informa se a impressão física ocorreu — registramos apenas a abertura da página.
- * Conector local: GET <connectorUrl>/status com tempo limite; o resultado (sucesso/falha) é registrado como medido.
+ * Conector local: GET <connectorUrl>/status feito pelo NAVEGADOR do computador do caixa (o conector escuta em 127.0.0.1);
+ * o resultado medido (sucesso/falha) é registrado. O servidor nunca contata a URL do conector — evita que o cadastro do
+ * terminal sirva para o servidor acessar endereços internos (SSRF) e devolver o que encontrou.
  * Contrato do conector em docs/integracoes.md, seção "Conector de periféricos".
  */
 
@@ -62,6 +64,8 @@ function normalizeUrl(u: string | null | undefined): string | null {
     throw new BusinessError("URL do conector inválida (ex.: http://127.0.0.1:9100).", "invalid_url");
   }
   assert(parsed.protocol === "http:" || parsed.protocol === "https:", "O conector deve usar http:// ou https://.");
+  assert(!parsed.username && !parsed.password, "A URL do conector não pode conter usuário ou senha.");
+  assert(!parsed.search && !parsed.hash, "Informe só o endereço do conector (sem parâmetros ?… ou #…), ex.: http://127.0.0.1:9100.");
   return v;
 }
 
@@ -178,7 +182,6 @@ export interface ConnectorStatus {
   httpStatus?: number;
   latencyMs?: number;
   message: string;
-  body?: any;
 }
 
 /** Interpreta a resposta do GET /status do conector (contrato em docs/integracoes.md). */
@@ -195,34 +198,17 @@ export function describeConnectorBody(body: any): string {
   return parts.join(" · ") || "conector respondeu sem detalhes de periféricos";
 }
 
-/** Verificação feita pelo SERVIDOR (conector exposto em endereço alcançável pelo servidor). */
-export async function checkConnectorFromServer(ctx: Ctx, id: string): Promise<ConnectorStatus> {
+/**
+ * Terminal sem conector configurado: registra "não verificado". Com conector, o teste é sempre feito pelo navegador
+ * do computador do caixa (`recordConnectorCheck` com origem "browser") — o servidor não faz requisições à URL cadastrada.
+ */
+export async function recordConnectorNotConfigured(ctx: Ctx, id: string): Promise<ConnectorStatus> {
   requirePerm(ctx, "admin", "edit");
   const t = await ctx.store.getOrThrow("terminals", id);
   assert(t.companyId === ctx.companyId, "Terminal de outra empresa.");
-  let status: ConnectorStatus;
-  if (!t.connectorUrl) {
-    status = { ok: false, verified: false, origin: "server", message: "Não verificado: terminal sem conector local configurado." };
-  } else {
-    const t0 = Date.now();
-    try {
-      const res = await fetch(`${t.connectorUrl}/status`, { signal: AbortSignal.timeout(5000), headers: { Accept: "application/json" }, cache: "no-store" });
-      const latencyMs = Date.now() - t0;
-      const text = (await res.text()).slice(0, 4000);
-      let body: any = null;
-      try {
-        body = JSON.parse(text);
-      } catch {
-        /* resposta não-JSON */
-      }
-      const ok = res.ok && Boolean(body?.ok ?? true) && (t.printerMode !== "connector" || body?.printer?.ready !== false);
-      status = { ok, verified: true, origin: "server", httpStatus: res.status, latencyMs, body, message: `HTTP ${res.status} em ${latencyMs} ms — ${describeConnectorBody(body)}` };
-    } catch (e: any) {
-      const latencyMs = Date.now() - t0;
-      const cause = e?.name === "TimeoutError" ? "tempo limite de 5 s excedido" : (e?.cause?.code ?? e?.message ?? String(e));
-      status = { ok: false, verified: true, origin: "server", latencyMs, message: `Falha ao contatar ${t.connectorUrl}/status: ${cause}` };
-    }
-  }
+  const status: ConnectorStatus = t.connectorUrl
+    ? { ok: false, verified: false, origin: "browser", message: "Não verificado: o conector é testado pelo navegador do computador do caixa (botão “Testar conector”); o servidor não acessa o endereço do conector." }
+    : { ok: false, verified: false, origin: "server", message: "Não verificado: terminal sem conector local configurado." };
   return recordConnectorCheck(ctx, t, status);
 }
 

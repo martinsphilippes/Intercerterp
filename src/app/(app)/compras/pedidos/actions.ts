@@ -56,14 +56,14 @@ export async function submitOrderAction(id: string) {
 }
 
 export async function cancelOrderAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", op: "edit", revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
+  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
     await cancelOrder(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Pedido cancelado." };
   });
 }
 
 export async function closeBalanceAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", op: "edit", revalidate: [`/compras/pedidos/${id}`] }, async (s) => {
+  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`] }, async (s) => {
     await closeOrderBalance(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Saldo pendente encerrado." };
   });
@@ -71,7 +71,7 @@ export async function closeBalanceAction(id: string, fd: FormData) {
 
 export async function registerSentAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "purchases", op: "edit", revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
+  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
     const method = (fstr(fd, "method") as "manual" | "email") || "manual";
     const o = await registerOrderSent(s.ctx, id, { method, channel: fopt(fd, "channel"), contact: fopt(fd, "contact"), to: fopt(fd, "to"), sentDate: fopt(fd, "sentDate"), notes: fopt(fd, "notes") });
     return { ok: true as const, message: method === "email" ? `Pedido enviado por e-mail para ${o.sentInfo?.to} (${o.sentInfo?.channel}).` : "Envio registrado." };

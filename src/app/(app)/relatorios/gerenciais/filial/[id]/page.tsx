@@ -14,7 +14,7 @@ import { formatMoney, marginBps } from "@/lib/money";
 import { formatDateTime } from "@/lib/dates";
 import { paginate, parseList, qs, sp, type SearchParams } from "@/lib/list";
 import { branchOperations, commercialOverview, type SaleOp } from "@/domain/reports";
-import { moduleQs, resolveReportParams } from "../../../params";
+import { contextShowsScope, resolveReportParams, salesListHref } from "../../../params";
 import { COMMON_DEFINITIONS, Delta, HowWeCalculate, marginText, PrintHeader, PrintStyles, ReportFilters, ScopeLine } from "../../../_components/report-ui";
 import { PrintButton } from "../../../_components/print-button";
 
@@ -112,11 +112,11 @@ export default async function Page({ params: routeParams, searchParams }: { para
       <section aria-label="Indicadores da filial" className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Vendas brutas" value={formatMoney(t.gross)} hint={<Delta cur={t.gross} prev={prev.gross} />} />
         <Stat label="Descontos" value={formatMoney(t.discounts)} hint={t.surcharges ? `Acréscimos ${formatMoney(t.surcharges)}` : "No item e rateio do desconto global"} />
-        <Stat label="Devoluções" value={formatMoney(t.returns)} href={`/vendas/devolucoes${moduleQs(rp)}`} hint={`${t.returnsCount} no período · na data do movimento`} tone={t.returns ? "warn" : "default"} />
-        <Stat label="Vendas líquidas" value={formatMoney(t.netRevenue)} href={`/vendas${moduleQs(rp)}`} hint={<Delta cur={t.netRevenue} prev={prev.netRevenue} />} />
+        <Stat label="Devoluções" value={formatMoney(t.returns)} href={salesListHref(s, rp, {}, rp.period, "/vendas/devolucoes") ?? "#devolucoes"} hint={`${t.returnsCount} no período · na data do movimento`} tone={t.returns ? "warn" : "default"} />
+        <Stat label="Vendas líquidas" value={formatMoney(t.netRevenue)} href={salesListHref(s, rp, { situacao: "completed" }) ?? "#vendas"} hint={<Delta cur={t.netRevenue} prev={prev.netRevenue} />} />
         <Stat label="Custo direto (CMV)" value={formatMoney(t.cmv)} hint={`Custo revertido nas devoluções ${formatMoney(t.costReturned)}`} />
         <Stat label="Resultado bruto" value={formatMoney(t.grossProfit)} hint={<>Margem {marginText(t.marginBps)} · <Delta cur={t.marginBps} prev={prev.marginBps} kind="points" /></>} tone={t.grossProfit < 0 ? "bad" : "default"} />
-        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { situacao: "completed" })}`} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
+        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={salesListHref(s, rp, { situacao: "completed" }) ?? "#vendas"} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
         <Stat label="Ticket médio" value={t.ticket == null ? "Sem vendas" : formatMoney(t.ticket)} hint={<Delta cur={t.ticket} prev={prev.ticket} />} />
       </section>
 
@@ -157,10 +157,10 @@ export default async function Page({ params: routeParams, searchParams }: { para
       </Card>
 
       <Card className="mb-4" title="Receita líquida por dia" description="Período atual (colunas) e período anterior equivalente (linha).">
-        <RevenueChart points={overview.series.points} granularity={overview.series.granularity} currentLabel={`Atual (${rp.period.label})`} previousLabel="Período anterior" drillBase={`/vendas${qs({ filial: id })}`} caption={`Receita líquida — ${branch.name}.`} />
+        <RevenueChart points={overview.series.points} granularity={overview.series.granularity} currentLabel={`Atual (${rp.period.label})`} previousLabel="Período anterior" drillBase={contextShowsScope(s, rp) ? `/vendas${qs({ filial: id, situacao: "completed" })}` : null} caption={`Receita líquida — ${branch.name}.`} />
       </Card>
 
-      <h2 className="mb-2 text-sm font-semibold text-ink">Vendas concluídas no período</h2>
+      <h2 id="vendas" className="mb-2 scroll-mt-24 text-sm font-semibold text-ink">Vendas concluídas no período</h2>
       <div className="mb-4">
         <DataTable
           id="branch-sales"
@@ -177,7 +177,7 @@ export default async function Page({ params: routeParams, searchParams }: { para
         />
       </div>
 
-      <h2 className="mb-2 text-sm font-semibold text-ink">Devoluções no período (data do movimento)</h2>
+      <h2 id="devolucoes" className="mb-2 scroll-mt-24 text-sm font-semibold text-ink">Devoluções no período (data do movimento)</h2>
       <Card bodyClass="p-0" className="mb-4">
         {ops.returns.length === 0 ? (
           <EmptyState title="Nenhuma devolução no período" />

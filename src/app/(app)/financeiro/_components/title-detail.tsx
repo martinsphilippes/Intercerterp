@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BadgeCheck, Ban, Download, Mail, Paperclip, Pencil, Receipt, Undo2 } from "lucide-react";
+import { BadgeCheck, Ban, CreditCard, Download, Mail, Paperclip, Pencil, Receipt, Undo2 } from "lucide-react";
 import type { SessionInfo } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
@@ -16,9 +16,9 @@ import { formatMoney } from "@/lib/money";
 import { formatDate, formatDateTime, today } from "@/lib/dates";
 import { can, canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
-import { dueState, lateChargeParams, type TitleKind } from "@/domain/finance";
+import { dueState, lateChargeParams, RENEG_MAX_ITEMS, type TitleKind } from "@/domain/finance";
 import { ORIGIN_LABEL, originHref, partyHref, titleDetail } from "../queries";
-import { approvePayableAction, cancelTitleAction, reverseSettlementAction, revokeApprovalAction, sendNoticeAction, updateInstallmentAction, updateTitleAction, uploadAttachmentAction } from "../actions";
+import { approvePayableAction, cancelTitleAction, reverseSettlementAction, revokeApprovalAction, sendNoticeAction, undoRenegotiationAction, updateInstallmentAction, updateTitleAction, uploadAttachmentAction } from "../actions";
 import { RenegotiateDialog } from "./renegotiate-dialog";
 import { FormDialog } from "./form-dialog";
 import { SettleDialog } from "./settle-dialog";
@@ -61,6 +61,18 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
   const cardFeeTotal = [...d.cardFee.values()].reduce((a, b) => a + b, 0);
   const customer = rec && t.partyType === "customer" && t.partyId ? await s.ctx.store.get("customers", t.partyId) : null;
   const openInsts = d.installments.filter((i) => ["open", "partial"].includes(i.status));
+  const isCard = t.originType === "sale_card";
+  const isReneg = t.originType === "renegotiation" && t.status !== "cancelled";
+  const renegNested = d.installments.some((i) => i.status === "renegotiated");
+  const undoBlock = branchCtxMissing
+    ? "Selecione uma filial (consolidado é somente consulta)."
+    : !canDo(s.user, "finance.settle")
+      ? "Sem permissão para negociar títulos."
+      : activeSettlements.length > 0
+        ? "Este título já tem recebimento(s): estorne-os antes de desfazer a renegociação."
+        : renegNested
+          ? "Parcelas deste título foram renegociadas novamente: desfaça primeiro a renegociação mais recente."
+          : null;
   return (
     <>
       <PageHeader
@@ -95,7 +107,26 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                 today={t0}
                 disabled={branchCtxMissing || !canDo(s.user, "finance.settle")}
                 disabledReason={branchCtxMissing ? "Selecione uma filial (consolidado é somente consulta)." : "Sem permissão para negociar títulos."}
+                maxItems={RENEG_MAX_ITEMS}
               />
+            )}
+            {isReneg && can(s.user, "finance", "edit") && (
+              <FormDialog
+                label="Desfazer renegociação"
+                icon={<Undo2 className="size-4" />}
+                variant="ghost"
+                title={`Desfazer renegociação — título nº ${t.number}`}
+                action={undoRenegotiationAction.bind(null, id)}
+                submitLabel="Desfazer renegociação"
+                submitVariant="danger"
+                disabled={Boolean(undoBlock)}
+                disabledReason={undoBlock ?? undefined}
+                description="Este título é cancelado e as parcelas renegociadas voltam ao saldo do título original (aberta ou parcial, com o valor que tinham). Nada é lançado em conta. O histórico é preservado."
+              >
+                <Field label="Motivo" required>
+                  <Textarea name="reason" required rows={2} maxLength={300} />
+                </Field>
+              </FormDialog>
             )}
             {activeSettlements.length > 0 && (
               <LinkButton href={`${self}/recibo`}>
@@ -218,10 +249,20 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                         )}
                         <td>
                           <StatusBadge kind="title" status={i.status === "partial" && st === "upcoming" ? "partial" : st} />
+                          {i.status === "renegotiated" && d.renegOf.get(i.id) && (
+                            <Link className="mt-0.5 block text-xs text-brand-700 hover:underline" href={`/financeiro/receber/${d.renegOf.get(i.id)!.id}`}>
+                              → título nº {d.renegOf.get(i.id)!.number}
+                            </Link>
+                          )}
                         </td>
                         <td className="no-print">
                           <div className="flex justify-end gap-2">
-                            {["open", "partial"].includes(i.status) && (
+                            {["open", "partial"].includes(i.status) && isCard && (
+                              <LinkButton href={`/financeiro/cartoes?status=open&to=${i.dueDate}`} size="sm" title="Recebível da adquirente: liquide com a taxa em Recebíveis de cartão">
+                                <CreditCard className="size-4" /> Liquidar em Cartões
+                              </LinkButton>
+                            )}
+                            {["open", "partial"].includes(i.status) && !isCard && (
                               <>
                                 <SettleDialog
                                   kind={kind}
@@ -295,6 +336,8 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                   <tbody>
                     {d.settlements.map((x) => {
                       const inst = d.installments.find((i) => i.id === x.installmentId);
+                      const instLocked = inst && (inst.status === "renegotiated" || inst.status === "cancelled");
+                      const reneg = inst ? d.renegOf.get(inst.id) : undefined;
                       const entry = x.accountEntryId ? d.entries.get(x.accountEntryId) : null;
                       const btx = d.bankTxBySettlement.get(x.id);
                       const file = x.attachmentFileId ? d.files.get(x.attachmentFileId) : null;
@@ -363,7 +406,17 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                           </td>
                           <td className="no-print text-right">
                             {!isRev && x.status === "active" && canReverse && (
-                              entry?.reconciled ? (
+                              instLocked ? (
+                                inst?.status === "renegotiated" && reneg ? (
+                                  <Link href={`/financeiro/receber/${reneg.id}`} className="text-xs text-amber-700 underline" title={`Parcela renegociada no título nº ${reneg.number}: desfaça a renegociação antes de estornar esta baixa (estorno direto reabriria a dívida em duplicidade).`}>
+                                    Desfazer renegociação p/ estornar
+                                  </Link>
+                                ) : (
+                                  <span className="text-xs text-slate-500" title={inst?.status === "renegotiated" ? "Parcela renegociada: desfaça a renegociação antes de estornar esta baixa." : "Parcela cancelada: a baixa não pode ser estornada."}>
+                                    {inst?.status === "renegotiated" ? "Parcela renegociada" : "Parcela cancelada"}
+                                  </span>
+                                )
+                              ) : entry?.reconciled ? (
                                 <Link href={`/financeiro/conciliacao?account=${entry.accountId}&tab=historico`} className="text-xs text-amber-700 underline" title="A baixa está conciliada com o extrato. Desfaça a conciliação antes de estornar.">
                                   Desfazer conciliação p/ estornar
                                 </Link>

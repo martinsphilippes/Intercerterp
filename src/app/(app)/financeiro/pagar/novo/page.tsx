@@ -30,7 +30,7 @@ export default async function Page() {
         parties={parties}
         categories={categories}
         costCenters={costCenters}
-        terms={terms.filter((t) => t.kind !== "sale").map((t) => ({ value: t.id, label: t.name, installments: t.installments, firstDueDays: t.firstDueDays, intervalDays: t.intervalDays }))}
+        terms={terms.filter((t) => t.kind !== "sale").map((t) => ({ value: t.id, label: t.name, installments: t.installments, firstDueDays: t.firstDueDays, intervalDays: t.intervalDays, interestBps: t.interestBps ?? 0 }))}
         today={today()}
         canApprove={canDo(s.user, "finance.approve_payable")}
       />

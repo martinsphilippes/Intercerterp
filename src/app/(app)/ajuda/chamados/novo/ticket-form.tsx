@@ -36,7 +36,7 @@ export function TicketForm({ categories, priorities, origin, branchName, default
               <Textarea name="message" required minLength={10} rows={6} />
             </Field>
             <Field label="Anexos" hint="Até 5 arquivos de 8 MB: imagens, PDF, texto, XML ou ZIP." className="sm:col-span-2">
-              <input type="file" name="attachments" multiple accept="image/*,application/pdf,text/plain,text/csv,text/xml,application/xml,application/zip,.zip,.xml" className="text-sm" />
+              <input type="file" name="attachments" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,text/xml,application/xml,application/zip,.zip,.xml" className="text-sm" />
             </Field>
           </FormGrid>
           <div className="rounded-md border border-line bg-slate-50 p-3 text-xs text-slate-600">

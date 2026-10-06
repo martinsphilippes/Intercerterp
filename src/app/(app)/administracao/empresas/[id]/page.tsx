@@ -18,6 +18,7 @@ import { CRT_OPTIONS, REGIMES } from "@/domain/companies";
 import { queryBranches } from "../queries";
 import { setCompanyStatusAction } from "../actions";
 import { CompanyUsersForm } from "../forms";
+import { companyView } from "../access";
 
 export const metadata = { title: "Empresa" };
 
@@ -25,15 +26,19 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const s = await requireSession("admin");
   const { id } = await params;
   const { tab = "cadastro" } = await searchParams;
-  if (!s.companies.some((c) => c.id === id)) notFound();
-  const c = await s.ctx.store.getOrThrow("companies", id);
+  // empresa ativa ou outra autorizada: contexto da empresa (acesso e perfil daquela empresa)
+  const cc = s.companies.some((x) => x.id === id) ? await companyView(s, id) : null;
+  if (!cc) notFound();
+  const c = await cc.store.getOrThrow("companies", id);
   const branches = await queryBranches(s, id);
-  const users = await listAll(s.ctx.store, "users");
+  const users = await listAll(cc.store, "users");
   const linked = users.filter((u) => u.isAdmin || (u.companyIds ?? []).includes(id));
-  const fiscal = await listAll(s.ctx.store, "fiscal_configs", { filters: [["eq", "companyId", id]] });
+  const fiscal = await listAll(cc.store, "fiscal_configs", { filters: [["eq", "companyId", id]] });
   const base = `/administracao/empresas/${id}`;
   const a = c.address ?? {};
-  const edit = can(s.user, "admin", "edit");
+  const edit = can(cc.user, "admin", "edit");
+  const create = can(cc.user, "admin", "create");
+  const inactive = c.status === "inactive";
   return (
     <>
       <PageHeader
@@ -54,7 +59,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 <Pencil className="size-4" /> Editar
               </LinkButton>
             )}
-            {can(s.user, "admin", "create") && (
+            {create && !inactive && (
               <LinkButton href={`${base}/filiais/nova`}>
                 <Plus className="size-4" /> Nova filial
               </LinkButton>
@@ -64,6 +69,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           </>
         }
       />
+      {inactive && (
+        <div className="mb-4">
+          <Notice tone="warn" title="Empresa inativa">A empresa não pode ser selecionada como unidade de trabalho nem operar (vendas, caixa, estoque, financeiro). Reative-a para voltar a usá-la.</Notice>
+        </div>
+      )}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Filiais" value={branches.length} hint={`${branches.filter((b) => b.status !== "inactive").length} ativas`} href={`${base}?tab=filiais`} />
         <Stat label="Usuários vinculados" value={linked.filter((u) => !u.isAdmin && u.status !== "inactive").length} hint="+ administradores" href={`${base}?tab=usuarios`} />
@@ -118,14 +128,14 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         </div>
       )}
       {tab === "filiais" && (
-        <Card bodyClass="p-0" actions={can(s.user, "admin", "create") && <LinkButton size="sm" href={`${base}/filiais/nova`}><Plus className="size-4" /> Nova filial</LinkButton>} title="Filiais (unidades)">
+        <Card bodyClass="p-0" actions={create && !inactive && <LinkButton size="sm" href={`${base}/filiais/nova`}><Plus className="size-4" /> Nova filial</LinkButton>} title="Filiais (unidades)">
           {branches.length === 0 ? (
             <EmptyState title="Nenhuma filial" />
           ) : (
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
                 <thead>
-                  <tr><th>Código</th><th>Filial</th><th>CNPJ</th><th>Município</th><th>Tabela padrão</th><th>Depósito padrão</th><th>Fuso</th><th className="text-right">Terminais</th><th className="text-right">Caixas abertos</th><th>Situação</th></tr>
+                  <tr><th>Código</th><th>Filial</th><th>CNPJ</th><th>Município</th><th>Tabela padrão</th><th>Depósito padrão</th><th className="text-right">Terminais</th><th className="text-right">Caixas abertos</th><th>Situação</th></tr>
                 </thead>
                 <tbody>
                   {branches.map((b) => (
@@ -136,7 +146,6 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                       <td>{b.city}</td>
                       <td>{b.priceTableName}</td>
                       <td>{b.warehouseName}</td>
-                      <td className="text-xs">{b.timezone ?? "—"}</td>
                       <td className="tabular text-right">{b.terminalsCount}</td>
                       <td className="tabular text-right">{b.openSessions}</td>
                       <td><StatusBadge kind="generic" status={b.status ?? "active"} /></td>
@@ -152,17 +161,17 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <Card title="Usuários com acesso a esta empresa" description="Marque para vincular; desmarque para remover o acesso (as filiais desta empresa também são removidas do usuário).">
           <CompanyUsersForm
             companyId={id}
-            disabled={!edit || !canDo(s.user, "admin.users")}
+            disabled={!edit || !canDo(cc.user, "admin.users")}
             users={users
-              .filter((u) => u.isAdmin || s.user.isAdmin || (u.companyIds ?? []).some((x: string) => s.companies.some((sc) => sc.id === x)))
+              .filter((u) => u.isAdmin || s.user.isAdmin || (u.companyIds ?? []).some((x: string) => s.user.companyIds.includes(x)))
               .sort((x, y) => x.name.localeCompare(y.name, "pt-BR"))
-              .map((u) => ({ id: u.id, name: u.name, email: u.email, linked: (u.companyIds ?? []).includes(id), isAdmin: Boolean(u.isAdmin), status: u.status }))}
+              .map((u) => ({ id: u.id, name: u.name, email: u.email, linked: (u.companyIds ?? []).includes(id), isAdmin: Boolean(u.isAdmin), status: u.status, self: !s.user.isAdmin && u.id === s.user.id }))}
           />
         </Card>
       )}
       {tab === "historico" && (
         <Card title="Linha do tempo">
-          <Timeline store={s.ctx.store} refs={[`company:${id}`]} />
+          <Timeline store={cc.store} refs={[`company:${id}`]} />
         </Card>
       )}
     </>

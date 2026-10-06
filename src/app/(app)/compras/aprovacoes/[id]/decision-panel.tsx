@@ -11,7 +11,7 @@ import { decideAction } from "../actions";
 const LABEL: Record<string, string> = { approve: "Aprovar", adjust: "Devolver para ajuste", reject: "Rejeitar" };
 
 /** Registrar decisão: escolha + observação/motivo (até 500) → “Revisar decisão” mostra o resumo antes de confirmar. */
-export function DecisionPanel({ requestId, stepName, canDecide, reason, requiresNote, expiredBlocks, total, nextStep }: { requestId: string; stepName: string; canDecide: boolean; reason?: string | null; requiresNote: boolean; expiredBlocks: boolean; total: string; nextStep: string | null }) {
+export function DecisionPanel({ requestId, currentStep, revision, stepName, canDecide, reason, requiresNote, expiredBlocks, total, nextStep }: { requestId: string; currentStep: number; revision: number; stepName: string; canDecide: boolean; reason?: string | null; requiresNote: boolean; expiredBlocks: boolean; total: string; nextStep: string | null }) {
   const [decision, setDecision] = useState("");
   const [note, setNote] = useState("");
   const [review, setReview] = useState(false);
@@ -37,6 +37,9 @@ export function DecisionPanel({ requestId, stepName, canDecide, reason, requires
           {({ pending, error }) => (
             <>
               <input type="hidden" name="requestId" value={requestId} />
+              {/* a decisão vale para a etapa/revisão exibida: se outra pessoa decidir antes, o servidor recusa */}
+              <input type="hidden" name="step" value={currentStep} />
+              <input type="hidden" name="revision" value={revision} />
               <input type="hidden" name="decision" value={decision} />
               <input type="hidden" name="note" value={note} />
               <p className="text-sm">Você vai <b>{LABEL[decision]?.toLowerCase()}</b> a etapa <b>{stepName}</b> desta solicitação ({total} com frete).</p>

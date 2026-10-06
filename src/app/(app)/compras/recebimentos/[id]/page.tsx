@@ -49,13 +49,28 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const supplier = await store.get("suppliers", r.supplierId);
   const items: ReceiptItem[] = r.items ?? [];
   const divergences = r.divergences ?? [];
-  const linkedOrders = (await Promise.all((r.orderIds ?? []).map((oid: string) => store.get("purchase_orders", oid)))).filter(Boolean) as any[];
+  const linkedOrders = (await Promise.all((r.orderIds ?? []).map((oid: string) => store.get("purchase_orders", oid)))).filter((o) => o && o.companyId === s.ctx.companyId) as any[];
   const draft = r.status === "draft";
   const eff = effectsOf(r);
   const active = items.filter((i) => !i.ignore);
   const checked = active.filter((i) => i.checked).length;
   const match = orderMatchRate(items);
   const tot = r.emitter?.totals ?? null;
+  // totais exibidos: com XML, os da NF-e; sem XML, os encargos do pedido proporcionais ao recebido
+  const docTotals = tot
+    ? [
+        { label: "Produtos", value: formatMoney(tot.vProd - tot.vDesc) },
+        { label: "Frete", value: formatMoney(r.freight) },
+        { label: "IPI", value: formatMoney(tot.vIPI ?? 0) },
+        { label: "ICMS destacado (informativo)", value: formatMoney(tot.vICMS ?? 0) },
+        { label: "Outras despesas/seguro/ST", value: formatMoney(Math.max(0, (r.otherExpenses ?? 0) - (tot.vIPI ?? 0))) },
+      ]
+    : [
+        { label: "Produtos recebidos", value: formatMoney(r.productsTotal) },
+        { label: "Frete", value: formatMoney(r.freight) },
+        { label: "Outras despesas/seguro/IPI", value: formatMoney(r.otherExpenses ?? 0) },
+        { label: "Desconto", value: formatMoney(r.discount ?? 0) },
+      ];
   const [users, terms, methods, categories, costCenters] = await Promise.all([nameMap(s.ctx, "users"), nameMap(s.ctx, "payment_terms"), nameMap(s.ctx, "payment_methods"), nameMap(s.ctx, "fin_categories"), nameMap(s.ctx, "cost_centers")]);
   const wh = r.warehouseId ? await store.get("warehouses", r.warehouseId) : null;
   const confirmed = r.status === "confirmed";
@@ -85,7 +100,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       listAll(store, "cost_centers", { filters: [["eq", "companyId", s.ctx.companyId]] }),
     ]);
     conf = {
-      receipt: { id, hasXml: Boolean(r.xmlFileId), supplierId: r.supplierId, warehouseId: r.warehouseId, orderIds: r.orderIds ?? [], freight: r.freight ?? 0, otherExpenses: r.otherExpenses ?? 0, discount: r.discount ?? 0, invoicedTotal: r.invoicedTotal ?? null, paymentTermId: r.paymentTermId ?? null, paymentMethodId: r.paymentMethodId ?? null, entryCfop: r.entryCfop ?? null, categoryId: r.categoryId ?? null, costCenterId: r.costCenterId ?? null, differenceAction: r.differenceAction ?? "adjust_to_due", notes: r.notes ?? null, effects: eff, hasDuplicatas: (r.emitter?.duplicatas ?? []).length > 0 },
+      receipt: { id, hasXml: Boolean(r.xmlFileId), chargesAuto: !r.xmlFileId && r.orderCharges ? r.orderCharges.auto !== false : null, supplierId: r.supplierId, warehouseId: r.warehouseId, orderIds: r.orderIds ?? [], freight: r.freight ?? 0, otherExpenses: r.otherExpenses ?? 0, discount: r.discount ?? 0, invoicedTotal: r.invoicedTotal ?? null, paymentTermId: r.paymentTermId ?? null, paymentMethodId: r.paymentMethodId ?? null, entryCfop: r.entryCfop ?? null, categoryId: r.categoryId ?? null, costCenterId: r.costCenterId ?? null, differenceAction: r.differenceAction ?? "adjust_to_due", notes: r.notes ?? null, effects: eff, hasDuplicatas: (r.emitter?.duplicatas ?? []).length > 0 },
       items: items.map((i) => ({ idx: i.idx, cProd: i.cProd ?? null, xProd: i.xProd ?? null, uCom: i.uCom ?? null, invoicedQtySupplier: i.invoicedQtySupplier ?? null, conversionFactor: i.conversionFactor ?? 1000, invoicedQty: i.invoicedQty, invoicedValue: i.invoicedValue, invoiceUnitCost: i.invoiceUnitCost, skuId: i.skuId, sku: i.sku ?? null, description: i.description, unitCode: i.unitCode ?? null, mapping: i.mapping ?? null, expectedQty: i.expectedQty ?? 0, orderUnitCost: i.orderUnitCost ?? null, receivedQty: i.receivedQty, unitCost: i.unitCost, ignore: Boolean(i.ignore), divergence: i.divergence ?? null, checked: Boolean(i.checked), lot: i.lot ?? null, expiry: i.expiry ?? null, status: receiptItemStatus(i, divergences) })),
       orders: orders.map((o) => ({ id: o.id, number: o.number, status: o.status, expectedDate: o.expectedDate ?? null })),
       orderSkus: [...skuOpts.entries()].map(([skuId, label]) => ({ skuId, label })),
@@ -123,8 +138,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               {r.nfeKey && <p className="tabular font-mono text-xs text-slate-600">{keyFmt}</p>}
               <div className="mt-1 flex flex-wrap gap-1">
                 {r.xmlFileId ? <Badge tone="good">XML validado (estrutura e chave)</Badge> : <Badge tone="warn">Sem XML</Badge>}
-                {r.emitter?.authorized && <Badge tone="good">Autorizada · protocolo {r.emitter?.protocol}</Badge>}
-                {r.xmlFileId && !r.emitter?.authorized && <Badge tone="warn">Sem protocolo de autorização no XML</Badge>}
+                {r.emitter?.environment === "homologacao" && <Badge tone="bad" title="NF-e emitida em ambiente de homologação (tpAmb = 2): não tem valor fiscal">Homologação – sem valor fiscal</Badge>}
+                {r.emitter?.authorized && r.emitter?.environment !== "homologacao" && <Badge tone="good">Autorizada · protocolo {r.emitter?.protocol}</Badge>}
+                {r.emitter?.authorized && r.emitter?.environment === "homologacao" && <Badge tone="warn">Protocolo de homologação {r.emitter?.protocol}</Badge>}
+                {r.xmlFileId && !r.emitter?.authorized && <Badge tone="warn">{r.emitter?.protocolStatus ? `Sem protocolo de autorização (cStat ${r.emitter.protocolStatus}${r.emitter.protocolMessage ? ` – ${r.emitter.protocolMessage}` : ""})` : "Sem protocolo de autorização no XML"}</Badge>}
               </div>
             </div>
           </div>
@@ -151,17 +168,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
       {draft && (
         <div className="mb-5 grid gap-4 lg:grid-cols-2">
-          <Card title="Totais da NF-e">
+          <Card title={tot ? "Totais da NF-e" : "Totais do recebimento (sem XML)"} description={!tot && r.orderCharges ? (r.orderCharges.auto !== false ? "Frete, seguro, outras despesas, IPI e desconto geral vêm do pedido, proporcionais ao recebido." : "Frete, despesas e desconto informados na conferência.") : undefined}>
             <DefinitionList
               cols={3}
-              items={[
-                { label: "Produtos", value: formatMoney(tot ? tot.vProd - tot.vDesc : r.productsTotal) },
-                { label: "Frete", value: formatMoney(r.freight) },
-                { label: "IPI", value: formatMoney(tot?.vIPI ?? 0) },
-                { label: "ICMS destacado (informativo)", value: formatMoney(tot?.vICMS ?? 0) },
-                { label: "Outras despesas/seguro/ST", value: formatMoney(Math.max(0, (r.otherExpenses ?? 0) - (tot?.vIPI ?? 0))) },
-                { label: "Total da NF-e", value: <strong>{formatMoney(r.invoicedTotal)}</strong> },
-              ]}
+              items={[...docTotals, { label: tot ? "Total da NF-e" : "Total faturado (informado)", value: <strong>{r.invoicedTotal != null ? formatMoney(r.invoicedTotal) : "—"}</strong> }]}
             />
           </Card>
           <Card title="Impactos previstos da entrada" description="Conforme o último salvamento da conferência.">
@@ -172,7 +182,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                 { label: "Novo custo médio", value: eff.updateCost ? `Atualizado em ${costProducts} produto(s)` : "Custo não será atualizado" },
                 { label: "Contas a pagar", value: eff.createPayable ? `${installments.length} parcela(s) · ${formatMoney(installments.reduce((a, x) => a + x.amount, 0))}` : "Não será gerado" },
                 { label: "Vencimentos", value: installments.map((x) => formatDate(x.dueDate)).join(" e ") || "—" },
-                { label: "Crédito de ICMS", value: tot?.vICMS ? `${formatMoney(tot.vICMS)} destacado — apuração conforme regime no módulo Fiscal` : "Sem ICMS destacado" },
+                { label: "ICMS destacado", value: tot?.vICMS ? `${formatMoney(tot.vICMS)} na NF-e (informativo — o sistema não faz a apuração de créditos)` : "Sem ICMS destacado" },
                 { label: "Valor devido", value: formatMoney(r.dueTotal) },
               ]}
             />
@@ -210,16 +220,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             </div>
           </Card>
           <div className="grid gap-4 lg:grid-cols-3">
-            <Card title="Totais da NF-e">
+            <Card title={tot ? "Totais da NF-e" : "Totais do recebimento (sem XML)"}>
               <DefinitionList
                 cols={1}
                 items={[
-                  { label: "Produtos", value: formatMoney(tot ? tot.vProd - tot.vDesc : r.productsTotal) },
-                  { label: "Frete", value: formatMoney(r.freight) },
-                  { label: "IPI", value: formatMoney(tot?.vIPI ?? 0) },
-                  { label: "ICMS destacado (informativo)", value: formatMoney(tot?.vICMS ?? 0) },
-                  { label: "Outras despesas/seguro/ST", value: formatMoney((r.otherExpenses ?? 0) - (tot?.vIPI ?? 0)) },
-                  { label: "Total da NF-e", value: <strong>{formatMoney(r.invoicedTotal)}</strong> },
+                  ...docTotals,
+                  { label: tot ? "Total da NF-e" : "Total faturado (informado)", value: <strong>{r.invoicedTotal != null ? formatMoney(r.invoicedTotal) : "—"}</strong> },
                   { label: "Valor devido pelo recebido", value: <strong>{formatMoney(r.dueTotal)}</strong> },
                 ]}
               />

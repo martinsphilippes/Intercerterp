@@ -1,8 +1,9 @@
-import { detId, isConflict, listAll } from "@/lib/db";
+import { detId, isConflict, listAll, retryOnConflict } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import { nowIso, today } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
+import { canDo } from "@/lib/permissions";
 import { audit } from "@/lib/core/audit";
 import { nextNumber } from "@/lib/core/numbering";
 import { transferBetweenAccounts } from "./finance";
@@ -30,6 +31,33 @@ export const CASH_MOVEMENT_LABEL: Record<string, string> = {
 export async function currentSession(ctx: Ctx, terminalId: string): Promise<Doc | null> {
   const res = await ctx.store.list("cash_sessions", { filters: [["eq", "terminalId", terminalId], ["eq", "status", ["open", "reopened"]]], limit: 1 });
   return res.items[0] ?? null;
+}
+
+/**
+ * Escrita em sessão de caixa: somente na filial ativa (não no consolidado) e, quando mexe na gaveta,
+ * pelo próprio operador da sessão ou por quem tem a permissão de supervisão do caixa ("Reabrir caixa").
+ */
+export function assertSessionScope(ctx: Ctx, s: Doc, opts: { drawer?: boolean } = {}) {
+  assert(s.companyId === ctx.companyId, "Sessão de outra empresa.");
+  const branchId = requireBranch(ctx);
+  assert(s.branchId === branchId, "Sessão de caixa de outra filial: selecione a filial da sessão para operar.", "branch_mismatch");
+  if (opts.drawer) assert(s.operatorId === ctx.user.id || canDo(ctx.user, "cash.reopen"), "Somente o operador desta sessão (ou um supervisor de caixa) pode movimentar ou fechar esta gaveta.", "not_session_operator");
+}
+
+/** Conferência cega ativa para a filial da sessão (parâmetro do servidor — nunca vem do formulário). */
+export async function blindCloseEnabled(ctx: Ctx, branchId: string) {
+  return Boolean(await getSetting(ctx.store, ctx.companyId, branchId, "cash.blindClose", false));
+}
+
+/**
+ * O previsto de uma sessão aberta só é exibido quando a conferência cega está desligada, quando a contagem
+ * desta versão já foi registrada, ou para supervisores de caixa.
+ */
+export async function expectedVisible(ctx: Ctx, s: Doc, blind?: boolean) {
+  if (!["open", "reopened"].includes(s.status)) return true;
+  if (canDo(ctx.user, "cash.reopen")) return true;
+  const isBlind = blind ?? (await blindCloseEnabled(ctx, s.branchId));
+  return !isBlind || s.blindCount?.version === (s.version ?? 1);
 }
 
 export async function openSession(ctx: Ctx, input: { terminalId: string; openingFund: number; peripheralsCheck?: Record<string, any>; notes?: string }) {
@@ -91,7 +119,7 @@ export async function addCashMovement(
   const existing = await ctx.store.get("cash_movements", id);
   if (existing) return existing; // repetição (duplo clique) devolve o mesmo movimento
   const s = await ctx.store.getOrThrow("cash_sessions", input.sessionId);
-  assert(s.companyId === ctx.companyId, "Sessão de outra empresa.");
+  assertSessionScope(ctx, s, { drawer: true });
   assert(["open", "reopened"].includes(s.status), "Sessão de caixa não está aberta.");
   assert(Number.isInteger(input.amount) && input.amount > 0, "Informe um valor positivo.");
   assert(input.reason?.trim(), "Informe o motivo.");
@@ -110,9 +138,11 @@ export async function addCashMovement(
     responsibleName = r.name;
   }
   let approver: { id: string; name: string } | null = null;
+  const showExpected = await expectedVisible(ctx, s);
+  const insufficient = (cash: number) => new BusinessError(showExpected ? `Sangria maior que o dinheiro disponível no caixa (${formatMoney(cash)}).` : "Sangria maior que o dinheiro disponível no caixa.", "insufficient_cash");
   if (input.type === "withdrawal") {
     const summary = await sessionSummary(ctx, s.id);
-    if (input.amount > summary.expected.cash) throw new BusinessError(`Sangria maior que o dinheiro disponível no caixa (${formatMoney(summary.expected.cash)}).`, "insufficient_cash");
+    if (input.amount > summary.expected.cash) throw insufficient(summary.expected.cash);
     const limit = Number(await getSetting(ctx.store, ctx.companyId, s.branchId, "cash.withdrawalApprovalAbove", 0)) || 0;
     if (limit > 0 && input.amount > limit) {
       if (!input.approval) throw new BusinessError(`Sangrias acima de ${formatMoney(limit)} exigem autorização adicional do gerente (login e senha).`, "approval_required");
@@ -122,22 +152,41 @@ export async function addCashMovement(
     }
   }
   const number = await nextNumber(ctx.store, `cashmov:${s.id}`);
+  const data = {
+    companyId: ctx.companyId, branchId: s.branchId, createdBy: ctx.user.id, sessionId: s.id, number, type: input.type, method: "cash",
+    amount: input.type === "withdrawal" ? -input.amount : input.amount, reason: input.reason.trim(), recipient: responsibleName,
+    responsibleId: input.responsibleId ?? null, approvedBy: approver?.id ?? null,
+    accountId: input.accountId ?? null, occurredAt: nowIso(), idemKey: input.idemKey, notes: input.notes?.trim() || null, sessionVersion: s.version ?? 1,
+  };
   let mov: Doc;
-  try {
-    mov = await ctx.store.create(
-      "cash_movements",
-      {
-        companyId: ctx.companyId, branchId: s.branchId, createdBy: ctx.user.id, sessionId: s.id, number, type: input.type, method: "cash",
-        amount: input.type === "withdrawal" ? -input.amount : input.amount, reason: input.reason.trim(), recipient: responsibleName,
-        responsibleId: input.responsibleId ?? null, approvedBy: approver?.id ?? null,
-        accountId: input.accountId ?? null, occurredAt: nowIso(), idemKey: input.idemKey, notes: input.notes?.trim() || null, sessionVersion: s.version ?? 1,
-      },
-      id,
-    );
-  } catch (e) {
-    if (isConflict(e)) return ctx.store.getOrThrow("cash_movements", id);
-    throw e;
+  let reused = false;
+  if (input.type === "withdrawal") {
+    // Sangrias da mesma sessão são serializadas: cada uma grava a trava nº (sangrias já registradas + 1) na mesma
+    // transação do movimento. Duas sangrias simultâneas disputam a mesma trava; a perdedora relê o dinheiro disponível.
+    mov = await retryOnConflict(async () => {
+      const again = await ctx.store.get("cash_movements", id);
+      if (again) {
+        reused = true;
+        return again;
+      }
+      const summary = await sessionSummary(ctx, s.id);
+      if (input.amount > summary.expected.cash) throw insufficient(summary.expected.cash);
+      const n = summary.movements.filter((m) => m.type === "withdrawal").length;
+      await ctx.store.transaction(async (t) => {
+        await t.create("operations", { companyId: ctx.companyId, type: "cash_withdrawal_lock", status: "done", entityType: "cash_session", entityId: s.id, createdBy: ctx.user.id }, detId("cashwd", s.id, n + 1));
+        await t.create("cash_movements", data, id);
+      });
+      return ctx.store.getOrThrow("cash_movements", id);
+    });
+  } else {
+    try {
+      mov = await ctx.store.create("cash_movements", data, id);
+    } catch (e) {
+      if (isConflict(e)) return ctx.store.getOrThrow("cash_movements", id);
+      throw e;
+    }
   }
+  if (reused) return mov;
   // Sangria com destino em conta financeira = transferência (não é despesa). Suprimento vindo de conta idem.
   if (input.accountId && cashAccount) {
     const tr = await transferBetweenAccounts(ctx, {
@@ -224,83 +273,158 @@ export function requiredChecklist(summary: SessionSummary) {
   ].filter((c) => c.applies);
 }
 
-/** Apuração sem gravar (conferência cega: o previsto só é revelado depois de informado o contado). */
-export async function previewClose(ctx: Ctx, sessionId: string, counted: Record<string, number>) {
-  requirePerm(ctx, "cash", "edit");
-  const s = await ctx.store.getOrThrow("cash_sessions", sessionId);
-  assert(s.companyId === ctx.companyId, "Sessão de outra empresa.");
-  const summary = await sessionSummary(ctx, s.id);
+function expectedOf(summary: SessionSummary) {
   const expected: Record<string, number> = { cash: summary.expected.cash };
   for (const [k, v] of Object.entries(summary.byMethod)) if (k !== "cash") expected[k] = v.expected;
+  return expected;
+}
+
+function differencesOf(expected: Record<string, number>, counted: Record<string, number>) {
   const differences: Record<string, number> = {};
   for (const k of new Set([...Object.keys(expected), ...Object.keys(counted)])) {
     const d = (counted[k] ?? 0) - (expected[k] ?? 0);
     if (d !== 0) differences[k] = d;
   }
-  return { expected, differences };
+  return differences;
+}
+
+function validCounted(counted: Record<string, number>) {
+  assert(counted && typeof counted === "object", "Informe os valores contados.");
+  for (const [k, v] of Object.entries(counted)) assert(Number.isInteger(v) && v >= 0, `Valor informado inválido para ${k}.`);
+  return counted;
+}
+
+/**
+ * Apuração sem fechar. Na conferência cega (parâmetro do servidor `cash.blindClose`), a primeira apuração de cada
+ * versão da sessão REGISTRA a contagem informada; só então o previsto é revelado. Apurações seguintes devolvem a
+ * contagem já registrada (não é possível recontar depois de ver o previsto) e o fechamento usa essa contagem.
+ */
+export async function previewClose(ctx: Ctx, sessionId: string, counted: Record<string, number>) {
+  requirePerm(ctx, "cash", "edit");
+  const s = await ctx.store.getOrThrow("cash_sessions", sessionId);
+  assertSessionScope(ctx, s, { drawer: true });
+  assert(["open", "reopened"].includes(s.status), "Sessão de caixa não está aberta.");
+  const blind = await blindCloseEnabled(ctx, s.branchId);
+  const version = s.version ?? 1;
+  let used = validCounted(counted);
+  if (blind) {
+    if (s.blindCount?.version === version) used = s.blindCount.counted ?? {};
+    else {
+      await ctx.store.update("cash_sessions", s.id, { blindCount: { version, counted: used, at: nowIso(), by: ctx.user.id, byName: ctx.user.name } });
+      await audit(ctx, { module: "cash", action: "session.blind_count", entityType: "cash_session", entityId: s.id, summary: `Contagem cega registrada no caixa nº ${s.number} (versão ${version}) antes da revelação do previsto`, after: { counted: used } });
+    }
+  }
+  const summary = await sessionSummary(ctx, s.id);
+  const expected = expectedOf(summary);
+  return { expected, differences: differencesOf(expected, used), counted: used, blind };
+}
+
+/** Recolhimento registrado no último fechamento e ainda não transferido (fechamento interrompido). */
+export async function pendingCloseTransfer(ctx: Ctx, s: Doc): Promise<{ toAccountId: string; fromAccountId: string; amount: number; idemKey: string } | null> {
+  if (s.status !== "closed") return null;
+  const last = [...(s.history ?? [])].reverse().find((h: any) => h.event === "closed");
+  const tr = last?.transfer;
+  if (!tr?.idemKey) return null;
+  if (await ctx.store.get("fin_transfers", detId("fintransfer", tr.idemKey))) return null;
+  return tr;
+}
+
+async function completeCloseTransfer(ctx: Ctx, s: Doc) {
+  const tr = await pendingCloseTransfer(ctx, s);
+  if (!tr) return null;
+  const target = await ctx.store.get("financial_accounts", tr.toAccountId);
+  assert(target && target.companyId === ctx.companyId && target.active !== false, "Recolhimento pendente: a conta de destino não está mais disponível (inativa ou removida). Registre a transferência manualmente no Financeiro.", "invalid_account");
+  return transferBetweenAccounts(ctx, {
+    fromAccountId: tr.fromAccountId, toAccountId: tr.toAccountId, amount: tr.amount, date: today(),
+    description: `Recolhimento do fechamento do caixa nº ${s.number}`, idemKey: tr.idemKey, kind: "cash_withdrawal",
+  });
+}
+
+/** Conclui o recolhimento de um fechamento interrompido (idempotente). */
+export async function retryCloseTransfer(ctx: Ctx, sessionId: string) {
+  requirePerm(ctx, "cash", "edit");
+  const s = await ctx.store.getOrThrow("cash_sessions", sessionId);
+  assertSessionScope(ctx, s, { drawer: true });
+  const tr = await completeCloseTransfer(ctx, s);
+  assert(tr, "Não há recolhimento pendente nesta sessão.");
+  return tr;
 }
 
 export async function closeSession(
   ctx: Ctx,
-  input: { sessionId: string; counted: Record<string, number>; justification?: string | null; checklist?: Record<string, boolean>; transferToAccountId?: string | null; transferAmount?: number; idemKey?: string; blind?: boolean; enforceChecklist?: boolean },
+  input: { sessionId: string; counted: Record<string, number>; justification?: string | null; checklist?: Record<string, boolean>; transferToAccountId?: string | null; transferAmount?: number; idemKey?: string; enforceChecklist?: boolean },
 ) {
   requirePerm(ctx, "cash", "edit");
   const s = await ctx.store.getOrThrow("cash_sessions", input.sessionId);
-  assert(s.companyId === ctx.companyId, "Sessão de outra empresa.");
+  assertSessionScope(ctx, s, { drawer: true });
   if (s.status === "closed") {
     const last = [...(s.history ?? [])].reverse().find((h: any) => h.event === "closed");
-    if (input.idemKey && last?.idemKey === input.idemKey) return s; // repetição do mesmo fechamento
+    if (input.idemKey && last?.idemKey === input.idemKey) {
+      // repetição do mesmo fechamento: conclui o recolhimento que tenha ficado pendente
+      await completeCloseTransfer(ctx, s);
+      return ctx.store.getOrThrow("cash_sessions", s.id);
+    }
   }
   assert(["open", "reopened"].includes(s.status), "Sessão já está fechada.");
-  for (const [k, v] of Object.entries(input.counted)) assert(Number.isInteger(v) && v >= 0, `Valor informado inválido para ${k}.`);
+  const version = s.version ?? 1;
+  const blind = await blindCloseEnabled(ctx, s.branchId);
+  let counted: Record<string, number>;
+  if (blind) {
+    // conferência cega: vale a contagem registrada antes da revelação do previsto (nunca a do formulário)
+    assert(s.blindCount?.version === version, "Conferência cega: informe a contagem e clique em “Apurar diferenças” antes de fechar.", "blind_count_required");
+    counted = validCounted(s.blindCount.counted ?? {});
+  } else counted = validCounted(input.counted);
   const summary = await sessionSummary(ctx, s.id);
-  const expected: Record<string, number> = { cash: summary.expected.cash };
-  for (const [k, v] of Object.entries(summary.byMethod)) if (k !== "cash") expected[k] = v.expected;
-  const differences: Record<string, number> = {};
-  for (const k of new Set([...Object.keys(expected), ...Object.keys(input.counted)])) {
-    const d = (input.counted[k] ?? 0) - (expected[k] ?? 0);
-    if (d !== 0) differences[k] = d;
-  }
+  const expected = expectedOf(summary);
+  const differences = differencesOf(expected, counted);
   const hasDiff = Object.keys(differences).length > 0;
   if (hasDiff) assert(input.justification?.trim(), "Há divergências entre previsto e informado: registre a justificativa.", "justification_required");
   if (input.enforceChecklist) {
     const missing = requiredChecklist(summary).filter((k) => !input.checklist?.[k.key]);
     assert(missing.length === 0, `Conferências finais pendentes: ${missing.map((m) => m.label).join(", ")}.`, "checklist_pending");
   }
+  // Recolhimento: tudo o que pode falhar é validado ANTES de fechar a sessão
+  let transfer: { fromAccountId: string; toAccountId: string; amount: number; idemKey: string } | null = null;
+  if (input.transferToAccountId && (input.transferAmount ?? 0) > 0) {
+    const amount = input.transferAmount!;
+    assert(Number.isInteger(amount) && amount > 0, "Valor do recolhimento inválido.");
+    assert(amount <= (counted.cash ?? 0), `Recolhimento (${formatMoney(amount)}) maior que o dinheiro contado (${formatMoney(counted.cash ?? 0)}).`, "transfer_over_counted");
+    const target = await ctx.store.get("financial_accounts", input.transferToAccountId);
+    assert(target && target.companyId === ctx.companyId && target.active !== false, "Conta de destino do recolhimento inválida: escolha uma conta ativa desta empresa.", "invalid_account");
+    const cashAcc = await cashAccountFor(ctx, s.branchId);
+    assert(cashAcc, "Filial sem conta financeira do tipo Caixa: não é possível registrar o recolhimento. Cadastre em Financeiro → Contas.");
+    assert(cashAcc.id !== target.id, "A conta de destino do recolhimento deve ser diferente da conta Caixa da filial.");
+    transfer = { fromAccountId: cashAcc.id, toAccountId: target.id, amount, idemKey: `close:${s.id}:${version}` };
+  }
   const closedAt = nowIso();
   const history = [
     ...(s.history ?? []),
-    { at: closedAt, event: "closed", by: ctx.user.name, byId: ctx.user.id, version: s.version ?? 1, expected, counted: input.counted, differences, justification: input.justification ?? null, checklist: input.checklist ?? null, totals: summary.totals, idemKey: input.idemKey ?? null, blind: Boolean(input.blind) },
+    {
+      at: closedAt, event: "closed", by: ctx.user.name, byId: ctx.user.id, version, expected, counted, differences, justification: input.justification ?? null, checklist: input.checklist ?? null,
+      totals: summary.totals, idemKey: input.idemKey ?? null, blind, blindCount: blind ? s.blindCount : null, transfer,
+    },
   ];
-  const updated = await ctx.store.update("cash_sessions", s.id, {
+  await ctx.store.update("cash_sessions", s.id, {
     status: "closed",
     closedAt,
     closedBy: ctx.user.id,
     expected,
-    counted: input.counted,
+    counted,
     differences,
     justification: input.justification ?? null,
     checklist: input.checklist ?? null,
     lockKey: `closed:${s.id}:${s.version}`,
     history,
   });
-  // Dinheiro informado (e não o previsto) é o que efetivamente vai para a conta de destino, se escolhida.
-  if (input.transferToAccountId && (input.transferAmount ?? 0) > 0) {
-    assert((input.transferAmount ?? 0) <= (input.counted.cash ?? 0), "Recolhimento maior que o dinheiro contado.");
-    const cashAcc = await cashAccountFor(ctx, s.branchId);
-    if (cashAcc && cashAcc.id !== input.transferToAccountId) {
-      await transferBetweenAccounts(ctx, {
-        fromAccountId: cashAcc.id, toAccountId: input.transferToAccountId, amount: input.transferAmount!, date: today(),
-        description: `Recolhimento do fechamento do caixa nº ${s.number}`, idemKey: `close:${s.id}:${s.version}`, kind: "cash_withdrawal",
-      });
-    }
-  }
   await audit(ctx, {
     module: "cash", action: "session.close", entityType: "cash_session", entityId: s.id,
-    summary: `Caixa nº ${s.number} fechado (versão ${s.version ?? 1})${hasDiff ? " com divergência: " + Object.entries(differences).map(([k, v]) => `${summary.byMethod[k]?.label ?? k} ${v > 0 ? "+" : ""}${formatMoney(v)}`).join(", ") : " sem divergência"}`,
-    after: { expected, counted: input.counted, differences }, reason: input.justification ?? null,
+    summary: `Caixa nº ${s.number} fechado (versão ${version})${blind ? " em conferência cega" : ""}${hasDiff ? " com divergência: " + Object.entries(differences).map(([k, v]) => `${summary.byMethod[k]?.label ?? k} ${v > 0 ? "+" : ""}${formatMoney(v)}`).join(", ") : " sem divergência"}${transfer ? ` · recolhimento ${formatMoney(transfer.amount)}` : ""}`,
+    after: { expected, counted, differences, transfer }, reason: input.justification ?? null,
   });
-  return updated;
+  // Dinheiro informado (e não o previsto) é o que efetivamente vai para a conta de destino. Idempotente pela chave
+  // do fechamento: se falhar aqui, repetir o fechamento (ou "Concluir recolhimento" na sessão) completa a transferência.
+  if (transfer) await completeCloseTransfer(ctx, await ctx.store.getOrThrow("cash_sessions", s.id));
+  return ctx.store.getOrThrow("cash_sessions", s.id);
 }
 
 /** Reabre: preserva o fechamento anterior no histórico e cria nova versão de conferência. */
@@ -308,7 +432,7 @@ export async function reopenSession(ctx: Ctx, sessionId: string, reason: string)
   requireAction(ctx, "cash.reopen");
   assert(reason?.trim(), "Informe o motivo da reabertura.");
   const s = await ctx.store.getOrThrow("cash_sessions", sessionId);
-  assert(s.companyId === ctx.companyId, "Sessão de outra empresa.");
+  assertSessionScope(ctx, s);
   assert(s.status === "closed", "Somente caixas fechados podem ser reabertos.");
   const other = await currentSession(ctx, s.terminalId);
   if (other) throw new BusinessError("Há outra sessão aberta neste terminal. Feche-a antes de reabrir esta.", "session_open");

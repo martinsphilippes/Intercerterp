@@ -8,7 +8,7 @@ import { requireAction, requirePerm, systemCtx, type Ctx } from "@/lib/core/ctx"
 import { audit } from "@/lib/core/audit";
 import { BUCKETS, getFileStorage, saveFile } from "@/lib/core/files";
 import { DEFAULT_SETTINGS, getSetting } from "@/lib/core/settings";
-import { addDays, nowIso, startOfLocalDay, today } from "@/lib/dates";
+import { DEFAULT_TZ, addDays, nowIso, startOfLocalDay, today } from "@/lib/dates";
 
 /**
  * Backup e restauração (Tela 41).
@@ -447,6 +447,7 @@ export function suggestedDatabaseId() {
 }
 
 export async function createRestoreJob(ctx: Ctx, b: Doc, target: "test" | "appwrite_new", databaseId: string | null, idemKey?: string) {
+  assert(b.companyId === ctx.companyId, "Cópia de outra empresa: a restauração só pode ser solicitada na empresa da cópia.");
   if (target === "appwrite_new") {
     await guard(ctx, `restaurar cópia em nova base Appwrite ${databaseId ?? ""}`, b.id);
     assert(configuredBackend() === "appwrite", "Restauração em nova base Appwrite exige a aplicação conectada ao Appwrite.");
@@ -467,8 +468,10 @@ export async function createRestoreJob(ctx: Ctx, b: Doc, target: "test" | "appwr
 /** Executa a restauração registrada em restore_jobs. */
 export async function runRestoreJob(ctx: Ctx, jobId: string) {
   const job = await ctx.store.getOrThrow("restore_jobs", jobId);
+  assert(job.companyId === ctx.companyId, "Restauração de outra empresa.");
   if (job.status === "completed" || job.status === "failed") return job;
   const b = await ctx.store.getOrThrow("backups", job.backupId);
+  assert(b.companyId === job.companyId, "Cópia de outra empresa: restauração recusada.");
   const t0 = Date.now();
   await ctx.store.update("restore_jobs", jobId, { status: "running", startedAt: nowIso() });
   try {
@@ -634,7 +637,7 @@ export async function scheduleDailyBackup(store: Store, companyId: string) {
   const stale = await failStaleBackups(store, companyId);
   const retention = await applyRetention(ctx);
   const s = await getSchedule(store, companyId);
-  const tz = await getSetting<string>(store, companyId, null, "timezone", "America/Sao_Paulo");
+  const tz = DEFAULT_TZ; // fuso único da instalação (APP_TIMEZONE)
   const day = today(tz);
   if (!scheduleDue(s, day)) return { stale, retention, scheduled: null };
   const runAt = scheduledInstant(day, s.time, tz);
@@ -658,7 +661,7 @@ export async function runScheduledBackup(ctx: Ctx, payload: { day: string }) {
 export async function backupSummary(store: Store, companyId: string) {
   const all = await listAll(store, "backups", { filters: [["eq", "companyId", companyId]], orderBy: [{ field: "startedAt", dir: "desc" }] });
   const s = await getSchedule(store, companyId);
-  const tz = await getSetting<string>(store, companyId, null, "timezone", "America/Sao_Paulo");
+  const tz = DEFAULT_TZ; // fuso único da instalação (APP_TIMEZONE)
   const valid = all.filter((b) => ["completed", "verified"].includes(b.status));
   return {
     all,

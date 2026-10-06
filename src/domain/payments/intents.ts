@@ -3,7 +3,7 @@ import { nowIso } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireBranch, type Ctx } from "@/lib/core/ctx";
 import { getIntegration, logIntegration } from "../integrations";
-import { pixProviderFrom, simulatedPix, type ProviderCharge } from "./providers";
+import { pixProviderFrom, REFUND_DONE_STATUSES, simulatedPix, type ProviderCharge } from "./providers";
 
 /**
  * Intenções de pagamento Pix. Regras:
@@ -16,6 +16,14 @@ async function providerFor(ctx: Ctx) {
   const integ = await getIntegration(ctx.store, ctx.companyId, ctx.branchId, "pix");
   const provider = pixProviderFrom(integ);
   return { integ, provider };
+}
+
+/**
+ * Cobrança "cancelada" apenas localmente (sem confirmação do provedor) e ainda dentro da validade:
+ * pode continuar pagável no provedor e deve ser reconsultada.
+ */
+export function maybePayable(intent: { status?: string; cancelConfirmedAt?: string | null; expiresAt?: string | null }) {
+  return intent.status === "cancelled" && !intent.cancelConfirmedAt && (!intent.expiresAt || intent.expiresAt > nowIso());
 }
 
 async function refresh(ctx: Ctx, intent: any) {
@@ -38,6 +46,7 @@ async function refresh(ctx: Ctx, intent: any) {
     lastCheckedAt: nowIso(),
     raw: charge.raw ?? null,
     errorMessage: null,
+    ...(status === "cancelled" && !intent.cancelConfirmedAt ? { cancelConfirmedAt: nowIso() } : {}),
   });
 }
 
@@ -50,7 +59,8 @@ export async function createPixIntent(ctx: Ctx, input: { cartId: string; amount:
   // 1) Consulta cobranças anteriores do mesmo atendimento antes de criar outra.
   const previous = await listAll(ctx.store, "payment_intents", { filters: [["eq", "cartId", input.cartId], ["eq", "kind", "pix"]] });
   for (const prev of previous) {
-    if (["pending", "unknown"].includes(prev.status)) {
+    // "cancelada" só localmente e ainda válida também é reconsultada: pode ter sido paga depois do cancelamento
+    if (["pending", "unknown"].includes(prev.status) || maybePayable(prev)) {
       const updated = await refresh(ctx, prev);
       if (updated.status === "confirmed" && updated.amount === input.amount && !updated.saleId) return updated;
       if (updated.status === "pending" && updated.amount === input.amount) return updated;
@@ -96,7 +106,8 @@ export async function createPixIntent(ctx: Ctx, input: { cartId: string; amount:
 export async function checkIntent(ctx: Ctx, intentId: string) {
   const intent = await ctx.store.getOrThrow("payment_intents", intentId);
   assert(intent.companyId === ctx.companyId, "Cobrança de outra empresa.");
-  if (["confirmed", "failed", "cancelled", "refunded"].includes(intent.status)) return intent;
+  if (["confirmed", "failed", "refunded"].includes(intent.status)) return intent;
+  if (intent.status === "cancelled" && !maybePayable(intent)) return intent;
   return refresh(ctx, intent);
 }
 
@@ -126,5 +137,87 @@ export async function cancelIntent(ctx: Ctx, intentId: string) {
   const intent = await ctx.store.getOrThrow("payment_intents", intentId);
   assert(intent.companyId === ctx.companyId, "Cobrança de outra empresa.");
   if (intent.saleId) throw new BusinessError("Cobrança já vinculada a uma venda.");
-  return ctx.store.update("payment_intents", intentId, { status: intent.status === "confirmed" ? "confirmed" : "cancelled" });
+  return cancelIntentAtProvider(ctx, intent);
+}
+
+/**
+ * Cancela a cobrança NO PROVEDOR antes de marcá-la como cancelada: consulta a situação atual (se já foi paga,
+ * devolve "confirmed" sem cancelar) e só grava "cancelled" quando o provedor confirma. Sem confirmação
+ * (falha de rede, provedor sem credencial), a cobrança mantém a situação real e o pedido fica registrado.
+ */
+export async function cancelIntentAtProvider(ctx: Ctx, intent: any) {
+  if (intent.status === "cancelled" && intent.cancelConfirmedAt) return intent;
+  if (["confirmed", "failed", "expired", "refunded"].includes(intent.status)) return intent;
+  const { integ, provider } = await providerFor(ctx);
+  const p = intent.isSimulated ? simulatedPix() : provider;
+  const log = (status: "success" | "failure" | "info", message: string) =>
+    logIntegration(ctx.store, { companyId: ctx.companyId, branchId: ctx.branchId, integrationId: integ?.id, kind: "pix", action: "cancel_charge", status, message });
+  const pendingCancel = (message: string) => ctx.store.update("payment_intents", intent.id, { cancelRequestedAt: nowIso(), lastCheckedAt: nowIso(), errorMessage: message.slice(0, 500) });
+  if (!p) {
+    await pendingCancel("Cancelamento não enviado: Pix sem provedor/credencial configurado.");
+    throw new BusinessError(`Não foi possível cancelar a cobrança Pix ${intent.reference} no provedor (Pix sem provedor/credencial configurado nesta filial). Ela pode continuar pagável até expirar: confira o recebimento antes de liberar o cliente.`, "pix_cancel_failed");
+  }
+  let charge: ProviderCharge | null;
+  try {
+    charge = await p.findByReference(intent.reference);
+  } catch (e: any) {
+    await log("failure", `Consulta antes do cancelamento de ${intent.reference}: ${e.message}`);
+    await pendingCancel(e.message);
+    throw new BusinessError(`Não foi possível consultar a cobrança Pix ${intent.reference} no provedor (${e.message}). Ela não foi cancelada e pode continuar pagável: tente novamente.`, "pix_cancel_failed");
+  }
+  if (!charge) {
+    // nunca registrada no provedor: nada a cancelar lá; continua sendo reconsultada até a validade
+    await log("info", `Cobrança ${intent.reference} não localizada no provedor; marcada como cancelada localmente.`);
+    return ctx.store.update("payment_intents", intent.id, { status: "cancelled", cancelRequestedAt: nowIso(), lastCheckedAt: nowIso(), errorMessage: "Cobrança não localizada no provedor ao cancelar (será reconsultada até a validade)." });
+  }
+  if (charge.status === "confirmed") {
+    return ctx.store.update("payment_intents", intent.id, { status: "confirmed", providerId: charge.providerId, raw: charge.raw ?? null, lastCheckedAt: nowIso(), errorMessage: null });
+  }
+  if (charge.status !== "pending" && charge.status !== "unknown") {
+    return ctx.store.update("payment_intents", intent.id, { status: charge.status, providerId: charge.providerId, lastCheckedAt: nowIso(), errorMessage: null, ...(charge.status === "cancelled" ? { cancelConfirmedAt: nowIso() } : {}) });
+  }
+  try {
+    const after = await p.cancel(charge.providerId);
+    if (after.status === "cancelled") {
+      await log("success", `Cobrança ${intent.reference} cancelada no provedor.`);
+      return ctx.store.update("payment_intents", intent.id, { status: "cancelled", providerId: after.providerId, cancelRequestedAt: nowIso(), cancelConfirmedAt: nowIso(), lastCheckedAt: nowIso(), errorMessage: null });
+    }
+    if (after.status === "confirmed") {
+      await log("info", `Cobrança ${intent.reference} já estava paga ao pedir o cancelamento.`);
+      return ctx.store.update("payment_intents", intent.id, { status: "confirmed", providerId: after.providerId, lastCheckedAt: nowIso(), errorMessage: null });
+    }
+    await log("failure", `Cancelamento de ${intent.reference} não confirmado (situação ${after.status}).`);
+    await pendingCancel(`Cancelamento não confirmado pelo provedor (situação ${after.status}).`);
+    throw new BusinessError(`O provedor não confirmou o cancelamento da cobrança Pix ${intent.reference} (situação: ${after.status}). Ela pode continuar pagável: consulte novamente antes de liberar o cliente.`, "pix_cancel_pending");
+  } catch (e: any) {
+    if (e instanceof BusinessError) throw e;
+    await log("failure", `Cancelamento de ${intent.reference}: ${e.message}`);
+    await pendingCancel(e.message);
+    throw new BusinessError(`Não foi possível cancelar a cobrança Pix ${intent.reference} no provedor (${e.message}). Ela pode continuar pagável até expirar: tente novamente.`, "pix_cancel_failed");
+  }
+}
+
+/**
+ * Estorno de Pix integrado no provedor (cancelamento de venda). Devolve `done` somente quando o provedor
+ * confirma a devolução; caso contrário o estorno fica pendente no provedor (o chamador mantém o estado honesto).
+ */
+export async function refundIntentAtProvider(ctx: Ctx, intent: any, amount: number): Promise<{ done: boolean; status: string | null; message: string | null }> {
+  const { integ, provider } = await providerFor(ctx);
+  const p = intent.isSimulated ? simulatedPix() : provider;
+  const log = (status: "success" | "failure", message: string) =>
+    logIntegration(ctx.store, { companyId: ctx.companyId, branchId: ctx.branchId, integrationId: integ?.id, kind: "pix", action: "refund", status, message });
+  if (!p) return { done: false, status: null, message: "Pix sem provedor/credencial configurado: estorno pendente no provedor." };
+  if (!intent.providerId) return { done: false, status: null, message: "Cobrança sem identificador do provedor: estorno pendente no provedor." };
+  try {
+    const r = await p.refund(intent.providerId, amount);
+    if (REFUND_DONE_STATUSES.includes(r.status)) {
+      await log("success", `Estorno de ${intent.reference} confirmado pelo provedor (${r.status}).`);
+      return { done: true, status: r.status, message: null };
+    }
+    await log("failure", `Estorno de ${intent.reference} não confirmado (situação ${r.status}).`);
+    return { done: false, status: r.status, message: `Provedor respondeu "${r.status}" ao estorno.` };
+  } catch (e: any) {
+    await log("failure", `Estorno de ${intent.reference}: ${e.message}`);
+    return { done: false, status: null, message: String(e.message ?? e).slice(0, 400) };
+  }
 }

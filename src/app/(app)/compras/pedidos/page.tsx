@@ -7,6 +7,7 @@ import { FilterBar } from "@/components/ui/filters";
 import { LinkButton, buttonClass } from "@/components/ui/button";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Stat } from "@/components/ui/card";
+import { Notice } from "@/components/ui/empty";
 import { cn } from "@/components/ui/cn";
 import { paginate, parseList, type SearchParams } from "@/lib/list";
 import { formatMoney, formatQty } from "@/lib/money";
@@ -37,6 +38,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const params = await searchParams;
   const p = parseList(params, { sort: "number", dir: "desc" });
   const all = await queryOrders(s.ctx, p);
+  const quotationFilter = p.f.quotation ? await s.ctx.store.get("quotations", p.f.quotation) : null;
   const { rows, total } = paginate(all, p);
   const [suppliers, buyers] = await Promise.all([lookups.suppliers(s.ctx), lookups.users(s.ctx)]);
   const sum = (list: Row[], k: keyof Row) => list.reduce((a, r) => a + (Number(r[k]) || 0), 0);
@@ -112,6 +114,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           </>
         }
       />
+      {p.f.quotation && (
+        <Notice tone="info">
+          Pedidos gerados pela {quotationFilter && quotationFilter.companyId === s.ctx.companyId ? <Link className="font-medium underline" href={`/compras/cotacoes/${quotationFilter.id}`}>cotação nº {quotationFilter.number}</Link> : "cotação selecionada"} ·{" "}
+          <Link className="underline" href="/compras/pedidos">mostrar todos os pedidos</Link>
+        </Notice>
+      )}
       <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Pedidos no mês" value={inMonth.length} hint={`${formatMoney(sum(inMonth, "total"))} em compras desde ${formatDate(monthStart(t))}`} href={href({ from: monthStart(t) })} />
         <Stat label="Aguardando aprovação" value={inReview.length} hint={`${formatMoney(sum(inReview, "total"))} pendentes`} href={href({ status: "in_review" })} tone={inReview.length ? "warn" : "default"} />

@@ -14,7 +14,9 @@ import { EmptyState, Notice } from "@/components/ui/empty";
 import { formatDoc, formatPhone } from "@/lib/core/text";
 import { formatDateTime } from "@/lib/dates";
 import { can } from "@/lib/permissions";
-import { TIMEZONES, UFS, branchKind, branchSituation, branchSummary } from "@/domain/companies";
+import { UFS, branchKind, branchSituation, branchSummary } from "@/domain/companies";
+import { DEFAULT_TZ } from "@/lib/dates";
+import { branchView } from "../../access";
 import { setBranchStatusAction } from "../../actions";
 import { BranchForm } from "../../forms";
 
@@ -24,19 +26,21 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const s = await requireSession("admin");
   const { id } = await params;
   const { tab = "dados" } = await searchParams;
-  const b = await s.ctx.store.get("branches", id);
-  if (!b || !s.companies.some((c) => c.id === b.companyId)) notFound();
-  const company = await s.ctx.store.getOrThrow("companies", b.companyId);
-  const sum = await branchSummary(s.ctx.store, b);
-  const tables = await listAll(s.ctx.store, "price_tables", { filters: [["eq", "companyId", b.companyId]] });
-  const fiscal = await listAll(s.ctx.store, "fiscal_configs", { filters: [["eq", "branchId", id]] });
+  // filial da empresa ativa ou de outra empresa autorizada: lê pelo contexto da empresa da filial
+  const view = await branchView(s, id);
+  if (!view || !s.companies.some((c) => c.id === view.branch.companyId)) notFound();
+  const { ctx: bc, branch: b } = view;
+  const company = await bc.store.getOrThrow("companies", b.companyId);
+  const sum = await branchSummary(bc.store, b);
+  const tables = await listAll(bc.store, "price_tables", { filters: [["eq", "companyId", b.companyId]] });
+  const fiscal = await listAll(bc.store, "fiscal_configs", { filters: [["eq", "branchId", id]] });
   const base = `/administracao/empresas/filiais/${id}`;
-  const edit = can(s.user, "admin", "edit");
+  const edit = can(bc.user, "admin", "edit");
   const a = b.address ?? {};
   const wh = sum.warehouses.find((w) => w.id === b.defaultWarehouseId);
   const kind = branchKind(b);
   const situation = branchSituation(b, new Set(fiscal.map((f) => f.branchId as string)));
-  const manager = b.managerUserId ? await s.ctx.store.get("users", b.managerUserId) : null;
+  const manager = b.managerUserId ? await bc.store.get("users", b.managerUserId) : null;
   const companyUsers = sum.users.filter((u) => u.status === "active").map((u) => ({ value: u.id, label: u.name }));
   const table = tables.find((t) => t.id === b.defaultPriceTableId);
   return (
@@ -65,9 +69,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         }
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Depósitos" value={sum.warehouses.length} href={`${base}?tab=depositos`} />
-        <Stat label="Terminais" value={sum.terminals.length} hint={`${sum.terminals.filter((t) => t.status !== "inactive").length} ativos`} href={`/administracao/terminais?branch=${id}`} />
-        <Stat label="Caixas abertos agora" value={sum.openSessions.length} tone={sum.openSessions.length ? "warn" : "default"} href={`${base}?tab=terminais`} />
+        <Stat label="Depósitos" value={sum.warehouses.length} href={`${base}?tab=operacao`} />
+        <Stat label="Terminais" value={sum.terminals.length} hint={`${sum.terminals.filter((t) => t.status !== "inactive").length} ativos`} href={`${base}?tab=operacao`} />
+        <Stat label="Caixas abertos agora" value={sum.openSessions.length} tone={sum.openSessions.length ? "warn" : "default"} href={`${base}?tab=operacao`} />
         <Stat label="Usuários com acesso" value={sum.users.length} href={`${base}?tab=usuarios`} />
       </div>
       <LinkTabs
@@ -108,9 +112,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               items={[
                 { label: "Tabela de preço padrão", value: table?.name ?? "Tabela padrão da empresa" },
                 { label: "Depósito padrão (vendas)", value: wh?.name ?? "—" },
-                { label: "Fuso horário", value: b.timezone ?? "America/Sao_Paulo" },
+                { label: "Fuso horário", value: `${DEFAULT_TZ} (único da instalação)` },
               ]}
             />
+            <p className="mt-3 text-xs text-slate-500">O fuso horário vale para toda a instalação (recortes de período, rotinas e agenda de backup) e é alterado pelo responsável técnico na variável APP_TIMEZONE do servidor.</p>
             <p className="mt-3 text-xs text-slate-500">Parâmetros comerciais por filial (venda sem saldo, pré-venda, alertas): <Link className="text-brand-700 hover:underline" href={`/administracao/parametros?escopo=${id}`}>Parâmetros da filial</Link>.</p>
           </Card>
           <Card title="Depósitos" bodyClass="p-0">
@@ -183,7 +188,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           companyId={b.companyId}
           warehouses={sum.warehouses.filter((w) => w.status !== "inactive").map((w) => ({ value: w.id, label: `${w.name} (${w.kind === "damaged" ? "avarias" : "disponível"})` }))}
           priceTables={tables.filter((t) => t.active !== false).map((t) => ({ value: t.id, label: t.name }))}
-          timezones={TIMEZONES}
+          timezone={DEFAULT_TZ}
           ufs={UFS}
           users={companyUsers}
         />
@@ -209,7 +214,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       )}
       {tab === "historico" && (
         <Card title="Linha do tempo">
-          <Timeline store={s.ctx.store} refs={[`branch:${id}`]} />
+          <Timeline store={bc.store} refs={[`branch:${id}`]} />
         </Card>
       )}
     </>

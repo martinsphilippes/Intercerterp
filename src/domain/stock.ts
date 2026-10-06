@@ -1,6 +1,6 @@
 import { detId, isConflict, listAll, retryOnConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { nowIso } from "@/lib/dates";
+import { DEFAULT_TZ, nowIso, startOfLocalDay, toLocalDate } from "@/lib/dates";
 import { roundDiv, QTY } from "@/lib/money";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, type Ctx } from "@/lib/core/ctx";
@@ -69,6 +69,12 @@ export interface MovementInput {
   lotExpiry?: string | null;
   documentRef?: string | null;
   notes?: string | null;
+  /**
+   * Saída que não pode consumir o estoque reservado (disponível = físico − reservado): ajustes e
+   * saídas manuais e perdas. Expedições de transferência (que consomem a própria reserva), vendas e
+   * inventário não usam esta regra.
+   */
+  respectReserved?: boolean;
 }
 
 export const balanceId = (warehouseId: string, skuId: string) => detId("bal", warehouseId, skuId);
@@ -167,6 +173,15 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
         const sku = await store.get("skus", m.skuId);
         throw new BusinessError(`Saldo insuficiente para ${sku?.sku ?? m.skuId}: disponível ${before / QTY}, solicitado ${-m.qty / QTY}.`, "insufficient_stock", { skuId: m.skuId });
       }
+      const reserved = (bal.reserved as number) ?? 0;
+      if (m.qty < 0 && m.respectReserved && !m.allowNegative && reserved > 0 && after < reserved) {
+        const sku = await store.get("skus", m.skuId);
+        throw new BusinessError(
+          `Saída excede o disponível de ${sku?.sku ?? m.skuId}: físico ${before / QTY}, reservado ${reserved / QTY}, disponível ${Math.max(0, before - reserved) / QTY}, solicitado ${-m.qty / QTY}. O reservado pertence a transferências separadas — cancele ou ajuste a transferência antes de dar saída nessas unidades.`,
+          "reserved_stock",
+          { skuId: m.skuId },
+        );
+      }
       let avg = bal.avgCost as number;
       let unitCost: number;
       if (m.qty > 0 && m.unitCost != null && COST_ENTRY_TYPES.includes(m.type)) {
@@ -220,25 +235,42 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
   return retryOnConflict(() => store.transaction(run));
 }
 
-/** Reserva quantidade (reduz disponível). Idempotente por idemKey. */
+/**
+ * Reserva quantidade (reduz disponível). Idempotente por idemKey: a mesma chave ativa (ou já consumida)
+ * não reserva de novo. Uma chave cuja reserva foi LIBERADA não é reaproveitada (a reserva não volta a
+ * valer sem conferir o disponível) — o chamador usa nova chave a cada tentativa.
+ * O incremento de `reserved` é limitado ao físico lido: duas reservas simultâneas não passam do físico.
+ */
 export async function reserve(ctx: Ctx, input: { warehouseId: string; skuId: string; qty: number; originType: string; originId: string; idemKey: string; allowNegative?: boolean }) {
   const store = ctx.store;
   const bal = await ensureBalance(store, ctx, input.warehouseId, input.skuId);
   const rid = detId("rsv", input.idemKey);
-  if (await store.get("stock_reservations", rid)) return;
-  const available = bal.physical - bal.reserved;
-  if (!input.allowNegative && available < input.qty) {
-    const sku = await store.get("skus", input.skuId);
-    throw new BusinessError(`Disponível insuficiente para reservar ${sku?.sku ?? ""}: ${available / QTY}.`, "insufficient_stock");
+  const existing = await store.get("stock_reservations", rid);
+  if (existing) {
+    if (existing.status === "released") throw new BusinessError("A reserva desta tentativa já foi liberada; repita a separação.", "reservation_released");
+    return;
   }
-  await store.transaction(async (t) => {
-    await t.create(
-      "stock_reservations",
-      { companyId: ctx.companyId, branchId: bal.branchId, createdBy: ctx.user.id, warehouseId: input.warehouseId, skuId: input.skuId, qty: input.qty, originType: input.originType, originId: input.originId, status: "active", idemKey: input.idemKey },
-      rid,
-    );
-    await t.increment("stock_balances", bal.id, "reserved", input.qty);
-  });
+  const available = bal.physical - bal.reserved;
+  const insufficient = async () => {
+    const sku = await store.get("skus", input.skuId);
+    return new BusinessError(`Disponível insuficiente para reservar ${sku?.sku ?? ""}: ${available / QTY}.`, "insufficient_stock");
+  };
+  if (!input.allowNegative && available < input.qty) throw await insufficient();
+  try {
+    await store.transaction(async (t) => {
+      await t.create(
+        "stock_reservations",
+        { companyId: ctx.companyId, branchId: bal.branchId, createdBy: ctx.user.id, warehouseId: input.warehouseId, skuId: input.skuId, qty: input.qty, originType: input.originType, originId: input.originId, status: "active", idemKey: input.idemKey },
+        rid,
+      );
+      await t.increment("stock_balances", bal.id, "reserved", input.qty, input.allowNegative ? undefined : { max: Math.max(bal.physical, 0) });
+    });
+  } catch (e) {
+    if (isConflict(e) && e.reason === "bounds") throw await insufficient();
+    // repetição simultânea da mesma chave: a outra chamada já reservou
+    if (isConflict(e) && (await store.get("stock_reservations", rid))?.status === "active") return;
+    throw e;
+  }
 }
 
 /**
@@ -307,7 +339,10 @@ export async function adjustStock(
   const product = await ctx.store.get("products", sku.productId);
   assert(product?.type !== "service", "Serviços não têm estoque.");
   const sign = input.type === "adjust_in" || input.type === "manual_in" ? 1 : -1;
-  if (input.occurredAt) assert(input.occurredAt <= new Date(Date.now() + 60000).toISOString(), "A data do ajuste não pode ser futura.");
+  if (input.occurredAt) {
+    assert(!Number.isNaN(Date.parse(input.occurredAt)), "Data do movimento inválida.");
+    assert(input.occurredAt <= new Date(Date.now() + 60000).toISOString(), "A data do ajuste não pode ser futura.");
+  }
   const [mov] = await postMovements(ctx, [
     {
       warehouseId: wh.id,
@@ -320,6 +355,8 @@ export async function adjustStock(
       reason: input.reason.trim(),
       idemKey: `manual:${input.idemKey}`,
       occurredAt: input.occurredAt,
+      // saída manual, ajuste de saída e perda não consomem o que está reservado (transferências separadas)
+      respectReserved: sign < 0,
       lot: input.lot?.trim() || null,
       lotExpiry: input.lotExpiry || null,
       documentRef: input.documentRef?.trim() || null,
@@ -340,6 +377,34 @@ export async function adjustStock(
     });
   }
   return movement;
+}
+
+/**
+ * Converte o valor de um campo `datetime-local` ("AAAA-MM-DDTHH:mm[:ss]", horário de parede) em instante
+ * ISO UTC, interpretando-o no fuso informado (padrão America/Sao_Paulo) — e não no fuso do servidor.
+ * Valor fora do formato devolve null (o chamador recusa com mensagem).
+ */
+export function localDateTimeToIso(value: string, tz: string = DEFAULT_TZ): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
+  if (!m) return null;
+  const [, date, hh, mm, ss] = m;
+  if (+hh > 23 || +mm > 59 || +(ss ?? 0) > 59) return null;
+  let t: number;
+  try {
+    t = Date.parse(startOfLocalDay(date, tz)) + ((+hh * 60 + +mm) * 60 + +(ss ?? 0)) * 1000;
+  } catch {
+    return null;
+  }
+  if (Number.isNaN(t)) return null;
+  // correção de horário de verão: compara o relógio local obtido com o pedido e reajusta uma vez
+  const [y, mo, d] = date.split("-").map(Number);
+  const wanted = Date.UTC(y, mo - 1, d, +hh, +mm, +(ss ?? 0));
+  const p: Record<string, string> = {};
+  for (const x of new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(t))) p[x.type] = x.value;
+  const got = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  t += wanted - got;
+  const iso = new Date(t).toISOString();
+  return toLocalDate(iso, tz) === date ? iso : null;
 }
 
 export async function defaultWarehouse(store: Store, branchId: string): Promise<Doc> {

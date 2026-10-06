@@ -11,7 +11,8 @@ import { formatDateTime } from "@/lib/dates";
 import { formatMoney, formatQty } from "@/lib/money";
 import { can } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
-import { queryInventories, branchScope, type InventoryRow } from "../queries";
+import { queryInventories, branchScope, branchOptions, warehouseOptions, type InventoryRow } from "../queries";
+import { INVENTORY_ACTIVE_STATUSES } from "@/domain/inventory";
 import { NewInventoryButton } from "./new-inventory";
 
 export const metadata = { title: "Inventário e contagem" };
@@ -23,8 +24,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const all = await queryInventories(s.ctx, p);
   const { rows, total } = paginate(all, p);
   const scope = branchScope(s.ctx, p.f);
-  const [branches, warehouses, categories, users] = await Promise.all([lookups.branches(s.ctx), lookups.warehouses(s.ctx, scope), lookups.categories(s.ctx), lookups.users(s.ctx)]);
-  const own = s.ctx.branchId ? (await listAll(s.ctx.store, "warehouses", { filters: [["eq", "branchId", s.ctx.branchId]] })).map((w) => ({ value: w.id, label: w.name })) : [];
+  const branches = branchOptions(s.branches);
+  const [warehouses, categories, users] = await Promise.all([warehouseOptions(s.ctx, scope), lookups.categories(s.ctx), lookups.users(s.ctx)]);
+  const own = s.ctx.branchId ? (await listAll(s.ctx.store, "warehouses", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "branchId", s.ctx.branchId]] })).map((w) => ({ value: w.id, label: w.name })) : [];
+  // inventário em andamento por depósito (um por depósito): a abertura mostra o bloqueio antes de enviar
+  const busy: Record<string, { id: string; code: string }> = {};
+  if (own.length) {
+    for (const i of await listAll(s.ctx.store, "inventories", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "warehouseId", own.map((w) => w.value)], ["eq", "status", INVENTORY_ACTIVE_STATUSES]] })) busy[i.warehouseId] = { id: i.id, code: i.code ?? `nº ${i.number}` };
+  }
   const locations = s.ctx.branchId ? [...new Set((await listAll(s.ctx.store, "stock_balances", { filters: [["eq", "branchId", s.ctx.branchId], ["notNull", "location"]] })).map((b) => String(b.location)))].sort() : [];
   const columns: Column<InventoryRow>[] = [
     { key: "code", label: "Inventário", sortable: true, fixed: true, cell: (r) => <span className="font-mono">{r.code ?? `nº ${r.number}`}</span> },
@@ -46,18 +53,18 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "diffValue", label: "Impacto (custo médio)", align: "right", sortable: true, cell: (r) => <span className={r.diffValue < 0 ? "text-red-700" : r.diffValue > 0 ? "text-emerald-700" : ""}>{formatMoney(r.diffValue)}</span> },
     { key: "completedAt", label: "Concluído", sortable: true, cell: (r) => (r.completedAt ? <span className="text-xs">{formatDateTime(r.completedAt)}<span className="block text-slate-500">{r.completedByName}</span></span> : "—") },
   ];
-  const open = all.filter((i) => ["open", "counting"].includes(i.status));
+  const open = all.filter((i) => INVENTORY_ACTIVE_STATUSES.includes(i.status));
   return (
     <>
       <PageHeader
         title="Inventário e contagem"
         crumbs={[{ label: "Produtos e estoque" }, { label: "Inventários" }]}
         description="Compare a contagem física com o saldo esperado (base + movimentos até a contagem de cada item) e conclua lançando um ajuste por item, uma única vez."
-        actions={can(s.user, "stock", "create") && s.ctx.branchId && own.length > 0 && <NewInventoryButton warehouses={own} categories={categories} locations={locations} users={users} currentUserId={s.user.id} />}
+        actions={can(s.user, "stock", "create") && s.ctx.branchId && own.length > 0 && <NewInventoryButton warehouses={own} busy={busy} categories={categories} locations={locations} users={users} currentUserId={s.user.id} />}
       />
       {!s.ctx.branchId && <div className="mb-4"><Notice tone="info">Contexto consolidado: consulta de todas as filiais. Para abrir ou contar um inventário, selecione uma filial.</Notice></div>}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Em andamento" value={open.length} hint="Abertos ou em contagem" href="/estoque/inventarios?status=open,counting" tone={open.length ? "warn" : "default"} />
+        <Stat label="Em andamento" value={open.length} hint="Em preparação, abertos ou em contagem" href="/estoque/inventarios?status=preparing,open,counting" tone={open.length ? "warn" : "default"} />
         <Stat label="Itens em contagem" value={open.reduce((a, i) => a + i.itemsTotal, 0)} hint={`${open.reduce((a, i) => a + i.counted, 0)} já contados`} />
         <Stat label="Concluídos no recorte" value={all.filter((i) => i.status === "completed").length} href="/estoque/inventarios?status=completed" />
         <Stat label="Impacto dos concluídos" value={formatMoney(all.filter((i) => i.status === "completed").reduce((a, i) => a + i.diffValue, 0))} hint={`${formatQty(all.filter((i) => i.status === "completed").reduce((a, i) => a + i.diffQty, 0))} un. líquidas`} />
@@ -67,7 +74,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         values={params}
         filters={[
           { type: "search", placeholder: "Número do inventário" },
-          { type: "select", name: "status", label: "Situação", options: [{ value: "open,counting", label: "Em andamento" }, { value: "open", label: "Aberto" }, { value: "counting", label: "Em contagem" }, { value: "completed", label: "Concluído" }, { value: "cancelled", label: "Cancelado" }] },
+          { type: "select", name: "status", label: "Situação", options: [{ value: "preparing,open,counting", label: "Em andamento" }, { value: "preparing", label: "Em preparação" }, { value: "open", label: "Aberto" }, { value: "counting", label: "Em contagem" }, { value: "completed", label: "Concluído" }, { value: "cancelled", label: "Cancelado" }] },
           { type: "select", name: "filial", label: "Filial", options: [{ value: "all", label: "Todas (consolidado)" }, ...branches], all: s.branch ? `Atual (${s.branch.name})` : "Todas" },
           { type: "select", name: "deposito", label: "Depósito", options: warehouses },
           { type: "date", name: "de", label: "Base de" },

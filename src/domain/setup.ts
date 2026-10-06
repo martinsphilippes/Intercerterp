@@ -1,7 +1,7 @@
 import { detId, isConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { DEFAULT_ROLES } from "@/lib/permissions";
-import { today } from "@/lib/dates";
+import { DEFAULT_TZ, today } from "@/lib/dates";
 import { onlyDigits } from "@/lib/core/text";
 import { setSetting } from "@/lib/core/settings";
 
@@ -23,7 +23,13 @@ export async function createCompanyWithDefaults(
     try {
       return await store.create(collection, data, id);
     } catch (e) {
-      if (isConflict(e)) return (await store.get(collection, id))!;
+      if (isConflict(e)) {
+        const again = await store.get(collection, id);
+        if (again) return again;
+        // conflito de índice único (ex.: CNPJ já usado por outra empresa criada ao mesmo tempo): nunca reaproveita
+        const { BusinessError } = await import("@/lib/core/errors");
+        throw new BusinessError(collection === "companies" ? "Já existe empresa com este CNPJ." : "Registro duplicado na parametrização inicial da empresa.", "duplicate");
+      }
       throw e;
     }
   };
@@ -40,7 +46,7 @@ export async function createCompanyWithDefaults(
   const whId = detId("setup", key, "warehouses", "main");
   const branch = await put("branches", "matriz", {
     ...base, code: "01", name: input.branchName ?? "Matriz", cnpj: onlyDigits(input.cnpj) || null, uf: input.uf ?? null, cityName: input.cityName ?? null, cityCode: input.cityCode ?? null,
-    status: "active", fiscalStatus: "pending", defaultWarehouseId: whId, timezone: "America/Sao_Paulo",
+    status: "active", fiscalStatus: "pending", defaultWarehouseId: whId, timezone: DEFAULT_TZ,
   });
   await put("warehouses", "main", { ...base, branchId: branch.id, code: "PRINC", name: "Depósito principal", kind: "available", isDefault: true, status: "active" });
   await put("warehouses", "damaged", { ...base, branchId: branch.id, code: "AVARIA", name: "Avarias", kind: "damaged", isDefault: false, status: "active" });

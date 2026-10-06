@@ -8,6 +8,8 @@ import type { DocItem } from "./service";
  * Relatórios fiscais (Tela 35). Critérios explícitos:
  *  - Faturamento fiscal = Σ valor das notas AUTORIZADAS de SAÍDA (NF-e, NFC-e, NFS-e), exceto finalidade devolução,
  *    com data de emissão no período. Canceladas, rejeitadas, denegadas, descartadas, rascunhos e pendentes NÃO entram.
+ *  - Transferências entre filiais (origem "transfer") e itens com CFOP que não é venda (transferência, remessa, retorno,
+ *    devolução, outras saídas — ver NON_REVENUE_CFOP) ficam FORA do faturamento e são totalizados à parte.
  *  - Devoluções recebidas = Σ NF-e AUTORIZADAS de ENTRADA com finalidade devolução (deduzidas no faturamento líquido).
  *  - Canceladas são listadas pelo instante do cancelamento; rejeições pelo evento de retorno no período.
  *  - Documentos de SIMULAÇÃO são contados à parte (sem validade fiscal) e identificados em todas as saídas.
@@ -50,7 +52,28 @@ export async function periodDocuments(ctx: Ctx, f: FiscalReportFilter) {
   return docs.filter((d) => d.originType !== "disable" && (f.includeSimulated !== false || !d.isSimulated));
 }
 
-export const isRevenue = (d: Doc) => d.status === "authorized" && d.operationType !== "entrada" && d.purpose !== "devolucao";
+/**
+ * CFOPs de saída que NÃO são receita: transferências (x15x, x408/x409, x552, x557), devoluções (x20x, x21x, x41x, x553, x555, x556),
+ * remessa de ativo (x554) e remessas/retornos/outras saídas (x9xx), exceto x922 (simples faturamento de venda para entrega futura)
+ * e x933 (serviço tributado pelo ISSQN). Regra assumida — validar com a contabilidade.
+ */
+export const NON_REVENUE_CFOP = /^[567](15\d|20\d|21\d|40[89]|41\d|55[2-7]|9(?!22|33)\d\d)$/;
+export const isRevenueItem = (i: { cfop?: string | null }) => !NON_REVENUE_CFOP.test(String(i.cfop ?? ""));
+
+/** Saída autorizada (fora devoluções) que não é receita: transferência entre filiais ou só itens de remessa/transferência. */
+export const isNonRevenueOut = (d: Doc) =>
+  d.status === "authorized" && d.operationType !== "entrada" && d.purpose !== "devolucao" &&
+  (d.originType === "transfer" || (d.model !== "nfse" && (d.items ?? []).length > 0 && !(d.items as DocItem[]).some(isRevenueItem)));
+
+export const isRevenue = (d: Doc) => d.status === "authorized" && d.operationType !== "entrada" && d.purpose !== "devolucao" && !isNonRevenueOut(d);
+
+/** Valor do documento no faturamento: em nota mista (venda + remessa/bonificação), só os itens com CFOP de venda. */
+export function revenueAmount(d: Doc): number {
+  if (!isRevenue(d)) return 0;
+  const items = (d.items ?? []) as DocItem[];
+  if (d.model === "nfse" || !items.length || items.every(isRevenueItem)) return d.total ?? 0;
+  return items.filter(isRevenueItem).reduce((a, i) => a + (i.total ?? 0), 0);
+}
 export const isReturnIn = (d: Doc) => d.status === "authorized" && d.operationType === "entrada" && d.purpose === "devolucao";
 
 export function summarize(docs: Doc[], f: FiscalReportFilter) {
@@ -63,13 +86,14 @@ export function summarize(docs: Doc[], f: FiscalReportFilter) {
   }
   const revenue = docs.filter(isRevenue);
   const returnsIn = docs.filter(isReturnIn);
+  const nonRevenueOut = docs.filter(isNonRevenueOut);
   for (const d of revenue) {
     const m = (byModel[d.model] ??= { count: 0, total: 0 });
     m.count++;
-    m.total += d.total ?? 0;
+    m.total += revenueAmount(d);
   }
   const sum = (arr: Doc[], fn: (d: Doc) => number) => arr.reduce((a, d) => a + (fn(d) || 0), 0);
-  const gross = sum(revenue, (d) => d.total);
+  const gross = sum(revenue, revenueAmount);
   const returns = sum(returnsIn, (d) => d.total);
   const goods = revenue.filter((d) => d.model !== "nfse");
   const services = revenue.filter((d) => d.model === "nfse");
@@ -92,10 +116,12 @@ export function summarize(docs: Doc[], f: FiscalReportFilter) {
   const idx = new Map(daily.map((r, i) => [r.date, i]));
   for (const d of revenue) {
     const i = idx.get(toLocalDate(d.issuedAt));
-    if (i != null) daily[i][d.model] += d.total ?? 0;
+    if (i != null) daily[i][d.model] += revenueAmount(d);
   }
   const pending = docs.filter((d) => PENDING_STATES.includes(d.status));
   const excluded = docs.filter((d) => !isRevenue(d) && !isReturnIn(d));
+  // itens de remessa/bonificação em notas mistas também ficam fora do faturamento
+  const mixedNonRevenue = sum(revenue, (d) => (d.total ?? 0) - revenueAmount(d));
   return {
     count: docs.length,
     gross,
@@ -103,6 +129,8 @@ export function summarize(docs: Doc[], f: FiscalReportFilter) {
     net: gross - returns,
     revenueCount: revenue.length,
     returnsCount: returnsIn.length,
+    nonRevenue: sum(nonRevenueOut, (d) => d.total) + mixedNonRevenue,
+    nonRevenueCount: nonRevenueOut.length,
     byStatus,
     byModel,
     taxes,
@@ -195,7 +223,7 @@ export function taxesByNcm(docs: Doc[]): NcmRow[] {
   const map = new Map<string, NcmRow & { docSet: Set<string> }>();
   for (const d of docs.filter(isRevenue)) {
     if (d.model === "nfse") continue;
-    for (const i of (d.items ?? []) as DocItem[]) {
+    for (const i of ((d.items ?? []) as DocItem[]).filter(isRevenueItem)) {
       const k = i.ncm || "(sem NCM)";
       const r = map.get(k) ?? { id: k, ncm: k, description: i.description, docs: 0, qty: 0, value: 0, icmsBase: 0, icms: 0, pis: 0, cofins: 0, docSet: new Set<string>() };
       r.docSet.add(d.id);

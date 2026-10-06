@@ -1,4 +1,4 @@
-import { detId, listAll } from "@/lib/db";
+import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
@@ -7,7 +7,7 @@ import { nextNumber } from "@/lib/core/numbering";
 import { notify, reopenOccurrence, resolveOccurrence } from "@/lib/core/notify";
 import { nowIso, today } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
-import { getOrder, setOrdersStatus, type OrderStatus } from "./purchases";
+import { afterOrdersStatus, getOrder, planOrdersStatus, setOrdersStatus, type OrderStatus } from "./purchases";
 import { supplierLabel } from "./suppliers";
 import { tierFor } from "./purchase-calc";
 
@@ -139,6 +139,17 @@ export async function stepResponsibles(store: Store, companyId: string, step: Po
 
 const occKey = (req: Doc | { id: string; revision?: number }, step: number) => `purchase_review:${req.id}:${req.revision ?? 1}:${step}`;
 
+/** Pedidos por solicitação: a decisão grava marcador + decisão + solicitação + pedidos numa transação (≤ 100). */
+const MAX_ORDERS_PER_REQUEST = 90;
+
+/**
+ * Vaga da próxima decisão/revogação da solicitação (id determinístico pela sequência `decisionSeq`):
+ * duas decisões (ou decisão e revogação) concorrentes disputam a mesma vaga e só uma é gravada.
+ */
+const decisionSlotId = (requestId: string, seq: number) => detId("approval-slot", requestId, String(seq));
+
+const CONCURRENT_DECISION = "Esta etapa já foi decidida (ou a decisão foi revista) por outra pessoa enquanto você decidia. Atualize a página e confira a situação antes de decidir.";
+
 async function proposalWarnings(store: Store, orders: Doc[]) {
   const t = today();
   const warnings: Array<{ kind: string; orderId: string; message: string; validUntil?: string }> = [];
@@ -183,7 +194,7 @@ async function notifyStep(ctx: Ctx, req: Doc, stepIndex: number) {
  */
 export async function submitForApproval(ctx: Ctx, orderIds: string[], opts: { origin?: string; notes?: string | null; skipStateCheck?: boolean; quotationId?: string | null } = {}) {
   requirePerm(ctx, "purchases", "edit");
-  requireBranch(ctx);
+  const branchId = requireBranch(ctx);
   assert(orderIds.length > 0, "Selecione ao menos um pedido.");
   let orders = await Promise.all([...new Set(orderIds)].map((id) => getOrder(ctx, id)));
   // reenvio após ajuste: reaproveita a solicitação devolvida, com todos os pedidos dela ainda ativos
@@ -196,6 +207,9 @@ export async function submitForApproval(ctx: Ctx, orderIds: string[], opts: { or
   }
   if (!opts.skipStateCheck) for (const o of orders) assert(["draft", "adjust"].includes(o.status), `Pedido nº ${o.number} está ${o.status === "in_review" ? "em análise" : "em estado que não permite envio para análise"}.`);
   for (const o of orders) assert(o.branchId === orders[0].branchId, "Pedidos de filiais diferentes devem ser enviados separadamente.");
+  assert(orders[0].branchId === branchId, `Pedido nº ${orders[0].number} é de outra filial: selecione a filial do pedido para enviá-lo para análise.`);
+  // a decisão grava solicitação + pedidos numa única transação (limite de 100 gravações)
+  assert(orders.length <= MAX_ORDERS_PER_REQUEST, `Uma solicitação aceita até ${MAX_ORDERS_PER_REQUEST} pedidos — envie em mais de uma solicitação.`);
   const policyDoc = await activePolicy(ctx.store, ctx.companyId);
   const policy: PolicyInput = policyDoc ? { name: policyDoc.name, rules: policyDoc.rules, autoApproveBelow: policyDoc.autoApproveBelow ?? 0, allowSelfApproval: Boolean(policyDoc.allowSelfApproval), expiredProposalAction: policyDoc.expiredProposalAction ?? "warn", reviewOnRevision: policyDoc.reviewOnRevision ?? "relevant" } : DEFAULT_POLICY;
   const total = orders.reduce((a, o) => a + o.total, 0);
@@ -226,6 +240,7 @@ export async function submitForApproval(ctx: Ctx, orderIds: string[], opts: { or
       quotationId: opts.quotationId ?? orders[0].quotationId ?? null,
       status: auto ? "approved" : "in_review",
       revision: 1,
+      decisionSeq: 0,
       notes: opts.notes ?? null,
       ...base,
     });
@@ -269,6 +284,7 @@ export async function requestDecisions(store: Store, requestId: string) {
 /** Verifica se o usuário pode decidir a etapa atual (e por quê não). */
 export async function canDecide(ctx: Ctx, req: Doc): Promise<{ ok: boolean; reason?: string; requiresNote?: boolean; expired?: boolean }> {
   if (req.status !== "in_review") return { ok: false, reason: "A solicitação não está em análise." };
+  if (ctx.branchId !== req.branchId) return { ok: false, reason: ctx.branchId ? "Solicitação de outra filial: selecione a filial da solicitação para decidir." : "Selecione a filial da solicitação para decidir (o contexto consolidado é somente consulta)." };
   const actions = ctx.user.actions ?? [];
   if (!ctx.user.isAdmin && !actions.includes("purchase.approve")) return { ok: false, reason: "Seu perfil não tem a permissão Aprovar compras." };
   const step = req.steps?.[req.currentStep ?? 0];
@@ -284,14 +300,20 @@ export async function canDecide(ctx: Ctx, req: Doc): Promise<{ ok: boolean; reas
   return { ok: true, expired: Boolean(expired), requiresNote: Boolean(expired) && snap.expiredProposalAction === "warn" };
 }
 
-export async function decideRequest(ctx: Ctx, requestId: string, decision: Decision, note?: string | null) {
+export async function decideRequest(ctx: Ctx, requestId: string, decision: Decision, note?: string | null, expected: { step?: number | null; revision?: number | null } = {}) {
   requireAction(ctx, "purchase.approve");
+  requireBranch(ctx);
   const req = await ctx.store.getOrThrow("purchase_requests", requestId);
   assert(req.companyId === ctx.companyId, "Solicitação de outra empresa.");
+  const stepIndex = req.currentStep ?? 0;
+  const revision = req.revision ?? 1;
+  // a decisão vale para a etapa/revisão que o usuário viu na tela
+  if ((expected.step != null && expected.step !== stepIndex) || (expected.revision != null && expected.revision !== revision)) {
+    throw new BusinessError("A solicitação mudou desde que você abriu a página (outra etapa ou revisão). Atualize a página e revise antes de decidir.", "stale");
+  }
   const check = await canDecide(ctx, req);
   if (!check.ok) throw new BusinessError(check.reason!, "forbidden");
   const snap = req.policySnapshot ?? {};
-  const stepIndex = req.currentStep ?? 0;
   const step = req.steps[stepIndex];
   if (decision !== "approve") assert(note?.trim(), decision === "reject" ? "Informe o motivo da rejeição." : "Informe o que precisa ser ajustado.");
   if (decision === "approve" && check.expired) {
@@ -301,7 +323,37 @@ export async function decideRequest(ctx: Ctx, requestId: string, decision: Decis
   const orderIds: string[] = req.orderIds ?? [];
   const active = (await Promise.all(orderIds.map((id) => getOrder(ctx, id)))).filter((o) => !["cancelled"].includes(o.status));
   assert(active.length > 0, "Todos os pedidos desta solicitação foram cancelados.");
-  const d = await ctx.store.create("approval_decisions", { companyId: ctx.companyId, branchId: req.branchId, createdBy: ctx.user.id, requestId, step: stepIndex, stepName: step.name, decision, note: note?.trim() || null, revision: req.revision ?? 1 });
+  assert(active.length <= MAX_ORDERS_PER_REQUEST, `Solicitação com mais de ${MAX_ORDERS_PER_REQUEST} pedidos: divida-a antes de decidir.`);
+  const now = nowIso();
+  const next = stepIndex + 1;
+  const final = decision === "approve" && next >= req.steps.length;
+  const reqPatch: Record<string, any> = decision === "approve" ? (final ? { status: "approved", decidedAt: now } : { currentStep: next }) : { status: decision === "adjust" ? "adjust" : "rejected", decidedAt: now };
+  const orderTo: OrderStatus | null = decision === "approve" ? (final ? "approved" : null) : decision === "adjust" ? "adjust" : "rejected";
+  const changing = orderTo ? planOrdersStatus(active.filter((o) => o.status === "in_review"), orderTo) : [];
+  const seq = req.decisionSeq ?? 0;
+  // decisão + solicitação + pedidos numa transação, disputando a vaga `decisionSeq` (concorrência: só uma vence)
+  let d: Doc;
+  try {
+    d = await ctx.store.transaction(async (t) => {
+      await t.create("operations", { companyId: ctx.companyId, type: "purchase.decision", status: "done", entityType: "purchase_request", entityId: requestId, result: { seq, decision, step: stepIndex, revision }, createdBy: ctx.user.id }, decisionSlotId(requestId, seq));
+      const created = await t.create(
+        "approval_decisions",
+        { companyId: ctx.companyId, branchId: req.branchId, createdBy: ctx.user.id, requestId, step: stepIndex, stepName: step.name, decision, note: note?.trim() || null, revision },
+        detId("approval-decision", requestId, String(revision), String(stepIndex), String(seq)),
+      );
+      await t.update("purchase_requests", requestId, { ...reqPatch, decisionSeq: seq + 1 });
+      for (const o of active) {
+        const p: Record<string, any> = {};
+        if (changing.includes(o)) Object.assign(p, { status: orderTo }, orderTo === "approved" ? { approvedAt: now } : orderTo === "rejected" ? { rejectReason: note } : {});
+        if (final) p.approvedRevision = o.revision ?? 1;
+        if (Object.keys(p).length) await t.update("purchase_orders", o.id, p);
+      }
+      return created;
+    });
+  } catch (e) {
+    if (isConflict(e)) throw new BusinessError(CONCURRENT_DECISION, "conflict");
+    throw e;
+  }
   await resolveOccurrence(ctx.store, occKey(req, stepIndex));
   const label = decision === "approve" ? "aprovou" : decision === "adjust" ? "devolveu para ajuste" : "rejeitou";
   await audit(ctx, {
@@ -318,23 +370,17 @@ export async function decideRequest(ctx: Ctx, requestId: string, decision: Decis
     await notify(ctx.store, { companyId: ctx.companyId, branchId: req.branchId, type: "purchase_review", title, body, link: `/compras/aprovacoes/${requestId}`, originType: "purchase_request", originId: requestId, occurrenceKey: `purchase_result:${requestId}:${req.revision}:${d.id}`, informative: true, audience: { userIds: [req.requesterId] } });
   };
   if (decision === "approve") {
-    const next = stepIndex + 1;
-    if (next < req.steps.length) {
-      const u = await ctx.store.update("purchase_requests", requestId, { currentStep: next });
-      await notifyStep(ctx, u, next);
+    if (!final) {
+      await notifyStep(ctx, await ctx.store.getOrThrow("purchase_requests", requestId), next);
     } else {
-      await ctx.store.update("purchase_requests", requestId, { status: "approved", decidedAt: nowIso() });
-      await setOrdersStatus(ctx, active.filter((o) => o.status === "in_review").map((o) => o.id), "approved", { approvedAt: nowIso() }, { action: "purchase_order.approved", summary: (o) => `Pedido nº ${o.number} aprovado (solicitação nº ${req.number}) — aguardando registro de envio ao fornecedor` });
-      for (const o of active) await ctx.store.update("purchase_orders", o.id, { approvedRevision: o.revision ?? 1 });
+      await afterOrdersStatus(ctx, changing, "approved", { action: "purchase_order.approved", summary: (o) => `Pedido nº ${o.number} aprovado (solicitação nº ${req.number}) — aguardando registro de envio ao fornecedor` });
       await notifyRequester(`Solicitação nº ${req.number} aprovada`, "Pedidos aprovados. Registre o envio ao fornecedor (a aprovação não envia o pedido).");
     }
   } else if (decision === "adjust") {
-    await ctx.store.update("purchase_requests", requestId, { status: "adjust", decidedAt: nowIso() });
-    await setOrdersStatus(ctx, active.filter((o) => o.status === "in_review").map((o) => o.id), "adjust", {}, { reason: note, summary: (o) => `Pedido nº ${o.number} devolvido para ajuste` });
+    await afterOrdersStatus(ctx, changing, "adjust", { reason: note, summary: (o) => `Pedido nº ${o.number} devolvido para ajuste` });
     await notifyRequester(`Solicitação nº ${req.number} devolvida para ajuste`, note ?? "");
   } else {
-    await ctx.store.update("purchase_requests", requestId, { status: "rejected", decidedAt: nowIso() });
-    await setOrdersStatus(ctx, active.filter((o) => o.status === "in_review").map((o) => o.id), "rejected", { rejectReason: note }, { reason: note, summary: (o) => `Pedido nº ${o.number} rejeitado` });
+    await afterOrdersStatus(ctx, changing, "rejected", { reason: note, summary: (o) => `Pedido nº ${o.number} rejeitado` });
     await notifyRequester(`Solicitação nº ${req.number} rejeitada`, note ?? "");
   }
   return { decision: d, request: await ctx.store.getOrThrow("purchase_requests", requestId) };
@@ -347,9 +393,11 @@ export async function decideRequest(ctx: Ctx, requestId: string, decision: Decis
 export async function revokeDecision(ctx: Ctx, decisionId: string, reason: string) {
   requireAction(ctx, "purchase.approve");
   assert(reason?.trim(), "Informe o motivo da revisão da decisão.");
+  const branchId = requireBranch(ctx);
   const d = await ctx.store.getOrThrow("approval_decisions", decisionId);
   const req = await ctx.store.getOrThrow("purchase_requests", d.requestId);
   assert(req.companyId === ctx.companyId, "Solicitação de outra empresa.");
+  assert(req.branchId === branchId, "Solicitação de outra filial: selecione a filial da solicitação para revisar a decisão.");
   assert(!d.revokedAt, "Esta decisão já foi revista.");
   assert(d.decision !== "auto", "Autoaprovação não pode ser revogada por aqui — altere o pedido (gera revisão).");
   assert(d.revision === (req.revision ?? 1), "Decisão de uma revisão anterior da solicitação.");
@@ -361,10 +409,21 @@ export async function revokeDecision(ctx: Ctx, decisionId: string, reason: strin
   const finalApproval = d.decision === "approve" && req.status === "approved";
   if (finalApproval) for (const o of active) assert(o.status === "approved", `Pedido nº ${o.number} já está ${o.status === "sent" ? "enviado" : "em andamento"} — a aprovação não pode mais ser revogada; altere o pedido (revisão) ou cancele.`);
   if (d.decision === "adjust") for (const o of active) assert(o.status === "adjust", `Pedido nº ${o.number} já foi alterado/reenviado.`);
-  await ctx.store.update("approval_decisions", d.id, { revokedAt: nowIso(), revokedBy: ctx.user.id, revokeReason: reason });
-  await ctx.store.update("purchase_requests", req.id, { status: "in_review", currentStep: d.step, decidedAt: null });
-  const back = active.filter((o) => ["approved", "adjust", "rejected"].includes(o.status)).map((o) => o.id);
-  await setOrdersStatus(ctx, back, "in_review", {}, { action: "purchase_order.decision_revoked", reason, summary: (o) => `Pedido nº ${o.number} volta para análise (decisão "${d.stepName}" revista)` });
+  const back = planOrdersStatus(active.filter((o) => ["approved", "adjust", "rejected"].includes(o.status)), "in_review");
+  const seq = req.decisionSeq ?? 0;
+  // revogação disputa a mesma vaga de uma decisão concorrente (só uma das duas é gravada)
+  try {
+    await ctx.store.transaction(async (t) => {
+      await t.create("operations", { companyId: ctx.companyId, type: "purchase.decision_revoke", status: "done", entityType: "purchase_request", entityId: req.id, result: { seq, decisionId: d.id }, createdBy: ctx.user.id }, decisionSlotId(req.id, seq));
+      await t.update("approval_decisions", d.id, { revokedAt: nowIso(), revokedBy: ctx.user.id, revokeReason: reason });
+      await t.update("purchase_requests", req.id, { status: "in_review", currentStep: d.step, decidedAt: null, decisionSeq: seq + 1 });
+      for (const o of back) await t.update("purchase_orders", o.id, { status: "in_review" });
+    });
+  } catch (e) {
+    if (isConflict(e)) throw new BusinessError(CONCURRENT_DECISION, "conflict");
+    throw e;
+  }
+  await afterOrdersStatus(ctx, back, "in_review", { action: "purchase_order.decision_revoked", reason, summary: (o) => `Pedido nº ${o.number} volta para análise (decisão "${d.stepName}" revista)` });
   await audit(ctx, {
     module: "purchases",
     action: "purchase_request.revoke",

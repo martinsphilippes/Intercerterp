@@ -33,7 +33,9 @@ export async function restoreAction(id: string, fd: FormData) {
     requireAction(s.ctx, "admin.backup");
     if (!fbool(fd, "confirm")) return { ok: false as const, error: "Confirme que revisou o escopo e o destino da restauração." };
     const target = fstr(fd, "target") === "appwrite_new" ? "appwrite_new" : "test";
-    const b = await s.ctx.store.getOrThrow("backups", id);
+    const b = await s.ctx.store.get("backups", id);
+    // a cópia precisa ser da empresa em uso (nunca restaurar/verificar cópia de outra empresa)
+    if (!b || b.companyId !== s.ctx.companyId) return { ok: false as const, error: "Registro não encontrado.", code: "not_found" };
     const job = await createRestoreJob(s.ctx, b, target, target === "appwrite_new" ? fopt(fd, "databaseId") : null, fstr(fd, "_idem") || undefined);
     if (target === "test") {
       const done = await runRestoreJob(s.ctx, job.id);

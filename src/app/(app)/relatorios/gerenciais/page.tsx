@@ -13,7 +13,7 @@ import { formatBps, formatMoney, roundDiv } from "@/lib/money";
 import { qs, sp, type SearchParams } from "@/lib/list";
 import { firstMovementDate, managerialReport, paymentBreakdown } from "@/domain/reports";
 import { formatDate } from "@/lib/dates";
-import { MANAGERIAL_TABS, moduleQs, reportQs, resolveReportParams } from "../params";
+import { MANAGERIAL_TABS, contextShowsScope, reportQs, resolveReportParams, salesListHref } from "../params";
 import { COMMON_DEFINITIONS, Delta, FilterSelect, HowWeCalculate, marginText, PrintHeader, PrintStyles, ReportFilters, ScopeLine } from "../_components/report-ui";
 import { PrintButton } from "../_components/print-button";
 import { ComparisonTable, ResultTable } from "../_components/tables";
@@ -46,6 +46,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const tabBase = `${base}${qs({ tab: null }, params)}`;
   const detailHref = (id: string) => `${base}/filial/${id}${qs({ periodo: sp(params, "periodo") || null, de: sp(params, "de") || null, ate: sp(params, "ate") || null })}`;
   const empty = t.salesCount === 0 && t.returnsCount === 0;
+  // Vendas lista a filial do contexto: quando o recorte é outro, o detalhamento vai para as operações da filial
+  // (resultado detalhado) ou fica sem link — nunca abre um recorte diferente do total clicado.
+  const salesHref = salesListHref(s, rp, { situacao: "completed" }) ?? (rp.single ? detailHref(rp.filial) : null);
+  const cancelledHref = salesListHref(s, rp, { situacao: "cancelled" });
 
   return (
     <>
@@ -88,18 +92,24 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       <ScopeLine rp={rp} compare={report.previousScope} company={String(s.company.tradeName || s.company.name)} />
 
       <section aria-label="Indicadores do período" className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Stat label="Vendas líquidas" value={formatMoney(t.netRevenue)} href={`/vendas${moduleQs(rp)}`} hint={<Hint text="Após descontos e devoluções">{compare && <Delta cur={t.netRevenue} prev={prev?.netRevenue ?? null} />}</Hint>} />
-        <Stat label="Vendas brutas" value={formatMoney(t.gross)} href={`/vendas${moduleQs(rp)}`} hint={<Hint text={`Descontos ${formatMoney(t.discounts)} · devoluções ${formatMoney(t.returns)}`}>{compare && <Delta cur={t.gross} prev={prev?.gross ?? null} />}</Hint>} />
+        <Stat label="Vendas líquidas" value={formatMoney(t.netRevenue)} href={salesHref ?? undefined} hint={<Hint text="Após descontos e devoluções">{compare && <Delta cur={t.netRevenue} prev={prev?.netRevenue ?? null} />}</Hint>} />
+        <Stat label="Vendas brutas" value={formatMoney(t.gross)} href={salesHref ?? undefined} hint={<Hint text={`Descontos ${formatMoney(t.discounts)} · devoluções ${formatMoney(t.returns)}`}>{compare && <Delta cur={t.gross} prev={prev?.gross ?? null} />}</Hint>} />
         <Stat label="Custo direto (CMV)" value={formatMoney(t.cmv)} hint={<Hint text={`Custo revertido ${formatMoney(t.costReturned)}`}>{compare && <Delta cur={t.cmv} prev={prev?.cmv ?? null} goodWhenUp={false} />}</Hint>} />
         <Stat label="Margem bruta" value={marginText(t.marginBps)} hint={<Hint text={`${formatMoney(t.grossProfit)} de resultado bruto`}>{compare && <Delta cur={t.marginBps} prev={prev?.marginBps ?? null} kind="points" />}</Hint>} tone={t.marginBps != null && t.marginBps < 0 ? "bad" : "default"} />
-        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { situacao: "completed" })}`} hint={<Hint text={`${t.returnsCount} ${t.returnsCount === 1 ? "devolução" : "devoluções"} no período`}>{compare && <Delta cur={t.salesCount} prev={prev?.salesCount ?? null} kind="count" />}</Hint>} />
+        <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={salesHref ?? undefined} hint={<Hint text={`${t.returnsCount} ${t.returnsCount === 1 ? "devolução" : "devoluções"} no período`}>{compare && <Delta cur={t.salesCount} prev={prev?.salesCount ?? null} kind="count" />}</Hint>} />
         <Stat label="Ticket médio" value={t.ticket == null ? "Sem vendas" : formatMoney(t.ticket)} hint={<Hint text="Vendas líquidas ÷ vendas concluídas">{compare && <Delta cur={t.ticket} prev={prev?.ticket ?? null} />}</Hint>} />
       </section>
       {report.cancelled.count > 0 && (
         <p className="-mt-2 mb-4 text-xs text-slate-500">
-          <Link className="text-brand-700 hover:underline" href={`/vendas${moduleQs(rp, { situacao: "cancelled" })}`}>
-            {report.cancelled.count} venda(s) cancelada(s) ({formatMoney(report.cancelled.total)})
-          </Link>{" "}
+          {cancelledHref ? (
+            <Link className="text-brand-700 hover:underline" href={cancelledHref}>
+              {report.cancelled.count} venda(s) cancelada(s) ({formatMoney(report.cancelled.total)})
+            </Link>
+          ) : (
+            <span>
+              {report.cancelled.count} venda(s) cancelada(s) ({formatMoney(report.cancelled.total)})
+            </span>
+          )}{" "}
           no período não entram nos totais.
         </p>
       )}
@@ -154,12 +164,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
               granularity={report.series.granularity}
               currentLabel={`Atual (${rp.period.label})`}
               previousLabel={compare ? "Período anterior" : null}
-              drillBase={`/vendas${rp.single ? qs({ filial: rp.filial }) : ""}`}
+              drillBase={contextShowsScope(s, rp) ? `/vendas${qs({ filial: rp.single ? rp.filial : null, situacao: "completed" })}` : null}
               caption={`Receita líquida — ${rp.branchName}.`}
             />
           </Card>
           <Card bodyClass="p-0">
-            <ResultTable rows={report.byDay.map((d) => ({ ...d, href: `/vendas${moduleQs(rp, {}, { from: d.id, to: d.id })}` }))} total={{ ...t, id: "total", label: "Total do período" }} firstLabel="Data" hideZero />
+            <ResultTable rows={report.byDay.map((d) => ({ ...d, href: salesListHref(s, rp, { situacao: "completed" }, { from: d.id, to: d.id }) ?? (rp.single ? `${base}/filial/${rp.filial}${qs({ de: d.id, ate: d.id })}` : null) }))} total={{ ...t, id: "total", label: "Total do período" }} firstLabel="Data" hideZero />
           </Card>
         </>
       ) : tab === "categoria" ? (
@@ -190,7 +200,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         </div>
       ) : tab === "operador" ? (
         <Card bodyClass="p-0">
-          <ResultTable rows={report.byOperator.map((o) => ({ ...o, href: o.id === "__none__" ? null : `/vendas${moduleQs(rp, { operador: o.id })}` }))} total={{ ...t, id: "total", label: "Total" }} firstLabel="Operador" showShare />
+          <ResultTable rows={report.byOperator.map((o) => ({ ...o, href: o.id === "__none__" ? null : salesListHref(s, rp, { operador: o.id, situacao: "completed" }) }))} total={{ ...t, id: "total", label: "Total" }} firstLabel="Operador" showShare />
           <p className="border-t border-line px-4 py-2 text-xs text-slate-500">Devoluções são atribuídas ao operador da venda original, na data do movimento da devolução.</p>
         </Card>
       ) : (

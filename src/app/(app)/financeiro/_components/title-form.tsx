@@ -8,10 +8,10 @@ import { MoneyInput } from "@/components/ui/money-input";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
 import { createTitleAction } from "../actions";
-import { addDays, addMonths, brl, schedule } from "./calc";
+import { addDays, addMonths, brl, financedTotal, schedule } from "./calc";
 
 type Opt = { value: string; label: string };
-type TermOpt = Opt & { installments: number; firstDueDays: number; intervalDays: number };
+type TermOpt = Opt & { installments: number; firstDueDays: number; intervalDays: number; interestBps?: number | null };
 
 /** Lançamento manual de título a receber / conta a pagar com parcelas geradas por condição ou personalizadas. */
 export function TitleForm({ kind, parties, categories, costCenters, terms, today, canApprove }: { kind: "receivable" | "payable"; parties: Opt[]; categories: Opt[]; costCenters: Opt[]; terms: TermOpt[]; today: string; canApprove: boolean }) {
@@ -25,22 +25,26 @@ export function TitleForm({ kind, parties, categories, costCenters, terms, today
   const [interval, setIntervalDays] = useState(30);
   const [plan, setPlan] = useState<Array<{ dueDate: string; amount: number }>>([]);
   const planned = plan.reduce((a, p) => a + p.amount, 0);
+  const selTerm = terms.find((t) => t.value === termId);
+  // juros da condição: acrescidos ao valor parcelado (mesma regra de buildSchedule com interestBps no domínio)
+  const expected = selTerm ? financedTotal(total, selTerm.interestBps) : total;
+  const interest = expected - total;
   const generate = () => {
-    const term = terms.find((t) => t.value === termId);
+    const term = selTerm;
     if (!term) return setPlan(schedule(total, count, first, interval));
     // mesma regra de buildSchedule (domínio): intervalo de 30 dias com 1º vencimento múltiplo de 30 usa meses-calendário
-    const parts = schedule(total, term.installments, issueDate, 30);
+    const parts = schedule(expected, term.installments, issueDate, 30);
     setPlan(parts.map((p, i) => ({ amount: p.amount, dueDate: term.intervalDays === 30 && term.firstDueDays % 30 === 0 ? addMonths(issueDate, term.firstDueDays / 30 + i) : addDays(issueDate, term.firstDueDays + term.intervalDays * i) })));
   };
   const problems: string[] = [];
-  if (plan.length && planned !== total) problems.push(`As parcelas somam ${brl(planned)} e o total é ${brl(total)}.`);
+  if (plan.length && planned !== expected) problems.push(`As parcelas somam ${brl(planned)} e o total${interest ? " com juros" : ""} é ${brl(expected)}.`);
   return (
     <ActionForm action={createTitleAction} className="space-y-5">
       {({ pending, error }) => (
         <>
           <input type="hidden" name="kind" value={kind} />
           <input type="hidden" name="installments" value={JSON.stringify(plan)} />
-          <input type="hidden" name="total" value={total} />
+          <input type="hidden" name="total" value={expected} />
           <FormSection title={rec ? "Cliente e documento" : "Fornecedor e documento"} description="Títulos de vendas e compras são criados automaticamente pelas operações; aqui ficam lançamentos manuais (serviços, despesas, acordos).">
             <FormGrid cols={3}>
               <Field label={rec ? "Pagador" : "Favorecido"} required>
@@ -102,6 +106,11 @@ export function TitleForm({ kind, parties, categories, costCenters, terms, today
                 </>
               )}
             </FormGrid>
+            {interest > 0 && (
+              <p className="mt-3 text-sm text-slate-600">
+                Juros da condição ({((selTerm?.interestBps ?? 0) / 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% sobre o total): + {brl(interest)} — valor parcelado <span className="font-semibold text-ink">{brl(expected)}</span>.
+              </p>
+            )}
             <div className="mt-4">
               <Button type="button" variant="outline" size="sm" onClick={generate} disabled={total <= 0}>
                 <Wand2 className="size-4" /> Gerar parcelas

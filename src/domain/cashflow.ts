@@ -56,10 +56,21 @@ export async function categoryDefaults(store: Store, companyId: string): Promise
 const SALE_ORIGINS = ["sale", "sale_card", "sale_payment", "sale_cancel"];
 const PURCHASE_ORIGINS = ["purchase", "purchase_order", "receipt", "purchase_receipt"];
 
-/** Categoria efetiva: a do lançamento/parcela → tarifas (lançamento de tarifa) → a do título → padrão por origem (vendas, compras). */
+/** Estorno da tarifa de uma baixa (gerado por reverseSettlement): pertence às tarifas, não à categoria do título. */
+export function isSettlementFeeReversal(e: Record<string, any>): boolean {
+  return e.kind === "reversal" && e.originType === "settlement_reversal" && typeof e.idemKey === "string" && e.idemKey.startsWith("reverse-fee:");
+}
+
+/** Filtro de categoria da URL: "none" = sem categoria (null); vazio = sem filtro (undefined). */
+export function categoryFilterValue(categoryId: string | null | undefined): string | null | undefined {
+  if (!categoryId) return undefined;
+  return categoryId === "none" ? null : categoryId;
+}
+
+/** Categoria efetiva: a do lançamento/parcela → tarifas (lançamento de tarifa e seu estorno) → a do título → padrão por origem (vendas, compras). */
 export function resolveCategory(rec: Record<string, any>, title: Doc | null | undefined, d: CategoryDefaults): string | null {
   if (rec.categoryId) return rec.categoryId;
-  if (rec.kind === "fee") return d.fees; // tarifa/taxa nunca herda a categoria de receita do título
+  if (rec.kind === "fee" || isSettlementFeeReversal(rec)) return d.fees; // tarifa/taxa nunca herda a categoria de receita do título
   if (title?.categoryId) return title.categoryId;
   const origin = title?.originType ?? rec.originType ?? "";
   if (SALE_ORIGINS.includes(origin)) return d.sales;
@@ -189,7 +200,8 @@ export async function computeCashflow(ctx: Ctx, f: CashflowFilter): Promise<Cash
   const scopedSince = sinceFrom.filter((e) => accIds.has(e.accountId));
   const inPeriod = scopedSince.filter((e) => e.date <= f.to);
   const titles = await titlesByIds(store, inPeriod.map((e) => e.titleId));
-  const passCat = (e: Doc, title?: Doc | null) => (!f.categoryId || resolveCategory(e, title, defaults) === f.categoryId) && (!f.costCenterId || (e.costCenterId ?? title?.costCenterId ?? null) === f.costCenterId);
+  const catFilter = categoryFilterValue(f.categoryId);
+  const passCat = (e: Doc, title?: Doc | null) => (catFilter === undefined || resolveCategory(e, title, defaults) === catFilter) && (!f.costCenterId || (e.costCenterId ?? title?.costCenterId ?? null) === f.costCenterId);
 
   // saldo inicial por conta na data `from`
   const accountRows = new Map<string, CashflowResult["accounts"][number]>();
@@ -367,7 +379,8 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
   const entries = (await listAll(store, "account_entries", { filters: ef })).filter((e) => {
     const side = entrySide(e);
     if (side === "skip" || side === "transfer") return false;
-    if (e.kind === "fee") return true; // tarifas (inclusive de baixas/cartão) são despesa do período
+    // tarifas (inclusive de baixas/cartão) são despesa do período; o estorno da tarifa de uma baixa a anula
+    if (e.kind === "fee" || isSettlementFeeReversal(e)) return true;
     return !e.titleId && !e.settlementId;
   });
   const etitles = await titlesByIds(store, entries.map((e) => e.titleId));
@@ -381,10 +394,11 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
   };
   let titleCount = 0;
   let entryCount = 0;
+  const catFilter = categoryFilterValue(f.categoryId);
   for (const t of titles) {
     if (t.originType === "renegotiation") continue; // receita já reconhecida no título original
     const c = resolveCategory({ categoryId: t.categoryId, kind: "", originType: t.originType }, t, defaults);
-    if (f.categoryId && c !== f.categoryId) continue;
+    if (catFilter !== undefined && c !== catFilter) continue;
     if (f.costCenterId && t.costCenterId !== f.costCenterId) continue;
     titleCount++;
     add(c, t.kind === "receivable" ? "revenue" : "expense", t.competenceDate.slice(0, 7), t.kind === "receivable" ? t.total : -t.total);
@@ -392,7 +406,7 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
   for (const e of entries) {
     const title = e.titleId ? etitles.get(e.titleId) : null;
     const c = resolveCategory(e, title, defaults);
-    if (f.categoryId && c !== f.categoryId) continue;
+    if (catFilter !== undefined && c !== catFilter) continue;
     if (f.costCenterId && e.costCenterId !== f.costCenterId) continue;
     entryCount++;
     add(c, entrySide(e) === "in" ? "revenue" : "expense", e.date.slice(0, 7), e.amount);

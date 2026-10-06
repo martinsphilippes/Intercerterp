@@ -45,6 +45,8 @@ export interface RepRow {
   stockoutDate: string | null;
   nextArrival: string | null;
   supplierOptions: Array<{ supplierId: string; name: string; lastCost: number | null; leadTimeDays: number | null }>;
+  /** fornecedores vinculados que não podem ser usados (bloqueado/inativo/pendente) — só informativo */
+  unavailableSuppliers?: Array<{ name: string; statusLabel: string; statusReason: string | null }>;
 }
 
 interface Sel {
@@ -187,8 +189,13 @@ export function ReplenishmentTable({ rows, branchId, branchName, coverageDays, d
                     {r.supplierOptions.length ? (
                       <Select aria-label={`Fornecedor de ${r.name}`} value={v.supplierId ?? ""} onChange={(e) => update(r, { supplierId: e.target.value, unitCost: r.supplierOptions.find((o) => o.supplierId === e.target.value)?.lastCost ?? v.unitCost })} options={r.supplierOptions.map((o) => ({ value: o.supplierId, label: `${o.name}${o.leadTimeDays != null ? ` · ${o.leadTimeDays} d` : ""}` }))} />
                     ) : (
-                      <Link className="text-xs text-accent-700 underline" href={`/fornecedores`}>Vincular fornecedor</Link>
+                      <Link className="text-xs text-accent-700 underline" href={`/fornecedores`}>{r.unavailableSuppliers?.length ? "Vincular fornecedor ativo" : "Vincular fornecedor"}</Link>
                     )}
+                    {(r.unavailableSuppliers ?? []).map((u) => (
+                      <span key={u.name} className="block text-[11px] text-amber-700" title={u.statusReason ?? undefined}>
+                        {u.name}: {u.statusLabel}{u.statusReason ? ` (${u.statusReason})` : ""} — fora da escolha
+                      </span>
+                    ))}
                     <div className="mt-1"><MoneyInput value={v.unitCost} onChange={(c) => update(r, { unitCost: c })} ariaLabel={`Custo de ${r.name}`} className="h-8 text-xs" /></div>
                   </td>
                   <td className="text-right">

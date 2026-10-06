@@ -17,6 +17,7 @@ import { can } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { pendingQty, transferCode, transferDocuments, transferItemsFromMovements, type TransferItem } from "@/domain/transfers";
 import { separateTransferAction, shipTransferAction, cancelTransferAction } from "../../actions";
+import { canSeeBranch } from "../../queries";
 import { PrintButton, ReceiveForm, ResolveForm, DocumentForm } from "./forms";
 
 export const metadata = { title: "Transferência" };
@@ -36,6 +37,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const ctx = s.ctx;
   const t = await ctx.store.get("transfers", id);
   if (!t || t.companyId !== ctx.companyId) notFound();
+  // usuário restrito a filiais: só vê transferências que envolvem uma filial dele
+  if (!canSeeBranch(ctx, t.fromBranchId) && !canSeeBranch(ctx, t.toBranchId)) notFound();
   const [branches, warehouses, users, docs, movements] = await Promise.all([
     nameMap(ctx, "branches"),
     nameMap(ctx, "warehouses"),
@@ -43,7 +46,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     can(s.user, "fiscal") ? transferDocuments(ctx, id) : Promise.resolve([]),
     listAll(ctx.store, "stock_movements", { filters: [["eq", "originType", "transfer"], ["eq", "originId", id]] }),
   ]);
-  const items: TransferItem[] = ["draft", "separated", "cancelled"].includes(t.status) && !movements.length ? t.items : await transferItemsFromMovements(ctx, t);
+  const items: TransferItem[] = ["draft", "separated", "shipping", "cancelled"].includes(t.status) && !movements.length ? t.items : await transferItemsFromMovements(ctx, t);
   const code = transferCode(t.number);
   const canEdit = can(s.user, "stock", "edit");
   const atOrigin = ctx.branchId === t.fromBranchId;
@@ -51,7 +54,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const pending = items.reduce((a, i) => a + pendingQty(i), 0);
   const totalQty = items.reduce((a, i) => a + i.qty, 0);
   const cost = t.totalCost ?? items.reduce((a, i) => a + roundDiv(i.qty * (i.unitCost ?? 0), QTY), 0);
-  const stepIndex = t.status === "partial" ? 2 : Math.max(0, STEPS.findIndex((x) => x.key === t.status));
+  const stepIndex = t.status === "partial" ? 2 : t.status === "shipping" ? 1 : Math.max(0, STEPS.findIndex((x) => x.key === t.status));
+  const shippedCount = items.filter((i) => i.shippedQty > 0).length;
   const divergences = (t.divergences ?? []) as any[];
   const skuName = new Map(items.map((i) => [i.skuId, `${i.sku} — ${i.name}`]));
   return (
@@ -69,8 +73,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               <LinkButton href={`/estoque/transferencias/${id}/editar`}><Pencil className="size-4" /> Editar</LinkButton>
             )}
             {canEdit && atOrigin && t.status === "draft" && <ActionButton action={separateTransferAction.bind(null, id)} label="Separar (reservar)" />}
-            {canEdit && atOrigin && ["draft", "separated"].includes(t.status) && <ActionButton action={shipTransferAction.bind(null, id)} label="Expedir" variant="accent" confirm="Expedir agora? A mercadoria sai da origem e fica em trânsito até o recebimento." />}
-            {canEdit && atOrigin && ["draft", "separated"].includes(t.status) && <ActionButton action={cancelTransferAction.bind(null, id)} label="Cancelar" variant="ghost" askReason="Motivo do cancelamento:" />}
+            {canEdit && atOrigin && ["draft", "separated", "shipping"].includes(t.status) && <ActionButton action={shipTransferAction.bind(null, id)} label={t.status === "shipping" ? "Concluir expedição" : "Expedir"} variant="accent" confirm={t.status === "shipping" ? "Concluir a expedição dos itens que ainda não saíram da origem?" : "Expedir agora? A mercadoria sai da origem e fica em trânsito até o recebimento."} />}
+            {canEdit && atOrigin && ["draft", "separated", "shipping"].includes(t.status) && <ActionButton action={cancelTransferAction.bind(null, id)} label="Cancelar" variant="ghost" askReason={shippedCount ? "Motivo do cancelamento (o que já saiu volta à origem):" : "Motivo do cancelamento:"} />}
           </>
         }
       />
@@ -86,6 +90,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         })}
       </ol>
       {t.status === "cancelled" && <div className="mb-4"><Notice tone="warn" title="Transferência cancelada">{t.cancelReason ?? "Pendente devolvido integralmente à origem."}</Notice></div>}
+      {t.status === "shipping" && (
+        <div className="mb-4">
+          <Notice tone="warn" title="Expedição incompleta">
+            {shippedCount} de {items.length} item(ns) já saíram da origem e estão em trânsito. {atOrigin ? "Use \"Concluir expedição\" depois de regularizar o estoque, ou \"Cancelar\" para devolver à origem o que já saiu." : `Conclua ou cancele no contexto da filial ${branches.get(t.fromBranchId)}.`}
+          </Notice>
+        </div>
+      )}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Produtos · unidades" value={`${items.length} · ${formatQty(totalQty)}`} />
         <Stat label="Valor de custo" value={formatMoney(cost)} hint={t.shippedAt ? "Custo médio da origem na expedição" : "Estimado após a expedição"} />
@@ -124,13 +135,17 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           {["in_transit", "partial"].includes(t.status) && (
             <Card title="Recebimento no destino" description={atDest ? "Confira a mercadoria e registre o que chegou." : `O recebimento é registrado no contexto da filial ${branches.get(t.toBranchId)}.`}>
               {atDest && canEdit ? (
-                <ReceiveForm transferId={id} items={items.filter((i) => pendingQty(i) > 0).map((i) => ({ skuId: i.skuId, sku: i.sku, name: i.name, unitCode: i.unitCode, pending: pendingQty(i) }))} />
+                <ReceiveForm
+                  key={items.map((i) => `${i.skuId}:${pendingQty(i)}`).join("|")}
+                  transferId={id}
+                  items={items.filter((i) => pendingQty(i) > 0).map((i) => ({ skuId: i.skuId, sku: i.sku, name: i.name, unitCode: i.unitCode, pending: pendingQty(i) }))}
+                />
               ) : (
                 <Notice tone="info">Selecione a filial de destino no topo para registrar o recebimento.</Notice>
               )}
             </Card>
           )}
-          {["in_transit", "partial"].includes(t.status) && pending > 0 && (atOrigin || atDest) && canEdit && (
+          {["in_transit", "partial", "cancelled"].includes(t.status) && pending > 0 && (atOrigin || atDest) && canEdit && (
             <Card title="Pendente em trânsito" description="Mercadoria não recebida: devolva à origem (transfer_return) ou baixe como perda (retorno + perda na origem, com motivo).">
               <ResolveForm transferId={id} pendingText={`${formatQty(pending)} un.`} />
             </Card>
@@ -201,7 +216,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               {can(s.user, "fiscal", "create") && t.status !== "draft" && t.status !== "cancelled" && (
                 <LinkButton href={`/fiscal/nfe/nova?origem=transfer:${id}`} size="sm"><FileText className="size-4" /> Emitir NF-e de transferência</LinkButton>
               )}
-              {canEdit ? <DocumentForm transferId={id} value={t.documentRef ?? null} /> : t.documentRef && <p className="text-sm">Referência: {t.documentRef}</p>}
+              {canEdit && atOrigin && t.status !== "cancelled" ? (
+                <DocumentForm transferId={id} value={t.documentRef ?? null} />
+              ) : (
+                <p className="text-sm text-slate-600">{t.documentRef ? `Referência: ${t.documentRef}` : "Sem documento de referência."}{canEdit && !atOrigin && t.status !== "cancelled" ? ` A referência é informada no contexto da filial ${branches.get(t.fromBranchId)}.` : ""}</p>
+              )}
             </div>
           </Card>
           <Card title="Linha do tempo">

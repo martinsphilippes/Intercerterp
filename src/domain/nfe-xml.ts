@@ -46,8 +46,19 @@ export interface ParsedNfe {
   totals: { vProd: number; vFrete: number; vDesc: number; vOutro: number; vIPI: number; vST: number; vSeg: number; vICMS: number; vNF: number };
   duplicatas: NfeDuplicata[];
   protocol: string | null;
+  /** autorizada: protocolo com cStat 100 (autorizado o uso) ou 150 (autorizado fora de prazo) */
   authorized: boolean;
+  /** uso denegado pela SEFAZ (cStat 110, 301, 302, 303 ou 205) — não pode ser recebida */
+  denied: boolean;
+  /** ambiente de emissão (ide/tpAmb ou protocolo): 1 = produção, 2 = homologação (sem valor fiscal); null quando ausente */
+  environment: "producao" | "homologacao" | null;
+  /** situação do protocolo (cStat/xMotivo) quando houver */
+  protocolStatus: string | null;
+  protocolMessage: string | null;
 }
+
+const AUTHORIZED_CSTAT = ["100", "150"];
+const DENIED_CSTAT = ["110", "205", "301", "302", "303"];
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", removeNSPrefix: true, parseTagValue: false, trimValues: true, isArray: (name) => ["det", "dup", "detPag"].includes(name) });
 
@@ -114,6 +125,7 @@ export function parseNfeXml(xml: string): ParsedNfe {
   });
   const tot = inf.total?.ICMSTot ?? {};
   const dups: any[] = inf.cobr?.dup ?? [];
+  const tpAmb = str(ide.tpAmb) ?? str(prot?.tpAmb);
   return {
     key,
     model: model || "55",
@@ -134,7 +146,11 @@ export function parseNfeXml(xml: string): ParsedNfe {
     totals: { vProd: money(tot.vProd), vFrete: money(tot.vFrete), vDesc: money(tot.vDesc), vOutro: money(tot.vOutro), vIPI: money(tot.vIPI), vST: money(tot.vST), vSeg: money(tot.vSeg), vICMS: money(tot.vICMS), vNF: money(tot.vNF) },
     duplicatas: dups.map((d) => ({ nDup: str(d.nDup) ?? "", dVenc: str(d.dVenc) ?? "", vDup: money(d.vDup) })).filter((d) => d.dVenc && d.vDup > 0),
     protocol: str(prot?.nProt),
-    authorized: str(prot?.cStat) === "100",
+    authorized: AUTHORIZED_CSTAT.includes(str(prot?.cStat) ?? ""),
+    denied: DENIED_CSTAT.includes(str(prot?.cStat) ?? ""),
+    environment: tpAmb === "1" ? "producao" : tpAmb === "2" ? "homologacao" : null,
+    protocolStatus: str(prot?.cStat),
+    protocolMessage: str(prot?.xMotivo),
   };
 }
 
@@ -164,6 +180,10 @@ export interface SampleNfeInput {
   freight?: number;
   other?: number;
   duplicatas?: Array<{ dVenc: string; vDup?: number }>;
+  /** ambiente (tpAmb): padrão homologação — o XML de exemplo não tem valor fiscal */
+  environment?: "producao" | "homologacao";
+  /** protocolo de autorização: padrão cStat 100; `false` gera o XML sem nfeProc/protNFe */
+  protocol?: false | { cStat: string; xMotivo: string };
 }
 
 const dec = (cents: number) => (cents / 100).toFixed(2);
@@ -180,6 +200,8 @@ export function buildSampleNfeXml(i: SampleNfeInput) {
   const key = buildNfeKey({ uf: "35", yymm: `${y.slice(2)}${m}`, cnpj: i.emitter.cnpj, series, number: i.number, code: i.code ?? 10000000 + i.number });
   const freight = i.freight ?? 0;
   const other = i.other ?? 0;
+  const tpAmb = i.environment === "producao" ? 1 : 2;
+  const prot = i.protocol === false ? null : i.protocol ?? { cStat: "100", xMotivo: "Autorizado o uso da NF-e (EXEMPLO SEM VALOR FISCAL)" };
   const lines = i.items.map((it) => {
     const vProd = Math.round((it.vUnCom * it.qCom) / 1000);
     return { ...it, vProd, vDesc: it.vDesc ?? 0 };
@@ -205,7 +227,7 @@ export function buildSampleNfeXml(i: SampleNfeInput) {
     ? `<cobr><fat><nFat>${i.number}</nFat><vOrig>${dec(vNF)}</vOrig><vDesc>0.00</vDesc><vLiq>${dec(vNF)}</vLiq></fat>${dups.map((d, n) => `<dup><nDup>${String(n + 1).padStart(3, "0")}</nDup><dVenc>${d.dVenc}</dVenc><vDup>${dec(dupVals[n])}</vDup></dup>`).join("")}</cobr>`
     : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
-<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${key}" versao="4.00"><ide><cUF>35</cUF><cNF>${key.slice(35, 43)}</cNF><natOp>Venda de mercadoria</natOp><mod>55</mod><serie>${series}</serie><nNF>${i.number}</nNF><dhEmi>${i.issueDate}T10:00:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>${i.emitter.cityCode ?? "3550308"}</cMunFG><tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>${key[43]}</cDV><tpAmb>2</tpAmb><finNFe>1</finNFe><indFinal>0</indFinal><indPres>9</indPres><procEmi>0</procEmi><verProc>Intercert-Exemplo</verProc></ide><emit><CNPJ>${i.emitter.cnpj}</CNPJ><xNome>${esc(i.emitter.name)}</xNome>${i.emitter.tradeName ? `<xFant>${esc(i.emitter.tradeName)}</xFant>` : ""}<enderEmit><xLgr>Rua Industrial</xLgr><nro>200</nro><xBairro>Distrito Industrial</xBairro><cMun>${i.emitter.cityCode ?? "3550308"}</cMun><xMun>${i.emitter.cityName ?? "Sao Paulo"}</xMun><UF>${i.emitter.uf ?? "SP"}</UF><CEP>03000000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderEmit><IE>${i.emitter.ie ?? "ISENTO"}</IE><CRT>1</CRT></emit><dest><CNPJ>${i.recipient.cnpj}</CNPJ><xNome>${esc(i.recipient.name)}</xNome><enderDest><xLgr>Rua das Flores</xLgr><nro>100</nro><xBairro>Centro</xBairro><cMun>3550308</cMun><xMun>Sao Paulo</xMun><UF>SP</UF><CEP>01001000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderDest><indIEDest>1</indIEDest><IE>${i.recipient.ie ?? "110042490114"}</IE></dest>${det}<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${dec(vProd)}</vProd><vFrete>${dec(freight)}</vFrete><vSeg>0.00</vSeg><vDesc>${dec(vDesc)}</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>${dec(other)}</vOutro><vNF>${dec(vNF)}</vNF></ICMSTot></total><transp><modFrete>${freight ? 0 : 9}</modFrete></transp>${cobr}<pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>${dec(vNF)}</vPag></detPag></pag><infAdic><infCpl>XML DE EXEMPLO PARA TESTE/DEMONSTRACAO - SEM VALOR FISCAL</infCpl></infAdic></infNFe></NFe><protNFe versao="4.00"><infProt><tpAmb>2</tpAmb><verAplic>EXEMPLO</verAplic><chNFe>${key}</chNFe><dhRecbto>${i.issueDate}T10:01:00-03:00</dhRecbto><nProt>135${String(i.number).padStart(12, "0")}</nProt><cStat>100</cStat><xMotivo>Autorizado o uso da NF-e (EXEMPLO SEM VALOR FISCAL)</xMotivo></infProt></protNFe></nfeProc>`;
+${prot ? '<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">' : ""}<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${key}" versao="4.00"><ide><cUF>35</cUF><cNF>${key.slice(35, 43)}</cNF><natOp>Venda de mercadoria</natOp><mod>55</mod><serie>${series}</serie><nNF>${i.number}</nNF><dhEmi>${i.issueDate}T10:00:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>${i.emitter.cityCode ?? "3550308"}</cMunFG><tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>${key[43]}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>0</indFinal><indPres>9</indPres><procEmi>0</procEmi><verProc>Intercert-Exemplo</verProc></ide><emit><CNPJ>${i.emitter.cnpj}</CNPJ><xNome>${esc(i.emitter.name)}</xNome>${i.emitter.tradeName ? `<xFant>${esc(i.emitter.tradeName)}</xFant>` : ""}<enderEmit><xLgr>Rua Industrial</xLgr><nro>200</nro><xBairro>Distrito Industrial</xBairro><cMun>${i.emitter.cityCode ?? "3550308"}</cMun><xMun>${i.emitter.cityName ?? "Sao Paulo"}</xMun><UF>${i.emitter.uf ?? "SP"}</UF><CEP>03000000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderEmit><IE>${i.emitter.ie ?? "ISENTO"}</IE><CRT>1</CRT></emit><dest><CNPJ>${i.recipient.cnpj}</CNPJ><xNome>${esc(i.recipient.name)}</xNome><enderDest><xLgr>Rua das Flores</xLgr><nro>100</nro><xBairro>Centro</xBairro><cMun>3550308</cMun><xMun>Sao Paulo</xMun><UF>SP</UF><CEP>01001000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderDest><indIEDest>1</indIEDest><IE>${i.recipient.ie ?? "110042490114"}</IE></dest>${det}<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${dec(vProd)}</vProd><vFrete>${dec(freight)}</vFrete><vSeg>0.00</vSeg><vDesc>${dec(vDesc)}</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>${dec(other)}</vOutro><vNF>${dec(vNF)}</vNF></ICMSTot></total><transp><modFrete>${freight ? 0 : 9}</modFrete></transp>${cobr}<pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>${dec(vNF)}</vPag></detPag></pag><infAdic><infCpl>XML DE EXEMPLO PARA TESTE/DEMONSTRACAO - SEM VALOR FISCAL</infCpl></infAdic></infNFe></NFe>${prot ? `<protNFe versao="4.00"><infProt><tpAmb>${tpAmb}</tpAmb><verAplic>EXEMPLO</verAplic><chNFe>${key}</chNFe><dhRecbto>${i.issueDate}T10:01:00-03:00</dhRecbto><nProt>135${String(i.number).padStart(12, "0")}</nProt><cStat>${prot.cStat}</cStat><xMotivo>${esc(prot.xMotivo)}</xMotivo></infProt></protNFe></nfeProc>` : ""}`;
 }
 
 function splitEven(total: number, n: number) {

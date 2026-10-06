@@ -22,6 +22,7 @@ import { productFormOptions } from "../form-options";
 import { ProductEditForm } from "../product-form";
 import { VariantsForm } from "../variants-editor";
 import { ImagePanel, ConversionsPanel, CostDialogButton, PriceDialogButton, DeletePriceButton, StockParamsButton, InitialBalanceForm } from "./panels";
+import { canSeeBranch } from "../../estoque/queries";
 
 export const metadata = { title: "Produto" };
 
@@ -35,19 +36,21 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const p = await ctx.store.get("products", id);
   if (!p || p.companyId !== ctx.companyId) notFound();
   const base = `/produtos/${id}`;
-  const [skus, prices, tables, branches, warehouses, balances, history, conversions, usage, categories, users] = await Promise.all([
+  const [skus, prices, tables, branches, warehouses, allBalances, history, conversions, usage, categories, users] = await Promise.all([
     listAll(ctx.store, "skus", { filters: [["eq", "productId", id]] }),
     listAll(ctx.store, "prices", { filters: [["eq", "productId", id]] }),
     listAll(ctx.store, "price_tables", { filters: [["eq", "companyId", ctx.companyId]] }),
     listAll(ctx.store, "branches", { filters: [["eq", "companyId", ctx.companyId]] }),
     listAll(ctx.store, "warehouses", { filters: [["eq", "companyId", ctx.companyId]] }),
-    listAll(ctx.store, "stock_balances", { filters: [["eq", "productId", id]] }),
+    listAll(ctx.store, "stock_balances", { filters: [["eq", "companyId", ctx.companyId], ["eq", "productId", id]] }),
     listAll(ctx.store, "price_history", { filters: [["eq", "productId", id]], orderBy: [{ field: "createdAt", dir: "desc" }] }, 200),
     listAll(ctx.store, "unit_conversions", { filters: [["eq", "productId", id]] }),
     productUsage(ctx.store, id),
     listAll(ctx.store, "categories", { filters: [["eq", "companyId", ctx.companyId]] }),
     nameMap(ctx, "users"),
   ]);
+  // saldos só das filiais que o usuário pode consultar
+  const balances = allBalances.filter((b) => canSeeBranch(ctx, b.branchId));
   const o = await productFormOptions(s);
   const canEdit = can(s.user, "products", "edit");
   const tableName = new Map(tables.map((t) => [t.id, t.name]));

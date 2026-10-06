@@ -108,7 +108,8 @@ export async function recordPriceHistory(
   }
 }
 
-function validatePrice(input: PriceInput) {
+/** Validação dos valores de um preço (também usada antes de gravar o cadastro do produto). */
+export function validatePrice(input: Pick<PriceInput, "price" | "wholesalePrice" | "wholesaleMinQty" | "maxDiscountBps" | "validFrom" | "validTo">) {
   assert(Number.isInteger(input.price) && input.price >= 0, "Preço inválido.");
   if (input.wholesalePrice != null && input.wholesalePrice > 0) {
     assert(input.wholesaleMinQty != null && input.wholesaleMinQty > 0, "Preço de atacado exige quantidade mínima.");

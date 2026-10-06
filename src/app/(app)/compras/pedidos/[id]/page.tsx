@@ -98,7 +98,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       {o.status === "adjust" && currentReq && <Notice tone="warn" title="Devolvido para ajuste">{(decisionsByReq.get(currentReq.id) ?? []).filter((d) => d.decision === "adjust" && !d.revokedAt).pop()?.note ?? ""}</Notice>}
       {o.status === "rejected" && <Notice tone="bad" title="Pedido rejeitado">{o.rejectReason}</Notice>}
       <div className="my-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Stat label="Total do pedido" value={formatMoney(o.total)} hint={`Produtos ${formatMoney(o.subtotal - o.discountTotal)} + frete ${formatMoney(o.freight)}`} />
+        <Stat
+          label="Total do pedido"
+          value={formatMoney(o.total)}
+          hint={[`Produtos ${formatMoney((o.subtotal ?? 0) - (o.discountTotal ?? 0))}`, ...([["IPI", o.ipiTotal], ["frete", o.freight], ["seguro", o.insurance], ["outras despesas", o.otherExpenses]] as const).filter(([, v]) => (v ?? 0) > 0).map(([l, v]) => `${l} ${formatMoney(v)}`)].join(" + ")}
+        />
         <Stat label="Recebido" value={formatMoney(o.receivedValue)} hint={`${confirmedReceipts.length} recebimento(s) confirmado(s)`} href={`${base}?tab=recebimentos`} />
         <Stat label="Saldo a receber" value={formatMoney(remainingValue)} hint={`${formatQty(remaining)} un. pendentes`} tone={remainingValue && o.expectedDate && o.expectedDate < t ? "bad" : "default"} />
         <Stat label="Previsão de entrega" value={formatDate(o.expectedDate)} hint={o.expectedDate && o.expectedDate < t && remaining ? "Atrasado" : wh?.name} tone={o.expectedDate && o.expectedDate < t && remaining && ["approved", "sent", "partial"].includes(o.status) ? "bad" : "default"} />

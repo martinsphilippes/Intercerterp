@@ -1,4 +1,4 @@
-import { listAll, newId } from "@/lib/db";
+import { detId, listAll, newId } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import { nowIso } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
@@ -7,6 +7,7 @@ import { audit } from "@/lib/core/audit";
 import { getSetting } from "@/lib/core/settings";
 import { formatMoney } from "@/lib/money";
 import { cartTotals, type CartItem } from "./cart-calc";
+import { cancelIntentAtProvider, maybePayable } from "./payments/intents";
 import type { FinalizeSaleInput, SalePaymentInput } from "./sales";
 
 export { cartTotals, effectiveUnitPrice, type CartItem } from "./cart-calc";
@@ -79,7 +80,12 @@ export async function ensureOpenCart(ctx: Ctx, terminalId: string, opts: { creat
   const terminal = await ctx.store.getOrThrow("terminals", terminalId);
   assert(terminal.branchId === branchId && terminal.companyId === ctx.companyId, "Terminal de outra filial.");
   const open = await listAll(ctx.store, "carts", { filters: [["eq", "terminalId", terminalId], ["eq", "status", OPEN], ["eq", "operatorId", ctx.user.id]], orderBy: [{ field: "updatedAt", dir: "desc" }] }, 5);
-  if (open[0]) return open[0];
+  for (const cart of open) {
+    // atendimento já vendido (registro anterior à conversão atômica): não reabre o atendimento vendido
+    const sold = await ctx.store.get("sales", detId("sale", cartIdemKey(cart.id)));
+    if (!sold) return cart;
+    await ctx.store.update("carts", cart.id, { status: "converted", saleId: sold.id, payments: [] });
+  }
   if (opts.create === false) return null;
   return createCart(ctx, terminalId);
 }
@@ -201,17 +207,24 @@ export async function unusedConfirmedPix(ctx: Ctx, cartId: string) {
   return intents.find((i) => i.status === "confirmed" && !i.saleId) ?? null;
 }
 
-/** Cancela o atendimento (não apaga: fica registrado com motivo). Cobranças Pix pendentes são canceladas localmente. */
+/**
+ * Cancela o atendimento (não apaga: fica registrado com motivo). Cobranças Pix em aberto são canceladas NO PROVEDOR
+ * antes (consulta → cancelamento confirmado); se o provedor não confirmar, o atendimento não é cancelado.
+ */
 export async function cancelCart(ctx: Ctx, cartId: string, reason?: string | null) {
   requirePerm(ctx, "pdv", "create");
   const cart = await ctx.store.getOrThrow("carts", cartId);
   assertCartAccess(ctx, cart);
   if (cart.status === "cancelled") return cart;
   assert(cart.status !== "converted", "Atendimento já concluído como venda.");
+  const pixConfirmedMsg = (amount: number) => `Há Pix confirmado neste atendimento (${formatMoney(amount)}). Conclua a venda ou providencie a devolução do Pix antes de cancelar.`;
   const confirmed = await unusedConfirmedPix(ctx, cartId);
-  assert(!confirmed, `Há Pix confirmado neste atendimento (${formatMoney(confirmed?.amount)}). Conclua a venda ou providencie a devolução do Pix antes de cancelar.`, "pix_confirmed");
-  const intents = await listAll(ctx.store, "payment_intents", { filters: [["eq", "cartId", cartId], ["eq", "status", ["pending", "unknown"]]] });
-  for (const i of intents) await ctx.store.update("payment_intents", i.id, { status: "cancelled", errorMessage: "Atendimento cancelado no PDV" });
+  assert(!confirmed, pixConfirmedMsg(confirmed?.amount), "pix_confirmed");
+  const intents = await listAll(ctx.store, "payment_intents", { filters: [["eq", "cartId", cartId], ["eq", "kind", "pix"]] });
+  for (const i of intents.filter((x) => !x.saleId && (["pending", "unknown"].includes(x.status) || maybePayable(x)))) await cancelIntentAtProvider(ctx, i);
+  // a consulta ao provedor pode revelar pagamento feito enquanto o atendimento era cancelado
+  const paidMeanwhile = await unusedConfirmedPix(ctx, cartId);
+  assert(!paidMeanwhile, pixConfirmedMsg(paidMeanwhile?.amount), "pix_confirmed");
   const updated = await ctx.store.update("carts", cartId, { status: "cancelled", cancelReason: reason?.trim() || "Cancelado pelo operador", payments: [] });
   if ((cart.items ?? []).length) {
     await audit(ctx, { module: "pdv", action: "cart.cancel", entityType: "cart", entityId: cartId, summary: `Atendimento cancelado — ${formatMoney(cart.total)} (${(cart.items ?? []).length} itens)`, reason: reason ?? null });

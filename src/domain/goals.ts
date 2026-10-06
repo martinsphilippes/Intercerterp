@@ -2,7 +2,7 @@ import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { diffDays, today } from "@/lib/dates";
 import { formatMoney, roundDiv } from "@/lib/money";
-import { assert } from "@/lib/core/errors";
+import { BusinessError, assert } from "@/lib/core/errors";
 import { requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { monthBounds, reportTotals, type Totals } from "./reports";
@@ -42,9 +42,14 @@ function validate(input: GoalInput) {
   assert(!input.notes || input.notes.length <= 500, "Observações: até 500 caracteres.");
 }
 
+/** Acesso a todas as filiais da empresa (administrador ou usuário sem restrição de filial). */
+export function hasAllBranches(user: Ctx["user"]) {
+  return Boolean(user.isAdmin) || (user.branchIds ?? []).length === 0;
+}
+
 async function checkBranch(ctx: Ctx, branchId: string | null) {
   if (!branchId) {
-    assert(ctx.user.isAdmin || (ctx.user.branchIds ?? []).length === 0, "Somente usuários com acesso a todas as filiais podem definir metas da empresa.");
+    assert(hasAllBranches(ctx.user), "Somente usuários com acesso a todas as filiais podem definir metas da empresa.");
     return null;
   }
   const b = await ctx.store.get("branches", branchId);
@@ -58,7 +63,18 @@ async function findDuplicate(store: Store, companyId: string, input: GoalInput, 
   return rows.find((g) => (g.branchId ?? null) === (input.branchId ?? null) && g.id !== exceptId) ?? null;
 }
 
-const goalId = (companyId: string, input: GoalInput) => detId("goal", companyId, input.branchId ?? "*", input.period, input.metric);
+/**
+ * Id determinístico pela chave (empresa, filial, mês, métrica): criações concorrentes da mesma meta convergem
+ * para o mesmo registro. A edição pode mudar a chave mantendo o id; por isso, quando a posição já pertence a uma
+ * meta com outra chave, a criação usa a próxima posição determinística da mesma chave (`slot`).
+ */
+const goalId = (companyId: string, input: GoalInput, slot = 0) =>
+  slot === 0 ? detId("goal", companyId, input.branchId ?? "*", input.period, input.metric) : detId("goal", companyId, input.branchId ?? "*", input.period, input.metric, slot);
+
+const sameKey = (g: Doc, companyId: string, input: GoalInput) =>
+  g.companyId === companyId && (g.branchId ?? null) === (input.branchId ?? null) && g.period === input.period && g.metric === input.metric;
+
+const MAX_GOAL_SLOTS = 50;
 
 function describe(input: { branchName?: string | null; period: string; metric: GoalMetric; target: number }) {
   return `${GOAL_METRICS[input.metric].label} ${input.period} — ${input.branchName ?? "empresa (todas as filiais)"}: ${formatGoalValue(input.metric, input.target)}`;
@@ -72,18 +88,23 @@ export async function createGoal(ctx: Ctx, input: GoalInput): Promise<Doc> {
   const branch = await checkBranch(ctx, input.branchId);
   const dup = await findDuplicate(ctx.store, ctx.companyId, input);
   assert(!dup, `Já existe meta de ${GOAL_METRICS[input.metric].label.toLowerCase()} para ${branch?.name ?? "a empresa"} em ${input.period}. Edite a meta existente.`, "duplicate");
-  const id = goalId(ctx.companyId, input);
-  let doc: Doc;
-  try {
-    doc = await ctx.store.create("goals", { companyId: ctx.companyId, branchId: input.branchId, createdBy: ctx.user.id, period: input.period, metric: input.metric, target: input.target, notes: input.notes ?? null }, id);
-  } catch (e) {
-    // criação concorrente da mesma meta: devolve a existente (idempotente)
-    if (isConflict(e)) {
+  const data = { companyId: ctx.companyId, branchId: input.branchId, createdBy: ctx.user.id, period: input.period, metric: input.metric, target: input.target, notes: input.notes ?? null };
+  let doc: Doc | null = null;
+  for (let slot = 0, attempts = 0; !doc && slot < MAX_GOAL_SLOTS && attempts < MAX_GOAL_SLOTS + 5; attempts++) {
+    const id = goalId(ctx.companyId, input, slot);
+    try {
+      doc = await ctx.store.create("goals", data, id);
+    } catch (e) {
+      if (!isConflict(e)) throw e;
       const again = await ctx.store.get("goals", id);
-      if (again) return again;
+      // criação concorrente da mesma meta: devolve a existente (idempotente)
+      if (again && sameKey(again, ctx.companyId, input)) return again;
+      // posição ocupada por meta cuja chave foi alterada na edição: próxima posição da mesma chave
+      if (again) slot++;
+      // (registro excluído entre a criação e a leitura: tenta a mesma posição de novo)
     }
-    throw e;
   }
+  if (!doc) throw new BusinessError("Não foi possível gravar a meta agora. Tente novamente.", "conflict");
   await audit(ctx, { module: "dashboard", action: "goal.create", entityType: "goal", entityId: doc.id, summary: `Meta criada: ${describe({ ...input, branchName: branch?.name })}`, after: input, related: auditRefs(ctx, input.branchId), branchId: input.branchId });
   return doc;
 }
@@ -178,8 +199,11 @@ export async function goalsProgress(ctx: Ctx, period: string, opts: { branchIds?
   const { from, to: end, days } = monthBounds(period);
   const to = end < ref ? end : ref;
   const started = from <= ref;
-  const goals = (await listAll(ctx.store, "goals", { filters: [["eq", "companyId", ctx.companyId], ["eq", "period", period]] })).filter(
-    (g) => !opts.branchIds || !g.branchId || opts.branchIds.includes(g.branchId),
+  // metas da empresa (sem filial) têm realizado de TODAS as filiais: só para quem tem acesso a todas;
+  // metas de filial: somente filiais do recorte e permitidas ao usuário
+  const fullAccess = hasAllBranches(ctx.user);
+  const goals = (await listAll(ctx.store, "goals", { filters: [["eq", "companyId", ctx.companyId], ["eq", "period", period]] })).filter((g) =>
+    g.branchId ? (!opts.branchIds || opts.branchIds.includes(g.branchId)) && (fullAccess || (ctx.user.branchIds ?? []).includes(g.branchId)) : fullAccess,
   );
   if (!goals.length) return [];
   const branches = new Map((await listAll(ctx.store, "branches", { filters: [["eq", "companyId", ctx.companyId]] })).map((b) => [b.id, b]));
@@ -211,6 +235,16 @@ export async function goalsProgress(ctx: Ctx, period: string, opts: { branchIds?
   }
   const order: Record<string, number> = { revenue: 0, sales_count: 1, ticket: 2 };
   return out.sort((a, b) => a.branchName.localeCompare(b.branchName, "pt-BR") || (order[a.metric] ?? 9) - (order[b.metric] ?? 9));
+}
+
+/**
+ * Metas da tela de metas e da exportação (mesma regra): filiais acessíveis ao usuário (e metas da empresa para quem
+ * tem acesso a todas as filiais). `filial` (id de filial acessível) restringe à filial; vazio = todas.
+ */
+export async function goalsScreen(ctx: Ctx, period: string, opts: { accessibleBranchIds: string[]; filial?: string | null; ref?: string }) {
+  const filial = opts.filial && opts.accessibleBranchIds.includes(opts.filial) ? opts.filial : null;
+  const all = await goalsProgress(ctx, period, { branchIds: opts.accessibleBranchIds, ref: opts.ref });
+  return { filial, all, goals: filial ? all.filter((g) => g.goal.branchId === filial) : all };
 }
 
 export const GOAL_STATUS_LABEL: Record<GoalProgress["status"], string> = {

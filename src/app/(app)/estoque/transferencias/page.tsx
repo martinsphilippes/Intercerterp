@@ -11,9 +11,8 @@ import { paginate, parseList, type SearchParams } from "@/lib/list";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatMoney, formatQty } from "@/lib/money";
 import { can } from "@/lib/permissions";
-import { lookups } from "@/lib/server/lookups";
 import { transferCode } from "@/domain/transfers";
-import { queryTransfers, type TransferRow } from "../queries";
+import { queryTransfers, branchOptions, type TransferRow } from "../queries";
 
 export const metadata = { title: "Transferências entre filiais" };
 
@@ -23,7 +22,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const p = parseList(params, { sort: "number", dir: "desc" });
   const all = await queryTransfers(s.ctx, p);
   const { rows, total } = paginate(all, p);
-  const branches = await lookups.branches(s.ctx);
+  const branches = branchOptions(s.branches);
   const here = s.ctx.branchId;
   const columns: Column<TransferRow>[] = [
     { key: "number", label: "Código", sortable: true, fixed: true, cell: (r) => <span className="font-mono">{transferCode(r.number)}</span> },
@@ -51,7 +50,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   ];
   const inTransit = all.filter((t) => ["in_transit", "partial"].includes(t.status));
   const toReceive = inTransit.filter((t) => here && t.toBranchId === here);
-  const waiting = all.filter((t) => ["draft", "separated"].includes(t.status) && (!here || t.fromBranchId === here));
+  const waiting = all.filter((t) => ["draft", "separated", "shipping"].includes(t.status) && (!here || t.fromBranchId === here));
   return (
     <>
       <PageHeader
@@ -63,7 +62,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Em trânsito" value={inTransit.length} hint={`${formatQty(inTransit.reduce((a, t) => a + t.pendingTotal, 0))} unidades pendentes`} href="/estoque/transferencias?status=in_transit,partial&filial=all" tone={inTransit.length ? "warn" : "default"} />
         <Stat label="A receber nesta filial" value={toReceive.length} hint={here ? (s.branch?.name ?? "") : "Selecione uma filial"} href="/estoque/transferencias?status=in_transit,partial&direcao=recebidas" />
-        <Stat label="Aguardando envio" value={waiting.length} hint="Rascunhos e separadas" href="/estoque/transferencias?status=draft,separated&direcao=enviadas" />
+        <Stat label="Aguardando envio" value={waiting.length} hint="Rascunhos, separadas e expedição incompleta" href="/estoque/transferencias?status=draft,separated,shipping&direcao=enviadas" tone={waiting.some((t) => t.status === "shipping") ? "warn" : "default"} />
         <Stat label="Com divergência" value={all.filter((t) => t.divergenceCount > 0).length} hint="Avaria, falta ou perda" href="/estoque/transferencias?divergencia=1&filial=all" tone={all.some((t) => t.divergenceCount > 0) ? "bad" : "default"} />
       </div>
       <FilterBar
@@ -79,7 +78,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             options: [
               { value: "draft", label: "Rascunho" },
               { value: "separated", label: "Separado" },
-              { value: "draft,separated", label: "Aguardando envio" },
+              { value: "shipping", label: "Expedição incompleta" },
+              { value: "draft,separated,shipping", label: "Aguardando envio" },
               { value: "in_transit", label: "Em trânsito" },
               { value: "partial", label: "Recebido parcial" },
               { value: "in_transit,partial", label: "Pendentes de recebimento" },

@@ -336,7 +336,7 @@ export function ProductCreateForm({ o, initialTab }: { o: ProductFormOptions; in
                       <Select name="stockWarehouseId" defaultValue={o.warehouses[0]?.value ?? ""} options={o.warehouses} />
                     </Field>
                     <Field label="Saldo inicial" hint={hasVariants ? "Com variações, lance por variação na aba Estoque após salvar." : o.canStock ? "Gera movimento “Saldo inicial” ao custo total." : "Sem permissão de ajuste de estoque."}>
-                      <QtyInput name="initialQty" defaultValue={0} />
+                      {o.canStock ? <QtyInput name="initialQty" defaultValue={0} /> : <div className="flex h-9 items-center rounded-md border border-line bg-slate-50 px-3 text-sm text-slate-500">—</div>}
                     </Field>
                     <Field label="Localização" hint="Ex.: A-03-2 (usada no inventário).">
                       <Input name="location" maxLength={60} />

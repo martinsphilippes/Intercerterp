@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, BarChart3, CalendarClock
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, Stat } from "@/components/ui/card";
-import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Badge, SimBadge, StatusBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { EmptyState, Notice } from "@/components/ui/empty";
 import { RevenueChart } from "@/components/charts/revenue-chart";
@@ -14,7 +14,7 @@ import { formatDate, formatDateTime, formatMonth, today } from "@/lib/dates";
 import { qs, type SearchParams } from "@/lib/list";
 import { commercialOverview } from "@/domain/reports";
 import { formatGoalValue, GOAL_METRICS, GOAL_STATUS_LABEL, goalsProgress, type GoalProgress } from "@/domain/goals";
-import { resolveReportParams, moduleQs, reportQs } from "../relatorios/params";
+import { resolveReportParams, reportQs, commercialOpsHref, contextShowsScope, fiscalShowsScope, salesListHref } from "../relatorios/params";
 import { COMMON_DEFINITIONS, Delta, HowWeCalculate, marginText, ReportFilters, ScopeLine } from "../relatorios/_components/report-ui";
 import { FISCAL_BUCKETS, certificateAlerts, financeSnapshot, fiscalSnapshot, latestSales, openCashSessions, stockAlerts, type FiscalBucket } from "./queries";
 
@@ -43,7 +43,8 @@ interface Alert {
   icon: typeof AlertTriangle;
   title: string;
   text: string;
-  href: string;
+  /** null quando a listagem de destino não abre o mesmo recorte no contexto atual */
+  href: string | null;
 }
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -75,25 +76,40 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const goals = goalsAll.filter((g) => (rp.single ? g.goal.branchId === rp.filial : true));
   const branchNames = new Map(s.branches.map((b) => [b.id, b.name as string]));
   const filial = rp.single ? rp.filial : null;
-  const filialQs = rp.single ? qs({ filial: rp.filial }) : "";
   const t = overview?.totals;
   const prev = overview?.previous;
-  const salesHref = `/vendas${moduleQs(rp)}`;
+  // Detalhamento: cada link abre exatamente o recorte do indicador (período, filial e situação).
+  // Vendas/devoluções/financeiro listam a filial do contexto; quando o recorte é outro, o comercial detalha pelos
+  // relatórios gerenciais (operações que compõem os totais) e o financeiro fica sem link (aviso abaixo dos indicadores).
+  const opsOk = contextShowsScope(s, rp);
+  const fiscalOk = fiscalShowsScope(s, rp);
+  const opsFallback = commercialOpsHref(s, rp, rp.period);
+  const salesHref = salesListHref(s, rp, { situacao: "completed" }) ?? opsFallback;
+  const returnsHref = salesListHref(s, rp, {}, rp.period, "/vendas/devolucoes") ?? opsFallback;
+  const finHref = (path: string, extra: Record<string, string | null>) => (opsOk ? `${path}${qs({ ...extra, branch: filial })}` : null);
+  // estoque aceita filial explícita e "all" (todas as filiais do recorte)
+  const stockQs = qs({ filial: rp.single ? rp.filial : "all", situacao: "below_min" });
   const outOfStock = alerts.filter((a) => a.available <= 0);
   // pendências fiscais são estado atual: lista desde o início (não só o mês corrente), por grupo de situações
-  const fiscalQs = (k: FiscalBucket) => qs({ status: FISCAL_BUCKETS[k].statuses.join(","), from: "2000-01-01", branch: filial });
+  const fiscalHref = (model: string, statuses: readonly string[]) => (fiscalOk ? `/fiscal/${model}${qs({ status: statuses.join(","), from: "2000-01-01", branch: filial })}` : null);
+  const bucketStatuses = (k: FiscalBucket) => FISCAL_BUCKETS[k].statuses;
+  const ALL_PENDING = (Object.keys(FISCAL_BUCKETS) as FiscalBucket[]).flatMap((k) => [...FISCAL_BUCKETS[k].statuses]);
+  const pendingOf = (g: { counts: Record<FiscalBucket, number> }) => g.counts.pending + g.counts.processing + g.counts.rejected;
+  const fiscalPendingModels = fiscal ? fiscal.grid.filter((g) => pendingOf(g) > 0) : [];
+  // um único modelo com pendências: abre a lista dele com todas as situações contadas; vários: resumo por tipo (links por modelo)
+  const fiscalPendingHref = (fiscalPendingModels.length === 1 ? fiscalHref(fiscalPendingModels[0].model, ALL_PENDING) : null) ?? "#resumo-fiscal";
 
   // Alertas importantes: somente fatos medidos agora (sem estados presumidos)
   const alertList: Alert[] = [];
-  if (outOfStock.length) alertList.push({ key: "nostock", tone: "bad", icon: PackageSearch, title: `${outOfStock.length} produto(s) sem estoque`, text: "Disponível zerado ou negativo com mínimo cadastrado — reposição necessária.", href: `/estoque${qs({ filial, situacao: "below_min" })}` });
-  if (alerts.length - outOfStock.length > 0) alertList.push({ key: "minstock", tone: "warn", icon: PackageSearch, title: `${alerts.length - outOfStock.length} produto(s) abaixo do mínimo`, text: "Avalie a reposição antes da ruptura.", href: `/estoque${qs({ filial, situacao: "below_min" })}` });
-  if (fin && fin.receivableOverdue.count) alertList.push({ key: "recov", tone: "bad", icon: DollarSign, title: `${fin.receivableOverdue.count} parcela(s) a receber vencida(s)`, text: `Total de ${formatMoney(fin.receivableOverdue.amount)} em atraso.`, href: `/financeiro/receber${qs({ state: "overdue", branch: filial })}` });
-  if (fin && fin.payableOverdue.count) alertList.push({ key: "payov", tone: "bad", icon: ArrowUpCircle, title: `${fin.payableOverdue.count} conta(s) a pagar vencida(s)`, text: `Total de ${formatMoney(fin.payableOverdue.amount)}.`, href: `/financeiro/pagar${qs({ state: "overdue", branch: filial })}` });
-  if (fin && fin.payableToday.count) alertList.push({ key: "paytoday", tone: "warn", icon: ArrowUpCircle, title: `${fin.payableToday.count} conta(s) a pagar vencem hoje`, text: `Total de ${formatMoney(fin.payableToday.amount)}.`, href: `/financeiro/pagar${qs({ state: "due_today", branch: filial })}` });
+  if (outOfStock.length) alertList.push({ key: "nostock", tone: "bad", icon: PackageSearch, title: `${outOfStock.length} produto(s) sem estoque`, text: "Disponível zerado ou negativo com mínimo cadastrado — reposição necessária.", href: `/estoque${stockQs}` });
+  if (alerts.length - outOfStock.length > 0) alertList.push({ key: "minstock", tone: "warn", icon: PackageSearch, title: `${alerts.length - outOfStock.length} produto(s) abaixo do mínimo`, text: "Avalie a reposição antes da ruptura.", href: `/estoque${stockQs}` });
+  if (fin && fin.receivableOverdue.count) alertList.push({ key: "recov", tone: "bad", icon: DollarSign, title: `${fin.receivableOverdue.count} parcela(s) a receber vencida(s)`, text: `Total de ${formatMoney(fin.receivableOverdue.amount)} em atraso.`, href: finHref("/financeiro/receber", { state: "overdue" }) });
+  if (fin && fin.payableOverdue.count) alertList.push({ key: "payov", tone: "bad", icon: ArrowUpCircle, title: `${fin.payableOverdue.count} conta(s) a pagar vencida(s)`, text: `Total de ${formatMoney(fin.payableOverdue.amount)}.`, href: finHref("/financeiro/pagar", { state: "overdue" }) });
+  if (fin && fin.payableToday.count) alertList.push({ key: "paytoday", tone: "warn", icon: ArrowUpCircle, title: `${fin.payableToday.count} conta(s) a pagar vencem hoje`, text: `Total de ${formatMoney(fin.payableToday.amount)}.`, href: finHref("/financeiro/pagar", { state: "due_today" }) });
   if (fiscal) {
     for (const g of fiscal.grid) {
-      if (g.counts.rejected) alertList.push({ key: `rej-${g.model}`, tone: "bad", icon: FileWarning, title: `${g.counts.rejected} ${MODEL_LABEL[g.model]} rejeitada(s)/com erro`, text: "Corrija e retransmita o documento.", href: `/fiscal/${g.model}${fiscalQs("rejected")}` });
-      if (g.counts.pending) alertList.push({ key: `pend-${g.model}`, tone: "warn", icon: FileWarning, title: `${g.counts.pending} ${MODEL_LABEL[g.model]} pendente(s)`, text: "Aguardando dados, revisão ou transmissão.", href: `/fiscal/${g.model}${fiscalQs("pending")}` });
+      if (g.counts.rejected) alertList.push({ key: `rej-${g.model}`, tone: "bad", icon: FileWarning, title: `${g.counts.rejected} ${MODEL_LABEL[g.model]} rejeitada(s)/com erro`, text: "Corrija e retransmita o documento.", href: fiscalHref(g.model, bucketStatuses("rejected")) });
+      if (g.counts.pending) alertList.push({ key: `pend-${g.model}`, tone: "warn", icon: FileWarning, title: `${g.counts.pending} ${MODEL_LABEL[g.model]} pendente(s)`, text: "Aguardando dados, revisão ou transmissão.", href: fiscalHref(g.model, bucketStatuses("pending")) });
     }
   }
   for (const c of certs) alertList.push({ key: `cert-${c.id}`, tone: c.daysLeft < 0 ? "bad" : "warn", icon: CalendarClock, title: c.daysLeft < 0 ? "Certificado digital vencido" : `Certificado vence em ${c.daysLeft} dia(s)`, text: `Validade ${formatDate(c.validTo)}${c.branchId ? ` · ${branchNames.get(c.branchId) ?? ""}` : ""}. Renovação recomendada.`, href: "/fiscal/configuracoes" });
@@ -167,23 +183,35 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       <section aria-label="Indicadores" className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {t && prev && (
           <>
-            <Stat label="Vendas líquidas (faturamento)" value={formatMoney(t.netRevenue)} href={salesHref} hint={<Delta cur={t.netRevenue} prev={prev.netRevenue} />} />
-            <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={`/vendas${moduleQs(rp, { situacao: "completed" })}`} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
-            <Stat label="Ticket médio" value={t.ticket == null ? "Sem vendas" : formatMoney(t.ticket)} href={salesHref} hint={<Delta cur={t.ticket} prev={prev.ticket} />} />
+            <Stat label="Vendas líquidas (faturamento)" value={formatMoney(t.netRevenue)} href={salesHref ?? undefined} hint={<Delta cur={t.netRevenue} prev={prev.netRevenue} />} />
+            <Stat label="Vendas concluídas" value={t.salesCount.toLocaleString("pt-BR")} href={salesHref ?? undefined} hint={<Delta cur={t.salesCount} prev={prev.salesCount} kind="count" />} />
+            <Stat label="Ticket médio" value={t.ticket == null ? "Sem vendas" : formatMoney(t.ticket)} href={salesHref ?? undefined} hint={<Delta cur={t.ticket} prev={prev.ticket} />} />
             {canCost && <Stat label="Margem bruta" value={marginText(t.marginBps)} href={`/relatorios/gerenciais${reportQs(params)}`} hint={<>{`Resultado bruto ${formatMoney(t.grossProfit)} · `}<Delta cur={t.marginBps} prev={prev.marginBps} kind="points" /></>} tone={t.marginBps != null && t.marginBps < 0 ? "bad" : "default"} />}
-            <Stat label="Devoluções no período" value={formatMoney(t.returns)} href={`/vendas/devolucoes${moduleQs(rp)}`} tone={t.returns > 0 ? "warn" : "default"} hint={`${t.returnsCount} devolução(ões)${canCost ? ` · custo revertido ${formatMoney(t.costReturned)}` : ""}`} />
+            <Stat label="Devoluções no período" value={formatMoney(t.returns)} href={returnsHref ?? undefined} tone={t.returns > 0 ? "warn" : "default"} hint={`${t.returnsCount} devolução(ões)${canCost ? ` · custo revertido ${formatMoney(t.costReturned)}` : ""}`} />
           </>
         )}
-        {fin && <Stat label="Saldo disponível" value={formatMoney(fin.accountsTotal)} href="/financeiro/fluxo-caixa" hint={<span className={fin.receivableToday.amount ? "text-accent-700" : undefined}>{formatMoney(fin.receivableToday.amount)} a receber hoje ({fin.receivableToday.count} parcela(s))</span>} tone={fin.accountsTotal < 0 ? "bad" : "default"} />}
-        {canStock && <Stat label="Estoque crítico" value={`${alerts.length} ${alerts.length === 1 ? "item" : "itens"}`} href={`/estoque${qs({ filial, situacao: "below_min" })}`} tone={outOfStock.length ? "bad" : alerts.length ? "warn" : "good"} hint={<span className={outOfStock.length ? "text-red-700" : undefined}>{outOfStock.length} sem estoque · demais abaixo do mínimo</span>} />}
-        {fiscal && <Stat label="Pendências fiscais" value={fiscal.totals.pending + fiscal.totals.processing + fiscal.totals.rejected} href={`/fiscal/nfce${fiscalQs(fiscal.totals.rejected ? "rejected" : "pending")}`} tone={fiscal.totals.rejected ? "bad" : fiscal.totals.pending ? "warn" : "good"} hint={`${fiscal.totals.rejected} rejeitado(s) · ${fiscal.totals.pending} pendente(s) · ${fiscal.totals.processing} processando`} />}
+        {fin && <Stat label="Saldo disponível" value={formatMoney(fin.accountsTotal)} href={finHref("/financeiro/fluxo-caixa", {}) ?? undefined} hint={<span className={fin.receivableToday.amount ? "text-accent-700" : undefined}>{formatMoney(fin.receivableToday.amount)} a receber hoje ({fin.receivableToday.count} parcela(s))</span>} tone={fin.accountsTotal < 0 ? "bad" : "default"} />}
+        {canStock && <Stat label="Estoque crítico" value={`${alerts.length} ${alerts.length === 1 ? "item" : "itens"}`} href={`/estoque${stockQs}`} tone={outOfStock.length ? "bad" : alerts.length ? "warn" : "good"} hint={<span className={outOfStock.length ? "text-red-700" : undefined}>{outOfStock.length} sem estoque · demais abaixo do mínimo</span>} />}
+        {fiscal && <Stat label="Pendências fiscais" value={fiscal.totals.pending + fiscal.totals.processing + fiscal.totals.rejected} href={fiscalPendingHref} tone={fiscal.totals.rejected ? "bad" : fiscal.totals.pending ? "warn" : "good"} hint={`${fiscal.totals.rejected} rejeitado(s) · ${fiscal.totals.pending} pendente(s) · ${fiscal.totals.processing} processando${fiscalPendingModels.length ? ` — ${fiscalPendingModels.map((g) => `${MODEL_LABEL[g.model]} ${pendingOf(g)}`).join(" · ")}` : ""}`} />}
       </section>
       {overview && overview.cancelled.count > 0 && (
         <p className="-mt-2 mb-4 text-xs text-slate-500">
-          <Link className="text-brand-700 hover:underline" href={`/vendas${moduleQs(rp, { situacao: "cancelled" })}`}>
-            {overview.cancelled.count} venda(s) cancelada(s) no período ({formatMoney(overview.cancelled.total)})
-          </Link>{" "}
+          {salesListHref(s, rp, { situacao: "cancelled" }) ? (
+            <Link className="text-brand-700 hover:underline" href={salesListHref(s, rp, { situacao: "cancelled" })!}>
+              {overview.cancelled.count} venda(s) cancelada(s) no período ({formatMoney(overview.cancelled.total)})
+            </Link>
+          ) : (
+            <span>
+              {overview.cancelled.count} venda(s) cancelada(s) no período ({formatMoney(overview.cancelled.total)})
+            </span>
+          )}{" "}
           não entram no faturamento.
+        </p>
+      )}
+      {!opsOk && (canSales || canFin || (canFiscal && !fiscalOk)) && (
+        <p className="-mt-2 mb-4 text-xs text-slate-500">
+          Você está no contexto de {s.branch?.name ?? "uma filial"}: as listagens de vendas, devoluções, financeiro{fiscalOk ? "" : " e documentos fiscais"} mostram somente essa filial, por isso os indicadores de {rp.branchName} não abrem essas listagens.
+          {canSales && (can(s.user, "reports") ? " O comercial detalha pelas operações dos relatórios gerenciais." : "")} Para listar os registros deste recorte, troque a unidade no seletor do topo.
         </p>
       )}
 
@@ -219,7 +247,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 granularity={overview.series.granularity}
                 currentLabel={`Atual (${rp.period.label})`}
                 previousLabel="Período anterior"
-                drillBase={`/vendas${filialQs}`}
+                drillBase={opsOk ? `/vendas${qs({ filial, situacao: "completed" })}` : null}
                 highlightDate={ref}
                 caption={`Receita líquida ${overview.series.granularity === "hour" ? "por hora" : "por dia"} — ${rp.branchName}.`}
               />
@@ -244,27 +272,38 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                     <ul className="space-y-3">
                       {list.map((g) => {
                         const expectedBps = g.metric === "ticket" || !g.target ? null : Math.round(((g.expected ?? 0) * 10000) / g.target);
-                        const link = g.metric === "ticket" && canCost ? `/relatorios/gerenciais?de=${g.from}&ate=${g.to}${g.goal.branchId ? `&filial=${g.goal.branchId}` : "&filial=todas"}` : `/vendas?de=${g.from}&ate=${g.to}${g.goal.branchId ? `&filial=${g.goal.branchId}` : ""}`;
+                        const gScope = { period: rp.period, single: Boolean(g.goal.branchId), filial: g.goal.branchId ?? "todas" };
+                        const gRange = { from: g.from, to: g.to };
+                        const link = g.metric === "ticket" && canCost ? `/relatorios/gerenciais${qs({ de: g.from, ate: g.to, filial: gScope.filial })}` : (salesListHref(s, gScope, { situacao: "completed" }, gRange) ?? commercialOpsHref(s, gScope, gRange));
+                        const body = (
+                          <>
+                            <div className="flex items-baseline justify-between gap-2 text-sm">
+                              <span className="text-ink">{GOAL_METRICS[g.metric]?.label ?? g.metric}</span>
+                              <span className="tabular text-xs text-slate-600">
+                                <strong className="text-sm text-ink">{formatGoalValue(g.metric, g.actual)}</strong> de {formatGoalValue(g.metric, g.target)}
+                              </span>
+                            </div>
+                            <div className="mt-1.5">
+                              <Meter bps={g.progressBps} expectedBps={expectedBps} tone={goalTone(g)} label={`${GOAL_METRICS[g.metric]?.label} — ${formatBps(g.progressBps ?? 0, 1)} da meta`} />
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                              <span className="inline-flex items-center gap-1">
+                                {g.status === "achieved" ? <CheckCircle2 className="size-3.5 text-emerald-700" aria-hidden /> : g.status === "behind" || g.status === "closed_missed" ? <AlertTriangle className="size-3.5 text-amber-700" aria-hidden /> : <Clock className="size-3.5" aria-hidden />}
+                                {GOAL_STATUS_LABEL[g.status]} · {formatBps(g.progressBps ?? 0, 1)}
+                              </span>
+                              {g.metric !== "ticket" && g.status !== "not_started" && <span>esperado até hoje: {formatGoalValue(g.metric, g.expected)}</span>}
+                            </div>
+                          </>
+                        );
                         return (
                           <li key={g.goal.id}>
-                            <Link href={link} className="focus-ring -mx-1 block rounded px-1 py-0.5 hover:bg-brand-50/60">
-                              <div className="flex items-baseline justify-between gap-2 text-sm">
-                                <span className="text-ink">{GOAL_METRICS[g.metric]?.label ?? g.metric}</span>
-                                <span className="tabular text-xs text-slate-600">
-                                  <strong className="text-sm text-ink">{formatGoalValue(g.metric, g.actual)}</strong> de {formatGoalValue(g.metric, g.target)}
-                                </span>
-                              </div>
-                              <div className="mt-1.5">
-                                <Meter bps={g.progressBps} expectedBps={expectedBps} tone={goalTone(g)} label={`${GOAL_METRICS[g.metric]?.label} — ${formatBps(g.progressBps ?? 0, 1)} da meta`} />
-                              </div>
-                              <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                                <span className="inline-flex items-center gap-1">
-                                  {g.status === "achieved" ? <CheckCircle2 className="size-3.5 text-emerald-700" aria-hidden /> : g.status === "behind" || g.status === "closed_missed" ? <AlertTriangle className="size-3.5 text-amber-700" aria-hidden /> : <Clock className="size-3.5" aria-hidden />}
-                                  {GOAL_STATUS_LABEL[g.status]} · {formatBps(g.progressBps ?? 0, 1)}
-                                </span>
-                                {g.metric !== "ticket" && g.status !== "not_started" && <span>esperado até hoje: {formatGoalValue(g.metric, g.expected)}</span>}
-                              </div>
-                            </Link>
+                            {link ? (
+                              <Link href={link} className="focus-ring -mx-1 block rounded px-1 py-0.5 hover:bg-brand-50/60">
+                                {body}
+                              </Link>
+                            ) : (
+                              <div className="-mx-1 px-1 py-0.5">{body}</div>
+                            )}
                           </li>
                         );
                       })}
@@ -280,7 +319,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
 
       <div className="mb-4 grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
         {canSales && (
-          <Card className="xl:col-span-2" title="Últimas vendas" actions={<Link href={`/vendas${filialQs}`} className="text-xs font-medium text-brand-700 hover:underline">Ver todas</Link>} bodyClass="p-0">
+          <Card className="xl:col-span-2" title="Últimas vendas" actions={opsOk ? <Link href={`/vendas${qs({ filial })}`} className="text-xs font-medium text-brand-700 hover:underline">Ver todas</Link> : undefined} bodyClass="p-0">
             {latest.length === 0 ? (
               <EmptyState icon={<Receipt className="size-8" />} title="Nenhuma venda registrada" description="As vendas concluídas no PDV aparecem aqui." />
             ) : (
@@ -309,10 +348,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                         </td>
                         <td className="whitespace-nowrap">
                           {v.documentModel ? (
-                            <Link href={`/fiscal/${v.documentModel}/${v.fiscalDocumentId}`} className="text-brand-700 hover:underline">
-                              {MODEL_LABEL[v.documentModel] ?? v.documentModel}
-                              {v.documentNumber ? ` ${v.documentNumber}` : ""}
-                            </Link>
+                            <span className="inline-flex items-center gap-1">
+                              <Link href={`/fiscal/${v.documentModel}/${v.fiscalDocumentId}`} className="text-brand-700 hover:underline">
+                                {MODEL_LABEL[v.documentModel] ?? v.documentModel}
+                                {v.documentNumber ? ` ${v.documentNumber}` : ""}
+                              </Link>
+                              <SimBadge show={v.documentSimulated} />
+                            </span>
                           ) : (
                             <StatusBadge kind="fiscal" status={v.fiscalStatus} />
                           )}
@@ -353,13 +395,23 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             <ul className="divide-y divide-line">
               {alertList.slice(0, 8).map((a) => (
                 <li key={a.key} className="py-2 first:pt-0 last:pb-0">
-                  <Link href={a.href} className="focus-ring -mx-1 flex items-start gap-3 rounded px-1 py-0.5 hover:bg-brand-50/60">
-                    <a.icon className={`mt-0.5 size-4 shrink-0 ${a.tone === "bad" ? "text-red-700" : a.tone === "warn" ? "text-accent-600" : "text-brand-600"}`} aria-hidden />
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-ink">{a.title}</span>
-                      <span className="block text-xs text-slate-500">{a.text}</span>
-                    </span>
-                  </Link>
+                  {a.href ? (
+                    <Link href={a.href} className="focus-ring -mx-1 flex items-start gap-3 rounded px-1 py-0.5 hover:bg-brand-50/60">
+                      <a.icon className={`mt-0.5 size-4 shrink-0 ${a.tone === "bad" ? "text-red-700" : a.tone === "warn" ? "text-accent-600" : "text-brand-600"}`} aria-hidden />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-ink">{a.title}</span>
+                        <span className="block text-xs text-slate-500">{a.text}</span>
+                      </span>
+                    </Link>
+                  ) : (
+                    <div className="-mx-1 flex items-start gap-3 px-1 py-0.5">
+                      <a.icon className={`mt-0.5 size-4 shrink-0 ${a.tone === "bad" ? "text-red-700" : a.tone === "warn" ? "text-accent-600" : "text-brand-600"}`} aria-hidden />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-ink">{a.title}</span>
+                        <span className="block text-xs text-slate-500">{a.text}</span>
+                      </span>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -380,29 +432,70 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             }
             bodyClass="p-0"
           >
+            <div id="resumo-fiscal" className="scroll-mt-32" />
             <ul className="divide-y divide-line">
               {fiscal.grid.map((g) => {
                 const issues = (Object.keys(FISCAL_BUCKETS) as FiscalBucket[]).filter((k) => g.counts[k] > 0);
+                // autorizados reais (sim=0) e de simulação (sim=1) em listas separadas, com o mesmo período e filial
+                const authHref = (sim: "0" | "1") => (fiscalOk ? `/fiscal/${g.model}${qs({ status: "authorized", sim, from: rp.period.from, to: rp.period.to, branch: filial })}` : null);
+                const allPending = pendingOf(g) > 0 && issues.length > 1 ? fiscalHref(g.model, ALL_PENDING) : null;
                 return (
                   <li key={g.model} className="flex items-start justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
-                      <Link href={`/fiscal/${g.model}${qs({ status: "authorized", from: rp.period.from, to: rp.period.to, branch: filial })}`} className="text-sm font-medium text-brand-700 hover:underline">
-                        {MODEL_LABEL[g.model]} autorizadas
-                      </Link>
+                      {authHref("0") ? (
+                        <Link href={authHref("0")!} className="text-sm font-medium text-brand-700 hover:underline">
+                          {MODEL_LABEL[g.model]} autorizadas
+                        </Link>
+                      ) : (
+                        <span className="text-sm font-medium text-ink">{MODEL_LABEL[g.model]} autorizadas</span>
+                      )}
                       <p className="text-xs text-slate-500">
                         {issues.length === 0 ? (
                           <span className="text-emerald-700">Sem pendências</span>
                         ) : (
-                          issues.map((k, i) => (
-                            <span key={k}>
-                              {i > 0 && " · "}
-                              <Link href={`/fiscal/${g.model}${fiscalQs(k)}`} className={k === "rejected" ? "text-red-700 hover:underline" : "text-amber-700 hover:underline"}>
-                                {g.counts[k]} {BUCKET_WORD[k][g.counts[k] === 1 ? 0 : 1]}
-                              </Link>
-                            </span>
-                          ))
+                          <>
+                            {issues.map((k, i) => {
+                              const href = fiscalHref(g.model, bucketStatuses(k));
+                              const label = `${g.counts[k]} ${BUCKET_WORD[k][g.counts[k] === 1 ? 0 : 1]}`;
+                              return (
+                                <span key={k}>
+                                  {i > 0 && " · "}
+                                  {href ? (
+                                    <Link href={href} className={k === "rejected" ? "text-red-700 hover:underline" : "text-amber-700 hover:underline"}>
+                                      {label}
+                                    </Link>
+                                  ) : (
+                                    <span className={k === "rejected" ? "text-red-700" : "text-amber-700"}>{label}</span>
+                                  )}
+                                </span>
+                              );
+                            })}
+                            {allPending && (
+                              <>
+                                {" · "}
+                                <Link href={allPending} className="text-brand-700 hover:underline">
+                                  ver as {pendingOf(g)}
+                                </Link>
+                              </>
+                            )}
+                          </>
                         )}
                       </p>
+                      {g.simulatedCount > 0 && (
+                        <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                          <SimBadge />
+                          {authHref("1") ? (
+                            <Link href={authHref("1")!} className="hover:underline">
+                              {g.simulatedCount} simulado(s) · {formatMoney(g.simulatedTotal)}
+                            </Link>
+                          ) : (
+                            <span>
+                              {g.simulatedCount} simulado(s) · {formatMoney(g.simulatedTotal)}
+                            </span>
+                          )}
+                          <span>— sem validade fiscal, fora dos autorizados</span>
+                        </p>
+                      )}
                     </div>
                     <div className="tabular shrink-0 text-right">
                       <p className="text-sm font-semibold text-ink">{g.authorizedCount}</p>
@@ -412,16 +505,19 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 );
               })}
             </ul>
-            <p className="border-t border-line px-4 py-2 text-xs text-slate-500">Quantidade e valor autorizados no período {rp.period.label}. Documentos de demonstração usam provedor de simulação.</p>
+            <p className="border-t border-line px-4 py-2 text-xs text-slate-500">
+              Quantidade e valor autorizados pela SEFAZ/prefeitura no período {rp.period.label}.
+              {fiscal.simulatedCount > 0 ? ` ${fiscal.simulatedCount} documento(s) do provedor de simulação no período aparecem à parte, com o selo SIMULAÇÃO, e não contam como autorizados.` : ""}
+            </p>
           </Card>
         )}
         {fin && (
           <Card title="Financeiro" description="Posição atual dos títulos e das contas." actions={<Link href="/financeiro/fluxo-caixa" className="text-xs font-medium text-brand-700 hover:underline">Fluxo de caixa</Link>}>
             <div className="grid grid-cols-2 gap-3">
-              <Stat label="Recebíveis vencidos" value={formatMoney(fin.receivableOverdue.amount)} hint={`${fin.receivableOverdue.count} parcela(s)`} tone={fin.receivableOverdue.amount ? "bad" : "default"} href={`/financeiro/receber${qs({ state: "overdue", branch: filial })}`} />
-              <Stat label="A pagar hoje" value={formatMoney(fin.payableToday.amount)} hint={`${fin.payableToday.count} parcela(s)`} tone={fin.payableToday.amount ? "warn" : "default"} href={`/financeiro/pagar${qs({ state: "due_today", branch: filial })}`} />
-              <Stat label="A pagar — próximos 7 dias" value={formatMoney(fin.payableNext7.amount)} hint={`${fin.payableNext7.count} parcela(s) até ${formatDate(fin.in7)}`} href={`/financeiro/pagar${qs({ state: "upcoming", dueFrom: addDay(fin.ref), dueTo: fin.in7, branch: filial })}`} />
-              <Stat label="A pagar vencidas" value={formatMoney(fin.payableOverdue.amount)} hint={`${fin.payableOverdue.count} parcela(s)`} tone={fin.payableOverdue.amount ? "bad" : "default"} href={`/financeiro/pagar${qs({ state: "overdue", branch: filial })}`} />
+              <Stat label="Recebíveis vencidos" value={formatMoney(fin.receivableOverdue.amount)} hint={`${fin.receivableOverdue.count} parcela(s)`} tone={fin.receivableOverdue.amount ? "bad" : "default"} href={finHref("/financeiro/receber", { state: "overdue" }) ?? undefined} />
+              <Stat label="A pagar hoje" value={formatMoney(fin.payableToday.amount)} hint={`${fin.payableToday.count} parcela(s)`} tone={fin.payableToday.amount ? "warn" : "default"} href={finHref("/financeiro/pagar", { state: "due_today" }) ?? undefined} />
+              <Stat label="A pagar — próximos 7 dias" value={formatMoney(fin.payableNext7.amount)} hint={`${fin.payableNext7.count} parcela(s) até ${formatDate(fin.in7)}`} href={finHref("/financeiro/pagar", { state: "upcoming", dueFrom: addDay(fin.ref), dueTo: fin.in7 }) ?? undefined} />
+              <Stat label="A pagar vencidas" value={formatMoney(fin.payableOverdue.amount)} hint={`${fin.payableOverdue.count} parcela(s)`} tone={fin.payableOverdue.amount ? "bad" : "default"} href={finHref("/financeiro/pagar", { state: "overdue" }) ?? undefined} />
             </div>
             <div className="mt-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Saldo das contas</p>
@@ -483,9 +579,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 </ul>
                 <div className="mt-3 flex items-center justify-between text-xs">
                   <span className="text-slate-500">{alerts.length > 7 ? `+${alerts.length - 7} item(ns)` : `${alerts.length} item(ns)`}</span>
-                  <Link href={`/compras/reposicao${qs({ filial, situacao: "abaixo-minimo" })}`} className="inline-flex items-center gap-1 font-medium text-brand-700 hover:underline">
-                    <ShoppingCart className="size-3.5" aria-hidden /> Planejar reposição
-                  </Link>
+                  {can(s.user, "purchases") && (
+                    <Link href={`/compras/reposicao${qs({ branch: filial ?? alerts[0]?.branchId ?? null, exibir: "reorder" })}`} className="inline-flex items-center gap-1 font-medium text-brand-700 hover:underline">
+                      <ShoppingCart className="size-3.5" aria-hidden /> Planejar reposição
+                    </Link>
+                  )}
                 </div>
               </>
             )}
@@ -500,7 +598,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           ["Saldo disponível", "Soma do saldo atual das contas financeiras ativas do recorte (extrato interno), incluindo contas compartilhadas entre filiais. “A receber hoje” = parcelas a receber em aberto com vencimento hoje."],
           ["Estoque crítico", "Saldo (SKU × depósito) com disponível (físico − reservado) abaixo do mínimo cadastrado — mesmo critério da listagem de Estoque “Abaixo do mínimo”; “sem estoque” = disponível ≤ 0."],
           ["Financeiro", "Parcelas em aberto/parciais pelo saldo; vencidas = vencimento antes de hoje."],
-          ["Resumo fiscal", "Autorizados: documentos com autorização no período selecionado (quantidade e valor). Pendentes: aguardando dados/revisão/transmissão (inclui rascunhos); processando: na fila ou aguardando retorno; rejeitados: rejeição, denegação ou erro — situação atual."],
+          ["Resumo fiscal", "Autorizados: documentos com autorização no período selecionado (quantidade e valor), sem os documentos do provedor de simulação — esses aparecem à parte, com o selo SIMULAÇÃO. Pendentes: aguardando dados/revisão/transmissão (inclui rascunhos); processando: na fila ou aguardando retorno; rejeitados: rejeição, denegação ou erro — situação atual."],
           ["Alertas", "Produtos sem estoque/abaixo do mínimo, contas vencidas, documentos fiscais pendentes/rejeitados, certificado digital vencido ou a vencer em até 30 dias e caixa aberto desde dia anterior."],
         ]}
       />

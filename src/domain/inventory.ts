@@ -1,9 +1,10 @@
-import { detId, listAll } from "@/lib/db";
-import type { Doc } from "@/lib/db/types";
-import { assert } from "@/lib/core/errors";
+import { detId, isConflict, listAll, newId } from "@/lib/db";
+import { NotFoundError, type Doc } from "@/lib/db/types";
+import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { nextNumber } from "@/lib/core/numbering";
+import { resolveOccurrence } from "@/lib/core/notify";
 import { nowIso } from "@/lib/dates";
 import { QTY, roundDiv } from "@/lib/money";
 import { balanceId, postMovements, type MovementInput } from "./stock";
@@ -20,6 +21,11 @@ import { categoryDescendants } from "./products";
  *  - Concluir lança UM ajuste (`inventory`) por item com diferença, com idemKey `inventory:<id>:<sku>`:
  *    concluir de novo não duplica. Novo físico = contado + movimentos ocorridos após a contagem.
  *  - A loja continua operando durante a contagem: vendas/recebimentos entram no esperado conforme a ordem.
+ *  - No máximo UM inventário em andamento por depósito (trava de id determinístico `invlock:<depósito>` em
+ *    `operations`, criada na mesma transação do cabeçalho): dois inventários abertos lançariam o mesmo
+ *    ajuste duas vezes. A trava é liberada ao concluir ou cancelar.
+ *  - Abertura em duas fases: cabeçalho `preparing` + trava; contagens gravadas em lotes idempotentes;
+ *    só então `open`. Repetir a abertura (mesma chave) ou "Retomar abertura" completa o que faltou.
  */
 
 export const INVENTORY_METHOD = "base_temporal_seq";
@@ -27,6 +33,11 @@ export const INVENTORY_METHOD = "base_temporal_seq";
 /** Código sequencial anual (ex.: INV-2026-009). */
 export const inventoryCode = (year: string, n: number) => `INV-${year}-${String(n).padStart(3, "0")}`;
 export const invLabel = (inv: { code?: string | null; number?: number | null }) => inv.code ?? `nº ${inv.number}`;
+
+/** Situações em que o inventário ocupa o depósito. */
+export const INVENTORY_ACTIVE_STATUSES = ["preparing", "open", "counting"];
+
+const lockId = (warehouseId: string) => detId("invlock", warehouseId);
 
 export interface InventoryInput {
   responsibleId?: string | null;
@@ -65,49 +76,134 @@ async function scopeSkus(ctx: Ctx, input: InventoryInput) {
   return skus.map((s) => ({ sku: s, bal: balBySku.get(s.id) ?? null }));
 }
 
-/** Abre o inventário e grava a base (snapshot) de cada item. Idempotente por `idemKey`. */
+function busyError(other: Doc) {
+  return new BusinessError(
+    `Já existe o inventário ${invLabel(other as any)} em andamento neste depósito (${other.status === "preparing" ? "abertura não concluída" : "aberto/em contagem"}). Conclua ou cancele-o antes de abrir outro — dois inventários simultâneos lançariam o mesmo ajuste duas vezes.`,
+    "inventory_open",
+    { inventoryId: other.id },
+  );
+}
+
+/** Recusa se o depósito já tem inventário em andamento; descarta trava órfã (inventário já encerrado). */
+async function assertWarehouseFree(ctx: Ctx, warehouseId: string, selfId: string) {
+  const open = await listAll(ctx.store, "inventories", { filters: [["eq", "companyId", ctx.companyId], ["eq", "warehouseId", warehouseId], ["eq", "status", INVENTORY_ACTIVE_STATUSES]] });
+  const other = open.find((i) => i.id !== selfId);
+  if (other) throw busyError(other);
+  const lock = await ctx.store.get("operations", lockId(warehouseId));
+  if (lock && lock.entityId !== selfId) {
+    const holder = lock.entityId ? await ctx.store.get("inventories", lock.entityId) : null;
+    if (holder && INVENTORY_ACTIVE_STATUSES.includes(holder.status)) throw busyError(holder);
+    await ctx.store.delete("operations", lock.id).catch((e) => {
+      if (!(e instanceof NotFoundError)) throw e;
+    });
+  }
+}
+
+/** Libera a trava do depósito (idempotente; só a do próprio inventário). */
+async function releaseInventoryLock(ctx: Ctx, inv: Doc) {
+  const lock = await ctx.store.get("operations", lockId(inv.warehouseId));
+  if (!lock || lock.entityId !== inv.id) return;
+  await ctx.store.delete("operations", lock.id).catch((e) => {
+    if (!(e instanceof NotFoundError)) throw e;
+  });
+}
+
+/**
+ * Grava as contagens que faltam (lotes transacionais idempotentes por id determinístico) e passa o
+ * inventário de `preparing` para `open`. Usado na abertura e na retomada.
+ */
+async function finishOpening(ctx: Ctx, inv: Doc, scoped?: Array<{ sku: Doc; bal: Doc | null }>) {
+  const items = scoped ?? (await scopeSkus(ctx, { warehouseId: inv.warehouseId, scope: inv.scope, categoryId: inv.categoryId, location: inv.location }));
+  const have = new Set((await listAll(ctx.store, "inventory_counts", { filters: [["eq", "inventoryId", inv.id]] })).map((c) => c.skuId));
+  const missing = items.filter((x) => !have.has(x.sku.id));
+  const row = ({ sku, bal }: { sku: Doc; bal: Doc | null }) => ({
+    companyId: ctx.companyId, branchId: inv.branchId, inventoryId: inv.id, skuId: sku.id, productId: sku.productId, baseQty: bal?.physical ?? 0, baseSeq: bal?.seq ?? 0,
+    unitCost: bal?.avgCost ?? sku.costTotal ?? 0, counted: false, location: bal?.location ?? null,
+  });
+  for (let i = 0; i < missing.length; i += 50) {
+    const chunk = missing.slice(i, i + 50);
+    try {
+      await ctx.store.transaction(async (tx) => {
+        for (const x of chunk) await tx.create("inventory_counts", row(x), detId("invcount", inv.id, x.sku.id));
+      });
+    } catch (e) {
+      if (!isConflict(e)) throw e;
+      // retomada simultânea: grava um a um, ignorando os que a outra chamada já gravou
+      for (const x of chunk) {
+        const cid = detId("invcount", inv.id, x.sku.id);
+        if (await ctx.store.get("inventory_counts", cid)) continue;
+        try {
+          await ctx.store.create("inventory_counts", row(x), cid);
+        } catch (e2) {
+          if (!isConflict(e2)) throw e2;
+        }
+      }
+    }
+  }
+  const cur = (await ctx.store.get("inventories", inv.id))!;
+  if (cur.status !== "preparing") return cur; // aberto por outra chamada ou cancelado durante a preparação
+  const total = have.size + missing.length;
+  const opened = await ctx.store.update("inventories", inv.id, { status: "open", itemsCount: total });
+  await audit(ctx, { module: "stock", action: "inventory.create", entityType: "inventory", entityId: inv.id, summary: `Inventário ${invLabel(inv as any)} aberto (${total} itens, base ${new Date(inv.baseAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})` });
+  return opened;
+}
+
+/**
+ * Abre o inventário e grava a base (snapshot) de cada item. Idempotente por `idemKey`: a repetição devolve
+ * o mesmo inventário e, se a abertura ficou pela metade, completa as contagens que faltaram.
+ * Recusa se já houver inventário em andamento no mesmo depósito.
+ */
 export async function createInventory(ctx: Ctx, input: InventoryInput, opts: { idemKey?: string | null; id?: string } = {}) {
   requirePerm(ctx, "stock", "create");
   const branchId = requireBranch(ctx);
-  const id = opts.id ?? (opts.idemKey ? detId("inventory", ctx.companyId, opts.idemKey) : undefined);
-  if (id) {
-    const existing = await ctx.store.get("inventories", id);
-    if (existing) return existing;
-  }
+  const id = opts.id ?? (opts.idemKey ? detId("inventory", ctx.companyId, opts.idemKey) : newId());
+  const existing = await ctx.store.get("inventories", id);
+  if (existing) return existing.status === "preparing" ? finishOpening(ctx, existing) : existing;
   const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
   assert(wh.companyId === ctx.companyId && wh.branchId === branchId, "O depósito não pertence à filial selecionada.");
   const items = await scopeSkus(ctx, input);
   assert(items.length > 0, "Nenhum item no escopo escolhido.");
+  await assertWarehouseFree(ctx, wh.id, id);
   const baseAt = nowIso();
   const year = baseAt.slice(0, 4);
   const number = await nextNumber(ctx.store, `inventory:${ctx.companyId}:${year}`);
-  const inv = await ctx.store.create(
-    "inventories",
-    {
-      companyId: ctx.companyId, branchId, createdBy: ctx.user.id, number, warehouseId: wh.id, scope: input.scope, categoryId: input.scope === "category" ? input.categoryId : null,
-      location: input.scope === "location" ? input.location?.trim() : null, status: "open", baseAt, startedAt: baseAt, method: INVENTORY_METHOD, notes: input.notes?.trim() || null, itemsCount: items.length,
-      code: inventoryCode(year, number), responsibleId: input.responsibleId || ctx.user.id,
-    },
-    id,
-  );
-  for (const { sku, bal } of items) {
-    await ctx.store.create(
-      "inventory_counts",
-      {
-        companyId: ctx.companyId, branchId, inventoryId: inv.id, skuId: sku.id, productId: sku.productId, baseQty: bal?.physical ?? 0, baseSeq: bal?.seq ?? 0,
-        unitCost: bal?.avgCost ?? sku.costTotal ?? 0, counted: false, location: bal?.location ?? null,
-      },
-      detId("invcount", inv.id, sku.id),
-    );
+  const header = {
+    companyId: ctx.companyId, branchId, createdBy: ctx.user.id, number, warehouseId: wh.id, scope: input.scope, categoryId: input.scope === "category" ? input.categoryId : null,
+    location: input.scope === "location" ? input.location?.trim() : null, status: "preparing", baseAt, startedAt: baseAt, method: INVENTORY_METHOD, notes: input.notes?.trim() || null, itemsCount: items.length,
+    code: inventoryCode(year, number), responsibleId: input.responsibleId || ctx.user.id,
+  };
+  try {
+    await ctx.store.transaction(async (tx) => {
+      await tx.create("operations", { companyId: ctx.companyId, type: "inventory.lock", status: "active", entityType: "inventory", entityId: id, createdBy: ctx.user.id, result: { warehouseId: wh.id } }, lockId(wh.id));
+      await tx.create("inventories", header, id);
+    });
+  } catch (e) {
+    if (!isConflict(e)) throw e;
+    const again = await ctx.store.get("inventories", id);
+    if (again) return again.status === "preparing" ? finishOpening(ctx, again) : again; // repetição simultânea da mesma abertura
+    const lock = await ctx.store.get("operations", lockId(wh.id));
+    const holder = lock?.entityId ? await ctx.store.get("inventories", lock.entityId) : null;
+    if (holder) throw busyError(holder);
+    throw new BusinessError("Outro inventário acabou de ser aberto neste depósito. Atualize a página.", "inventory_open");
   }
-  await audit(ctx, { module: "stock", action: "inventory.create", entityType: "inventory", entityId: inv.id, summary: `Inventário ${inventoryCode(year, number)} aberto em ${wh.name} (${items.length} itens, base ${new Date(baseAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})` });
-  return inv;
+  return finishOpening(ctx, (await ctx.store.get("inventories", id))!, items);
+}
+
+/** Retoma a abertura interrompida (`preparing`): grava as contagens que faltaram e abre o inventário. */
+export async function resumeInventoryOpening(ctx: Ctx, inventoryId: string) {
+  requirePerm(ctx, "stock", "create");
+  requireBranch(ctx);
+  const inv = await loadInventory(ctx, inventoryId);
+  if (inv.status !== "preparing") return inv;
+  assert(ctx.branchId === inv.branchId, "Opere o inventário no contexto da sua filial.");
+  return finishOpening(ctx, inv);
 }
 
 /** Inclui um SKU fora do escopo inicial (ex.: item encontrado na contagem); base = saldo no momento da inclusão. */
 export async function addInventoryItem(ctx: Ctx, inventoryId: string, skuId: string) {
   requirePerm(ctx, "stock", "edit");
   const inv = await loadInventory(ctx, inventoryId);
+  assert(inv.status !== "preparing", "A abertura do inventário não foi concluída; retome a abertura antes de incluir itens.");
   assert(["open", "counting"].includes(inv.status), "Inventário não está em contagem.");
   assert(ctx.branchId === inv.branchId, "Opere o inventário no contexto da sua filial.");
   const id = detId("invcount", inventoryId, skuId);
@@ -156,6 +252,7 @@ export interface CountEntry {
 export async function saveCounts(ctx: Ctx, inventoryId: string, entries: CountEntry[]) {
   requirePerm(ctx, "stock", "edit");
   const inv = await loadInventory(ctx, inventoryId);
+  assert(inv.status !== "preparing", "A abertura do inventário não foi concluída; retome a abertura antes de contar.");
   assert(["open", "counting"].includes(inv.status), "Inventário concluído ou cancelado não aceita contagens.");
   assert(!inv.closingAt, "Inventário em conclusão.");
   assert(ctx.branchId === inv.branchId, "Opere o inventário no contexto da sua filial.");
@@ -211,7 +308,11 @@ export interface InventorySummary {
 export async function concludeInventory(ctx: Ctx, inventoryId: string, opts: { uncounted?: "keep" | "zero" } = {}) {
   requireAction(ctx, "stock.inventory_close");
   const inv0 = await loadInventory(ctx, inventoryId);
-  if (inv0.status === "completed") return inv0;
+  if (inv0.status === "completed") {
+    await releaseInventoryLock(ctx, inv0);
+    return inv0;
+  }
+  assert(inv0.status !== "preparing", "A abertura do inventário não foi concluída; retome a abertura antes de concluir.");
   assert(["open", "counting"].includes(inv0.status), "Inventário cancelado não pode ser concluído.");
   assert(ctx.branchId === inv0.branchId, "Conclua o inventário no contexto da sua filial.");
   const uncounted = opts.uncounted ?? inv0.summary?.uncounted ?? "keep";
@@ -278,6 +379,8 @@ export async function concludeInventory(ctx: Ctx, inventoryId: string, opts: { u
     uncounted,
   };
   const done = await ctx.store.update("inventories", inventoryId, { status: "completed", completedAt: nowIso(), completedBy: ctx.user.id, summary });
+  await releaseInventoryLock(ctx, inv0);
+  await resolveOccurrence(ctx.store, `inventory_stale:${inventoryId}`);
   await audit(ctx, {
     module: "stock",
     action: "inventory.complete",
@@ -298,6 +401,8 @@ export async function cancelInventory(ctx: Ctx, inventoryId: string, reason: str
   assert(ctx.branchId === inv.branchId, "Opere o inventário no contexto da sua filial.");
   assert(reason?.trim(), "Informe o motivo do cancelamento.");
   const u = await ctx.store.update("inventories", inventoryId, { status: "cancelled", cancelledAt: nowIso(), cancelReason: reason.trim() });
+  await releaseInventoryLock(ctx, inv);
+  await resolveOccurrence(ctx.store, `inventory_stale:${inventoryId}`);
   await audit(ctx, { module: "stock", action: "inventory.cancel", entityType: "inventory", entityId: inventoryId, summary: `Inventário ${invLabel(inv)} cancelado (sem ajustes)`, reason: reason.trim() });
   return u;
 }

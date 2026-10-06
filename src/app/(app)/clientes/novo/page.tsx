@@ -2,6 +2,7 @@ import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { lookups } from "@/lib/server/lookups";
 import { CustomerForm } from "../customer-form";
+import { canGrantCredit } from "@/domain/customers";
 
 export const metadata = { title: "Novo cliente" };
 
@@ -11,7 +12,7 @@ export default async function Page() {
   return (
     <>
       <PageHeader title="Novo cliente" crumbs={[{ label: "Clientes", href: "/clientes" }, { label: "Novo" }]} description="Campos acessórios são opcionais: salve como rascunho e complete depois." />
-      <CustomerForm sellers={sellers} priceTables={priceTables} terms={terms} />
+      <CustomerForm sellers={sellers} priceTables={priceTables} terms={terms} canGrantCredit={canGrantCredit(s.ctx)} />
     </>
   );
 }

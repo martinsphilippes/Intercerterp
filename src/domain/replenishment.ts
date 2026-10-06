@@ -1,6 +1,6 @@
-import { detId, listAll } from "@/lib/db";
+import { detId, listAll, sha256 } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { assert } from "@/lib/core/errors";
+import { BusinessError, assert } from "@/lib/core/errors";
 import { requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { getSetting } from "@/lib/core/settings";
 import { audit } from "@/lib/core/audit";
@@ -11,6 +11,8 @@ import { CONFIRMED, PENDING, computeReplenishment, type ReplenishmentResult } fr
 import { classifyAbc, getAbcLimits } from "./abc";
 import { createOrder, remainingQty } from "./purchases";
 import { preferredSupplierProduct, supplierLabel } from "./suppliers";
+
+const SUPPLIER_STATUS: Record<string, string> = { blocked: "bloqueado", inactive: "inativo", draft: "cadastro pendente" };
 
 /**
  * Planejamento de compras e reposição (Tela 46 / visão 12).
@@ -92,6 +94,8 @@ export interface ReplenishmentRow extends ReplenishmentResult {
   situation: "risk" | "reorder" | "incomplete" | "ok";
   horizonEnd: string;
   supplierOptions: Array<{ supplierId: string; name: string; lastCost: number | null; leadTimeDays: number | null; minQty: number | null; multiple: number | null; preferred: boolean; supplierCode: string | null }>;
+  /** vínculos com fornecedor não utilizável (bloqueado/inativo/rascunho): informativos, fora da escolha */
+  unavailableSuppliers: Array<{ supplierId: string; name: string; status: string; statusLabel: string; statusReason: string | null }>;
 }
 
 async function inChunks<T>(ids: string[], fn: (chunk: string[]) => Promise<T[]>) {
@@ -186,7 +190,10 @@ export async function computeBranchReplenishment(store: Store, companyId: string
   for (const sku of skus) {
     const a = avail.get(sku.id) ?? { physical: 0, reserved: 0, available: 0, avgCost: 0 };
     const pr = param.get(sku.id) ?? { min: 0, max: 0, safety: 0, multiple: 0 };
-    const candidates = (spBySku.get(sku.id) ?? []).filter((x) => suppliers.get(x.supplierId)?.status !== "inactive");
+    // só fornecedores utilizáveis (ativos) entram na escolha — mesma regra de assertSupplierUsable
+    const linked = (spBySku.get(sku.id) ?? []).filter((x) => suppliers.get(x.supplierId)?.companyId === companyId);
+    const candidates = linked.filter((x) => suppliers.get(x.supplierId)?.status === "active");
+    const unavailable = linked.filter((x) => suppliers.get(x.supplierId)?.status !== "active");
     let sp: Doc | null = null;
     if (p.supplierId) sp = candidates.find((c) => c.supplierId === p.supplierId) ?? null;
     else sp = await preferredSupplierProduct(store, sku.id, candidates);
@@ -227,6 +234,10 @@ export async function computeBranchReplenishment(store: Store, companyId: string
       abc: abc.get(sku.id) ?? null,
       situation: !sp || !unitCost ? (r.suggested > 0 || r.grossNeed > 0 ? "incomplete" : "ok") : shortage && (r.grossNeed > 0 || outsideLines.length > 0) ? "risk" : r.suggested > 0 ? "reorder" : "ok",
       horizonEnd,
+      unavailableSuppliers: unavailable.map((c) => {
+        const sup = suppliers.get(c.supplierId)!;
+        return { supplierId: c.supplierId, name: supplierLabel(sup), status: sup.status ?? "", statusLabel: SUPPLIER_STATUS[sup.status] ?? sup.status ?? "", statusReason: sup.statusReason ?? null };
+      }),
       supplierOptions: candidates.map((c) => ({ supplierId: c.supplierId, name: supplierLabel(suppliers.get(c.supplierId)), lastCost: c.lastCost ?? null, leadTimeDays: c.leadTimeDays ?? suppliers.get(c.supplierId)?.leadTimeDays ?? null, minQty: c.minQty ?? null, multiple: c.multiple ?? null, preferred: Boolean(c.preferred), supplierCode: c.supplierCode ?? null })),
     });
   }
@@ -253,10 +264,21 @@ export async function createDraftsFromReplenishment(ctx: Ctx, lines: DraftLine[]
   const bySku = new Map(rows.map((r) => [r.skuId, r]));
   const groups = new Map<string, DraftLine[]>();
   for (const l of valid) groups.set(l.supplierId, [...(groups.get(l.supplierId) ?? []), l]);
+  // valida todos os fornecedores antes de criar qualquer rascunho (nada é criado pela metade)
+  const supplierDocs = new Map<string, Doc>();
+  const problems: string[] = [];
+  for (const [supplierId, ls] of groups) {
+    const sup = await ctx.store.get("suppliers", supplierId);
+    if (!sup || sup.companyId !== ctx.companyId) problems.push("fornecedor não encontrado nesta empresa");
+    else if (sup.status !== "active") problems.push(`${supplierLabel(sup)} está ${SUPPLIER_STATUS[sup.status] ?? sup.status}${sup.statusReason ? ` (${sup.statusReason})` : ""} — escolha outro fornecedor para ${ls.length} item(ns)`);
+    else if (ls.length > 90) problems.push(`${supplierLabel(sup)}: limite de 90 produtos por pedido`);
+    if (sup) supplierDocs.set(supplierId, sup);
+  }
+  if (problems.length) throw new BusinessError(`Nenhum rascunho foi criado: ${problems.join("; ")}.`, "supplier_unusable");
   const runId = detId("replenishment-run", opts.idemKey);
   const orders: Doc[] = [];
   for (const [supplierId, ls] of groups) {
-    const supplier = await ctx.store.getOrThrow("suppliers", supplierId);
+    const supplier = supplierDocs.get(supplierId)!;
     const lead = Math.max(...ls.map((l) => bySku.get(l.skuId)?.supplierOptions.find((o) => o.supplierId === supplierId)?.leadTimeDays ?? supplier.leadTimeDays ?? 0));
     const o = await createOrder(ctx, {
       supplierId,
@@ -278,7 +300,9 @@ export async function createDraftsFromReplenishment(ctx: Ctx, lines: DraftLine[]
             : { skuId: l.skuId, qty: l.qty };
         }),
       },
-      idemKey: `replenishment:${opts.idemKey}:${supplierId}`,
+      // a chave inclui as linhas: repetir o mesmo envio não duplica, mas mudar a seleção após uma falha
+      // gera um rascunho novo em vez de devolver o antigo com outros itens
+      idemKey: `replenishment:${opts.idemKey}:${sha256(JSON.stringify([supplierId, [...ls].sort((a, b) => a.skuId.localeCompare(b.skuId)).map((l) => [l.skuId, l.qty, l.unitCost])])).slice(0, 32)}`,
     });
     orders.push(o);
   }

@@ -85,7 +85,7 @@ export function BranchForm({
   companyId,
   warehouses,
   priceTables,
-  timezones,
+  timezone,
   ufs,
   users,
 }: {
@@ -93,7 +93,8 @@ export function BranchForm({
   companyId: string;
   warehouses: Opt[];
   priceTables: Opt[];
-  timezones: string[];
+  /** fuso único da instalação (somente leitura) */
+  timezone: string;
   ufs: string[];
   users: Opt[];
 }) {
@@ -131,8 +132,8 @@ export function BranchForm({
               ) : (
                 <Field label="Depósito padrão"><p className="pt-2 text-sm text-slate-500">“Depósito principal”, criado com a filial.</p></Field>
               )}
-              <Field label="Fuso horário" hint="Recortes de período e horários desta filial.">
-                <Select name="timezone" defaultValue={b.timezone ?? "America/Sao_Paulo"} options={timezones.map((t) => ({ value: t, label: t.replace("America/", "").replace("_", " ") }))} />
+              <Field label="Fuso horário" hint="Único para toda a instalação: alterado pelo responsável técnico na variável APP_TIMEZONE do servidor.">
+                <p className="pt-2 text-sm text-slate-700">{timezone.replace("America/", "").replace("_", " ")} <span className="text-xs text-slate-500">({timezone})</span></p>
               </Field>
             </FormGrid>
           </FormSection>
@@ -146,7 +147,7 @@ export function BranchForm({
   );
 }
 
-export function CompanyUsersForm({ companyId, users, disabled }: { companyId: string; users: Array<{ id: string; name: string; email: string; linked: boolean; isAdmin: boolean; status: string }>; disabled?: boolean }) {
+export function CompanyUsersForm({ companyId, users, disabled }: { companyId: string; users: Array<{ id: string; name: string; email: string; linked: boolean; isAdmin: boolean; status: string; self?: boolean }>; disabled?: boolean }) {
   return (
     <ActionForm action={setCompanyUsersAction} className="space-y-3">
       {({ pending, error }) => (
@@ -158,6 +159,10 @@ export function CompanyUsersForm({ companyId, users, disabled }: { companyId: st
                 {u.isAdmin ? (
                   <p className="text-sm">
                     {u.name} <span className="text-xs text-slate-500">— administrador (todas as empresas)</span>
+                  </p>
+                ) : u.self ? (
+                  <p className="text-sm">
+                    {u.name} <span className="block text-xs text-slate-500">você — {u.linked ? "vinculado" : "não vinculado"} (o próprio vínculo é alterado por outro gestor)</span>
                   </p>
                 ) : (
                   <Checkbox name="userIds" value={u.id} defaultChecked={u.linked} label={<span>{u.name} <span className="block text-xs text-slate-500">{u.email}{u.status !== "active" ? ` · ${u.status}` : ""}</span></span>} />

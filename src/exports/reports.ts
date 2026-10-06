@@ -3,7 +3,8 @@ import { defineExport } from "@/lib/exporters";
 import { sp } from "@/lib/list";
 import { variationBps, managerialReport, paymentBreakdown, branchOperations, type Row, type Totals } from "@/domain/reports";
 import { abcReport, abcProductLines, criterionValue } from "@/domain/abc";
-import { GOAL_METRICS, GOAL_STATUS_LABEL, goalsProgress } from "@/domain/goals";
+import { GOAL_METRICS, GOAL_STATUS_LABEL, goalsScreen } from "@/domain/goals";
+import { today } from "@/lib/dates";
 import { resolveAbcParams, resolveReportParams } from "@/app/(app)/relatorios/params";
 
 /**
@@ -73,7 +74,7 @@ defineExport("reports-breakdown", {
       const pay = await paymentBreakdown(s.ctx.store, rp.scope);
       return [
         ...pay.rows.map((r) => ({ dimension: "Meio de pagamento", label: r.kind === "return" ? `(−) ${r.label}` : r.label, amount: r.kind === "return" ? -r.amount : r.amount, count: r.count })),
-        { dimension: "Meio de pagamento", label: "= Receita líquida", amount: pay.paymentsTotal - pay.returnsTotal, count: null },
+        { dimension: "Meio de pagamento", label: "Receita líquida (total)", amount: pay.paymentsTotal - pay.returnsTotal, count: null },
       ];
     }
     const r = await managerialReport(s.ctx.store, rp.scope, { compare: false, branchIds: rp.branchIds });
@@ -198,12 +199,12 @@ defineExport("reports-goals", {
     { key: "notes", label: "Observações" },
   ],
   rows: async (s, params) => {
-    const rp = resolveReportParams(s, params);
-    const mes = /^\d{4}-\d{2}$/.test(sp(params, "mes")) ? sp(params, "mes") : rp.period.to.slice(0, 7);
-    const prog = await goalsProgress(s.ctx, mes, { branchIds: rp.branchIds });
+    // mesma regra da tela de metas (goalsScreen): filtro por filial só com id de filial acessível; vazio/"todas" = todas
+    const mesParam = sp(params, "mes");
+    const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(mesParam) ? mesParam : today().slice(0, 7);
+    const { goals } = await goalsScreen(s.ctx, mes, { accessibleBranchIds: s.branches.map((b) => b.id as string), filial: sp(params, "filial") });
     const fmt = (m: string, v: number | null) => (v == null ? "" : GOAL_METRICS[m as keyof typeof GOAL_METRICS]?.unit === "count" ? String(v) : (v / 100).toFixed(2).replace(".", ","));
-    return prog
-      .filter((g) => (rp.single ? g.goal.branchId === rp.filial : true))
+    return goals
       .map((g) => ({
         period: g.goal.period, branchName: g.branchName, metricLabel: GOAL_METRICS[g.metric]?.label ?? g.metric, targetText: fmt(g.metric, g.target), actualText: fmt(g.metric, g.actual),
         progressBps: g.progressBps, expectedText: fmt(g.metric, g.expected), statusLabel: GOAL_STATUS_LABEL[g.status], from: g.from, to: g.to, notes: g.goal.notes ?? "",

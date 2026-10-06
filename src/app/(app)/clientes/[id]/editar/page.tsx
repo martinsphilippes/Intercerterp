@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { lookups } from "@/lib/server/lookups";
 import { CustomerForm } from "../../customer-form";
+import { canGrantCredit } from "@/domain/customers";
 
 export const metadata = { title: "Editar cliente" };
 
@@ -15,7 +16,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <>
       <PageHeader title={`Editar ${c.name}`} crumbs={[{ label: "Clientes", href: "/clientes" }, { label: c.name, href: `/clientes/${c.id}` }, { label: "Editar" }]} />
-      <CustomerForm customer={c} sellers={sellers} priceTables={priceTables} terms={terms} />
+      <CustomerForm customer={c} sellers={sellers} priceTables={priceTables} terms={terms} canGrantCredit={canGrantCredit(s.ctx)} />
     </>
   );
 }

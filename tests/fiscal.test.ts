@@ -352,7 +352,8 @@ describe("Adaptador Focus NFe contra servidor HTTP falso (contrato — não comp
   });
 
   it("fluxo completo pelo serviço: envia, consulta, baixa e guarda o XML; credencial inválida → estado erro", async () => {
-    const ctx = await adminCtx();
+    // emissão e consultas sempre no contexto da filial emitente (regra: escrita fiscal exige a filial do documento)
+    const ctx = await refs.ctxFor("admin", "shopping");
     process.env.FOCUSNFE_BASE_URL = base;
     process.env.FOCUS_TESTE_TOKEN = "token-bom";
     const branchId = refs.branches.shopping.id;

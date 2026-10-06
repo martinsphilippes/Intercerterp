@@ -14,7 +14,7 @@ import { addDays, brl, dmy, lateCharges, schedule, type LateParams } from "./cal
 type Inst = { id: string; number: number; dueDate: string; balance: number };
 
 /** Renegociação (Tela 22 — "Negociar"): parcelas em aberto → novo título com novo cronograma. */
-export function RenegotiateDialog({ titleId, titleNumber, installments, late, today, disabled, disabledReason }: { titleId: string; titleNumber: number; installments: Inst[]; late: LateParams; today: string; disabled?: boolean; disabledReason?: string }) {
+export function RenegotiateDialog({ titleId, titleNumber, installments, late, today, disabled, disabledReason, maxItems = 49 }: { titleId: string; titleNumber: number; installments: Inst[]; late: LateParams; today: string; disabled?: boolean; disabledReason?: string; maxItems?: number }) {
   const [open, setOpen] = useState(false);
   const [sel, setSel] = useState<string[]>(installments.map((i) => i.id));
   const chosen = installments.filter((i) => sel.includes(i.id));
@@ -32,7 +32,10 @@ export function RenegotiateDialog({ titleId, titleNumber, installments, late, to
   const [plan, setPlan] = useState<Array<{ dueDate: string; amount: number }>>([]);
   const planned = plan.reduce((a, p) => a + p.amount, 0);
   const gen = () => setPlan(schedule(total, count, first, interval));
-  const ok = chosen.length > 0 && total > 0 && plan.length > 0 && planned === total;
+  // limite de escritas por transação: parcelas selecionadas + novas (mesma regra do servidor)
+  const maxNew = Math.max(1, maxItems - chosen.length);
+  const tooMany = chosen.length + plan.length > maxItems;
+  const ok = chosen.length > 0 && total > 0 && plan.length > 0 && planned === total && !tooMany;
   const diffMsg = useMemo(() => (plan.length && planned !== total ? `As parcelas somam ${brl(planned)}; o valor renegociado é ${brl(total)}. Gere novamente ou ajuste.` : null), [plan, planned, total]);
   return (
     <>
@@ -67,7 +70,7 @@ export function RenegotiateDialog({ titleId, titleNumber, installments, late, to
                   <MoneyInput name="discount" value={discount} onChange={(v) => (setDiscount(v), setPlan([]))} />
                 </Field>
                 <Field label="Nº de parcelas">
-                  <Input type="number" min={1} max={60} value={count} onChange={(e) => (setCount(Number(e.target.value) || 1), setPlan([]))} />
+                  <Input type="number" min={1} max={maxNew} value={count} onChange={(e) => (setCount(Math.min(maxNew, Number(e.target.value) || 1)), setPlan([]))} />
                 </Field>
                 <Field label="1º vencimento">
                   <Input type="date" value={first} min={today} onChange={(e) => (setFirst(e.target.value), setPlan([]))} />
@@ -112,6 +115,7 @@ export function RenegotiateDialog({ titleId, titleNumber, installments, late, to
                 <Textarea name="reason" required rows={2} maxLength={300} placeholder="Ex.: acordo por telefone em 3x, cliente com dificuldade temporária" />
               </Field>
               {diffMsg && <Notice tone="warn">{diffMsg}</Notice>}
+              {tooMany && <Notice tone="warn">{`Renegociação limitada a ${maxItems} parcelas no total (selecionadas + novas): gere no máximo ${maxNew} nova(s) parcela(s).`}</Notice>}
               {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
               <div className="flex justify-end gap-2 border-t border-line pt-3">
                 <Button type="button" variant="ghost" onClick={() => setOpen(false)}>

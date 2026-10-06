@@ -4,6 +4,8 @@ import { runAction, fstr, fint, fjson } from "@/lib/server/action";
 import { createDraftsFromReplenishment, computeBranchReplenishment, type DraftLine } from "@/domain/replenishment";
 import { createQuotation } from "@/domain/quotations";
 import { addDays, today } from "@/lib/dates";
+import { listAll } from "@/lib/db";
+import { supplierLabel } from "@/domain/suppliers";
 import type { SessionInfo } from "@/lib/server/session";
 import { BusinessError } from "@/lib/core/errors";
 
@@ -31,8 +33,12 @@ export async function quotationFromReplenishmentAction(fd: FormData) {
     const valid = lines.filter((l) => l.qty > 0);
     if (!valid.length) return { ok: false as const, error: "Selecione itens com quantidade." };
     const rows = await computeBranchReplenishment(ctx.store, ctx.companyId, { branchId: ctx.branchId, skuIds: valid.map((l) => l.skuId) });
-    const supplierIds = [...new Set(rows.flatMap((r) => r.supplierOptions.map((o) => o.supplierId)))];
-    if (!supplierIds.length) return { ok: false as const, error: "Nenhum fornecedor vinculado aos itens selecionados." };
+    // somente fornecedores ativos da empresa; os demais (bloqueados/inativos/pendentes) são ignorados com aviso
+    const linkedIds = [...new Set(rows.flatMap((r) => [...r.supplierOptions.map((o) => o.supplierId), ...r.unavailableSuppliers.map((u) => u.supplierId)]))];
+    const linked = linkedIds.length ? await listAll(ctx.store, "suppliers", { filters: [["eq", "id", linkedIds]] }) : [];
+    const supplierIds = linked.filter((x) => x.companyId === ctx.companyId && x.status === "active").map((x) => x.id);
+    const skipped = linked.filter((x) => x.companyId === ctx.companyId && x.status !== "active");
+    if (!supplierIds.length) return { ok: false as const, error: skipped.length ? `Nenhum fornecedor ativo vinculado aos itens selecionados (${skipped.map((x) => supplierLabel(x)).join(", ")} não podem receber cotação).` : "Nenhum fornecedor vinculado aos itens selecionados." };
     const t = today();
     const q = await createQuotation(ctx, {
       title: `Reposição ${t.split("-").reverse().join("/")} — ${valid.length} item(ns)`,
@@ -46,6 +52,7 @@ export async function quotationFromReplenishmentAction(fd: FormData) {
       responseDue: addDays(t, 3),
       idemKey: `replenishment-q:${fstr(fd, "_idem")}`,
     });
-    return { ok: true as const, message: `Cotação nº ${q.number} criada com ${supplierIds.length} fornecedor(es).`, redirect: `/compras/cotacoes/${q.id}?tab=propostas` };
+    const warn = skipped.length ? ` Ignorado(s) por não estar(em) ativo(s): ${skipped.map((x) => `${supplierLabel(x)} (${x.status === "blocked" ? "bloqueado" : x.status === "inactive" ? "inativo" : "cadastro pendente"})`).join(", ")}.` : "";
+    return { ok: true as const, message: `Cotação nº ${q.number} criada com ${supplierIds.length} fornecedor(es).${warn}`, redirect: `/compras/cotacoes/${q.id}?tab=propostas` };
   });
 }

@@ -60,7 +60,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "netValue", label: "Líquido", align: "right", hidden: true, cell: (r) => formatMoney(r.netValue) },
     { key: "verificationCode", label: "Cód. verificação", hidden: true, cell: (r) => r.verificationCode ?? "—" },
     { key: "status", label: "Situação", cell: (r) => <DocStatus d={r} /> },
-    { key: "actions", label: "Ações", fixed: true, cell: (r) => <RowActions d={r} canIssue={canIssue && Boolean(s.branch)} /> },
+    { key: "actions", label: "Ações", fixed: true, cell: (r) => <RowActions d={r} canIssue={canIssue && Boolean(s.branch)} branchId={s.ctx.branchId} /> },
   ];
   return (
     <>

@@ -53,7 +53,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "protocol", label: "Protocolo", cell: (r) => <span className="font-mono text-xs">{r.protocol ?? "—"}</span> },
     { key: "accessKey", label: "Chave de acesso", hidden: true, cell: (r) => <span className="font-mono text-[11px]">{formatKey(r.accessKey)}</span> },
     { key: "status", label: "Situação", cell: (r) => <span className="flex flex-wrap items-center gap-1"><DocStatus d={r} />{r.correctionCount ? <Badge tone="info">CC-e</Badge> : null}</span> },
-    { key: "actions", label: "Ações", fixed: true, cell: (r) => <RowActions d={r} canIssue={canIssue && Boolean(s.branch)} /> },
+    { key: "actions", label: "Ações", fixed: true, cell: (r) => <RowActions d={r} canIssue={canIssue && Boolean(s.branch)} branchId={s.ctx.branchId} /> },
   ];
   return (
     <>

@@ -2,16 +2,16 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plug, Server } from "lucide-react";
+import { Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
 import { useToast } from "@/components/ui/toast";
-import { checkConnectorServerAction, recordBrowserConnectorAction } from "./actions";
+import { recordNoConnectorAction, recordBrowserConnectorAction } from "./actions";
 
 /**
  * Teste do conector local. Topologia usual: o conector roda no computador do caixa (127.0.0.1), portanto só é
  * alcançável a partir do NAVEGADOR daquele computador — a verificação é feita aqui e o resultado medido é registrado.
- * A verificação pelo servidor serve para conectores expostos em endereço de rede alcançável pelo servidor.
+ * O servidor nunca acessa a URL do conector (sem requisições do servidor a endereços internos).
  */
 export function ConnectorCheck({ id, url }: { id: string; url: string | null }) {
   const [pending, start] = useTransition();
@@ -21,8 +21,9 @@ export function ConnectorCheck({ id, url }: { id: string; url: string | null }) 
   const fromBrowser = () =>
     start(async () => {
       if (!url) {
-        const r = await checkConnectorServerAction(id);
-        if (r.ok) setResult(r.data as any);
+        const r = await recordNoConnectorAction(id);
+        if (!r.ok) return toast("error", r.error);
+        setResult(r.data as any);
         router.refresh();
         return;
       }
@@ -48,25 +49,14 @@ export function ConnectorCheck({ id, url }: { id: string; url: string | null }) 
       setResult(r.data as any);
       router.refresh();
     });
-  const fromServer = () =>
-    start(async () => {
-      const r = await checkConnectorServerAction(id);
-      if (!r.ok) return toast("error", r.error);
-      setResult(r.data as any);
-      router.refresh();
-    });
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={fromBrowser} loading={pending}>
           <Plug className="size-4" /> {url ? "Testar conector (deste navegador)" : "Testar conector"}
         </Button>
-        {url && (
-          <Button type="button" variant="ghost" onClick={fromServer} disabled={pending} title="Somente para conectores expostos em endereço alcançável pelo servidor">
-            <Server className="size-4" /> Testar a partir do servidor
-          </Button>
-        )}
       </div>
+      {url && <p className="text-xs text-slate-500">Faça o teste no computador do caixa: o conector só é alcançável pelo navegador daquela máquina.</p>}
       {result && (
         <Notice tone={!result.verified ? "info" : result.ok ? "good" : "bad"} title={!result.verified ? "Não verificado" : result.ok ? "Conector respondeu" : "Falha no conector"}>
           {result.message} {result.verified && <span className="text-xs">(verificado {result.origin === "browser" ? "pelo navegador" : "pelo servidor"})</span>}

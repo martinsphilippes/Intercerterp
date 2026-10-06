@@ -14,7 +14,7 @@ import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatDoc } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import type { SessionInfo } from "@/lib/server/session";
-import { cancelWindow, DOC_STATUS_LABEL, FREIGHT_MODE_LABEL, getFiscalConfig, PRESENCE_LABEL, PURPOSE_LABEL, type DocItem } from "@/domain/fiscal/service";
+import { cancelWindow, DOC_STATUS_LABEL, FREIGHT_MODE_LABEL, getFiscalConfig, INACTIVE, OPERATION_ORIGINS, PRESENCE_LABEL, PURPOSE_LABEL, type DocItem } from "@/domain/fiscal/service";
 import { currentIssues } from "@/domain/fiscal/nfe";
 import { TPAG_LABEL } from "@/domain/fiscal/providers";
 import { DocActions } from "./doc-actions";
@@ -81,6 +81,11 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
   const crumbsHref = `/fiscal/${model}`;
   const units = items.reduce((a, i) => a + i.qty, 0);
   const payLabel = [...new Set(((doc.payments ?? []) as Array<{ kind: string }>).map((p) => TPAG_LABEL[p.kind] ?? p.kind))].join(" + ") || "—";
+  // ações de escrita só no contexto da filial do documento (o consolidado é somente consulta)
+  const inBranch = Boolean(s.branch) && doc.branchId === s.ctx.branchId;
+  const canIssue = can(s.user, "fiscal", "create") && canDo(s.user, "fiscal.issue") && inBranch;
+  const scopeNote = inBranch ? null : s.branch ? `Documento de outra filial (${branch?.name ?? "—"}): selecione essa filial no topo para transmitir, consultar, cancelar ou corrigir.` : "Contexto consolidado (somente consulta): selecione a filial do documento no topo para transmitir, consultar, cancelar ou corrigir.";
+  const reissueHref = model === "nfe" && INACTIVE.includes(doc.status) && OPERATION_ORIGINS.includes(doc.originType) && doc.originId ? `/fiscal/nfe/nova?origem=${doc.originType}:${doc.originId}` : null;
   return (
     <>
       <PageHeader
@@ -106,8 +111,9 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
             xmlFileId={doc.xmlFileId}
             danfeUrl={doc.danfeUrl}
             isSimulated={Boolean(doc.isSimulated)}
-            canIssue={can(s.user, "fiscal", "create") && canDo(s.user, "fiscal.issue") && Boolean(s.branch)}
-            canCancel={can(s.user, "fiscal", "edit") && canDo(s.user, "fiscal.cancel")}
+            canIssue={canIssue}
+            canCancel={can(s.user, "fiscal", "edit") && canDo(s.user, "fiscal.cancel") && inBranch}
+            scopeNote={scopeNote}
             cancelAllowed={win.allowed}
             cancelReason={win.reason}
             defaultEmail={doc.lastEmailTo ?? doc.recipient?.email ?? null}
@@ -155,7 +161,7 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
           <ShieldCheck className="size-5 shrink-0" />
           <div>
             <p className="font-semibold">{doc.isSimulated ? `${MODEL_LABEL[model]} autorizada pelo provedor de SIMULAÇÃO (sem validade fiscal)` : `${MODEL_LABEL[model]} autorizada ${model === "nfse" ? "pela prefeitura/ambiente nacional" : "pela SEFAZ"}`}</p>
-            <p className="text-xs">Protocolo {doc.protocol ?? "—"} • {formatDateTimeSec(doc.authorizedAt)} • {doc.contingency ? "Emissão em contingência" : "Autorização normal"}{doc.verificationCode ? ` • Código de verificação ${doc.verificationCode}` : ""}</p>
+            <p className="text-xs">Protocolo {doc.protocol ?? "—"} • {formatDateTimeSec(doc.authorizedAt)} • {doc.contingency ? "Emissão em contingência (retorno do provedor)" : "Autorização normal"}{doc.verificationCode ? ` • Código de verificação ${doc.verificationCode}` : ""}</p>
           </div>
         </div>
       )}
@@ -163,6 +169,12 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
         <div className="mb-4 rounded-lg border border-line bg-slate-50 px-4 py-3 text-sm text-slate-700">
           <p className="font-semibold">Documento cancelado em {formatDateTimeSec(doc.cancelledAt)}</p>
           <p className="text-xs">Justificativa: {doc.cancelReason ?? "—"} • protocolo de autorização original {doc.protocol ?? "—"}</p>
+          {reissueHref && canIssue && <p className="mt-1 text-xs"><Link className="text-brand-700 underline" href={reissueHref}>Emitir nova NF-e para esta operação</Link> (nova referência e numeração).</p>}
+        </div>
+      )}
+      {reissueHref && canIssue && doc.status !== "cancelled" && (
+        <div className="mb-4">
+          <Notice tone="info">Este documento não está mais ativo para a operação de origem. <Link className="underline" href={reissueHref}>Emitir nova NF-e para esta operação</Link>.</Notice>
         </div>
       )}
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">

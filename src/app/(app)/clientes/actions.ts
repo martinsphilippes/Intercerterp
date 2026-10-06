@@ -27,7 +27,8 @@ function parse(fd: FormData): CustomerInput {
     im: fopt(fd, "im"),
     addresses: fjson(fd, "addresses", []),
     contacts: fjson(fd, "contacts", []),
-    creditLimit: fint(fd, "creditLimit"),
+    // ausente quando o usuário não pode conceder crédito (campo somente leitura): o servidor mantém o limite atual
+    creditLimit: fd.has("creditLimit") ? fint(fd, "creditLimit") : undefined,
     paymentTermDays: fint(fd, "paymentTermDays"),
     paymentTermId: fopt(fd, "paymentTermId"),
     priceTableId: fopt(fd, "priceTableId"),
@@ -40,7 +41,8 @@ export async function saveCustomerAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "customers", op: id ? "edit" : "create", revalidate: ["/clientes"] }, async (s) => {
     const input = parse(fd);
-    const c = id ? await updateCustomer(s.ctx, id, input) : await createCustomer(s.ctx, input);
+    const idem = fstr(fd, "_idem");
+    const c = id ? await updateCustomer(s.ctx, id, input) : await createCustomer(s.ctx, input, { idemKey: idem ? `ui:${idem}` : null });
     return { ok: true as const, data: { id: c.id }, message: input.status === "draft" ? "Rascunho salvo." : "Cliente salvo.", redirect: `/clientes/${c.id}` };
   });
 }
@@ -49,7 +51,8 @@ export async function saveCustomerAction(fd: FormData) {
 export async function quickCustomerAction(fd: FormData) {
   return runAction({ module: "customers", op: "create" }, async (s) => {
     const personType = (fstr(fd, "personType") as "PF" | "PJ") || "PF";
-    const c = await createCustomer(s.ctx, { personType, doc: fopt(fd, "doc"), name: fstr(fd, "name"), mobile: fopt(fd, "mobile"), email: fopt(fd, "email"), status: "active" }, { quick: true });
+    const idem = fstr(fd, "_idem");
+    const c = await createCustomer(s.ctx, { personType, doc: fopt(fd, "doc"), name: fstr(fd, "name"), mobile: fopt(fd, "mobile"), email: fopt(fd, "email"), status: "active" }, { quick: true, idemKey: idem ? `ui-quick:${idem}` : null });
     return { id: c.id, name: c.name, doc: c.doc, email: c.email, mobile: c.mobile, creditLimit: c.creditLimit, personType: c.personType };
   });
 }

@@ -10,9 +10,9 @@ import { audit } from "@/lib/core/audit";
 import { today, addDays } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import {
-  addTitleAttachment, approvePayable, cancelTitle, changeInitialBalance, createAccountEntry, createManualTitle, rebuildRunningBalances, reverseEntry, reverseSettlement,
+  addTitleAttachment, approvePayable, assertUsableAccount, cancelTitle, changeInitialBalance, createAccountEntry, createManualTitle, rebuildRunningBalances, reverseEntry, reverseSettlement,
   revokePayableApproval, saveAccount, saveCostCenter, saveFinCategory, savePaymentMethod, savePaymentTerm, setRecordActive, settleInstallment, transferBetweenAccounts,
-  updateInstallment, updateTitle, type InstallmentInput,
+  undoRenegotiation, updateInstallment, updateTitle, type InstallmentInput,
 } from "@/domain/finance";
 import { importBankFile, ignoreBankTx, previewBankImport, reconcile, restoreBankTx, settleFromBankTx, undoReconciliation } from "@/domain/reconciliation";
 import { settleCardReceivable } from "@/domain/sales";
@@ -108,6 +108,12 @@ export async function settleAction(fd: FormData) {
     const method = methodId ? await s.ctx.store.get("payment_methods", methodId) : null;
     let attachmentFileId: string | null = null;
     const inst = await s.ctx.store.getOrThrow("installments", installmentId);
+    const title = await s.ctx.store.getOrThrow("titles", inst.titleId);
+    assert(title.companyId === s.ctx.companyId, "Título de outra empresa.");
+    // recebível da adquirente: a liquidação exige a taxa (lançamento separado) — tela de Cartões
+    if (title.originType === "sale_card") throw new BusinessError("Recebível de cartão é liquidado em Financeiro → Cartões, com a taxa da adquirente lançada à parte.", "card_receivable");
+    // conta validada antes de gravar o comprovante
+    const account = await assertUsableAccount(s.ctx, fstr(fd, "accountId"));
     const file = await fileFrom(fd, "file");
     if (file) attachmentFileId = (await saveFile(s.ctx, { bucket: "attachments", ...file, entityType: "title", entityId: inst.titleId, kind: "receipt_proof" })).id;
     const st = await settleInstallment(s.ctx, {
@@ -120,7 +126,7 @@ export async function settleAction(fd: FormData) {
       fee: fint(fd, "fee"),
       methodId,
       methodKind: method?.kind ?? null,
-      accountId: fstr(fd, "accountId"),
+      accountId: account.id,
       reference: fopt(fd, "reference"),
       notes: fopt(fd, "notes"),
       attachmentFileId,
@@ -143,6 +149,8 @@ export async function reverseSettlementAction(settlementId: string, fd: FormData
 export async function approvePayableAction(titleId: string, fd: FormData) {
   return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.approve_payable");
+    const t = await s.ctx.store.get("titles", titleId);
+    assert(t && t.companyId === s.ctx.companyId, "Título de outra empresa.");
     await approvePayable(s.ctx, titleId, fopt(fd, "reason") ?? undefined);
     return { ok: true as const, message: "Obrigação conferida e autorizada para pagamento." };
   });
@@ -160,11 +168,31 @@ export async function cancelTitleAction(titleId: string, fd: FormData) {
   return runAction({ module: "finance", op: "delete", revalidate: RV }, async (s) => {
     const t = await s.ctx.store.getOrThrow("titles", titleId);
     assert(t.companyId === s.ctx.companyId, "Título de outra empresa.");
-    if (t.originType !== "manual") throw new BusinessError("Títulos gerados por vendas/compras são cancelados pela operação de origem (cancelamento da venda ou do recebimento).", "origin_managed");
     const reason = fstr(fd, "reason");
     assert(reason, "Informe o motivo do cancelamento.");
+    // título de renegociação: cancelar = desfazer a renegociação (parcelas originais voltam ao saldo)
+    if (t.originType === "renegotiation") return undoRenegotiationResult(s.ctx, t, reason);
+    if (t.originType !== "manual") throw new BusinessError("Títulos gerados por vendas, compras ou documentos fiscais são cancelados pela operação de origem (cancelamento da venda, do recebimento ou do documento).", "origin_managed");
     await cancelTitle(s.ctx, titleId, reason);
     return { ok: true as const, message: `Título nº ${t.number} cancelado.` };
+  });
+}
+
+async function undoRenegotiationResult(ctx: Ctx, t: { id: string; number: number; originId?: string | null }, reason: string) {
+  requireAction(ctx, "finance.settle");
+  await undoRenegotiation(ctx, t.id, reason);
+  const orig = t.originId ? await ctx.store.get("titles", t.originId) : null;
+  return { ok: true as const, message: `Renegociação desfeita: título nº ${t.number} cancelado e parcelas devolvidas ao título nº ${orig?.number ?? "original"}.`, redirect: orig ? `/financeiro/receber/${orig.id}` : undefined };
+}
+
+/** Desfaz a renegociação (título gerado sem recebimentos ativos). */
+export async function undoRenegotiationAction(titleId: string, fd: FormData) {
+  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+    const t = await s.ctx.store.getOrThrow("titles", titleId);
+    assert(t.companyId === s.ctx.companyId, "Título de outra empresa.");
+    const reason = fstr(fd, "reason");
+    assert(reason, "Informe o motivo para desfazer a renegociação.");
+    return undoRenegotiationResult(s.ctx, t as any, reason);
   });
 }
 
@@ -399,7 +427,7 @@ export async function settleFromTxAction(fd: FormData) {
       bankTxId: fstr(fd, "bankTxId"), installmentId: fstr(fd, "installmentId"), principal: fint(fd, "principal"), interest: fint(fd, "interest"), fine: fint(fd, "fine"),
       discount: fint(fd, "discount"), fee: fint(fd, "fee"), methodId, methodKind: method?.kind ?? null,
     });
-    return { ok: true as const, message: `Baixa de ${formatMoney(r.settlement.total)} registrada e conciliada com a linha.` };
+    return { ok: true as const, message: r.reused ? `Baixa existente de ${formatMoney(r.settlement.total)} (parcela ${r.installmentNumber}) conciliada com a linha.` : `Baixa de ${formatMoney(r.settlement.total)} registrada e conciliada com a linha.` };
   });
 }
 
@@ -410,7 +438,8 @@ async function settleCard(ctx: Ctx, input: { installmentId: string; accountId: s
   const title = await ctx.store.getOrThrow("titles", inst.titleId);
   assert(title.companyId === ctx.companyId && title.originType === "sale_card", "Recebível de cartão inválido.");
   assert(input.fee >= 0 && input.fee < input.gross, "Taxa inválida.");
-  return settleCardReceivable(ctx, { installmentId: inst.id, accountId: input.accountId, date: input.date, grossAmount: input.gross, fee: input.fee, reference: input.reference ?? undefined });
+  const account = await assertUsableAccount(ctx, input.accountId);
+  return settleCardReceivable(ctx, { installmentId: inst.id, accountId: account.id, date: input.date, grossAmount: input.gross, fee: input.fee, reference: input.reference ?? undefined });
 }
 
 export async function settleCardAction(fd: FormData) {
@@ -431,7 +460,7 @@ export async function settleCardsBatchAction(fd: FormData) {
     const date = fstr(fd, "date") || today();
     noFuture(date);
     assert(until && until <= addDays(today(), 0), "Informe a data limite da previsão (até hoje).");
-    const accountId = fstr(fd, "accountId");
+    const accountId = (await assertUsableAccount(s.ctx, fstr(fd, "accountId"))).id;
     const rows = (await queryCardReceivables(s.ctx, { q: "", f: { status: "open", to: until, kind: fstr(fd, "kind") } })).filter((r) => r.openGross > 0);
     assert(rows.length, "Nenhum recebível em aberto previsto até a data.");
     let gross = 0;

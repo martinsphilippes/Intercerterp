@@ -325,7 +325,11 @@ export async function reconcile(ctx: Ctx, input: ReconcileInput) {
   requireBranch(ctx);
   const id = reconciliationId(input.idemKey);
   const existing = await ctx.store.get("reconciliations", id);
-  if (existing) return existing;
+  if (existing) {
+    assert(existing.companyId === ctx.companyId, "Conciliação de outra empresa.", "cross_company");
+    // repetição devolve o registro da chave (settleFromBankTx usa chave nova a cada conciliação desfeita)
+    return existing;
+  }
   const bankTxIds = [...new Set(input.bankTxIds)];
   const entryIds = [...new Set(input.entryIds)];
   assert(bankTxIds.length >= 1, "Selecione ao menos uma linha do extrato.");
@@ -460,16 +464,43 @@ export interface SettleFromBankInput {
   methodKind?: string | null;
 }
 
+/**
+ * Chave da baixa gerada pela linha. A 1ª rodada usa `banktx:<linha>`; depois que essa baixa é estornada (conciliação
+ * desfeita + estorno), a próxima rodada usa `banktx:<linha>:<n>` — repetir na mesma rodada (duplo clique) continua
+ * idempotente, mas uma baixa estornada nunca é reaproveitada como se fosse nova.
+ */
+async function bankTxSettlementKey(ctx: Ctx, txId: string): Promise<{ key: string; existing: Doc | null }> {
+  for (let n = 0; n < 100; n++) {
+    const key = n === 0 ? `banktx:${txId}` : `banktx:${txId}:${n}`;
+    const existing = await ctx.store.get("settlements", detId("settle", key));
+    if (!existing || existing.status !== "reversed") return { key, existing };
+  }
+  throw new BusinessError("Esta linha já gerou baixas estornadas demais. Concilie manualmente.", "too_many_rounds");
+}
+
+/** Chave da conciliação automática da linha: conciliações desfeitas não são devolvidas como se fossem a nova. */
+async function bankTxReconcileKey(ctx: Ctx, txId: string): Promise<string> {
+  for (let n = 0; n < 100; n++) {
+    const key = n === 0 ? `banktx-settle:${txId}` : `banktx-settle:${txId}:${n}`;
+    const existing = await ctx.store.get("reconciliations", reconciliationId(key));
+    if (!existing || existing.status !== "undone") return key;
+  }
+  throw new BusinessError("Esta linha já teve conciliações desfeitas demais. Concilie manualmente.", "too_many_rounds");
+}
+
 /** Baixa a parcela a partir de uma linha do extrato/retorno e já concilia (a soma dos lançamentos deve fechar com a linha). */
-export async function settleFromBankTx(ctx: Ctx, input: SettleFromBankInput) {
+export async function settleFromBankTx(ctx: Ctx, input: SettleFromBankInput): Promise<{ settlement: Doc; reconciliation: Doc; reused: boolean; installmentNumber: number }> {
   requireBranch(ctx);
   const tx = await ctx.store.getOrThrow("bank_transactions", input.bankTxId);
   assert(tx.companyId === ctx.companyId, "Linha de outra empresa.");
   const inst = await ctx.store.getOrThrow("installments", input.installmentId);
   assert(inst.companyId === ctx.companyId, "Parcela de outra empresa.");
   const prior = tx.settlementId ? await ctx.store.get("settlements", tx.settlementId) : null;
-  if (tx.status === "reconciled" && prior) return { settlement: prior, reconciliation: await ctx.store.get("reconciliations", tx.reconciliationId) };
-  assert(tx.status === "pending", "A linha não está pendente.");
+  if (tx.status === "reconciled" && prior?.status === "active" && prior.installmentId === inst.id && tx.reconciliationId) {
+    const rec = await ctx.store.get("reconciliations", tx.reconciliationId);
+    if (rec?.status === "active") return { settlement: prior, reconciliation: rec, reused: true, installmentNumber: inst.number };
+  }
+  assert(tx.status === "pending", tx.status === "reconciled" ? "A linha já está conciliada. Desfaça a conciliação para baixar outra parcela." : "A linha não está pendente.");
   if (inst.kind === "receivable") assert(tx.amount > 0, "Recebimentos só podem ser baixados a partir de créditos.");
   else assert(tx.amount < 0, "Pagamentos só podem ser baixados a partir de débitos.");
   const interest = input.interest ?? 0;
@@ -479,15 +510,27 @@ export async function settleFromBankTx(ctx: Ctx, input: SettleFromBankInput) {
   const sign = inst.kind === "receivable" ? 1 : -1;
   const net = sign * (input.principal - discount + interest + fine) - fee;
   assert(net === tx.amount, `Os valores informados resultam em ${formatMoney(net)} na conta, mas a linha é de ${formatMoney(tx.amount)}. Ajuste principal, juros, desconto ou tarifa.`, "difference");
-  const settlement = await settleInstallment(ctx, {
+  // baixa já gerada por esta linha e ainda ativa (ex.: conciliação desfeita sem estorno): reaproveita só se for da mesma parcela
+  const { key, existing } = await bankTxSettlementKey(ctx, tx.id);
+  if (existing && existing.installmentId !== inst.id) {
+    const other = await ctx.store.get("installments", existing.installmentId);
+    throw new BusinessError(
+      `Esta linha já gerou a baixa da parcela ${other ? `${other.number} (${other.description})` : "anterior"}, ainda ativa. Estorne essa baixa no título ou concilie a linha manualmente com ela.`,
+      "bank_tx_settled",
+    );
+  }
+  const reused = Boolean(existing);
+  const settlement = existing ?? (await settleInstallment(ctx, {
     installmentId: inst.id, date: tx.date, principal: input.principal, interest, fine, discount, fee, accountId: tx.accountId, methodId: input.methodId ?? null,
     methodKind: input.methodKind ?? (tx.kind === "collection" ? "boleto" : null), reference: tx.docNumber || tx.ourNumber || tx.externalId || null,
-    notes: `Baixa a partir de ${tx.kind === "collection" ? `retorno de cobrança (${tx.cnabOccurrenceText ?? tx.cnabOccurrence})` : "extrato"} — linha ${tx.lineNo ?? "?"}`, idemKey: `banktx:${tx.id}`,
-  });
-  await ctx.store.update("bank_transactions", tx.id, { settlementId: settlement.id, installmentId: inst.id });
-  const entryIds = [settlement.accountEntryId, ...(fee > 0 ? [settlementFeeEntryId(settlement)] : [])];
-  const reconciliation = await reconcile(ctx, { accountId: tx.accountId, bankTxIds: [tx.id], entryIds, kind: tx.kind === "collection" ? "collection" : "settlement", idemKey: `banktx-settle:${tx.id}`, notes: `Baixa da parcela ${inst.number} (${inst.description})` });
-  return { settlement, reconciliation };
+    notes: `Baixa a partir de ${tx.kind === "collection" ? `retorno de cobrança (${tx.cnabOccurrenceText ?? tx.cnabOccurrence})` : "extrato"} — linha ${tx.lineNo ?? "?"}`, idemKey: key,
+  }));
+  assert(settlement.status === "active" && settlement.installmentId === inst.id, "A baixa desta linha não está ativa para a parcela escolhida. Atualize a tela e tente novamente.", "settlement_mismatch");
+  if (tx.settlementId !== settlement.id || tx.installmentId !== inst.id) await ctx.store.update("bank_transactions", tx.id, { settlementId: settlement.id, installmentId: inst.id });
+  const entryIds = [settlement.accountEntryId, ...((settlement.fee ?? 0) > 0 ? [settlementFeeEntryId(settlement)] : [])];
+  const reconciliation = await reconcile(ctx, { accountId: tx.accountId, bankTxIds: [tx.id], entryIds, kind: tx.kind === "collection" ? "collection" : "settlement", idemKey: await bankTxReconcileKey(ctx, tx.id), notes: `Baixa da parcela ${inst.number} (${inst.description})` });
+  assert(reconciliation.status === "active" && (reconciliation.bankTxIds ?? []).includes(tx.id), "A conciliação da linha não foi registrada. Atualize a tela e tente novamente.", "reconcile_mismatch");
+  return { settlement, reconciliation, reused, installmentNumber: inst.number };
 }
 
 // ───────────────────────────── Consultas da tela

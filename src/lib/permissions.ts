@@ -43,6 +43,7 @@ export const SPECIAL_ACTIONS = [
   { key: "admin.integrations", label: "Configurar integrações" },
   { key: "admin.backup", label: "Backup e restauração" },
   { key: "support.manage", label: "Atender chamados" },
+  { key: "customer.credit_limit", label: "Conceder/alterar limite de crédito (crediário)" },
 ] as const;
 
 export type SpecialAction = (typeof SPECIAL_ACTIONS)[number]["key"];
@@ -77,7 +78,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
       dashboard: all(), pdv: all(), sales: all(), cash: all(), products: all(), stock: all(), customers: all(),
       suppliers: all(), finance: rw(), purchases: all(), fiscal: rw(), reports: all(), admin: ro(), support: rw(),
     },
-    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "stock.adjust", "stock.inventory_close", "finance.settle", "purchase.approve", "purchase.receive", "fiscal.issue", "data.export"],
+    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "stock.adjust", "stock.inventory_close", "finance.settle", "purchase.approve", "purchase.receive", "fiscal.issue", "data.export", "customer.credit_limit"],
     discountLimitBps: 2000,
   },
   {

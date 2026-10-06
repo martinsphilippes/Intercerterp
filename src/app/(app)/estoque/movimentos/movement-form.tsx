@@ -42,7 +42,7 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
   const [dir, setDir] = useState<"in" | "out">("in");
   const [wh, setWh] = useState(warehouses[0]?.value ?? "");
   const [qty, setQty] = useState(0);
-  const [bal, setBal] = useState<{ physical: number; available: number; avgCost: number; location: string | null } | null>(initialSku ? { physical: initialSku.physical, available: initialSku.available, avgCost: initialSku.avgCost, location: initialSku.location ?? null } : null);
+  const [bal, setBal] = useState<{ physical: number; reserved?: number; available: number; avgCost: number; location: string | null } | null>(initialSku ? { physical: initialSku.physical, reserved: initialSku.physical - initialSku.available, available: initialSku.available, avgCost: initialSku.avgCost, location: initialSku.location ?? null } : null);
   const [reason, setReason] = useState(REASONS.in[0]);
   const [formKey, setFormKey] = useState(0);
   useEffect(() => {
@@ -65,6 +65,10 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
   const type = kind === "in" ? "manual_in" : kind === "out" ? "manual_out" : kind === "loss" ? "loss" : dir === "in" ? "adjust_in" : "adjust_out";
   const before = bal?.physical ?? 0;
   const after = before + sign * qty;
+  const reserved = bal?.reserved ?? Math.max(0, before - (bal?.available ?? before));
+  const available = bal?.available ?? before - reserved;
+  // saídas manuais, ajustes de saída e perdas não podem consumir o reservado (disponível = físico − reservado)
+  const overAvailable = sign < 0 && qty > 0 && after >= 0 && reserved > 0 && qty > available;
   return (
     <section className="rounded-lg border border-line bg-white">
       <header className="border-b border-line px-4 py-3">
@@ -115,6 +119,11 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
                 </button>
               ))}
             </div>
+            {kind !== "transfer" && sku && reserved > 0 && (
+              <p className="text-xs text-slate-600">
+                Reservado (transferências separadas): <span className="tabular font-semibold">{fmt(reserved)}</span> · Disponível: <span className="tabular font-semibold">{fmt(available)}</span> {sku.unitCode}
+              </p>
+            )}
             {kind !== "transfer" && (
               <dl className="grid grid-cols-3 gap-2 rounded-md bg-slate-50 p-3 text-center text-sm">
                 <div>
@@ -132,6 +141,7 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
               </dl>
             )}
             {kind !== "transfer" && after < 0 && <Notice tone="bad">A saída deixaria o saldo negativo; o sistema vai recusar.</Notice>}
+            {kind !== "transfer" && overAvailable && <Notice tone="bad">A saída passa do disponível ({fmt(available)}): {fmt(reserved)} estão reservados para transferências separadas. Cancele ou ajuste a transferência antes, ou o sistema vai recusar.</Notice>}
             </div>
             <div className="space-y-4">
             {kind === "transfer" ? (
@@ -189,7 +199,7 @@ export function MovementForm({ warehouses, initialSku, branchName }: { warehouse
                   <Field label="Documento de referência">
                     <Input name="documentRef" maxLength={120} placeholder="NF-e, pedido, OS ou documento interno" />
                   </Field>
-                  <Field label="Data do movimento" hint="Vazio = agora. Não pode ser futura.">
+                  <Field label="Data do movimento" hint="Horário local da filial. Vazio = agora. Não pode ser futura.">
                     <Input name="occurredAt" type="datetime-local" />
                   </Field>
                 </FormGrid>

@@ -259,6 +259,12 @@ export class SimulatedFiscalProvider implements FiscalProvider {
     for (const it of p.items ?? []) {
       if (!ncmLooksValid(String(it.codigo_ncm ?? ""))) return `Rejeição 778 (simulada): Informado NCM inexistente no item ${it.numero_item} (${it.codigo_ncm || "vazio"}).`;
       if (!/^[123567]\d{3}$/.test(String(it.cfop ?? ""))) return `Rejeição 321 (simulada): CFOP inválido no item ${it.numero_item}.`;
+      // PISAliq/COFINSAliq (CST 01/02) exigem vBC, pPIS/pCOFINS e valor — como na SEFAZ
+      for (const pre of ["pis", "cofins"] as const) {
+        const cst = String(it[`${pre}_situacao_tributaria`] ?? "");
+        if (["01", "02"].includes(cst) && (it[`${pre}_base_calculo`] == null || it[`${pre}_aliquota_porcentual`] == null || it[`${pre}_valor`] == null))
+          return `Rejeição 225 (simulada): ${pre.toUpperCase()} CST ${cst} sem base de cálculo/alíquota/valor no item ${it.numero_item}.`;
+      }
     }
     if (model === "nfe" && !p.cpf_destinatario && !p.cnpj_destinatario) return "Rejeição 237 (simulada): destinatário sem CPF/CNPJ.";
     return null;
