@@ -44,8 +44,9 @@ export async function GET(req: NextRequest) {
   if (step === "demo") {
     const { seedDemo } = await import("@/domain/seed");
     const days = Math.max(1, Math.min(45, Number(req.nextUrl.searchParams.get("days") ?? process.env.DEMO_HISTORY_DAYS ?? 7)));
-    const r = await seedDemo(store, { historyDays: days });
-    return NextResponse.json({ ok: true, step, companyId: r.companyId, ms: Date.now() - started });
+    // deixa folga dentro dos 300 s da função; repita a chamada até done=true
+    const r = await seedDemo(store, { historyDays: days, deadline: started + 170000 });
+    return NextResponse.json({ ok: true, step, done: r.done, companyId: r.companyId, ms: Date.now() - started });
   }
 
   if (step === "owner") {

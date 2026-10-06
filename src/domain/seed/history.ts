@@ -1,4 +1,4 @@
-import { listAll } from "@/lib/db";
+import { listAll, detId } from "@/lib/db";
 import { addDays, startOfLocalDay, today } from "@/lib/dates";
 import { getSetting, setSetting } from "@/lib/core/settings";
 import type { DemoRefs } from "./base";
@@ -18,7 +18,7 @@ function rng(seed: number) {
 }
 
 /** Histórico de vendas, caixas e financeiro para alimentar painéis, ABC, metas e reposição. */
-export async function seedHistory(refs: DemoRefs, days = 45) {
+export async function seedHistory(refs: DemoRefs, days = 45, deadline = Infinity) {
   const store = refs.seeder.store;
   const companyId = refs.company.id;
   if (await getSetting(store, companyId, null, "demo.history.done", false)) return { skipped: true };
@@ -35,6 +35,10 @@ export async function seedHistory(refs: DemoRefs, days = 45) {
     const terminal = refs.terminals[termKey];
     for (let d = days; d >= 1; d--) {
       const date = addDays(today(), -d);
+      // retomável: cada dia/terminal concluído fica marcado; o prazo encerra entre dias (nunca no meio de um caixa)
+      const dayKey = `demo.history.day.${termKey}.${date}`;
+      if (await getSetting(store, companyId, null, dayKey, false)) continue;
+      if (Date.now() > deadline) return { partial: true, created };
       const dayStart = new Date(startOfLocalDay(date)).getTime();
       const session = await openSession(ctx, { terminalId: terminal.id, openingFund: 20000 });
       await store.update("cash_sessions", session.id, { openedAt: new Date(dayStart + 9 * 3600000).toISOString() });
@@ -53,6 +57,7 @@ export async function seedHistory(refs: DemoRefs, days = 45) {
         if (!items.length) continue;
         const at = new Date(dayStart + (10 + i * 1.5) * 3600000).toISOString();
         const idemKey = `demo-hist-${termKey}-${date}-${i}`;
+        if (await store.get("sales", detId("sale", idemKey))) continue; // já gravada numa carga interrompida
         // total para montar pagamentos
         const { prepareSale } = await import("../sales");
         const customerKey = rand() < 0.35 ? pick(Object.keys(refs.customers)) : null;
@@ -81,6 +86,7 @@ export async function seedHistory(refs: DemoRefs, days = 45) {
       counted.cash += divergence;
       await closeSession(ctx, { sessionId: session.id, counted, justification: divergence ? "Diferença de R$ 12,50 em dinheiro — conferência repetida, valor não localizado (demonstração)." : undefined, checklist: { cashCounted: true, cardReportPrinted: true, pixConferred: true } });
       await store.update("cash_sessions", session.id, { closedAt: new Date(dayStart + 20 * 3600000).toISOString() });
+      await setSetting(store, companyId, null, dayKey, true);
     }
   }
   await runDueJobs(store, { limit: 2000 });
@@ -136,7 +142,7 @@ export async function seedToday(refs: DemoRefs) {
   // 2) Venda mista: Pix (cobrança simulada confirmada) + dinheiro
   const cartId = "demo-cart-2";
   const intent = await createPixIntent(ctx, { cartId, amount: 10000, description: "Venda demonstração" });
-  await simulateIntent(ctx, intent.id, "confirmed");
+  if (intent.status !== "confirmed" && !intent.saleId) await simulateIntent(ctx, intent.id, "confirmed"); // retomada: já confirmada
   await finalizeSale(ctx, { idemKey: "demo-today-2", cartId: null, terminalId: terminal.id, customerId: refs.customers.joao.id, items: [{ skuId: refs.skus["fone-u"].id, qty: 1000 }], payments: [{ methodId: refs.methods.pix.id, amount: 10000, intentId: intent.id }, { methodId: refs.methods.dinheiro.id, amount: 4990, received: 5000 }] });
   // 3) Venda a prazo (crediário 3x) com desconto global
   await finalizeSale(ctx, { idemKey: "demo-today-3", terminalId: terminal.id, customerId: refs.customers.maria.id, items: [{ skuId: refs.skus["tenis-40"].id, qty: 1000 }, { skuId: refs.skus["cinto-u"].id, qty: 1000 }], globalDiscount: 1000, payments: [{ methodId: refs.methods.crediario.id, amount: 27990 + 6990 - 1000, paymentTermId: refs.terms["crediario-3x"].id }] });

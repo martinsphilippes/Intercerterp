@@ -21,4 +21,22 @@ describe("seed de demonstração", () => {
     expect(docs.length).toBeGreaterThan(0);
     expect(docs.every((d) => d.isSimulated)).toBe(true);
   });
+
+  it("retoma uma carga interrompida pelo prazo sem duplicar caixas nem vendas", async () => {
+    const store = freshStore();
+    // prazo já esgotado: grava a base e para antes do primeiro dia de histórico
+    const r1 = await seedDemo(store, { historyDays: 3, deadline: 0 });
+    expect(r1.done).toBe(false);
+    expect((await listAll(store, "sales")).length).toBe(0);
+    const r2 = await seedDemo(store, { historyDays: 3 });
+    expect(r2.done).toBe(true);
+    const sessions = await listAll(store, "cash_sessions");
+    // 3 dias × 2 terminais fechados + o caixa aberto de hoje
+    expect(sessions.filter((s) => s.status === "open").length).toBe(1);
+    const sales = await listAll(store, "sales");
+    const r3 = await seedDemo(store, { historyDays: 3 });
+    expect(r3.done).toBe(true);
+    expect((await listAll(store, "sales")).length).toBe(sales.length);
+    expect((await listAll(store, "cash_sessions")).length).toBe(sessions.length);
+  });
 });
