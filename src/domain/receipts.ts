@@ -625,7 +625,7 @@ export async function createManualReceipt(ctx: Ctx, input: { supplierId: string;
     }
     throw e;
   }
-  await audit(ctx, { module: "purchases", action: "receipt.create", entityType: "receipt", entityId: r.id, summary: `Recebimento nº ${number} aberto sem XML${key ? ` (chave ${key})` : ""} — ${supplierLabel(supplier)}, ${items.length} item(ns) do saldo de ${orders.length} pedido(s), devido ${formatMoney(r.dueTotal)}${orders.some((o) => !claimed.includes(o.id) && (o.freight ?? 0) + (o.insurance ?? 0) + (o.otherExpenses ?? 0) > 0) ? " (frete/seguro/despesas de pedido já entregue ou com outro recebimento não são cobrados de novo)" : ""}`, related: [`supplier:${supplier.id}`, ...orderIds.map((o) => `purchase_order:${o}`)] });
+  await audit(ctx, { module: "purchases", action: "receipt.create", entityType: "receipt", entityId: r.id, summary: `Recebimento nº ${number} aberto sem XML${key ? ` (chave ${key})` : ""} — ${supplierLabel(supplier)}, ${items.length} item(ns) do saldo de ${orders.length} pedido(s), devido ${formatMoney(r.dueTotal)}${orders.some((o) => !claimed.includes(o.id) && (o.freight ?? 0) + (o.insurance ?? 0) + (o.otherExpenses ?? 0) > 0) ? " (frete/seguro/despesas já cobrados ou assumidos por outro recebimento não são cobrados de novo)" : ""}`, related: [`supplier:${supplier.id}`, ...orderIds.map((o) => `purchase_order:${o}`)] });
   return r;
 }
 
@@ -756,6 +756,12 @@ export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) 
     else if (wasAuto && chargesTouched) orderCharges = { ...r.orderCharges, auto: false, lostAck: Boolean(input.chargesLostAck) };
     else if (!wasAuto && input.chargesLostAck !== undefined) orderCharges = { ...r.orderCharges, lostAck: Boolean(input.chargesLostAck) };
   }
+  // pedido desvinculado: deixa de ter os encargos assumidos por este recebimento (o marcador é liberado após gravar)
+  const unlinked = (r.orderIds ?? []).filter((oid: string) => !orderIds.includes(oid));
+  if (!r.xmlFileId && r.orderCharges && unlinked.length) {
+    const cur = orderCharges ?? r.orderCharges;
+    orderCharges = { ...cur, claimed: (cur.claimed ?? []).filter((oid: string) => orderIds.includes(oid)), lost: (cur.lost ?? []).filter((l: any) => orderIds.includes(l.orderId)) };
+  }
   // encargos calculados pelo pedido: os valores de frete/despesas/desconto enviados pelo formulário não valem
   const autoAfter = !r.xmlFileId && Boolean(r.orderCharges) && (orderCharges ?? r.orderCharges).auto !== false;
   const keepCharges = !autoAfter;
@@ -779,6 +785,9 @@ export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) 
   };
   const calc = await recompute(ctx, r, patch);
   const u = await ctx.store.update("receipts", id, { ...patch, ...omit(calc, "payable") });
+  // encargos de pedido desvinculado cobrados por este recebimento (conclusão interrompida para revisão) ficam livres
+  // para o próximo recebimento do pedido
+  for (const oid of unlinked) await releaseChargesMarker(ctx.store, oid, id);
   await audit(ctx, { module: "purchases", action: "receipt.update", entityType: "receipt", entityId: id, summary: `Recebimento nº ${r.number}: conferência atualizada (devido ${formatMoney(calc.dueTotal)}, ${calc.divergences.length} divergência(s))` });
   return u;
 }
@@ -791,11 +800,8 @@ export async function cancelReceipt(ctx: Ctx, id: string, reason: string) {
   // libera a chave para nova importação (o índice único é o scopeKey; o id do registro vem do número),
   // preservando o registro cancelado
   await ctx.store.update("receipts", id, { status: "cancelled", scopeKey: `${r.scopeKey}|cancelled|${Date.now()}` });
-  // libera a cobrança de frete/despesas do pedido que este recebimento tenha assumido
-  for (const oid of r.orderCharges?.claimed ?? []) {
-    const m = await ctx.store.get("operations", chargesMarkerId(oid));
-    if (m && m.result?.receiptId === id) await ctx.store.delete("operations", m.id);
-  }
+  // libera a cobrança de frete/despesas do pedido que este recebimento tenha registrado (conclusão interrompida)
+  for (const oid of new Set<string>([...(r.orderCharges?.claimed ?? []), ...(r.orderIds ?? [])])) await releaseChargesMarker(ctx.store, oid, id);
   await audit(ctx, { module: "purchases", action: "receipt.cancel", entityType: "receipt", entityId: id, summary: `Recebimento nº ${r.number} cancelado na conferência`, reason });
 }
 
@@ -870,46 +876,49 @@ async function learnSupplierProduct(ctx: Ctx, r: Doc, it: ReceiptItem) {
 
 /**
  * Registra, com marcador de id determinístico por pedido, que ESTE recebimento (sem XML) cobra o frete/seguro/
- * outras despesas do pedido. Se outro recebimento já os cobrou (dois recebimentos abertos ao mesmo tempo),
- * retira o encargo deste, recalcula o devido e interrompe a confirmação para revisão.
+ * outras despesas do pedido — vale quem confirmar primeiro. Se outro recebimento já os cobrou (dois recebimentos
+ * abertos ao mesmo tempo), retira o encargo deste; se ninguém os cobrou ainda (entregas parciais anteriores sem eles,
+ * recebimento que os assumiria cancelado ou desvinculado), este os assume. Em ambos os casos recalcula o devido e
+ * interrompe a confirmação para revisão.
  */
 async function claimOrderCharges(ctx: Ctx, r: Doc) {
   if (r.xmlFileId || !r.orderCharges) return;
   const auto = r.orderCharges.auto !== false;
-  const claimed: string[] = (r.orderCharges.claimed ?? []).filter((oid: string) => (r.orderIds ?? []).includes(oid));
+  const linked: string[] = r.orderIds ?? [];
+  const claimed: string[] = (r.orderCharges.claimed ?? []).filter((oid: string) => linked.includes(oid));
   const lost: Array<{ orderId: string; number: number | null; receiptNumber: number | null; freight: number; insurance: number; otherExpenses: number }> = [];
   const added: Array<{ orderId: string; number: number }> = [];
   const marker = (oid: string) => ({ companyId: ctx.companyId, type: "purchase.order_charges", status: "done", entityType: "purchase_order", entityId: oid, result: { receiptId: r.id, receiptNumber: r.number }, createdBy: ctx.user.id });
-  for (const oid of claimed) {
-    const mid = chargesMarkerId(oid);
+  /** grava o marcador deste recebimento; devolve o marcador de OUTRO recebimento quando ele já registrou a cobrança */
+  const take = async (oid: string) => {
+    await liveChargesMarker(ctx.store, oid); // marcador de recebimento cancelado/desvinculado é liberado antes
     try {
-      await ctx.store.create("operations", marker(oid), mid);
+      await ctx.store.create("operations", marker(oid), chargesMarkerId(oid));
+      return null;
     } catch (e) {
       if (!isConflict(e)) throw e;
-      const m = await ctx.store.get("operations", mid);
-      if (m && m.result?.receiptId !== r.id) {
-        const o = await ctx.store.get("purchase_orders", oid);
-        lost.push({ orderId: oid, number: o?.number ?? null, receiptNumber: m.result?.receiptNumber ?? null, freight: Math.max(0, o?.freight ?? 0), insurance: Math.max(0, o?.insurance ?? 0), otherExpenses: Math.max(0, o?.otherExpenses ?? 0) });
-      }
+      const m = await ctx.store.get("operations", chargesMarkerId(oid));
+      return m && m.result?.receiptId !== r.id ? m : null;
     }
+  };
+  for (const oid of claimed) {
+    const m = await take(oid);
+    if (!m) continue;
+    const o = await ctx.store.get("purchase_orders", oid);
+    lost.push({ orderId: oid, number: o?.number ?? null, receiptNumber: m.result?.receiptNumber ?? null, freight: Math.max(0, o?.freight ?? 0), insurance: Math.max(0, o?.insurance ?? 0), otherExpenses: Math.max(0, o?.otherExpenses ?? 0) });
   }
-  // encargos ainda sem dono: o recebimento que os assumiria foi cancelado (ou não havia como assumir na abertura).
-  // Com cálculo pelo pedido, este recebimento os assume na confirmação quando: pedido sem entrega anterior,
-  // sem marcador de cobrança e nenhum outro recebimento ativo os assumiu (ou é de XML, que traz o frete da nota).
+  // encargos ainda não cobrados por nenhum recebimento confirmado: com cálculo pelo pedido, este recebimento os
+  // assume para os pedidos de que recebe mercadoria (mesmo após entregas parciais confirmadas sem eles)
   if (auto) {
-    for (const oid of (r.orderIds ?? []) as string[]) {
-      if (claimed.includes(oid)) continue;
+    const receiving = new Set<string>();
+    for (const it of (r.items ?? []) as ReceiptItem[]) if (!it.ignore) for (const al of it.allocations ?? []) if (al.qty > 0) receiving.add(al.orderId);
+    for (const oid of linked) {
+      if (claimed.includes(oid) || !receiving.has(oid)) continue;
       const o = await ctx.store.get("purchase_orders", oid);
-      if (!o || (o.receivedValue ?? 0) > 0 || Math.max(0, o.freight ?? 0) + Math.max(0, o.insurance ?? 0) + Math.max(0, o.otherExpenses ?? 0) <= 0) continue;
-      if (await ctx.store.get("operations", chargesMarkerId(oid))) continue;
-      const others = (await listAll(ctx.store, "receipts", { filters: [["contains", "orderIds", oid], ["eq", "status", ["draft", "confirming", "confirmed"]]] })).filter((x) => x.id !== r.id);
-      if (others.some((x) => x.status !== "draft" || x.xmlFileId || (x.orderCharges?.claimed ?? []).includes(oid))) continue;
-      try {
-        await ctx.store.create("operations", marker(oid), chargesMarkerId(oid));
-        added.push({ orderId: oid, number: o.number });
-      } catch (e) {
-        if (!isConflict(e)) throw e;
-      }
+      if (!o || Math.max(0, o.freight ?? 0) + Math.max(0, o.insurance ?? 0) + Math.max(0, o.otherExpenses ?? 0) <= 0) continue;
+      if (await orderChargesTaken(ctx.store, oid, r.id)) continue;
+      if (await take(oid)) continue; // outro recebimento registrou a cobrança ao mesmo tempo
+      added.push({ orderId: oid, number: o.number });
     }
   }
   if (!lost.length && !added.length) return;
@@ -926,7 +935,7 @@ async function claimOrderCharges(ctx: Ctx, r: Doc) {
       `Frete/seguro/outras despesas de ${lost.map((l) => `pedido nº ${l.number}`).join(", ")} já foram cobrados no recebimento ${lost.map((l) => `nº ${l.receiptNumber}`).join(", ")}. ${auto ? "Os valores deste recebimento foram recalculados sem esses encargos." : "Retire esses valores de frete/outras despesas deste recebimento (ou use “Recalcular encargos pelo pedido”)."}`,
     );
   }
-  if (added.length) parts.push(`Frete/seguro/outras despesas de ${added.map((a) => `pedido nº ${a.number}`).join(", ")} ainda não tinham sido cobrados em nenhum recebimento (o recebimento que os assumiria foi cancelado) e foram incluídos neste: valor devido recalculado para ${formatMoney(calc.dueTotal)}.`);
+  if (added.length) parts.push(`Frete/seguro/outras despesas de ${added.map((a) => `pedido nº ${a.number}`).join(", ")} ainda não tinham sido cobrados em nenhum recebimento confirmado (entregas anteriores sem esses encargos, ou o recebimento que os assumiria foi cancelado/desvinculado) e foram incluídos neste: valor devido recalculado para ${formatMoney(calc.dueTotal)}.`);
   await audit(ctx, { module: "purchases", action: "receipt.order_charges", entityType: "receipt", entityId: r.id, summary: `Recebimento nº ${r.number}: ${parts.join(" ")}`, related: [...lost, ...added].map((x) => `purchase_order:${x.orderId}`) });
   throw new BusinessError(`${parts.join(" ")} Revise e conclua novamente.`, lost.length ? "charges_taken" : "charges_added");
 }
@@ -936,25 +945,60 @@ async function claimOrderCharges(ctx: Ctx, r: Doc) {
  * saldo dos pedidos recalculado a partir dos recebimentos confirmados), então uma retentativa
  * após falha conclui sem duplicar. Durante os efeitos o documento fica "confirmando" (não editável).
  */
+/** Pedidos vinculados ainda aceitam o recebimento? (podem ter mudado desde a importação: revisão → análise, cancelamento) */
+async function linkedOrdersOrThrow(ctx: Ctx, r: Doc) {
+  const out: Doc[] = [];
+  for (const oid of r.orderIds ?? []) {
+    const o = await ctx.store.get("purchase_orders", oid);
+    if (!o || o.companyId !== ctx.companyId) throw new BusinessError("Pedido vinculado não encontrado nesta empresa — revise os pedidos relacionados.", "receipt_blocked");
+    if (o.supplierId !== r.supplierId || o.branchId !== r.branchId) throw new BusinessError(`Pedido nº ${o.number} é de outro fornecedor ou filial — desmarque-o em “Pedidos relacionados”.`, "receipt_blocked");
+    if (!LINKABLE.includes(o.status)) throw new BusinessError(`Pedido nº ${o.number} está ${ORDER_STATUS_LABEL[o.status as keyof typeof ORDER_STATUS_LABEL] ?? o.status} — aguarde a nova aprovação ou desmarque-o em “Pedidos relacionados” antes de concluir.`, "receipt_blocked");
+    out.push(o);
+  }
+  return out;
+}
+
+/** Limite de gravações por transação do Appwrite (passagem para "confirmando": 2 por solicitação + o recebimento). */
+const TX_MAX_WRITES = 100;
+
+/**
+ * Passa o recebimento para "confirmando" — a partir daqui os efeitos (estoque, custo, título, saldo do pedido) são
+ * concluídos, inclusive por retomada. Na mesma transação ocupa a vaga da decisão (`decisionSeq`) das solicitações dos
+ * pedidos ainda revogáveis/canceláveis (aprovado/enviado): revogação da aprovação ou cancelamento concorrentes que
+ * leram a vaga anterior falham (e, relidos, recusam o pedido com recebimento em andamento); se eles gravarem antes,
+ * esta passagem relê os pedidos e recusa sem lançar nada.
+ */
+async function startConfirming(ctx: Ctx, id: string) {
+  return retryOnConflict(async () => {
+    const r = await ctx.store.getOrThrow("receipts", id);
+    assert(r.status !== "cancelled", "Recebimento cancelado.");
+    if (r.status !== "draft") return r; // outra conclusão (duplo clique) já passou para "confirmando"
+    const orders = await linkedOrdersOrThrow(ctx, r);
+    const reqIds = [...new Set(orders.filter((o) => ["approved", "sent"].includes(o.status) && o.requestId).map((o) => o.requestId as string))];
+    const reqs = (await Promise.all(reqIds.map((rid) => ctx.store.get("purchase_requests", rid)))).filter((x): x is Doc => Boolean(x));
+    if (1 + 2 * reqs.length > TX_MAX_WRITES) throw new BusinessError(`Recebimento vinculado a pedidos de ${reqs.length} solicitações diferentes (limite ${Math.floor((TX_MAX_WRITES - 1) / 2)} por conclusão): desmarque parte dos pedidos em “Pedidos relacionados” e receba-os em outro recebimento.`, "receipt_blocked");
+    await ctx.store.transaction(async (t) => {
+      await occupyDecisionSlots(ctx, t, reqs, "purchase.receipt_confirm", { receiptId: id, receiptNumber: r.number });
+      await t.update("receipts", id, { status: "confirming" });
+    });
+    return { ...r, status: "confirming" } as Doc;
+  });
+}
+
 export async function confirmReceipt(ctx: Ctx, id: string) {
   requireReceive(ctx);
   let r = await getReceiptForWrite(ctx, id);
   if (r.status === "confirmed") return r;
   assert(["draft", "confirming"].includes(r.status), "Recebimento cancelado.");
   if (r.status === "draft") {
-    // os pedidos vinculados podem ter mudado desde a importação (revisão → análise, cancelamento)
-    for (const oid of r.orderIds ?? []) {
-      const o = await ctx.store.get("purchase_orders", oid);
-      if (!o || o.companyId !== ctx.companyId) throw new BusinessError("Pedido vinculado não encontrado nesta empresa — revise os pedidos relacionados.", "receipt_blocked");
-      if (o.supplierId !== r.supplierId || o.branchId !== r.branchId) throw new BusinessError(`Pedido nº ${o.number} é de outro fornecedor ou filial — desmarque-o em “Pedidos relacionados”.`, "receipt_blocked");
-      if (!LINKABLE.includes(o.status)) throw new BusinessError(`Pedido nº ${o.number} está ${ORDER_STATUS_LABEL[o.status as keyof typeof ORDER_STATUS_LABEL] ?? o.status} — aguarde a nova aprovação ou desmarque-o em “Pedidos relacionados” antes de concluir.`, "receipt_blocked");
-    }
+    await linkedOrdersOrThrow(ctx, r);
     const calc = await recompute(ctx, r);
     r = await ctx.store.update("receipts", id, omit(calc, "payable"));
     const blockers = confirmBlockers(r);
     if (blockers.length) throw new BusinessError(blockers.join(" "), "receipt_blocked");
     await claimOrderCharges(ctx, r);
-    r = await ctx.store.update("receipts", id, { status: "confirming" });
+    r = await startConfirming(ctx, id);
+    if (r.status === "confirmed") return r;
   }
   const items: ReceiptItem[] = r.items ?? [];
   const active = items.filter((i) => !i.ignore && i.skuId && i.receivedQty > 0);

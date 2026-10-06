@@ -1180,10 +1180,11 @@ type SendClaim = { kind: "ok" } | { kind: "busy"; holder: string } | { kind: "do
 /**
  * Reivindicação única da tentativa de envio (id determinístico por documento + nº da tentativa):
  * envios concorrentes do mesmo documento não disputam numeração nem perdem a contagem de tentativas.
- * Reivindicação parada sem registrar a tentativa — "failed" (falha antes do registro: nada foi enviado), "running"
- * além da validade (processo interrompido) ou "abandoned" (versão anterior) — é retomada por um único processo:
- * a retomada é reivindicada por um registro próprio (id por documento + tentativa + episódio). Retomada também parada
- * além da validade consome a tentativa ("skip": segue para a próxima). "busy" só enquanto o detentor está na validade.
+ * Reivindicação parada sem registrar a tentativa — "failed" (falha antes do registro: nada foi enviado) ou "running"
+ * além da validade (processo interrompido) — é retomada por um único processo: a retomada é reivindicada por um registro
+ * próprio (id por documento + tentativa + episódio). Retomada também parada além da validade, e "abandoned" (versão
+ * anterior: quem a abandonou seguiu para a tentativa seguinte), consomem a tentativa ("skip": a próxima tentativa passa
+ * pela mesma reivindicação/retomada única — sem envio em paralelo a ela). "busy" só enquanto o detentor está na validade.
  */
 async function claimSend(ctx: Ctx, docId: string, attempt: number): Promise<SendClaim> {
   const id = detId("fiscalsend", docId, attempt);
@@ -1200,10 +1201,11 @@ async function claimSend(ctx: Ctx, docId: string, attempt: number): Promise<Send
     const cur = await ctx.store.get("fiscal_documents", docId);
     return (cur?.attempts ?? 0) >= attempt ? { kind: "done" } : { kind: "skip" };
   }
+  if (claim.status === "abandoned") return { kind: "skip" };
   const claimedAt = claim.result?.claimedAt ?? claim.createdAt;
   let episode: Array<string | number> | null = null;
   if (claim.status === "failed") episode = [Number(claim.result?.failures ?? 1)];
-  else if (claim.status === "abandoned" || (claim.status === "running" && claimExpired(claimedAt))) episode = ["stale", String(claimedAt)];
+  else if (claim.status === "running" && claimExpired(claimedAt)) episode = ["stale", String(claimedAt)];
   if (!episode) return { kind: "busy", holder: `${id}:${claimedAt}` };
   const retakeId = detId("fiscalsend-retake", docId, attempt, ...episode);
   try {

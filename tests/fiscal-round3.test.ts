@@ -83,7 +83,7 @@ function failProcessingOnce(docId: string) {
   };
 }
 
-describe("Reivindicação de envio parada (low): 'abandoned' e vencidas são retomadas; 'busy' não reagenda para sempre", () => {
+describe("Reivindicação de envio parada (low): 'abandoned' é consumida, vencidas são retomadas; 'busy' não reagenda para sempre", () => {
   it("cenário do revisor: reivindicação 1 abandonada + 2 falhou (dados da versão anterior) — a tarefa e a retransmissão enviam", async () => {
     const doc = await queuedDoc("abandoned-legacy");
     await claim(doc.id, 1, "abandoned", { claimedAt: minutesAgo(10) });
@@ -92,9 +92,22 @@ describe("Reivindicação de envio parada (low): 'abandoned' e vencidas são ret
     const r = await runJob(job.id);
     expect(r.status).toBe("done");
     const cur = (await store.get("fiscal_documents", doc.id))!;
-    expect(cur.attempts).toBe(1);
+    // a tentativa abandonada foi consumida; a 2 (falhou antes do registro) é retomada uma única vez
+    expect(cur.attempts).toBe(2);
     expect(["processing", "authorized"]).toContain(cur.status);
     expect(await requests(doc.id)).toHaveLength(1);
+    expect((await store.get("operations", detId("fiscalsend", doc.id, 2)))!.status).toBe("done");
+  });
+
+  it("reivindicação abandonada com a tentativa seguinte em andamento: aguarda (sem envio em paralelo)", async () => {
+    const doc = await queuedDoc("abandoned-next-running");
+    await claim(doc.id, 1, "abandoned", { claimedAt: minutesAgo(10) });
+    await claim(doc.id, 2, "running", { claimedAt: nowIso() });
+    let busy = "";
+    const same = await transmitDocument(await adminCtx(), doc.id, { onBusy: (h) => (busy = h) });
+    expect(busy).toContain(detId("fiscalsend", doc.id, 2));
+    expect(same.attempts ?? 0).toBe(0);
+    expect(await requests(doc.id)).toHaveLength(0);
   });
 
   it("processo interrompido (reivindicação 'running' vencida) + falha antes de registrar: a próxima execução envia (sem bloqueio)", async () => {
@@ -124,7 +137,7 @@ describe("Reivindicação de envio parada (low): 'abandoned' e vencidas são ret
     await store.update("fiscal_documents", doc.id, { status: "error" });
     await claim(doc.id, 1, "abandoned", { claimedAt: minutesAgo(30) });
     const out = await retransmit(await adminCtx(), doc.id);
-    expect(out.attempts).toBe(1);
+    expect(out.attempts).toBe(2);
     expect(["processing", "authorized"]).toContain(out.status);
     expect(await requests(doc.id)).toHaveLength(1);
   });

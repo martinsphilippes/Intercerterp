@@ -222,7 +222,7 @@ Resultado da revisão independente (achados confirmados corrigidos com testes de
 - Travas otimistas com id determinístico: uso único de cobrança Pix por venda, vínculo único de troca, crédito por cliente, devolução por venda, sangria por sessão.
 - Gaveta (sangria, suprimento, fechamento, saída de dinheiro em cancelamento/devolução): somente o operador da sessão ou quem pode “Reabrir caixa”, e somente na filial ativa.
 - Recolhimento do fechamento: conta de destino da empresa, ativa e diferente do Caixa; valor ≤ dinheiro contado; fechamento interrompido é concluído pela repetição (“Concluir recolhimento”).
-- Conferência cega imposta pelo servidor: a contagem é registrada na primeira apuração de cada versão e não pode ser refeita; o previsto fica oculto para não supervisores até a contagem.
+- Conferência cega imposta pelo servidor: a contagem é registrada na primeira apuração de cada versão; o previsto fica oculto para não supervisores até a contagem (recontagem: ver “Vendas e caixa (rodada 3)”).
 - Pix: “cancelada” só com confirmação do provedor; estorno de Pix integrado fica “pendente no provedor” até a confirmação (repetido por tarefa); Pix manual → “Devolver ao cliente (manual)”.
 - Estorno em cartão fica “em processamento” até a confirmação manual (NSU/protocolo da adquirente).
 - Consulta da situação fiscal a partir da venda é feita pela tarefa durável (não exige permissão fiscal do usuário).
