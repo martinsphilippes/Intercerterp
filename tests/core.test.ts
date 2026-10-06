@@ -90,3 +90,19 @@ describe("armazenamento local (mesma semântica do Appwrite)", () => {
     expect((await s.get("counters", "c1"))!.value).toBe(1);
   });
 });
+
+describe("tarefas que se reagendam sozinhas", () => {
+  it("após o limite de reagendamentos a tarefa segue o caminho de falha (sem ciclo infinito)", async () => {
+    const { freshStore } = await import("./helpers");
+    const { enqueue, registerJob, runDueJobs, RETRY_AT_CAP } = await import("@/lib/core/jobs");
+    const store = freshStore();
+    registerJob("test.forever_busy", async () => ({ __retryAt: new Date(Date.now() - 1000).toISOString() }));
+    const job = await enqueue(store, { type: "test.forever_busy", payload: {}, dedupeKey: "forever-busy" });
+    // simula uma tarefa que já foi reagendada quase até o limite
+    await store.update("jobs", job.id, { attempts: RETRY_AT_CAP - 1, maxAttempts: 8 });
+    await runDueJobs(store, { jobIds: [job.id] });
+    const after = (await store.get("jobs", job.id))!;
+    expect(after.status).toBe("dead");
+    expect(after.lastError).toMatch(/reagendada/);
+  });
+});

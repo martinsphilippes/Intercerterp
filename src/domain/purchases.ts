@@ -58,6 +58,19 @@ export async function getOrderForWrite(ctx: Ctx, id: string) {
 /** Limite de gravações por transação do Appwrite. */
 const TX_MAX_WRITES = 100;
 
+/**
+ * Recebimentos que prendem o pedido ao estado atual: em conferência ou confirmando (vinculados) e confirmados com
+ * mercadoria alocada a ele (cobre a confirmação interrompida antes de atualizar o saldo do pedido). Cancelar,
+ * revogar a aprovação ou revisar o pedido com um deles deixaria estoque e título a pagar num pedido cancelado ou em
+ * análise. Ordenados pelo número.
+ */
+export async function receiptsHoldingOrder(store: Store, orderId: string, statuses: string[] = ["draft", "confirming", "confirmed"]) {
+  const rs = await listAll(store, "receipts", { filters: [["contains", "orderIds", orderId], ["eq", "status", statuses]] });
+  return rs
+    .filter((r) => r.status !== "confirmed" || (r.items ?? []).some((it: any) => !it.ignore && (it.allocations ?? []).some((al: any) => al.orderId === orderId && al.qty > 0)))
+    .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+}
+
 /** Saldo a receber por item (pedido − recebido). */
 export function remainingQty(item: { qty: number; receivedQty?: number | null }) {
   return Math.max(0, item.qty - (item.receivedQty ?? 0));
@@ -274,6 +287,9 @@ export async function updateOrder(ctx: Ctx, id: string, input: OrderInput & { re
     assert(input.supplierId === before.supplierId, "Após a aprovação o fornecedor não pode ser trocado — cancele e crie outro pedido.");
     const receivedAny = (await orderItems(ctx.store, id)).some((i) => (i.receivedQty ?? 0) > 0);
     assert(!receivedAny, "Pedido com recebimento registrado não pode ser revisado.");
+    // confirmação de recebimento em andamento/interrompida (saldo do pedido ainda não atualizado)
+    const rec = (await receiptsHoldingOrder(ctx.store, id, ["confirming", "confirmed"]))[0];
+    if (rec) throw new BusinessError(`Pedido com recebimento registrado não pode ser revisado: o recebimento nº ${rec.number} está ${rec.status === "confirming" ? "em confirmação — conclua-o em Compras → Recebimentos" : "confirmado"}.`, "invalid_state");
   }
   const supplier = await ctx.store.getOrThrow("suppliers", input.supplierId);
   assert(supplier.companyId === ctx.companyId, "Fornecedor de outra empresa.");
@@ -414,14 +430,23 @@ export async function cancelOrder(ctx: Ctx, id: string, reason: string) {
   requirePerm(ctx, "purchases", "edit");
   assert(reason?.trim(), "Informe o motivo do cancelamento.");
   const o = await getOrderForWrite(ctx, id);
-  const items = await orderItems(ctx.store, id);
-  assert(!items.some((i) => (i.receivedQty ?? 0) > 0), "Pedido com recebimento não pode ser cancelado — use Encerrar saldo.");
-  const drafts = await listAll(ctx.store, "receipts", { filters: [["contains", "orderIds", id], ["eq", "status", "draft"]] });
-  assert(!drafts.length, `Há recebimento em conferência (nº ${drafts[0]?.number}) vinculado a este pedido. Cancele-o antes.`);
+  // sem mercadoria recebida nem recebimento em conferência/confirmação (a confirmação interrompida ainda não
+  // atualizou o saldo do pedido, mas vai lançar estoque e título ao ser retomada)
+  const assertCancellable = async () => {
+    const items = await orderItems(ctx.store, id);
+    assert(!items.some((i) => (i.receivedQty ?? 0) > 0), "Pedido com recebimento não pode ser cancelado — use Encerrar saldo.");
+    const rec = (await receiptsHoldingOrder(ctx.store, id))[0];
+    if (!rec) return;
+    if (rec.status === "draft") throw new BusinessError(`Há recebimento em conferência (nº ${rec.number}) vinculado a este pedido. Cancele-o (ou desmarque o pedido nele) antes.`, "invalid_state");
+    if (rec.status === "confirming") throw new BusinessError(`O recebimento nº ${rec.number} deste pedido está em confirmação (ou teve a confirmação interrompida) e vai lançar a mercadoria no estoque: o pedido não pode ser cancelado. Conclua a confirmação em Compras → Recebimentos e, se o restante não for entregue, use Encerrar saldo.`, "invalid_state");
+    throw new BusinessError(`Pedido com recebimento (nº ${rec.number}) não pode ser cancelado — use Encerrar saldo.`, "invalid_state");
+  };
+  await assertCancellable();
   const statusOpts: OrderStatusOpts = { reason, summary: () => `Pedido nº ${o.number} cancelado` };
   // pedido de uma solicitação: cancelamento + recálculo da solicitação disputam a vaga da decisão (decisão
-  // concorrente que leu o pedido em análise não o "ressuscita" como aprovado)
-  const viaRequest = o.requestId ? await (await import("./approvals")).changeOrderInRequest(ctx, o.requestId, id, "cancelled", { cancelledAt: nowIso() }, { kind: "purchase.order_cancel" }) : null;
+  // concorrente que leu o pedido em análise não o "ressuscita" como aprovado); a conclusão de recebimento disputa a
+  // mesma vaga, e a cada nova tentativa o cancelamento revalida os recebimentos
+  const viaRequest = o.requestId ? await (await import("./approvals")).changeOrderInRequest(ctx, o.requestId, id, "cancelled", { cancelledAt: nowIso() }, { kind: "purchase.order_cancel", validate: assertCancellable }) : null;
   if (viaRequest) {
     await afterOrdersStatus(ctx, viaRequest.changed, "cancelled", statusOpts);
     if (viaRequest.requestCancelled) await (await import("./approvals")).afterRequestCancelled(ctx, viaRequest.req);

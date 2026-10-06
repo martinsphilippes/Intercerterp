@@ -9,7 +9,7 @@ import { nextNumber } from "@/lib/core/numbering";
 import { notify, reopenOccurrence, resolveOccurrence } from "@/lib/core/notify";
 import { nowIso, today } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
-import { afterOrdersStatus, getOrder, planOrdersStatus, setOrdersStatus, type OrderStatus } from "./purchases";
+import { afterOrdersStatus, getOrder, planOrdersStatus, receiptsHoldingOrder, setOrdersStatus, type OrderStatus } from "./purchases";
 import { supplierLabel } from "./suppliers";
 import { tierFor } from "./purchase-calc";
 
@@ -158,11 +158,24 @@ const MAX_ORDERS_PER_REQUEST = 90;
  */
 const decisionSlotId = (requestId: string, seq: number) => detId("approval-slot", requestId, String(seq));
 
-const CONCURRENT_DECISION = "Esta etapa já foi decidida (ou a decisão foi revista, ou um pedido da solicitação foi cancelado/enviado) por outra pessoa enquanto você decidia. Atualize a página e confira a situação antes de decidir.";
+const CONCURRENT_DECISION = "Esta etapa já foi decidida (ou a decisão foi revista, ou um pedido da solicitação foi cancelado/enviado/recebido) por outra pessoa enquanto você decidia. Atualize a página e confira a situação antes de decidir.";
 
-/** Registro da vaga `decisionSeq` ocupada por uma mudança fora da decisão (cancelamento/envio de pedido, recálculo). */
+/** Registro da vaga `decisionSeq` ocupada por uma mudança fora da decisão (cancelamento/envio de pedido, recálculo, recebimento). */
 function slotDoc(ctx: Ctx, requestId: string, seq: number, type: string, result: Record<string, any>) {
   return { companyId: ctx.companyId, type, status: "done", entityType: "purchase_request", entityId: requestId, result: { seq, ...result }, createdBy: ctx.user.id };
+}
+
+/**
+ * Ocupa, na transação `t`, a vaga `decisionSeq` de cada solicitação (lida antes da transação): decisão, revogação ou
+ * mudança de pedido concorrente que leu a mesma sequência falha (ConflictError — quem chamou repete relendo o estado).
+ * Usada pela confirmação de recebimento, que não pode correr junto com a revogação da aprovação ou o cancelamento.
+ */
+export async function occupyDecisionSlots(ctx: Ctx, t: Store, reqs: Doc[], kind: string, result: Record<string, any>) {
+  for (const req of reqs) {
+    const seq = req.decisionSeq ?? 0;
+    await t.create("operations", slotDoc(ctx, req.id, seq, kind, result), decisionSlotId(req.id, seq));
+    await t.update("purchase_requests", req.id, { decisionSeq: seq + 1 });
+  }
 }
 
 /** Alteração da solicitação depois que pedidos dela mudaram: total/frete dos pedidos ativos, ou cancelada se nenhum restou. */
@@ -187,12 +200,12 @@ export async function afterRequestCancelled(ctx: Ctx, req: Doc) {
  * pedido (ex.: pedido cancelado "ressuscitado" como aprovado). Se a decisão vencer, esta mudança relê o pedido e
  * revalida (`validate` e a máquina de estados). Devolve null se a solicitação não existe mais.
  */
-export async function changeOrderInRequest(ctx: Ctx, requestId: string, orderId: string, to: OrderStatus, patch: Record<string, any>, opts: { kind: string; validate?: (o: Doc) => void }) {
+export async function changeOrderInRequest(ctx: Ctx, requestId: string, orderId: string, to: OrderStatus, patch: Record<string, any>, opts: { kind: string; validate?: (o: Doc) => void | Promise<void> }) {
   return retryOnConflict(async () => {
     const req = await ctx.store.get("purchase_requests", requestId);
     if (!req) return null;
     const o = await getOrder(ctx, orderId);
-    opts.validate?.(o);
+    await opts.validate?.(o);
     const changed = planOrdersStatus([o], to);
     const reqPatch: Record<string, any> = to === "cancelled" ? await requestPatchAfterOrders(ctx.store, req, orderId) : {};
     const seq = req.decisionSeq ?? 0;
@@ -462,7 +475,22 @@ export async function revokeDecision(ctx: Ctx, decisionId: string, reason: strin
   const orders = await Promise.all((req.orderIds ?? []).map((id: string) => getOrder(ctx, id)));
   const active = orders.filter((o) => o.status !== "cancelled");
   const finalApproval = d.decision === "approve" && req.status === "approved";
-  if (finalApproval) for (const o of active) assert(o.status === "approved", `Pedido nº ${o.number} já está ${o.status === "sent" ? "enviado" : "em andamento"} — a aprovação não pode mais ser revogada; altere o pedido (revisão) ou cancele.`);
+  if (finalApproval) {
+    for (const o of active) {
+      assert(o.status === "approved", `Pedido nº ${o.number} já está ${o.status === "sent" ? "enviado" : "em andamento"} — a aprovação não pode mais ser revogada; altere o pedido (revisão) ou cancele.`);
+      // recebimento em conferência/confirmando/confirmado: a entrada (estoque, título) não pode ficar num pedido
+      // devolvido para análise. A conclusão do recebimento disputa a mesma vaga da decisão (ver receipts.startConfirming).
+      const rec = (await receiptsHoldingOrder(ctx.store, o.id))[0];
+      if (rec) {
+        throw new BusinessError(
+          rec.status === "draft"
+            ? `Pedido nº ${o.number} tem o recebimento nº ${rec.number} em conferência — a aprovação não pode ser revogada com mercadoria sendo recebida. Cancele o recebimento (ou desmarque o pedido nele) antes de revogar.`
+            : `Pedido nº ${o.number} tem o recebimento nº ${rec.number} ${rec.status === "confirming" ? "em confirmação" : "confirmado"} — a aprovação não pode mais ser revogada; altere o pedido (revisão) ou encerre o saldo.`,
+          "invalid_state",
+        );
+      }
+    }
+  }
   if (d.decision === "adjust") for (const o of active) assert(o.status === "adjust", `Pedido nº ${o.number} já foi alterado/reenviado.`);
   const back = planOrdersStatus(active.filter((o) => ["approved", "adjust", "rejected"].includes(o.status)), "in_review");
   const seq = req.decisionSeq ?? 0;

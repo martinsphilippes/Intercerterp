@@ -65,6 +65,8 @@ function backoffMs(attempt: number) {
   return Math.min(60 * 60 * 1000, 15000 * 2 ** (attempt - 1));
 }
 
+/** Máximo de execuções de uma tarefa que se reagenda sozinha (`__retryAt`) antes de ser tratada como falha. */
+export const RETRY_AT_CAP = 200;
 const LOCK_MS = 10 * 60 * 1000;
 
 /**
@@ -104,6 +106,9 @@ export async function runDueJobs(store: Store, opts: { limit?: number; types?: s
       const ctx = systemCtx(store, job.companyId ?? "", job.payload?.branchId ?? null);
       const result = await handler(ctx, job.payload ?? {});
       if (result && typeof result === "object" && result.__retryAt) {
+        // limite geral de reagendamentos ("aguarde e tente de novo"): evita tarefa em ciclo infinito; ao estourar, a
+        // tarefa segue o caminho de falha (retentativas com recuo até "morta", com notificação ao responsável)
+        if (attempt >= RETRY_AT_CAP) throw new Error(`Tarefa reagendada ${attempt} vezes sem concluir (${job.type}). Verifique a pendência na origem.`);
         await store.update("jobs", job.id, { status: "retry", runAt: result.__retryAt, result: result.state ?? null, attempts: attempt, lockedUntil: null });
         results.push({ id: job.id, type: job.type, status: "retry" });
       } else {
