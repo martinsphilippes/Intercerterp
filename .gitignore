@@ -9,3 +9,7 @@ playwright-report
 test-results
 .vercel
 .next-dev/
+
+# testes temporários das revisões automatizadas (apagados ao final de cada revisão)
+tests/_final_*
+tests/_verify_*
