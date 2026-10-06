@@ -9,7 +9,8 @@ Data da validação: 06/10/2026. Este documento registra **o que foi executado e
 | **Testes automatizados** | `vitest` com o `MemoryStore` (mesma interface do Appwrite) em dois modos: imediato e `MEMORY_TX_MODE=deferred` (escritas visíveis só no commit e limite de 100 operações por transação, como o Appwrite TablesDB) | Regras de negócio, concorrência, idempotência, cenários ponta a ponta de domínio |
 | **Appwrite 1.8 local (Docker)** | Instância self-hosted completa (banco, Auth, Storage, workers) em `localhost:8090` | Provisionamento do esquema (~75 tabelas), login real, seed de demonstração, backup e restauração em nova base, navegação |
 | **Aplicação em build de produção** | `next build` + `next start` apontando para a base `intercert_demo` do Appwrite local | Varredura de navegação e captura de evidências em Chromium (Playwright), fuso `America/Sao_Paulo` |
-| Appwrite Cloud / Vercel | **Não executado** | Endpoint e Project ID do Appwrite Cloud não foram informados (ver `docs/pendencias-externas.md`) |
+| Vercel (produção) | Implantação do commit 2373ab3 em https://intercerterp.vercel.app — build concluído (READY) | Sem as variáveis do Appwrite, o site mostra a página “configuração pendente”; o acesso a `*.vercel.app` está bloqueado na rede deste ambiente, então o conteúdo servido não foi conferido daqui |
+| Appwrite Cloud | **Não executado** | Endpoint e Project ID não foram informados (ver `docs/pendencias-externas.md`) |
 | Provedores externos (Focus NFe, Mercado Pago, Resend, adquirente/TEF, banco) | **Não executado em homologação nem produção** | Contratos testados contra servidores HTTP falsos/adaptadores de teste identificados — isso **não comprova** a integração real |
 
 ## 2. Verificações automatizadas (estado final)
@@ -71,5 +72,5 @@ Detalhes das regras resultantes: `docs/regras-assumidas.md` (seções 18 e 19). 
 ## 5. O que a validação **não** cobre
 
 - Emissão fiscal real (SEFAZ/prefeitura), cobrança Pix real, TEF/adquirente, envio de e-mail real, API bancária: dependem de credenciais e contratos externos (`docs/pendencias-externas.md`).
-- Appwrite Cloud e Vercel: não publicados nesta execução por falta do Endpoint e do Project ID do projeto Appwrite.
+- Appwrite Cloud: não conectado por falta do Endpoint e do Project ID; a publicação na Vercel existe, mas sem banco configurado.
 - Carga/volume: os testes cobrem concorrência lógica (corridas determinísticas e paralelas), não desempenho com milhares de usuários simultâneos.

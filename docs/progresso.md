@@ -13,7 +13,7 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] Documentação: README, arquitetura, matriz de cobertura (gerada), regras assumidas, integrações, validação, pendências externas.
 
 ## Pendente (depende de terceiros)
-- Publicação na Vercel conectada ao Appwrite Cloud: falta Endpoint e Project ID do projeto Appwrite (ver `docs/pendencias-externas.md`).
+- Código publicado na Vercel (https://intercerterp.vercel.app, estado READY, mostra “configuração pendente”); falta Endpoint e Project ID do Appwrite e as variáveis do projeto (ver `docs/pendencias-externas.md`).
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).
 
 ## Como retomar
