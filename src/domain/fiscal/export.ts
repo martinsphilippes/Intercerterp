@@ -272,17 +272,24 @@ export async function sendAccountingPackage(ctx: Ctx, f: FiscalReportFilter, opt
 <ul><li>XMLs incluídos: ${pkg.xmlCount}${pkg.simulatedXml ? ` (${pkg.simulatedXml} de SIMULAÇÃO, sem validade fiscal)` : ""}</li><li>Documentos no período: ${pkg.docs}</li>${pkg.missingXml.length ? `<li><b>XML ausentes: ${pkg.missingXml.length}</b></li>` : ""}</ul>
 <p>Detalhes e critérios no arquivo LEIA-ME.txt do pacote. Este pacote não substitui arquivos de obrigações acessórias.</p></div>`;
   const r = await sendEmail(ctx.companyId, { to, subject: `Pacote fiscal ${formatDate(f.from)}–${formatDate(f.to)} — ${company.tradeName || company.name}`, html, attachments: [{ filename: pkg.fileName, content: data }] });
-  const message = r.delivered ? `Pacote ${pkg.fileName} entregue ao canal ${r.channel} para ${to}` : `Pacote ${pkg.fileName} gerado, mas NÃO enviado (${r.channel}): ${r.message ?? "falha"}`;
-  await logIntegration(ctx.store, { companyId: ctx.companyId, integrationId: integ.id, kind: "accounting", action: opts.reason === "scheduled" ? "scheduled_package" : "send_package", status: r.delivered ? "success" : "failure", message, payload: { fileId: pkg.fileId, from: f.from, to: f.to, xmlCount: pkg.xmlCount, missing: pkg.missingXml.length, to_address: to } });
-  await audit(ctx, { module: "fiscal", action: "export.send", entityType: "file", entityId: pkg.fileId, summary: message, result: r.delivered ? "success" : "failure" });
-  // a obrigação "Entrega de XML" é da EMPRESA: só é concluída pelo pacote de todas as filiais enviado ao e-mail da contabilidade
+  // com escritório vinculado, a caixa de entrada dele já recebeu o pacote (registrado em buildAccountingPackage): o e-mail é um segundo canal
+  const inbox = Boolean(pkg.deliveredToFirm);
+  const delivered = r.delivered || inbox;
+  const message = r.delivered
+    ? `Pacote ${pkg.fileName} entregue ao canal ${r.channel} para ${to}${inbox ? ` e na caixa de entrada do escritório ${linkedFirm}` : ""}`
+    : inbox
+      ? `Pacote ${pkg.fileName} entregue na caixa de entrada do escritório ${linkedFirm}; e-mail para ${to} NÃO enviado (${r.channel}): ${r.message ?? "falha"}`
+      : `Pacote ${pkg.fileName} gerado, mas NÃO enviado (${r.channel}): ${r.message ?? "falha"}`;
+  await logIntegration(ctx.store, { companyId: ctx.companyId, integrationId: integ.id, kind: "accounting", action: opts.reason === "scheduled" ? "scheduled_package" : "send_package", status: delivered ? "success" : "failure", message, payload: { fileId: pkg.fileId, from: f.from, to: f.to, xmlCount: pkg.xmlCount, missing: pkg.missingXml.length, to_address: to, firm: inbox ? linkedFirm : null, email: r.delivered } });
+  await audit(ctx, { module: "fiscal", action: "export.send", entityType: "file", entityId: pkg.fileId, summary: message, result: delivered ? "success" : "failure" });
+  // a obrigação "Entrega de XML" é da EMPRESA: concluída pelo pacote de todas as filiais entregue à contabilidade (e-mail cadastrado ou caixa de entrada do escritório vinculado)
   const accountant = String(integ.config?.accountantEmail ?? "").trim().toLowerCase();
   const wholeCompany = (f.branchId ?? ctx.branchId) == null;
-  if (r.delivered && wholeCompany && accountant && to.toLowerCase() === accountant) {
+  if (wholeCompany && ((r.delivered && accountant && to.toLowerCase() === accountant) || inbox)) {
     const { markXmlDelivery } = await import("./obligations");
-    await markXmlDelivery(ctx, f, pkg.fileId, to).catch(() => undefined);
+    await markXmlDelivery(ctx, f, pkg.fileId, r.delivered ? to : `escritório ${linkedFirm}`).catch(() => undefined);
   }
-  return { delivered: r.delivered, message, package: pkg };
+  return { delivered, message, package: pkg };
 }
 
 export interface AccountingSchedule {

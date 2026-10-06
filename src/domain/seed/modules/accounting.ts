@@ -1,6 +1,6 @@
 import type { DemoRefs } from "../base";
 import { DEMO_PASSWORD, Seeder } from "../base";
-import { detId, listAll } from "@/lib/db";
+import { listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import { scopeStore } from "@/lib/db/scoped-store";
 import { getAuth } from "@/lib/auth/provider";
@@ -88,5 +88,5 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   const sent = await sendAccountingPackage({ ...lojaAdmin, branchId: null }, { from: prev, to: monthEnd(prev), branchId: null, includeSimulated: true }, { reason: "manual" }).catch(() => null);
 
   await setSetting(store, firm.id, null, "demo.accounting.done", true);
-  return { firmId: firm.id, clients: 4, delivered: Boolean(sent?.delivered), deliveryId: detId("delivery", loja.id, sent?.package?.fileId ?? "") };
+  return { firmId: firm.id, clients: 4, delivered: Boolean(sent?.package?.deliveredToFirm), deliveryId: sent?.package?.deliveredToFirm?.deliveryId ?? null };
 }
