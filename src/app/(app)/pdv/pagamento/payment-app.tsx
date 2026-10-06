@@ -13,7 +13,7 @@ import { Notice } from "@/components/ui/empty";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/components/ui/cn";
 import { formatMoney, formatQty } from "@/lib/money";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatTime } from "@/lib/dates";
 import { formatDoc } from "@/lib/core/text";
 import { changeFor, previewSchedule } from "@/domain/cart-calc";
 import { cancelPixAction, createPixAction, finalizeCartAction, saveCartAction, simulatePixAction } from "../actions";
@@ -559,7 +559,7 @@ function PixForm({ method, remaining, onAdd, props, existing }: { method: Method
                 </div>
               </div>
             )}
-            {intent.expiresAt && <p className="text-xs text-slate-500">Expira em {new Date(intent.expiresAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>}
+            {intent.expiresAt && <p className="text-xs text-slate-500">Expira em {formatTime(intent.expiresAt)}</p>}
             <div className="flex flex-wrap gap-2 pt-1">
               <Button type="button" size="sm" onClick={query} loading={busy}><RefreshCcw className="size-4" /> Consultar agora</Button>
               {["pending", "unknown"].includes(intent.status) && <Button type="button" size="sm" variant="ghost" onClick={cancel} disabled={busy}>Cancelar cobrança</Button>}

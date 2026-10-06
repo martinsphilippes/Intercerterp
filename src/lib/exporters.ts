@@ -52,9 +52,16 @@ function cell(v: any, type?: ExportColumn["type"]): string {
   }
 }
 
+/**
+ * Número negativo já formatado em texto ("-12,34", "-1.234,56", "-R$ 12,34", "-12,5%"): só sinal, "R$", espaços,
+ * dígitos, separadores e "%" — não há como compor fórmula, então segue como número para a planilha.
+ */
+const PREFORMATTED_NEGATIVE = /^-[\s ]*(R\$[\s ]*)?\d[\d.,]*%?$/;
+
 /** Neutraliza fórmulas em texto (injeção de fórmula no Excel/planilhas). Números formatados não são afetados. */
 function neutralize(s: string, numeric: boolean): string {
   if (numeric || !s) return s;
+  if (PREFORMATTED_NEGATIVE.test(s)) return s;
   return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
 }
 

@@ -1,4 +1,5 @@
 import { resolveRoleId } from "@/lib/auth/users";
+import { unscoped } from "@/lib/db/scoped-store";
 import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { BusinessError, assert } from "@/lib/core/errors";
@@ -123,7 +124,8 @@ export { tierFor };
 
 async function usersWithRoles(store: Store, companyId: string) {
   const users = await listAll(store, "users", { filters: [["eq", "status", "active"]] });
-  const roleList = await listAll(store, "roles");
+  // perfis lidos sem restrição de empresa: o perfil legado do usuário pode ser de outra empresa (perfil de sistema equivalente)
+  const roleList = await listAll(unscoped(store), "roles");
   const roles = new Map(roleList.map((r) => [r.id, r]));
   // perfil do usuário NA empresa (perfil por empresa)
   return users

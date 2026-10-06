@@ -4,7 +4,7 @@ import { Pencil, ShoppingCart } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
-import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Badge, SimBadge, StatusBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { LinkTabs } from "@/components/ui/tabs";
 import { ActionButton } from "@/components/ui/action-form";
@@ -213,7 +213,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   <tr key={d.id}>
                     <td><Link className="text-brand-700 hover:underline" href={`/fiscal/${d.model}/${d.id}`}>{d.model.toUpperCase()} {d.number ? `nº ${d.number}` : d.ref}</Link></td>
                     <td>{formatDateTime(d.issuedAt)}</td>
-                    <td><StatusBadge kind="fiscal" status={d.status} /></td>
+                    <td><span className="flex flex-wrap gap-1"><StatusBadge kind="fiscal" status={d.status} /><SimBadge show={Boolean(d.isSimulated)} /></span></td>
                     <td className="tabular text-right">{formatMoney(d.total)}</td>
                   </tr>
                 ))}

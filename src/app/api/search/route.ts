@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/server/session";
-import { listAll } from "@/lib/db";
 import { can } from "@/lib/permissions";
 import { searchable, onlyDigits, formatDoc } from "@/lib/core/text";
 import { formatMoney } from "@/lib/money";

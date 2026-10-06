@@ -94,6 +94,18 @@ export function formatDateTime(v: string | null | undefined, tz = DEFAULT_TZ): s
   return new Intl.DateTimeFormat("pt-BR", { timeZone: tz, dateStyle: "short", timeStyle: "short" }).format(new Date(v));
 }
 
+/** Hora local (HH:MM ou HH:MM:SS) no fuso da instalação — igual no servidor e no navegador (sem erro de hidratação). */
+export function formatTime(v: string | number | Date | null | undefined, withSeconds = false, tz = DEFAULT_TZ): string {
+  if (v == null || v === "") return "—";
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: tz, hour: "2-digit", minute: "2-digit", ...(withSeconds ? { second: "2-digit" } : {}) }).format(new Date(v));
+}
+
+/** Data e hora com segundos no fuso da instalação. */
+export function formatDateTimeSeconds(v: string | number | Date | null | undefined, tz = DEFAULT_TZ): string {
+  if (v == null || v === "") return "—";
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: tz, dateStyle: "short", timeStyle: "medium" }).format(new Date(v));
+}
+
 export function formatMonth(period: string): string {
   const [y, m] = period.split("-");
   const names = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];

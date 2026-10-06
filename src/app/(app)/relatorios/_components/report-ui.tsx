@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatDateTimeSeconds } from "@/lib/dates";
 import { ArrowDownRight, ArrowUpRight, Filter, Info, Minus } from "lucide-react";
 import { buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/form";
@@ -213,7 +214,7 @@ export function PrintHeader({ title, company, user, rp }: { title: string; compa
     <div className="print-only mb-3 border-b border-slate-300 pb-2 text-xs text-slate-600">
       <p className="text-base font-semibold text-ink">{title}</p>
       <p>
-        {company} · {rp.branchName} · Período {rp.period.label} · Emitido em {new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} por {user}
+        {company} · {rp.branchName} · Período {rp.period.label} · Emitido em {formatDateTimeSeconds(new Date())} por {user}
       </p>
     </div>
   );

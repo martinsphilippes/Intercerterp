@@ -1,4 +1,5 @@
 import { resolveRoleId } from "@/lib/auth/users";
+import { unscoped } from "../db/scoped-store";
 import { detId, isConflict, listAll } from "../db";
 import type { Store } from "../db/types";
 import { can, canDo, type ModuleKey, type SpecialAction } from "../permissions";
@@ -23,7 +24,8 @@ export interface NotifyInput {
 async function resolveAudience(store: Store, input: NotifyInput): Promise<string[]> {
   if (input.audience.userIds) return input.audience.userIds;
   const users = await listAll(store, "users", { filters: [["eq", "status", "active"]] });
-  const roleList = await listAll(store, "roles");
+  // perfis lidos sem restrição de empresa: o perfil legado do usuário pode ser de outra empresa (perfil de sistema equivalente)
+  const roleList = await listAll(unscoped(store), "roles");
   const roles = new Map(roleList.map((r) => [r.id, r]));
   return users
     .filter((u) => (u.companyIds ?? []).includes(input.companyId) || u.isAdmin)

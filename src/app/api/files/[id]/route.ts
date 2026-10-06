@@ -41,8 +41,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   } else if (meta0.kind === "certificate_a1" || meta0.entityType === "fiscal_config") {
     if (!canDo(s.user, "fiscal.configure")) return new NextResponse("Sem permissão para o certificado digital", { status: 403 });
   } else {
-    const module = (meta0.entityType && ENTITY_MODULE[meta0.entityType]) || (meta0.bucket === "images" ? "products" : null);
-    if (!module || !can(s.user, module, "view")) return new NextResponse("Sem permissão para este arquivo", { status: 403 });
+    const requiredModule = (meta0.entityType && ENTITY_MODULE[meta0.entityType]) || (meta0.bucket === "images" ? "products" : null);
+    if (!requiredModule || !can(s.user, requiredModule, "view")) return new NextResponse("Sem permissão para este arquivo", { status: 403 });
   }
   try {
     const { meta, data } = await readFile(s.ctx, id);

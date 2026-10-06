@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTimeSeconds } from "@/lib/dates";
 import { useState, useTransition } from "react";
 import { Plus, Trash2, Search } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
@@ -94,7 +95,7 @@ export function SupplierForm({ supplier, terms }: { supplier?: Record<string, an
             {lookup && (
               <div className="mt-4">
                 <Notice tone="info" title="Dados sugeridos por consulta externa">
-                  Fonte: {lookup.source} · situação cadastral: {lookup.situation ?? "—"} · consultado em {new Date(lookup.consultedAt!).toLocaleString("pt-BR")}. Confira antes de salvar.
+                  Fonte: {lookup.source} · situação cadastral: {lookup.situation ?? "—"} · consultado em {formatDateTimeSeconds(lookup.consultedAt!)}. Confira antes de salvar.
                 </Notice>
               </div>
             )}

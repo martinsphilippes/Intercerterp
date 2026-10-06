@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTimeSeconds, formatTime } from "@/lib/dates";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, CircleDollarSign, Lock, Printer, ScanBarcode, Wifi, CreditCard } from "lucide-react";
@@ -96,10 +97,10 @@ export function OpeningForm(p: Props) {
             <ul className="divide-y divide-line">
               <li className="space-y-2 p-4">
                 <p className="flex items-center gap-2 text-sm font-medium"><Printer className="size-4" /> Impressora não fiscal</p>
-                <p className="text-xs text-slate-600">{PRINTER[p.terminal.printerMode ?? ""] ?? p.terminal.printerMode ?? "Não configurada"}{p.terminal.paperWidth ? ` · bobina ${p.terminal.paperWidth} mm` : ""}{p.terminal.lastPrinterTestAt ? ` · último teste registrado: ${new Date(p.terminal.lastPrinterTestAt).toLocaleString("pt-BR")} (${p.terminal.lastPrinterTestResult ?? "—"})` : ""}</p>
+                <p className="text-xs text-slate-600">{PRINTER[p.terminal.printerMode ?? ""] ?? p.terminal.printerMode ?? "Não configurada"}{p.terminal.paperWidth ? ` · bobina ${p.terminal.paperWidth} mm` : ""}{p.terminal.lastPrinterTestAt ? ` · último teste registrado: ${formatDateTimeSeconds(p.terminal.lastPrinterTestAt)} (${p.terminal.lastPrinterTestResult ?? "—"})` : ""}</p>
                 <div className="flex flex-wrap items-center gap-3">
                   <Button type="button" size="sm" onClick={() => { setPrintedAt(new Date().toISOString()); setTimeout(() => window.print(), 50); }}>Imprimir página de teste</Button>
-                  {printedAt && <span className="text-xs text-slate-500">Teste enviado à impressão às {new Date(printedAt).toLocaleTimeString("pt-BR")} — confira o papel.</span>}
+                  {printedAt && <span className="text-xs text-slate-500">Teste enviado à impressão às {formatTime(printedAt, true)} — confira o papel.</span>}
                   <Toggle k="printer" label="Impressora conferida (papel e impressão)" />
                 </div>
               </li>
@@ -124,7 +125,7 @@ export function OpeningForm(p: Props) {
                 <p className="flex items-center gap-2 text-sm font-medium"><Wifi className="size-4" /> Internet, SEFAZ e Pix</p>
                 <p className="text-xs text-slate-600">
                   Fiscal: {p.integrations.fiscal.provider ? `${p.integrations.fiscal.provider === "simulated" ? "simulação (sem validade fiscal)" : p.integrations.fiscal.provider} · ${p.integrations.fiscal.environment ?? "—"}` : "não configurado"}
-                  {p.integrations.fiscal.lastTestAt ? ` · último teste ${new Date(p.integrations.fiscal.lastTestAt).toLocaleString("pt-BR")}: ${p.integrations.fiscal.lastTest}` : p.integrations.fiscal.lastTest ? ` · ${p.integrations.fiscal.lastTest}` : " · conexão não testada"}
+                  {p.integrations.fiscal.lastTestAt ? ` · último teste ${formatDateTimeSeconds(p.integrations.fiscal.lastTestAt)}: ${p.integrations.fiscal.lastTest}` : p.integrations.fiscal.lastTest ? ` · ${p.integrations.fiscal.lastTest}` : " · conexão não testada"}
                 </p>
                 <p className="flex flex-wrap items-center gap-2 text-xs text-slate-600">Pix: <StatusBadge kind="integration" status={p.integrations.pix.simulated ? "simulated" : p.integrations.pix.status} /> {p.integrations.pix.ready ? (p.integrations.pix.simulated ? "cobranças de simulação" : "credencial presente") : "indisponível — use Pix manual com comprovante"}</p>
                 <Toggle k="fiscal" label="Ciente da situação das integrações" />
@@ -145,7 +146,7 @@ export function OpeningForm(p: Props) {
             </div>
           </section>
           <div className="print-doc hidden print:block">
-            <p className="text-center font-mono text-xs">TESTE DE IMPRESSÃO — {p.terminal.code} {p.terminal.name}<br />{p.branch}<br />{new Date().toLocaleString("pt-BR")}<br />1234567890 ÁÉÍÓÚ ÇÃÕ<br />---------------------------</p>
+            <p className="text-center font-mono text-xs">TESTE DE IMPRESSÃO — {p.terminal.code} {p.terminal.name}<br />{p.branch}<br />{printedAt ? formatDateTimeSeconds(printedAt) : ""}<br />1234567890 ÁÉÍÓÚ ÇÃÕ<br />---------------------------</p>
           </div>
         </div>
       )}

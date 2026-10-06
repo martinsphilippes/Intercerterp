@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTimeSeconds } from "@/lib/dates";
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -81,7 +82,7 @@ export function FiscalStatus({ saleId, model, initial, auto }: { saleId: string;
       {authorized && (
         <dl className="grid grid-cols-1 gap-1 text-xs text-slate-600">
           {state.protocol && <div><dt className="inline text-slate-500">Protocolo: </dt><dd className="inline font-mono">{state.protocol}</dd></div>}
-          {state.authorizedAt && <div><dt className="inline text-slate-500">Autorização: </dt><dd className="inline">{new Date(state.authorizedAt).toLocaleString("pt-BR")}</dd></div>}
+          {state.authorizedAt && <div><dt className="inline text-slate-500">Autorização: </dt><dd className="inline">{formatDateTimeSeconds(state.authorizedAt)}</dd></div>}
           {state.accessKey && <div><dt className="text-slate-500">Chave de acesso</dt><dd className="break-all font-mono">{fmtKey(state.accessKey)}</dd></div>}
         </dl>
       )}

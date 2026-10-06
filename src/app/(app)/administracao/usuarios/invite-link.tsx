@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTimeSeconds } from "@/lib/dates";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, Send } from "lucide-react";
@@ -12,7 +13,7 @@ type Invite = { link: string; delivered: boolean; channel: string; message: stri
 
 export function InviteLinkPanel({ invite }: { invite: Invite }) {
   const toast = useToast();
-  const expires = new Date(invite.expiresAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  const expires = formatDateTimeSeconds(invite.expiresAt);
   return (
     <Notice tone={invite.delivered ? "good" : "warn"} title={invite.delivered ? "Convite enviado por e-mail" : "Convite criado — e-mail NÃO enviado"}>
       {invite.delivered ? (

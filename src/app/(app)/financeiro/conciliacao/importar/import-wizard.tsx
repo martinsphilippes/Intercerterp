@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTimeSeconds } from "@/lib/dates";
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -182,7 +183,7 @@ export function ImportWizard({ accounts, defaultAccount, canImport, block }: { a
             {pv.alreadyImported && (
               <div className="mt-3">
                 <Notice tone="warn" title="Arquivo já importado nesta conta">
-                  Mesmo conteúdo (hash) importado em {new Date(pv.alreadyImported.createdAt).toLocaleString("pt-BR")} como “{pv.alreadyImported.fileName}”. Importar de novo não duplica nada.{" "}
+                  Mesmo conteúdo (hash) importado em {formatDateTimeSeconds(pv.alreadyImported.createdAt)} como “{pv.alreadyImported.fileName}”. Importar de novo não duplica nada.{" "}
                   <Link className="underline" href={`/financeiro/conciliacao/importacoes/${pv.alreadyImported.id}`}>
                     Ver importação
                   </Link>

@@ -87,7 +87,7 @@ await page.waitForURL((u) => u.pathname.startsWith("/pdv/pagamento"), { timeout:
 await shot("07-pagamento", { full: false });
 
 // 08–11 — vendas
-const sale = await firstLink("/vendas", /^\/vendas\/[A-Za-z0-9_-]{8,}$/);
+const sale = await firstLink("/vendas", /^\/vendas\/(?!devolucoes)[A-Za-z0-9_-]{8,}$/);
 await go("/vendas");
 await shot("09-vendas");
 if (sale) {
@@ -119,12 +119,12 @@ if (product) {
 }
 await go("/estoque/movimentos");
 await shot("17-movimentos");
-const transfer = await firstLink("/estoque/transferencias", /^\/estoque\/transferencias\/(?!novo)[A-Za-z0-9_-]{8,}$/);
+const transfer = await firstLink("/estoque/transferencias?filial=all", /^\/estoque\/transferencias\/(?!novo)[A-Za-z0-9_-]{8,}$/);
 if (transfer) {
   await go(transfer);
   await shot("18-transferencia");
 }
-const inventory = await firstLink("/estoque/inventarios", /^\/estoque\/inventarios\/[A-Za-z0-9_-]{8,}$/);
+const inventory = await firstLink("/estoque/inventarios?filial=all", /^\/estoque\/inventarios\/[A-Za-z0-9_-]{8,}$/);
 if (inventory) {
   await go(inventory);
   await shot("19-inventario");

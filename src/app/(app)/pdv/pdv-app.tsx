@@ -1,5 +1,6 @@
 "use client";
 
+import { formatTime, formatDateTime } from "@/lib/dates";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -397,7 +398,7 @@ export function PdvApp(props: PdvProps) {
         )}
         <span className={cn("ml-auto flex items-center gap-1 text-xs", saveState.state === "error" ? "text-red-200" : "text-brand-200")} role="status" aria-live="polite" title="Gravação automática do atendimento">
           {saveState.state === "saving" ? <RefreshCcw className="size-3.5 animate-spin" /> : saveState.state === "error" ? <CloudOff className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}
-          <span className="hidden md:inline">{saveState.state === "saving" ? "Gravando…" : saveState.state === "error" ? "Não gravado no servidor (cópia local mantida)" : `Gravado ${saveState.at ? new Date(saveState.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}`}</span>
+          <span className="hidden md:inline">{saveState.state === "saving" ? "Gravando…" : saveState.state === "error" ? "Não gravado no servidor (cópia local mantida)" : `Gravado ${saveState.at ? formatTime(saveState.at, true) : ""}`}</span>
         </span>
         <div className="flex items-center gap-1">
           <button type="button" onClick={() => setDialog("parked")} className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800">
@@ -687,7 +688,7 @@ export function PdvApp(props: PdvProps) {
                   <div>
                     <p className="font-medium text-ink">{p.name ?? "Pré-venda"} {p.expired && <Badge tone="warn">vencida</Badge>}</p>
                     <p className="text-xs text-slate-500">{p.customerName ?? "Consumidor final"} · {p.itemsCount} item(ns) · {p.operatorName} · {p.terminalName}</p>
-                    <p className="text-xs text-slate-500">Salva em {new Date(p.parkedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>
+                    <p className="text-xs text-slate-500">Salva em {formatDateTime(p.parkedAt)}</p>
                   </div>
                   <span className="tabular font-semibold">{formatMoney(p.total)}</span>
                 </div>

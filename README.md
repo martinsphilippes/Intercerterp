@@ -15,7 +15,9 @@ DATA_BACKEND=local npm run seed      # carrega a demonstração em .data/local
 DATA_BACKEND=local npm run dev       # http://localhost:3000
 ```
 
-Usuários da demonstração (senha `Intercert@2026`): `admin`, `gerente`, `caixa`, `estoque`, `financeiro`, `fiscal`, `diretoria`.
+Usuários da demonstração (senha `Intercert@2026`): `admin`, `gerente`, `caixa`, `estoque`, `financeiro`, `fiscal`, `diretoria`. A empresa de demonstração é identificada como **DEMO** em todas as telas; documentos fiscais e cobranças simuladas exibem o selo **SIMULAÇÃO** e nunca são apresentados como operação real.
+
+Fuso horário: único por instalação (`APP_TIMEZONE`, padrão `America/Sao_Paulo`), usado em filtros por período, relatórios, rotinas e exibição.
 
 ## Com Appwrite
 
@@ -41,7 +43,13 @@ Sem acesso de linha de comando ao Appwrite, abra a aplicação publicada: a tela
 Variáveis do projeto: `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_API_KEY` (sensível), `APPWRITE_DATABASE_ID`, `CRON_SECRET`, `SETUP_TOKEN`, `APP_TIMEZONE=America/Sao_Paulo` e, conforme integrações, `FOCUSNFE_TOKEN`, `NFCE_CSC`, `MERCADOPAGO_ACCESS_TOKEN`, `RESEND_API_KEY`.
 O `vercel.json` agenda `/api/jobs` (tarefas fiscais, efeitos de venda, rotinas diárias de notificações e backup). Em plano sem cron frequente, a Central de integrações oferece “Executar tarefas pendentes agora”.
 
-Sem variáveis do Appwrite na Vercel, a aplicação sobe em **modo memória** (demonstração volátil, recriada a cada reinício e sem consistência entre instâncias) — apenas para visualização.
+Sem as variáveis do Appwrite na Vercel, a aplicação mostra a página **“configuração pendente”** com a lista do que falta (nenhum dado é gravado). Somente para apresentação, `DATA_BACKEND=memory` sobe uma demonstração volátil (recriada a cada reinício e sem consistência entre instâncias).
+
+Passo a passo:
+1. Vercel → projeto → *Settings → Git*: conecte o repositório do GitHub (deploy a cada push na branch principal).
+2. *Settings → Environment Variables*: cadastre as variáveis acima (marque `APPWRITE_API_KEY`, `CRON_SECRET` e `SETUP_TOKEN` como *Sensitive*).
+3. Faça o deploy e abra `/primeiro-acesso` (informe o `SETUP_TOKEN`): o servidor provisiona as tabelas no Appwrite (retomável) e cria a empresa e o administrador, ou carrega a demonstração identificada.
+4. Em atualizações que mudam o esquema, rode `npm run appwrite:setup` (ou reabra `/primeiro-acesso` — o provisionamento é idempotente e só cria o que falta).
 
 ## Scripts
 
@@ -55,6 +63,10 @@ Sem variáveis do Appwrite na Vercel, a aplicação sobe em **modo memória** (d
 | `npm run seed` | Carrega a demonstração (repetível, sem duplicar) |
 | `npm run jobs` | Executa tarefas pendentes e rotinas (equivalente ao cron) |
 | `npm run e2e` | Testes de navegador (Playwright) |
+| `MEMORY_TX_MODE=deferred npm test` | Mesmos testes com a semântica de transação do Appwrite (escritas visíveis só no commit, máx. 100 operações) |
+| `node scripts/dev/crawl.mjs` | Varredura de navegação: login real, todos os links internos, erros de página/console e telas de erro |
+| `node scripts/dev/evidence.mjs` | Captura as evidências de interface (48 telas + 14 visões) em `docs/evidencias/` |
+| `node scripts/docs/build-matrix.mjs` | Regenera `docs/matriz-cobertura.md` a partir de `scripts/docs/coverage-map.json` |
 
 ## Documentação
 

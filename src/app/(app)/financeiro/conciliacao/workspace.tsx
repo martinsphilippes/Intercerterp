@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTime } from "@/lib/dates";
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -202,7 +203,7 @@ export function Workspace({
                 <div className={cn("rounded-md px-3 py-2", r.state === "unmatched" || r.state === "ignored" ? "border border-dashed border-slate-300" : "bg-slate-50")}>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Lançamento no ERP</p>
                   {r.state === "reconciled" ? (
-                    <EntryList list={r.linked} footer={<span className="text-emerald-700">Conciliado{r.reconciledAt ? ` em ${new Date(r.reconciledAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}` : ""}</span>} />
+                    <EntryList list={r.linked} footer={<span className="text-emerald-700">Conciliado{r.reconciledAt ? ` em ${formatDateTime(r.reconciledAt)}` : ""}</span>} />
                   ) : r.state === "ignored" ? (
                     <p className="text-sm text-slate-500">Ignorado: {r.notes ?? "—"}</p>
                   ) : (r.state === "suggested" || r.state === "divergent") && r.suggestion ? (
