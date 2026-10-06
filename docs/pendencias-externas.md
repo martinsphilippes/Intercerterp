@@ -17,7 +17,7 @@ Itens que dependem de recurso externo, credencial ou ação do titular. O códig
 
 ## Riscos residuais conhecidos (não dependem de terceiros)
 
-- Compras: uma revogação de aprovação concorrente com a confirmação de recebimento (aprovado → parcial) ou com a revisão do pedido ainda pode sobrescrever o estado do pedido (janela estreita).
+- Compras: pedido sem solicitação de aprovação não tem vaga de decisão para disputar — resta uma janela estreita de concorrência no cancelamento; “Registrar envio” concorrente com a atualização do saldo pode deixar o pedido “enviado” com tudo recebido (corrigível pelo próximo recebimento/encerramento); um XML em conferência impede o recebimento sem XML de assumir o frete do pedido (critério conservador).
 - Crediário: títulos a receber criados fora da venda (manuais, renegociação) não disputam a trava de crédito do cliente; o limite é garantido entre vendas.
-- Conferência cega: a lista de vendas e o relatório da sessão mostram o total de cada venda (necessário para operar); um operador decidido ainda consegue somar à mão.
+- Conferência cega: o valor de cada venda e de cada suprimento/sangria continua visível ao operador (necessário para operar); as somas e o recorte por sessão ficam ocultos até a contagem, e uma recontagem não apaga diferença já revelada.
 - Juros da condição de parcelamento aplicam-se apenas a títulos manuais (vendas e compras não aplicam; o cadastro avisa).

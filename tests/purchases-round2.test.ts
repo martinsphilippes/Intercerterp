@@ -193,17 +193,22 @@ describe("recebimento sem XML: o recebimento que assumiu o frete é cancelado", 
     expect((await payables(r2.id))[0].total + (await payables(r3.id))[0].total).toBe(o.total);
   });
 
-  it("enquanto o recebimento que assumiu o frete está ativo, outro rascunho não o assume", async () => {
+  // rodada 3: o frete fica com o recebimento que CONFIRMA a cobrança (vale quem confirmar primeiro) — a prévia da
+  // abertura não reserva; assim uma entrega integral confirmada antes não deixa o frete sem cobrança
+  it("vale quem confirmar primeiro: o rascunho que assumiu o frete na abertura é recalculado sem ele", async () => {
     const o = await createOrder(admin, { supplierId: papel, items: [{ skuId: caneta, qty: 10000, unitCost: 1000 }], freight: 5000, paymentTermId: avista });
     await approve(o.id);
     const r1 = await createManualReceipt(stockist, { supplierId: papel, orderIds: [o.id], idemKey: "r2-active-1" });
     const r2 = await createManualReceipt(stockist, { supplierId: papel, orderIds: [o.id], idemKey: "r2-active-2" });
+    expect([r1.freight, r2.freight]).toEqual([5000, 0]);
     await updateReceipt(stockist, r2.id, { items: [{ idx: 1, receivedQty: 5000, checked: true }] });
+    await expect(confirmReceipt(stockist, r2.id)).rejects.toThrow(/ainda não tinham sido cobrados/);
     const c2 = await confirmReceipt(stockist, r2.id);
-    expect(c2.freight).toBe(0);
+    expect(c2.freight).toBe(5000);
     await updateReceipt(stockist, r1.id, { items: [{ idx: 1, receivedQty: 5000, checked: true }] });
+    await expect(confirmReceipt(stockist, r1.id)).rejects.toThrow(/já foram cobrados no recebimento/);
     const c1 = await confirmReceipt(stockist, r1.id);
-    expect(c1.freight).toBe(5000);
+    expect(c1.freight).toBe(0);
     expect((await payables(r1.id))[0].total + (await payables(r2.id))[0].total).toBe(o.total);
   });
 });

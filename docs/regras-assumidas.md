@@ -263,7 +263,7 @@ Resultado da revisão independente (achados confirmados corrigidos com testes de
 
 #### Compras (rodada 2)
 - Encargos sem XML só passam a “informados” quando o usuário altera um valor em relação ao exibido ao carregar o formulário; “Recalcular encargos pelo pedido” volta ao cálculo automático.
-- Frete único do pedido: se o recebimento que assumiu o frete for cancelado, o primeiro recebimento sem XML confirmado (sem entrega anterior e sem outro recebimento ativo que o assumiu/seja de XML) assume o frete; a conclusão é interrompida uma vez para revisão.
+- Frete único do pedido: ver “Compras (rodada 3)” — vale quem confirmar a cobrança primeiro.
 - Frete já cobrado em outro recebimento + valores informados > 0: a confirmação exige zerar, recalcular pelo pedido ou marcar “nova cobrança do fornecedor” com justificativa.
 - Valor da linha sem XML = líquido exato da linha do pedido proporcional ao recebido (arredondamento acumulado; parciais somam exatamente o total).
 - Cancelamento e registro de envio de pedido de uma solicitação disputam a mesma vaga de decisão da aprovação (só um vence; o perdedor relê).
@@ -286,6 +286,32 @@ Resultado da revisão independente (achados confirmados corrigidos com testes de
 - Expedição × cancelamento simultâneos: o cancelamento prevalece; o que saiu volta à origem e a transferência nunca fica “em trânsito” sobre um cancelamento. Repetir o cancelamento conclui o que ficou pendente.
 - /produtos e a exportação de produtos mostram só as filiais permitidas ao usuário.
 
+
+## 19. Regras consolidadas na rodada final (revisão das correções) [Decisão]
+
+Quando conflitam com as seções anteriores, estas prevalecem.
+
+#### Administração e relatórios (rodada 3)
+- A restrição de filiais é uma lista única e literal para todas as empresas do usuário. Quem não administra usuários em todas as empresas do alvo não inclui restrição em quem não tem e não remove a de quem tem; com restrição, empresa sem filial marcada fica sem acesso (nunca ampliação silenciosa) e desmarcar todas as filiais de uma empresa em que o usuário tinha acesso é recusado com pedido de escolha explícita.
+- Quebra por meio de pagamento: a parte da devolução coberta por desconto concedido na baixa fica em linha própria (“coberta por desconto concedido no recebimento”) e não conta como reembolso.
+- Detalhamento de abatimentos da competência: a coluna “Abatido” mostra só o valor do período (o total histórico fica à parte).
+
+#### Vendas e caixa (rodada 3)
+- Conferência cega — recontagem: se o previsto mudar depois da contagem, exige-se nova contagem, mas a diferença já revelada (por meio de pagamento) não pode ser apagada. Com D = diferença que vale da contagem anterior e N = diferença da nova contagem: vale N se D = 0, ou se N tem o mesmo sinal de D e é maior ou igual em valor absoluto; caso contrário mantém-se D (contado que vale = previsto atual + D, mínimo 0; o valor informado fica registrado). Se qualquer contagem da versão revelou diferença, o fechamento fica com divergência e exige justificativa. O recolhimento é limitado ao menor entre o contado que vale e o informado na última contagem.
+- Valores ocultos até a contagem cega também no histórico de vendas filtrado pela sessão (tela e CSV), na coluna Total da aba de vendas da sessão e na soma de suprimentos/sangrias; somas de sessões informam quantas sessões ocultas ficaram de fora.
+- “Pendente no Financeiro” da venda cancelada é recalculado pela situação atual dos títulos (some quando o título é cancelado).
+
+#### Fiscal e integrações (rodada 3)
+- Reivindicação de envio fiscal vale 5 min: “em andamento” vencida ou “falhou” é retomada por um único processo (um registro de retomada por episódio); retomada que trava além da validade e o estado antigo “abandonada” consomem a tentativa; carimbos inválidos ou no futuro contam como vencidos.
+- A tarefa `fiscal.transmit` aguarda o mesmo detentor por no máximo 15 min (reagenda a cada 60 s); depois para, alerta no documento e orienta “Retransmitir”.
+- Núcleo: qualquer tarefa que se reagenda sozinha tem limite geral de 200 execuções; depois segue o caminho de falha (retentativas com recuo até “morta”, com notificação).
+- Credencial salva sem vínculo não tem vínculo: o nome padrão da variável é só sugestão até o primeiro salvamento (tela e execução).
+- Registros de inutilização não contam como pendentes/rejeitados na fila da NFC-e; aparecem à parte com a orientação de repetir a inutilização.
+
+#### Compras (rodada 3)
+- Frete do pedido é cobrado uma vez, pelo primeiro recebimento sem XML que confirmar a cobrança; o marcador é gravado na passagem para “confirmando” (rascunho não reserva). Entrega parcial confirmada sem o frete não impede o próximo recebimento de assumi-lo (a conclusão é interrompida uma vez para revisão). O frete conta como cobrado quando há recebimento de XML do pedido ou recebimento sem XML confirmado com encargos informados > 0. Desvincular o pedido ou cancelar o recebimento libera o marcador.
+- Revogação da aprovação é recusada quando há recebimento em conferência, em confirmação ou confirmado; a conclusão do recebimento disputa a vaga de decisão da solicitação.
+- Cancelamento e revisão do pedido são recusados com recebimento em confirmação (inclusive confirmação interrompida).
 
 #### Riscos residuais conhecidos
 - Ver `docs/pendencias-externas.md` (seção “Riscos residuais conhecidos”).

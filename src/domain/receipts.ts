@@ -25,8 +25,12 @@ import { createSupplier, findSupplierByDoc, supplierLabel } from "./suppliers";
  *  - NF-e denegada é recusada; de homologação (sem valor fiscal) só em empresa de demonstração; XML sem
  *    protocolo de autorização só é confirmado com justificativa.
  *  - Sem XML: IPI e desconto geral do pedido proporcionais ao alocado; frete/seguro/outras despesas do pedido
- *    cobrados uma única vez (marcador por pedido na confirmação). O total faturado informado é comparado ao
- *    devido (tolerância `purchase.receiptValueTolerance`, padrão 0) e a divergência exige justificativa.
+ *    cobrados uma única vez — pelo primeiro recebimento que confirmar a cobrança (marcador por pedido gravado na
+ *    passagem para "confirmando"; entregas parciais confirmadas sem eles não impedem o próximo de assumi-los).
+ *    O total faturado informado é comparado ao devido (tolerância `purchase.receiptValueTolerance`, padrão 0) e a
+ *    divergência exige justificativa.
+ *  - A passagem para "confirmando" disputa a vaga da decisão da solicitação dos pedidos (revogação da aprovação e
+ *    cancelamento concorrentes não deixam mercadoria/título num pedido em análise ou cancelado).
  *  - Escritas exigem a filial do recebimento (contexto consolidado é somente consulta).
  *  - Mapeamento código do fornecedor (cProd) → SKU interno, aprendido em `supplier_products`.
  *  - Comparação previsto (saldo do pedido) × faturado (XML) × recebido (conferência).
@@ -136,8 +140,10 @@ async function getReceiptForWrite(ctx: Ctx, id: string) {
 
 /**
  * Marcador de cobrança única do frete/seguro/outras despesas do pedido: gravado pelo recebimento sem XML que
- * CONFIRMA a cobrança (na passagem para "confirmando"; vale quem confirmar primeiro). Só vale enquanto o dono está
- * ativo e vinculado ao pedido: cancelar o recebimento ou desvincular o pedido antes da confirmação o libera.
+ * CONFIRMA a cobrança, na mesma transação que o passa para "confirmando" (vale quem confirmar primeiro; rascunho não
+ * reserva). Só vale enquanto o dono está ativo e vinculado ao pedido: marcador de recebimento cancelado ou que
+ * desvinculou o pedido (estado de versão anterior) é liberado no cancelamento, ao desmarcar o pedido ou na próxima
+ * consulta.
  */
 const chargesMarkerId = (orderId: string) => detId("po-charges", orderId);
 
@@ -149,10 +155,7 @@ async function releaseChargesMarker(store: Store, orderId: string, receiptId: st
   return true;
 }
 
-/**
- * Marcador de cobrança vigente do pedido. Marcador de recebimento cancelado ou que não está mais vinculado ao pedido
- * (estado de versão anterior ou de concorrência entre conferência e conclusão) não vale e é liberado aqui.
- */
+/** Marcador de cobrança vigente do pedido (marcador de recebimento cancelado ou desvinculado do pedido é liberado aqui). */
 async function liveChargesMarker(store: Store, orderId: string) {
   const m = await store.get("operations", chargesMarkerId(orderId));
   if (!m) return null;
@@ -875,40 +878,32 @@ async function learnSupplierProduct(ctx: Ctx, r: Doc, it: ReceiptItem) {
 }
 
 /**
- * Registra, com marcador de id determinístico por pedido, que ESTE recebimento (sem XML) cobra o frete/seguro/
- * outras despesas do pedido — vale quem confirmar primeiro. Se outro recebimento já os cobrou (dois recebimentos
- * abertos ao mesmo tempo), retira o encargo deste; se ninguém os cobrou ainda (entregas parciais anteriores sem eles,
- * recebimento que os assumiria cancelado ou desvinculado), este os assume. Em ambos os casos recalcula o devido e
- * interrompe a confirmação para revisão.
+ * Encargos do pedido (frete/seguro/outras despesas) num recebimento sem XML, avaliados na conclusão. Vale quem
+ * confirmar primeiro: o marcador de cobrança é gravado na mesma transação que passa o recebimento para
+ * "confirmando" (ver startConfirming), então rascunho nunca reserva a cobrança.
+ *  - pedido assumido (`claimed`) cuja cobrança outro recebimento já confirmou → retirado deste (lost);
+ *  - com cálculo pelo pedido, pedido de que este recebimento recebe mercadoria e cujos encargos ninguém cobrou
+ *    ainda (entregas parciais anteriores sem eles, recebimento que os assumiria cancelado/desvinculado) → incluído
+ *    neste (added).
+ * Havendo mudança, recalcula o devido e interrompe a conclusão para revisão. Senão, devolve os pedidos cujo marcador
+ * este recebimento deve gravar.
  */
-async function claimOrderCharges(ctx: Ctx, r: Doc) {
-  if (r.xmlFileId || !r.orderCharges) return;
+async function planOrderCharges(ctx: Ctx, r: Doc): Promise<string[]> {
+  if (r.xmlFileId || !r.orderCharges) return [];
   const auto = r.orderCharges.auto !== false;
   const linked: string[] = r.orderIds ?? [];
   const claimed: string[] = (r.orderCharges.claimed ?? []).filter((oid: string) => linked.includes(oid));
   const lost: Array<{ orderId: string; number: number | null; receiptNumber: number | null; freight: number; insurance: number; otherExpenses: number }> = [];
   const added: Array<{ orderId: string; number: number }> = [];
-  const marker = (oid: string) => ({ companyId: ctx.companyId, type: "purchase.order_charges", status: "done", entityType: "purchase_order", entityId: oid, result: { receiptId: r.id, receiptNumber: r.number }, createdBy: ctx.user.id });
-  /** grava o marcador deste recebimento; devolve o marcador de OUTRO recebimento quando ele já registrou a cobrança */
-  const take = async (oid: string) => {
-    await liveChargesMarker(ctx.store, oid); // marcador de recebimento cancelado/desvinculado é liberado antes
-    try {
-      await ctx.store.create("operations", marker(oid), chargesMarkerId(oid));
-      return null;
-    } catch (e) {
-      if (!isConflict(e)) throw e;
-      const m = await ctx.store.get("operations", chargesMarkerId(oid));
-      return m && m.result?.receiptId !== r.id ? m : null;
-    }
-  };
+  const toMark: string[] = [];
   for (const oid of claimed) {
-    const m = await take(oid);
-    if (!m) continue;
-    const o = await ctx.store.get("purchase_orders", oid);
-    lost.push({ orderId: oid, number: o?.number ?? null, receiptNumber: m.result?.receiptNumber ?? null, freight: Math.max(0, o?.freight ?? 0), insurance: Math.max(0, o?.insurance ?? 0), otherExpenses: Math.max(0, o?.otherExpenses ?? 0) });
+    const m = await liveChargesMarker(ctx.store, oid);
+    if (!m) toMark.push(oid);
+    else if (m.result?.receiptId !== r.id) {
+      const o = await ctx.store.get("purchase_orders", oid);
+      lost.push({ orderId: oid, number: o?.number ?? null, receiptNumber: m.result?.receiptNumber ?? null, freight: Math.max(0, o?.freight ?? 0), insurance: Math.max(0, o?.insurance ?? 0), otherExpenses: Math.max(0, o?.otherExpenses ?? 0) });
+    }
   }
-  // encargos ainda não cobrados por nenhum recebimento confirmado: com cálculo pelo pedido, este recebimento os
-  // assume para os pedidos de que recebe mercadoria (mesmo após entregas parciais confirmadas sem eles)
   if (auto) {
     const receiving = new Set<string>();
     for (const it of (r.items ?? []) as ReceiptItem[]) if (!it.ignore) for (const al of it.allocations ?? []) if (al.qty > 0) receiving.add(al.orderId);
@@ -917,11 +912,10 @@ async function claimOrderCharges(ctx: Ctx, r: Doc) {
       const o = await ctx.store.get("purchase_orders", oid);
       if (!o || Math.max(0, o.freight ?? 0) + Math.max(0, o.insurance ?? 0) + Math.max(0, o.otherExpenses ?? 0) <= 0) continue;
       if (await orderChargesTaken(ctx.store, oid, r.id)) continue;
-      if (await take(oid)) continue; // outro recebimento registrou a cobrança ao mesmo tempo
       added.push({ orderId: oid, number: o.number });
     }
   }
-  if (!lost.length && !added.length) return;
+  if (!lost.length && !added.length) return toMark;
   const orderCharges = {
     ...r.orderCharges,
     claimed: [...claimed.filter((x) => !lost.some((l) => l.orderId === x)), ...added.map((a) => a.orderId)],
@@ -940,11 +934,6 @@ async function claimOrderCharges(ctx: Ctx, r: Doc) {
   throw new BusinessError(`${parts.join(" ")} Revise e conclua novamente.`, lost.length ? "charges_taken" : "charges_added");
 }
 
-/**
- * Confirma o recebimento. Cada efeito é idempotente (movimentos por idemKey, título por idemKey,
- * saldo dos pedidos recalculado a partir dos recebimentos confirmados), então uma retentativa
- * após falha conclui sem duplicar. Durante os efeitos o documento fica "confirmando" (não editável).
- */
 /** Pedidos vinculados ainda aceitam o recebimento? (podem ter mudado desde a importação: revisão → análise, cancelamento) */
 async function linkedOrdersOrThrow(ctx: Ctx, r: Doc) {
   const out: Doc[] = [];
@@ -958,15 +947,18 @@ async function linkedOrdersOrThrow(ctx: Ctx, r: Doc) {
   return out;
 }
 
-/** Limite de gravações por transação do Appwrite (passagem para "confirmando": 2 por solicitação + o recebimento). */
+/** Limite de gravações por transação do Appwrite. */
 const TX_MAX_WRITES = 100;
 
 /**
  * Passa o recebimento para "confirmando" — a partir daqui os efeitos (estoque, custo, título, saldo do pedido) são
- * concluídos, inclusive por retomada. Na mesma transação ocupa a vaga da decisão (`decisionSeq`) das solicitações dos
- * pedidos ainda revogáveis/canceláveis (aprovado/enviado): revogação da aprovação ou cancelamento concorrentes que
- * leram a vaga anterior falham (e, relidos, recusam o pedido com recebimento em andamento); se eles gravarem antes,
- * esta passagem relê os pedidos e recusa sem lançar nada.
+ * concluídos, inclusive por retomada. Numa única transação:
+ *  - grava o marcador de cobrança dos encargos dos pedidos que este recebimento cobra (ver planOrderCharges): outro
+ *    recebimento que confirmar ao mesmo tempo falha aqui e, relido, perde esses encargos (revisão);
+ *  - ocupa a vaga da decisão (`decisionSeq`) das solicitações dos pedidos ainda revogáveis/canceláveis (aprovado/
+ *    enviado): revogação da aprovação ou cancelamento concorrentes que leram a vaga anterior falham (e, relidos,
+ *    recusam o pedido com recebimento em andamento); se eles gravarem antes, esta passagem relê os pedidos e recusa
+ *    sem lançar nada.
  */
 async function startConfirming(ctx: Ctx, id: string) {
   return retryOnConflict(async () => {
@@ -974,16 +966,24 @@ async function startConfirming(ctx: Ctx, id: string) {
     assert(r.status !== "cancelled", "Recebimento cancelado.");
     if (r.status !== "draft") return r; // outra conclusão (duplo clique) já passou para "confirmando"
     const orders = await linkedOrdersOrThrow(ctx, r);
+    const toMark = await planOrderCharges(ctx, r);
     const reqIds = [...new Set(orders.filter((o) => ["approved", "sent"].includes(o.status) && o.requestId).map((o) => o.requestId as string))];
     const reqs = (await Promise.all(reqIds.map((rid) => ctx.store.get("purchase_requests", rid)))).filter((x): x is Doc => Boolean(x));
-    if (1 + 2 * reqs.length > TX_MAX_WRITES) throw new BusinessError(`Recebimento vinculado a pedidos de ${reqs.length} solicitações diferentes (limite ${Math.floor((TX_MAX_WRITES - 1) / 2)} por conclusão): desmarque parte dos pedidos em “Pedidos relacionados” e receba-os em outro recebimento.`, "receipt_blocked");
+    if (toMark.length + 2 * reqs.length + 1 > TX_MAX_WRITES) throw new BusinessError(`Recebimento vinculado a pedidos demais para uma conclusão (${orders.length} pedidos de ${reqs.length} solicitações): desmarque parte dos pedidos em “Pedidos relacionados” e receba-os em outro recebimento.`, "receipt_blocked");
     await ctx.store.transaction(async (t) => {
+      for (const oid of toMark) await t.create("operations", { companyId: ctx.companyId, type: "purchase.order_charges", status: "done", entityType: "purchase_order", entityId: oid, result: { receiptId: id, receiptNumber: r.number }, createdBy: ctx.user.id }, chargesMarkerId(oid));
       await occupyDecisionSlots(ctx, t, reqs, "purchase.receipt_confirm", { receiptId: id, receiptNumber: r.number });
       await t.update("receipts", id, { status: "confirming" });
     });
     return { ...r, status: "confirming" } as Doc;
   });
 }
+
+/**
+ * Confirma o recebimento. Cada efeito é idempotente (movimentos por idemKey, título por idemKey,
+ * saldo dos pedidos recalculado a partir dos recebimentos confirmados), então uma retentativa
+ * após falha conclui sem duplicar. Durante os efeitos o documento fica "confirmando" (não editável).
+ */
 
 export async function confirmReceipt(ctx: Ctx, id: string) {
   requireReceive(ctx);
@@ -996,7 +996,6 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
     r = await ctx.store.update("receipts", id, omit(calc, "payable"));
     const blockers = confirmBlockers(r);
     if (blockers.length) throw new BusinessError(blockers.join(" "), "receipt_blocked");
-    await claimOrderCharges(ctx, r);
     r = await startConfirming(ctx, id);
     if (r.status === "confirmed") return r;
   }
