@@ -158,7 +158,11 @@ export async function createInventory(ctx: Ctx, input: InventoryInput, opts: { i
   const branchId = requireBranch(ctx);
   const id = opts.id ?? (opts.idemKey ? detId("inventory", ctx.companyId, opts.idemKey) : newId());
   const existing = await ctx.store.get("inventories", id);
-  if (existing) return existing.status === "preparing" ? finishOpening(ctx, existing) : existing;
+  if (existing) {
+    if (existing.status !== "preparing") return existing;
+    assert(existing.branchId === branchId, "Opere o inventário no contexto da sua filial.");
+    return finishOpening(ctx, existing);
+  }
   const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
   assert(wh.companyId === ctx.companyId && wh.branchId === branchId, "O depósito não pertence à filial selecionada.");
   const items = await scopeSkus(ctx, input);

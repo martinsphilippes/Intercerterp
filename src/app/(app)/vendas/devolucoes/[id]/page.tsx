@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeftRight } from "lucide-react";
+import { canViewBranch } from "../../queries";
+import { ArrowLeftRight, CheckCircle2 } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
@@ -11,12 +12,14 @@ import { Notice } from "@/components/ui/empty";
 import { listAll } from "@/lib/db";
 import { formatMoney, formatQty } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/dates";
-import { can } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { MOVEMENT_LABEL } from "@/domain/stock";
 import { COMPENSATION_LABEL, REFUND_METHOD_LABEL } from "@/domain/sales";
 import { DOC_STATUS_LABEL } from "@/domain/fiscal/service";
 import { MODEL_NAME } from "../../labels";
+import { ActionButton } from "@/components/ui/action-form";
+import { confirmCardReversalAction } from "../../actions";
 
 export const metadata = { title: "Devolução" };
 
@@ -27,7 +30,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const { id } = await params;
   const store = s.ctx.store;
   const ret = await store.get("returns", id);
-  if (!ret || ret.companyId !== s.ctx.companyId) notFound();
+  if (!ret || ret.companyId !== s.ctx.companyId || !canViewBranch(s.ctx, ret.branchId)) notFound();
   const sale = await store.getOrThrow("sales", ret.saleId);
   const [items, saleItems, movs, voucher, entries, cashMovs, titles, users, warehouses, accounts] = await Promise.all([
     listAll(store, "return_items", { filters: [["eq", "returnId", id]] }),
@@ -58,16 +61,29 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         actions={
           <>
             <LinkButton href={`/vendas/${sale.id}`}>Venda nº {sale.number}</LinkButton>
+            {ret.status === "processing" && ret.refundMethod === "card_reversal" && canDo(s.user, "sale.return") && s.ctx.branchId === ret.branchId && (
+              <ActionButton action={confirmCardReversalAction.bind(null, id)} label="Confirmar estorno na adquirente" icon={<CheckCircle2 className="size-4" />} askReason="NSU/protocolo do estorno confirmado pela adquirente (obrigatório):" />
+            )}
             {pendingExchange && can(s.user, "pdv", "create") && s.ctx.branchId === ret.branchId && (
               <LinkButton href={`/pdv?troca=${id}`} variant="accent"><ArrowLeftRight className="size-4" /> Abrir PDV com o vale da troca</LinkButton>
             )}
           </>
         }
       />
+      {ret.effectsStatus === "pending" && <div className="mb-4"><Notice tone="warn" title="Efeitos da devolução em processamento">Itens devolvidos, retorno ao estoque e documento fiscal estão sendo concluídos pela tarefa durável.</Notice></div>}
+      {ret.status === "processing" && ret.refundMethod === "card_reversal" && <div className="mb-4"><Notice tone="info" title="Estorno no cartão aguardando a adquirente">A devolução fica “em processamento” até a confirmação do estorno (NSU/protocolo) pela adquirente.</Notice></div>}
+      {ret.confirmationRef && <div className="mb-4"><Notice tone="info" title="Estorno confirmado">Confirmado pela adquirente em {formatDateTime(ret.completedAt)} por {users.get(ret.confirmedBy) ?? "—"} (ref. {ret.confirmationRef}).</Notice></div>}
       {pendingExchange && <div className="mb-4"><Notice tone="info" title="Troca aguardando a nova venda">O vale {voucher?.code} ({formatMoney(voucher?.balance)}) será aplicado automaticamente no pagamento do novo atendimento.</Notice></div>}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Valor devolvido" value={formatMoney(ret.itemsTotal)} hint={`${items.length} item(ns) · custo retornado ${formatMoney(ret.costTotal)}`} />
-        <Stat label="Compensação" value={COMPENSATION_LABEL[ret.compensation] ?? ret.compensation} hint={ret.refundMethod ? REFUND_METHOD_LABEL[ret.refundMethod] : voucher ? `Vale ${voucher.code}` : "—"} />
+        <Stat
+          label="Compensação"
+          value={(ret.abatedAmount ?? 0) > 0 && (ret.compensatedAmount ?? 0) === 0 ? "Abatimento do título" : COMPENSATION_LABEL[ret.compensation] ?? ret.compensation}
+          hint={[
+            (ret.abatedAmount ?? 0) > 0 ? `${formatMoney(ret.abatedAmount)} abatidos do título a prazo` : "",
+            (ret.compensatedAmount ?? ret.itemsTotal) > 0 ? `${formatMoney(ret.compensatedAmount ?? ret.itemsTotal)} ${ret.refundMethod ? REFUND_METHOD_LABEL[ret.refundMethod] : voucher ? `em vale ${voucher.code}` : ""}` : "",
+          ].filter(Boolean).join(" · ") || "—"}
+        />
         <Stat label={ret.kind === "exchange" ? "Diferença da troca" : "Saldo do vale"} value={ret.kind === "exchange" ? (exSale ? formatMoney(Math.abs(ret.difference)) : "—") : voucher ? formatMoney(voucher.balance) : "—"} hint={ret.kind === "exchange" ? (exSale ? (ret.difference >= 0 ? "paga pelo cliente na nova venda" : "a favor do cliente (permanece no vale)") : "nova venda pendente") : voucher ? `de ${formatMoney(voucher.originalAmount)} · validade ${formatDate(voucher.expiresAt)}` : undefined} />
         <Stat label="Documento fiscal de devolução" value={doc ? `${doc.model === "nfe" ? "NF-e" : doc.model} ${doc.number ?? "(rascunho)"}` : "Não gerado"} hint={doc ? `Situação: ${DOC_STATUS_LABEL[doc.status] ?? doc.status}${doc.status === "draft" ? " — revisar e transmitir no módulo Fiscal" : ""}` : "Venda sem documento autorizado a referenciar"} href={doc ? `/fiscal/${doc.model}/${doc.id}` : undefined} />
       </div>

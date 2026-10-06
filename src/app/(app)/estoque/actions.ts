@@ -9,6 +9,15 @@ import { DEFAULT_TZ } from "@/lib/dates";
 import { adjustStock, balanceId, localDateTimeToIso, type ManualType } from "@/domain/stock";
 import { transferCode, createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, type TransferReceiptLine } from "@/domain/transfers";
 import { createInventory, saveCounts, concludeInventory, cancelInventory, addInventoryItem, resumeInventoryOpening, type CountEntry } from "@/domain/inventory";
+import type { Ctx } from "@/lib/core/ctx";
+import { canSeeBranch } from "./queries";
+
+/** Depósito consultável: da empresa ativa e de filial permitida ao usuário. */
+async function visibleWarehouse(ctx: Ctx, warehouseId: string | null | undefined) {
+  if (!warehouseId) return null;
+  const wh = await ctx.store.get("warehouses", warehouseId);
+  return wh && wh.companyId === ctx.companyId && canSeeBranch(ctx, wh.branchId) ? wh : null;
+}
 
 /** Pesquisa de SKUs para os seletores (nome, SKU, código de barras); traz o saldo do depósito informado. */
 export async function searchSkusAction(q: string, warehouseId?: string | null) {
@@ -18,11 +27,12 @@ export async function searchSkusAction(q: string, warehouseId?: string | null) {
     const n = normalizeSearch(term);
     const res = await s.ctx.store.list("skus", { filters: [["eq", "companyId", s.ctx.companyId], ["or", [["contains", "searchText", n], ["eq", "barcode", term], ["eq", "sku", term.toUpperCase()], ["contains", "extraBarcodes", term]]]], limit: 20 });
     const products = new Map((await listAll(s.ctx.store, "products", { filters: [["eq", "id", [...new Set(res.items.map((x) => x.productId))]]] })).map((p) => [p.id, p]));
+    const wh = await visibleWarehouse(s.ctx, warehouseId);
     const out = [];
     for (const x of res.items) {
       const p = products.get(x.productId);
       if (!p || p.type === "service" || x.active === false) continue;
-      const bal = warehouseId ? await s.ctx.store.get("stock_balances", balanceId(warehouseId, x.id)) : null;
+      const bal = wh ? await s.ctx.store.get("stock_balances", balanceId(wh.id, x.id)) : null;
       out.push({ id: x.id, sku: x.sku, name: x.name as string, unitCode: (x.unitCode ?? p.unitCode) as string, barcode: x.barcode as string | null, physical: bal?.physical ?? 0, available: (bal?.physical ?? 0) - (bal?.reserved ?? 0), avgCost: bal?.avgCost ?? x.costTotal ?? 0, location: (bal?.location ?? null) as string | null, minQty: (bal?.minQty ?? 0) as number });
     }
     return out.slice(0, 15);
@@ -34,7 +44,8 @@ export async function skuBalanceAction(skuId: string, warehouseId: string) {
   return runAction({ module: "stock" }, async (s) => {
     const sku = await s.ctx.store.get("skus", skuId);
     if (!sku || sku.companyId !== s.ctx.companyId) return null;
-    const bal = await s.ctx.store.get("stock_balances", balanceId(warehouseId, skuId));
+    const wh = await visibleWarehouse(s.ctx, warehouseId);
+    const bal = wh ? await s.ctx.store.get("stock_balances", balanceId(wh.id, skuId)) : null;
     return { physical: bal?.physical ?? 0, reserved: (bal?.reserved ?? 0) as number, available: (bal?.physical ?? 0) - (bal?.reserved ?? 0), avgCost: bal?.avgCost ?? sku.costTotal ?? 0, location: (bal?.location ?? null) as string | null, minQty: (bal?.minQty ?? 0) as number };
   });
 }

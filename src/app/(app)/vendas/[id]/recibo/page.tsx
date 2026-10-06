@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { canViewBranch } from "../../queries";
 import { requireSession } from "@/lib/server/session";
 import { listAll } from "@/lib/db";
 import { formatMoney, formatQty } from "@/lib/money";
@@ -20,7 +21,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const { print } = await searchParams;
   const store = s.ctx.store;
   const sale = await store.get("sales", id);
-  if (!sale || sale.companyId !== s.ctx.companyId) notFound();
+  if (!sale || sale.companyId !== s.ctx.companyId || !canViewBranch(s.ctx, sale.branchId)) notFound();
   const [items, payments, users, terminals] = await Promise.all([
     listAll(store, "sale_items", { filters: [["eq", "saleId", id]], orderBy: [{ field: "seq" }] }),
     listAll(store, "sale_payments", { filters: [["eq", "saleId", id]], orderBy: [{ field: "seq" }] }),

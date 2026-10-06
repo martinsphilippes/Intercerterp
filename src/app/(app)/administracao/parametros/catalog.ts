@@ -37,6 +37,11 @@ export const PARAMS: ParamDef[] = [
     key: "purchase.revisionRequiresReview", group: "Compras", label: "Revisão de pedido aprovado volta para análise", help: "Define quando alterar um pedido já aprovado exige nova aprovação.", type: "select", scopes: ["company"], default: "relevant",
     options: [{ value: "relevant", label: "Somente alterações relevantes (valor, itens, fornecedor)" }, { value: "always", label: "Sempre" }, { value: "never", label: "Nunca" }], usedBy: "Compras (revisão de pedidos)",
   },
+  {
+    key: "purchase.receiptValueTolerance", group: "Compras", label: "Tolerância de valor no recebimento", type: "money", scopes: ["company", "branch"], default: 0, min: 0,
+    help: "Diferença máxima aceita, sem registrar divergência, entre o total faturado informado na nota do fornecedor e o valor devido calculado no recebimento. Acima dela, a divergência de valor é registrada e exige justificativa. 0 = qualquer diferença é divergência.",
+    usedBy: "Compras (recebimento de mercadorias)",
+  },
   { key: "purchase.monthlyBudget", group: "Compras", label: "Orçamento mensal de compras", help: "0 = sem orçamento. Usado nas aprovações para indicar consumo do orçamento.", type: "money", scopes: ["company", "branch"], default: 0, min: 0, usedBy: "Aprovação de compras" },
   { key: "users.inviteExpiryDays", group: "Usuários", label: "Validade do convite de primeiro acesso", help: "Depois deste prazo o link de convite deixa de funcionar e precisa ser reenviado.", type: "int", scopes: ["company"], default: 7, min: 1, max: 30, unit: "dias", usedBy: "Usuários e permissões (convites)" },
   {

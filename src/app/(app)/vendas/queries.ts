@@ -132,11 +132,18 @@ export function salesTotals(rows: SaleRow[]) {
   };
 }
 
+/** Usuário restrito a filiais só consulta registros das suas filiais (administrador e usuário sem restrição: todas). */
+export function canViewBranch(ctx: Ctx, branchId: string | null | undefined) {
+  return ctx.user.isAdmin || !(ctx.user.branchIds ?? []).length || (branchId != null && ctx.user.branchIds.includes(branchId));
+}
+
 /** Detalhe da venda com todos os efeitos e reversões relacionados. */
 export async function saleDetail(ctx: Ctx, id: string) {
   const store = ctx.store;
   const sale = await store.get("sales", id);
   if (!sale || sale.companyId !== ctx.companyId) return null;
+  // usuário restrito a filiais: não acessa por URL o detalhe de venda de outra filial
+  if (!canViewBranch(ctx, sale.branchId)) return null;
   const [items, payments, titles, returns, cashMovs, stockMovs, docs] = await Promise.all([
     listAll(store, "sale_items", { filters: [["eq", "saleId", id]], orderBy: [{ field: "seq" }] }),
     listAll(store, "sale_payments", { filters: [["eq", "saleId", id]], orderBy: [{ field: "seq" }] }),

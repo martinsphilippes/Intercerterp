@@ -6,7 +6,7 @@ import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/
 import { canDo } from "@/lib/permissions";
 import { audit } from "@/lib/core/audit";
 import { nextNumber } from "@/lib/core/numbering";
-import { transferBetweenAccounts } from "./finance";
+import { assertUsableAccount, transferBetweenAccounts } from "./finance";
 import { formatMoney } from "@/lib/money";
 import { getSetting } from "@/lib/core/settings";
 import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
@@ -332,8 +332,12 @@ export async function pendingCloseTransfer(ctx: Ctx, s: Doc): Promise<{ toAccoun
 async function completeCloseTransfer(ctx: Ctx, s: Doc) {
   const tr = await pendingCloseTransfer(ctx, s);
   if (!tr) return null;
-  const target = await ctx.store.get("financial_accounts", tr.toAccountId);
-  assert(target && target.companyId === ctx.companyId && target.active !== false, "Recolhimento pendente: a conta de destino não está mais disponível (inativa ou removida). Registre a transferência manualmente no Financeiro.", "invalid_account");
+  try {
+    await assertUsableAccount(ctx, tr.toAccountId);
+  } catch (e) {
+    if (e instanceof BusinessError) throw new BusinessError(`Recolhimento pendente: ${e.message} Reative a conta ou registre a transferência no Financeiro.`, e.code ?? "invalid_account");
+    throw e;
+  }
   return transferBetweenAccounts(ctx, {
     fromAccountId: tr.fromAccountId, toAccountId: tr.toAccountId, amount: tr.amount, date: today(),
     description: `Recolhimento do fechamento do caixa nº ${s.number}`, idemKey: tr.idemKey, kind: "cash_withdrawal",
@@ -389,8 +393,13 @@ export async function closeSession(
     const amount = input.transferAmount!;
     assert(Number.isInteger(amount) && amount > 0, "Valor do recolhimento inválido.");
     assert(amount <= (counted.cash ?? 0), `Recolhimento (${formatMoney(amount)}) maior que o dinheiro contado (${formatMoney(counted.cash ?? 0)}).`, "transfer_over_counted");
-    const target = await ctx.store.get("financial_accounts", input.transferToAccountId);
-    assert(target && target.companyId === ctx.companyId && target.active !== false, "Conta de destino do recolhimento inválida: escolha uma conta ativa desta empresa.", "invalid_account");
+    let target: Doc;
+    try {
+      target = await assertUsableAccount(ctx, input.transferToAccountId);
+    } catch (e) {
+      if (e instanceof BusinessError) throw new BusinessError(`Conta de destino do recolhimento inválida: ${e.message}`, e.code ?? "invalid_account");
+      throw e;
+    }
     const cashAcc = await cashAccountFor(ctx, s.branchId);
     assert(cashAcc, "Filial sem conta financeira do tipo Caixa: não é possível registrar o recolhimento. Cadastre em Financeiro → Contas.");
     assert(cashAcc.id !== target.id, "A conta de destino do recolhimento deve ser diferente da conta Caixa da filial.");

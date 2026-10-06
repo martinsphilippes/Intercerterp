@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { canViewBranch } from "../../queries";
 import { ArrowLeft } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,7 +20,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const { id } = await params;
   const store = s.ctx.store;
   const sale = await store.get("sales", id);
-  if (!sale || sale.companyId !== s.ctx.companyId) notFound();
+  if (!sale || sale.companyId !== s.ctx.companyId || !canViewBranch(s.ctx, sale.branchId)) notFound();
   const header = (
     <PageHeader
       title="Troca ou devolução"

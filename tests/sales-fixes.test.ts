@@ -313,6 +313,25 @@ describe("vendas — correções da revisão", () => {
     expect(done.confirmationRef).toBe("EST-998877");
   });
 
+  it("consulta da situação fiscal pela venda usa a tarefa durável (perfil sem permissão fiscal consegue consultar)", async () => {
+    const { refreshSaleFiscal } = await import("@/domain/sales");
+    const s = await sale({ idemKey: "fq-1", items: [{ skuId: refs.skus["bone-u"].id, qty: 1000 }], payments: [{ methodId: refs.methods.dinheiro.id, amount: 4490 }] });
+    await runDueJobs(store, { limit: 50 });
+    const docId = (await store.getOrThrow("sales", s.id)).fiscalDocumentId;
+    expect((await store.getOrThrow("fiscal_documents", docId)).status).toBe("authorized");
+    await store.update("fiscal_documents", docId, { status: "processing" });
+    const fin = await refs.ctxFor("finance", "matriz");
+    const r = await refreshSaleFiscal(fin, s.id);
+    expect(r.document?.status).toBe("authorized");
+    const jobs = await listAll(store, "jobs", { filters: [["eq", "dedupeKey", `fiscal-query:${docId}:consulta-venda`]] });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].status).toBe("done");
+    // nova consulta reaproveita a mesma tarefa (chave determinística)
+    await store.update("fiscal_documents", docId, { status: "processing" });
+    await refreshSaleFiscal(fin, s.id);
+    expect(await listAll(store, "jobs", { filters: [["eq", "dedupeKey", `fiscal-query:${docId}:consulta-venda`]] })).toHaveLength(1);
+  });
+
   it("devolução em dinheiro de venda a prazo integralmente abatida não exige caixa aberto", async () => {
     const s = await sale({ idemKey: "nc-1", customerId: refs.customers.joao.id, items: [{ skuId: refs.skus["meia-u"].id, qty: 1000 }], payments: [{ methodId: refs.methods.crediario.id, amount: 2990 }] });
     const sm = await sessionSummary(cashier, s.cashSessionId);

@@ -1277,7 +1277,7 @@ export async function refreshSaleFiscal(ctx: Ctx, saleId: string) {
   const sale = await ctx.store.getOrThrow("sales", saleId);
   assert(sale.companyId === ctx.companyId, "Venda de outra empresa.");
   await import("./jobs-registry");
-  const { jobsFor, runDueJobs } = await import("@/lib/core/jobs");
+  const { enqueue, jobsFor, requeue, runDueJobs } = await import("@/lib/core/jobs");
   if (sale.effectsStatus !== "done") {
     const jobs = await jobsFor(ctx.store, `sale-effects:${saleId}`);
     const due = jobs.filter((j) => ["pending", "retry"].includes(j.status)).map((j) => j.id);
@@ -1286,7 +1286,6 @@ export async function refreshSaleFiscal(ctx: Ctx, saleId: string) {
   }
   const fresh = await ctx.store.getOrThrow("sales", saleId);
   const docs = await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "originType", "sale"], ["eq", "originId", saleId]] });
-  const { queryDocument } = await import("./fiscal/service");
   for (const d of docs) {
     if (d.status === "queued" || d.status === "error") {
       const jobs = [...(await jobsFor(ctx.store, `fiscal-transmit:${d.id}`)), ...(await jobsFor(ctx.store, `fiscal-query:${d.id}`))];
@@ -1297,7 +1296,13 @@ export async function refreshSaleFiscal(ctx: Ctx, saleId: string) {
         await runDueJobs(ctx.store, { jobIds: due });
       }
     } else if (d.status === "processing") {
-      await queryDocument({ ...ctx, branchId: d.branchId }, d.id);
+      // consulta pelo executor de tarefas (contexto técnico), não com as permissões fiscais do usuário:
+      // tarefa "fiscal.query" com chave determinística por documento, reativada a cada pedido de consulta
+      let job = await enqueue(ctx.store, { type: "fiscal.query", payload: { documentId: d.id, branchId: d.branchId }, dedupeKey: `fiscal-query:${d.id}:consulta-venda`, companyId: ctx.companyId, createdBy: ctx.user.id });
+      if (job.status === "running") continue; // outra execução em andamento
+      if (!["pending", "retry"].includes(job.status)) job = await requeue(ctx.store, job.id);
+      else if (job.runAt > nowIso()) job = await ctx.store.update("jobs", job.id, { runAt: nowIso() });
+      await runDueJobs(ctx.store, { jobIds: [job.id] });
     }
   }
   const after = await ctx.store.getOrThrow("sales", saleId);

@@ -40,6 +40,7 @@ export const DEFAULT_SETTINGS = {
   "replenishment.historyDays": 90,
   "purchase.revisionRequiresReview": "relevant",
   "purchase.monthlyBudget": 0,
+  "purchase.receiptValueTolerance": 0,
   "backup.schedule": { enabled: true, frequency: "daily", time: "02:00", retentionDays: 30, includeFiles: true },
   "notifications.stockMin": true,
   "timezone": "America/Sao_Paulo",

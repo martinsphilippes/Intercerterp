@@ -46,9 +46,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const doc = d.docs.find((x) => x.originType === "sale") ?? null;
   const deferred = d.installments.filter((i) => i.kind === "receivable" && d.titles.find((t) => t.id === i.titleId)?.originType === "sale");
   const openDeferred = deferred.reduce((a, i) => a + (i.balance ?? 0), 0);
-  const paymentHint = sale.status === "cancelled" ? "Estornado no cancelamento" : sale.paymentStatus === "paid" ? "Recebido integralmente" : `A receber ${formatMoney(openDeferred)} em ${deferred.filter((i) => i.balance > 0).length} parcela(s)`;
+  const refundPending = payments.filter((p) => p.status === "refund_pending");
+  const refundManual = payments.filter((p) => p.status === "refund_manual");
+  const paymentHint = sale.status === "cancelled" ? (refundPending.length ? "Estorno Pix pendente no provedor" : refundManual.length ? "Devolver Pix manual ao cliente" : "Estornado no cancelamento") : sale.paymentStatus === "paid" ? "Recebido integralmente" : `A receber ${formatMoney(openDeferred)} em ${deferred.filter((i) => i.balance > 0).length} parcela(s)`;
   const stockDone = sale.effectsStatus === "done";
-  const canCancel = sale.status === "completed" && (sale.returnedTotal ?? 0) === 0 && canDo(s.user, "sale.cancel") && Boolean(s.ctx.branchId);
+  const canCancel = sale.status === "completed" && (sale.returnedTotal ?? 0) === 0 && canDo(s.user, "sale.cancel") && s.ctx.branchId === sale.branchId;
   const canReturn = sale.status === "completed" && returnable > 0 && canDo(s.user, "sale.return") && s.ctx.branchId === sale.branchId;
   const titleLink = (t: any) => `/financeiro/${t.kind === "payable" ? "pagar" : "receber"}/${t.id}`;
   const waText = `Comprovante da compra nº ${sale.number} (${formatDateTime(sale.completedAt)}) — total ${formatMoney(sale.total)}.`;
@@ -78,7 +80,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 label="Cancelar venda"
                 icon={<Ban className="size-4" />}
                 variant="danger"
-                askReason="Motivo do cancelamento (obrigatório). Estoque, caixa, financeiro e documento fiscal serão estornados; cartões devem ser estornados na maquininha/TEF."
+                askReason="Motivo do cancelamento (obrigatório). Estoque, caixa, títulos e documento fiscal serão estornados; cartões devem ser estornados na maquininha/TEF; Pix integrado tem o estorno solicitado ao provedor e Pix manual deve ser devolvido ao cliente."
               />
             )}
             {sale.customerId && can(s.user, "pdv", "create") && s.ctx.branchId && <LinkButton href={`/pdv?cliente=${sale.customerId}`} variant="ghost"><ShoppingCart className="size-4" /> Nova venda</LinkButton>}
@@ -87,7 +89,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       />
       {sale.status === "cancelled" && (
         <div className="mb-4">
-          <Notice tone="bad" title={`Venda cancelada em ${formatDateTime(sale.cancelledAt)} por ${users.get(sale.cancelledBy) ?? "—"}`}>Motivo: {sale.cancelReason}. A venda original é preservada; os efeitos foram estornados (veja as abas).</Notice>
+          <Notice tone="bad" title={`Venda cancelada em ${formatDateTime(sale.cancelledAt)} por ${users.get(sale.cancelledBy) ?? "—"}`}>
+            Motivo: {sale.cancelReason}. A venda original é preservada;{" "}
+            {sale.cancelEffectsStatus === "pending" ? "os efeitos do cancelamento (estoque, títulos, fiscal, estorno Pix) estão sendo concluídos pela tarefa durável." : "os efeitos foram estornados (veja as abas)."}
+            {refundPending.length > 0 && <> Estorno Pix de {formatMoney(refundPending.reduce((a, p) => a + p.amount, 0))} <b>pendente no provedor</b>{refundPending[0].refundMessage ? ` (${refundPending[0].refundMessage})` : ""}.</>}
+            {refundManual.length > 0 && <> Pix manual: <b>devolva {formatMoney(refundManual.reduce((a, p) => a + p.amount, 0))} ao cliente</b> pela conta do Pix (o sistema não estorna Pix manual).</>}
+          </Notice>
         </div>
       )}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -210,7 +217,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 <tbody>
                   {d.installments.map((i) => {
                     const t = d.titles.find((x) => x.id === i.titleId)!;
-                    const st = d.settlements.filter((x) => x.installmentId === i.id);
+                    // somente baixas e estornos (marcadores de renegociação têm valor 0); abatimentos de devolução à parte
+                    const st = d.settlements.filter((x) => x.installmentId === i.id && (x.kind === "settlement" || x.kind === "reversal"));
+                    const ab = d.settlements.filter((x) => x.installmentId === i.id && x.kind === "abatement" && x.status === "active");
                     return (
                       <tr key={i.id}>
                         <td><Link className="text-brand-700 hover:underline" href={titleLink(t)}>{t.kind === "payable" ? "A pagar" : "A receber"} nº {t.number}</Link><span className="block text-xs text-slate-500">{t.partyName} · {t.description}</span></td>
@@ -219,7 +228,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                         <td><StatusBadge kind="title" status={t.status === "cancelled" ? "cancelled" : dueState(i)} /></td>
                         <td className="tabular text-right">{formatMoney(i.amount)}</td>
                         <td className="tabular text-right">{formatMoney(i.balance)}</td>
-                        <td className="text-xs">{st.length ? st.map((x) => <span key={x.id} className="block">{formatDate(x.date)} · {formatMoney(x.total)} {x.status !== "active" ? "(estornada)" : ""}</span>) : "—"}</td>
+                        <td className="text-xs">
+                          {st.map((x) => <span key={x.id} className="block">{formatDate(x.date)} · {formatMoney(x.total)} {x.status !== "active" ? "(estornada)" : ""}</span>)}
+                          {ab.map((x) => <span key={x.id} className="block text-amber-800">{formatDate(x.date)} · abatido {formatMoney(x.principal)} ({x.reference ?? "devolução"})</span>)}
+                          {!st.length && !ab.length && "—"}
+                        </td>
                       </tr>
                     );
                   })}
