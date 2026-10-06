@@ -17,6 +17,11 @@ export function listPeriod(p: Pick<ListParams, "f">, defaultFrom?: string) {
   return { from, to };
 }
 
+/** Usuário restrito a filiais (branchIds) só enxerga documentos dessas filiais. */
+export function canSeeBranch(ctx: Ctx, branchId: string | null | undefined) {
+  return ctx.user.isAdmin || !ctx.user.branchIds?.length || (branchId != null && ctx.user.branchIds.includes(branchId));
+}
+
 /** Consulta única das listagens de documentos (tela + exportação). */
 export async function queryDocuments(ctx: Ctx, model: FiscalModelKey, p: Pick<ListParams, "q" | "f">) {
   // NFC-e: listagem padrão do dia corrente (documentos do caixa); demais: mês corrente
@@ -24,7 +29,7 @@ export async function queryDocuments(ctx: Ctx, model: FiscalModelKey, p: Pick<Li
   const { start, end } = dayRange(from, to);
   const filters: any[] = [["eq", "companyId", ctx.companyId], ["eq", "model", model], ["gte", "issuedAt", start], ["lt", "issuedAt", end]];
   // filial explícita no link (consulta) tem precedência; senão a filial do contexto (consolidado = todas)
-  const branch = p.f.branch || ctx.branchId || null;
+  const branch = (p.f.branch && canSeeBranch(ctx, p.f.branch) ? p.f.branch : null) || ctx.branchId || null;
   if (branch) filters.push(["eq", "branchId", branch]);
   if (p.f.status) filters.push(["eq", "status", p.f.status.split(",")]);
   if (p.f.op) filters.push(["eq", "operationType", p.f.op]);

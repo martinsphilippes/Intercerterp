@@ -122,8 +122,126 @@ describe("caixa", () => {
     const sum = await sessionSummary(cashier, s.id);
     expect(requiredChecklist(sum).map((c) => c.key)).toEqual(["cashCounted", "pixReconciled", "cashDelivered"]);
     await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: sum.expected.cash, pix: 2990 }, enforceChecklist: true, checklist: { cashCounted: true } })).rejects.toThrow(/Conferências finais pendentes/);
-    const closed = await closeSession(cashier, { sessionId: s.id, counted: { cash: sum.expected.cash, pix: 2990 }, enforceChecklist: true, checklist: { cashCounted: true, pixReconciled: true, cashDelivered: true }, blind: true });
+    const closed = await closeSession(cashier, { sessionId: s.id, counted: { cash: sum.expected.cash, pix: 2990 }, enforceChecklist: true, checklist: { cashCounted: true, pixReconciled: true, cashDelivered: true } });
     expect(closed.differences).toEqual({});
-    expect((closed.history as any[]).at(-1).blind).toBe(true);
+    // sem o parâmetro de conferência cega, o fechamento não é registrado como cego (o formulário não decide isso)
+    expect((closed.history as any[]).at(-1).blind).toBe(false);
+  });
+});
+
+describe("caixa — correções da revisão", () => {
+  beforeEach(async () => {
+    store = freshStore();
+    refs = await seedBase(store);
+    cashier = await refs.ctxFor("cashier", "matriz");
+    manager = await refs.ctxFor("manager", "matriz");
+    terminalId = refs.terminals.cx1.id;
+  });
+
+  it("recolhimento do fechamento só para conta ativa da própria empresa, validado antes de fechar", async () => {
+    const s = await openSession(cashier, { terminalId, openingFund: 10000 });
+    const foreign = await store.create("financial_accounts", { companyId: "OTHERCO", name: "Conta de outra empresa", kind: "bank", balance: 0, seq: 0, active: true });
+    await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, transferToAccountId: foreign.id, transferAmount: 5000 })).rejects.toThrow(/Conta de destino/);
+    expect((await store.getOrThrow("financial_accounts", foreign.id)).balance).toBe(0);
+    expect(await listAll(store, "fin_transfers")).toHaveLength(0);
+    expect((await store.getOrThrow("cash_sessions", s.id)).status).toBe("open");
+    await store.update("financial_accounts", refs.accounts.banco.id, { active: false });
+    await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, transferToAccountId: refs.accounts.banco.id, transferAmount: 5000 })).rejects.toThrow(/Conta de destino/);
+    await store.update("financial_accounts", refs.accounts.banco.id, { active: true });
+    // recolhimento maior que o contado: recusado sem fechar a sessão
+    await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, transferToAccountId: refs.accounts.banco.id, transferAmount: 20000, idemKey: "cl-1" })).rejects.toThrow(/maior que o dinheiro contado/);
+    expect((await store.getOrThrow("cash_sessions", s.id)).status).toBe("open");
+  });
+
+  it("fechamento interrompido antes do recolhimento: repetir conclui a transferência uma única vez", async () => {
+    const s = await openSession(cashier, { terminalId, openingFund: 10000 });
+    const caixaBefore = await balanceOf("caixa-matriz");
+    const bancoBefore = await balanceOf("banco");
+    // a primeira transação depois de fechar (a transferência) falha
+    const proto = Object.getPrototypeOf(store);
+    let fail = true;
+    (store as any).transaction = async (fn: any) => {
+      if (fail) {
+        fail = false;
+        throw new Error("tempo esgotado");
+      }
+      return proto.transaction.call(store, fn);
+    };
+    try {
+      await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, transferToAccountId: refs.accounts.banco.id, transferAmount: 8000, idemKey: "cl-2" })).rejects.toThrow(/tempo esgotado/);
+    } finally {
+      delete (store as any).transaction;
+    }
+    const closed = await store.getOrThrow("cash_sessions", s.id);
+    expect(closed.status).toBe("closed");
+    expect(await listAll(store, "fin_transfers")).toHaveLength(0);
+    const { pendingCloseTransfer } = await import("@/domain/cash");
+    expect((await pendingCloseTransfer(cashier, closed))?.amount).toBe(8000);
+    await closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, transferToAccountId: refs.accounts.banco.id, transferAmount: 8000, idemKey: "cl-2" });
+    await closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, transferToAccountId: refs.accounts.banco.id, transferAmount: 8000, idemKey: "cl-2" });
+    expect(await listAll(store, "fin_transfers")).toHaveLength(1);
+    expect(await balanceOf("caixa-matriz")).toBe(caixaBefore - 8000);
+    expect(await balanceOf("banco")).toBe(bancoBefore + 8000);
+    expect(await pendingCloseTransfer(cashier, await store.getOrThrow("cash_sessions", s.id))).toBeNull();
+  });
+
+  it("operações de caixa somente na filial ativa e na gaveta do próprio operador (ou supervisor)", async () => {
+    const s = await openSession(cashier, { terminalId, openingFund: 10000 });
+    const consolidated = await refs.ctxFor("manager", null);
+    await expect(closeSession(consolidated, { sessionId: s.id, counted: { cash: 10000 } })).rejects.toThrow(/filial/);
+    const otherBranch = await refs.ctxFor("manager", "shopping");
+    await expect(addCashMovement(otherBranch, { sessionId: s.id, type: "supply", amount: 1000, reason: "x", idemKey: "ob-1" })).rejects.toThrow(/outra filial/);
+    await expect(closeSession(otherBranch, { sessionId: s.id, counted: { cash: 10000 } })).rejects.toThrow(/outra filial/);
+    // outro operador sem supervisão não movimenta a gaveta alheia
+    const other = { ...cashier, user: { ...cashier.user, id: refs.users.stockist.id, name: "Outro operador" } };
+    await expect(addCashMovement(other, { sessionId: s.id, type: "withdrawal", amount: 1000, reason: "x", idemKey: "oo-1" })).rejects.toThrow(/operador desta sessão/);
+    await expect(closeSession(other, { sessionId: s.id, counted: { cash: 10000 } })).rejects.toThrow(/operador desta sessão/);
+    // supervisor (Reabrir caixa) pode
+    const sup = await addCashMovement(manager, { sessionId: s.id, type: "supply", amount: 1000, reason: "troco", idemKey: "sup-ok" });
+    expect(sup.amount).toBe(1000);
+    const closed = await closeSession(cashier, { sessionId: s.id, counted: { cash: 11000 } });
+    await expect(reopenSession(otherBranch, closed.id, "conferir")).rejects.toThrow(/outra filial/);
+  });
+
+  it("conferência cega imposta pelo servidor: contagem registrada antes de revelar o previsto", async () => {
+    const { setSetting } = await import("@/lib/core/settings");
+    const { previewClose, expectedVisible } = await import("@/domain/cash");
+    await setSetting(store, refs.company.id, null, "cash.blindClose", true);
+    const s = await openSession(cashier, { terminalId, openingFund: 10000 });
+    expect(await expectedVisible(cashier, await store.getOrThrow("cash_sessions", s.id))).toBe(false);
+    // sem apurar (contagem registrada), não fecha
+    await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, justification: "x" })).rejects.toThrow(/Apurar diferenças/);
+    const p1 = await previewClose(cashier, s.id, { cash: 0 });
+    expect(p1.expected.cash).toBe(10000);
+    expect(p1.differences).toEqual({ cash: -10000 });
+    // depois de ver o previsto, recontar não altera a contagem registrada
+    const p2 = await previewClose(cashier, s.id, { cash: 10000 });
+    expect(p2.counted).toEqual({ cash: 0 });
+    expect(await expectedVisible(cashier, await store.getOrThrow("cash_sessions", s.id))).toBe(true);
+    await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 } })).rejects.toThrow(/justificativa/);
+    const closed = await closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 }, justification: "conferido" });
+    expect(closed.counted).toEqual({ cash: 0 });
+    expect(closed.differences).toEqual({ cash: -10000 });
+    const last = (closed.history as any[]).at(-1);
+    expect(last.blind).toBe(true);
+    expect(last.blindCount.counted).toEqual({ cash: 0 });
+    // reabertura: nova versão exige nova contagem cega
+    await reopenSession(manager, s.id, "recontagem");
+    await expect(closeSession(cashier, { sessionId: s.id, counted: { cash: 10000 } })).rejects.toThrow(/Apurar diferenças/);
+  });
+
+  it("sangrias simultâneas não deixam o dinheiro esperado negativo", async () => {
+    const s = await openSession(cashier, { terminalId, openingFund: 10000 });
+    const res = await Promise.allSettled([
+      addCashMovement(cashier, { sessionId: s.id, type: "withdrawal", amount: 8000, reason: "cofre", idemKey: "wc-1" }),
+      addCashMovement(cashier, { sessionId: s.id, type: "withdrawal", amount: 8000, reason: "cofre", idemKey: "wc-2" }),
+    ]);
+    expect(res.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(String((res.find((r) => r.status === "rejected") as PromiseRejectedResult).reason.message)).toMatch(/maior que o dinheiro disponível/);
+    expect((await sessionSummary(cashier, s.id)).expected.cash).toBe(2000);
+    // repetição da mesma sangria (mesma chave) devolve o mesmo movimento
+    const again = await addCashMovement(cashier, { sessionId: s.id, type: "withdrawal", amount: 8000, reason: "cofre", idemKey: (res[0].status === "fulfilled" ? "wc-1" : "wc-2") });
+    expect(again.amount).toBe(-8000);
+    expect((await sessionSummary(cashier, s.id)).expected.cash).toBe(2000);
   });
 });

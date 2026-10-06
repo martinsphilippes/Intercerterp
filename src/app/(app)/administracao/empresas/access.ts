@@ -22,7 +22,7 @@ export async function companyView(s: SessionInfo, companyId: string, op: Crud = 
   }
 }
 
-export async function branchView(s: SessionInfo, branchId: string, op: Crud = "view"): Promise<{ ctx: Ctx; branch: Doc } | null> {
+export async function branchView(s: SessionInfo, branchId: string, op: Crud = "view"): Promise<{ ctx: Ctx; branch: Doc<any> } | null> {
   try {
     return await branchAdminCtx(s.ctx, branchId, op);
   } catch (e) {

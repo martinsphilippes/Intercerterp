@@ -33,7 +33,8 @@ export async function saveSupplierAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "suppliers", op: id ? "edit" : "create", revalidate: ["/fornecedores"] }, async (s) => {
     const input = parse(fd);
-    const sup = id ? await updateSupplier(s.ctx, id, input) : await createSupplier(s.ctx, input);
+    // idempotência do cadastro: chave estável do formulário (o id não deriva do CNPJ)
+    const sup = id ? await updateSupplier(s.ctx, id, input) : await createSupplier(s.ctx, input, { idemKey: fopt(fd, "_idem") ? `ui:${fstr(fd, "_idem")}` : null });
     return { ok: true as const, data: { id: sup.id }, message: input.status === "draft" ? "Rascunho salvo." : "Fornecedor salvo.", redirect: `/fornecedores/${sup.id}` };
   });
 }

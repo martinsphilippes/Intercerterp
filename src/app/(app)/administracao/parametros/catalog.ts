@@ -17,6 +17,8 @@ export interface ParamDef {
   options?: Array<{ value: string; label: string }>;
   /** onde o parâmetro é usado (transparência para o administrador) */
   usedBy: string;
+  /** definido para toda a instalação (somente leitura na tela; não é gravado por empresa/filial) */
+  installation?: boolean;
 }
 
 export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Notificações", "Usuários", "Regional"];
@@ -37,7 +39,11 @@ export const PARAMS: ParamDef[] = [
   },
   { key: "purchase.monthlyBudget", group: "Compras", label: "Orçamento mensal de compras", help: "0 = sem orçamento. Usado nas aprovações para indicar consumo do orçamento.", type: "money", scopes: ["company", "branch"], default: 0, min: 0, usedBy: "Aprovação de compras" },
   { key: "users.inviteExpiryDays", group: "Usuários", label: "Validade do convite de primeiro acesso", help: "Depois deste prazo o link de convite deixa de funcionar e precisa ser reenviado.", type: "int", scopes: ["company"], default: 7, min: 1, max: 30, unit: "dias", usedBy: "Usuários e permissões (convites)" },
-  { key: "timezone", group: "Regional", label: "Fuso horário da empresa", help: "Recortes de período, agenda de backup e horários de rotinas. A filial pode ter fuso próprio no cadastro da unidade.", type: "timezone", scopes: ["company"], default: "America/Sao_Paulo", usedBy: "Relatórios, rotinas e backup" },
+  {
+    key: "timezone", group: "Regional", label: "Fuso horário", type: "timezone", scopes: ["company"], default: "America/Sao_Paulo", installation: true,
+    help: "Único para toda a instalação (todas as empresas e filiais): define o dia de cada movimento nos recortes de período, o horário das rotinas e a agenda de backup. Para alterar, o responsável técnico define a variável de ambiente APP_TIMEZONE no servidor (ex.: America/Manaus) e reinicia a aplicação.",
+    usedBy: "Relatórios, rotinas e backup (toda a instalação)",
+  },
 ];
 
 export const PARAM_MAP: Record<string, ParamDef> = Object.fromEntries(PARAMS.map((p) => [p.key, p]));

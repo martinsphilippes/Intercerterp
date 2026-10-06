@@ -3,7 +3,8 @@ import { freshStore } from "./helpers";
 import { seedBase } from "@/domain/seed/base";
 import { listAll, detId } from "@/lib/db";
 import { resolvePrices, savePrice, priceMetrics, defaultPriceTableId } from "@/domain/pricing";
-import { createProduct, saveVariants, saveSkuCosts, deleteProduct, setProductStatus, postInitialBalance, generateVariantCombos, isValidGtin, updateProduct, saveUnitConversion, convertQty, saveCategory, deleteCategory, savePriceTable, saveTaxGroup } from "@/domain/products";
+import { createProduct, saveVariants, saveSkuCosts, deleteProduct, setProductStatus, postInitialBalance, generateVariantCombos, isValidGtin, updateProduct, saveUnitConversion, convertQty, saveCategory, deleteCategory, savePriceTable, saveTaxGroup, saveBrand, saveStockParams } from "@/domain/products";
+import { balanceId } from "@/domain/stock";
 import { previewImport, runImport, parseCsv, guessMapping } from "@/domain/product-import";
 import { addDays, today } from "@/lib/dates";
 
@@ -140,6 +141,86 @@ describe("produtos — variações e preços", () => {
     await expect(saveTaxGroup(ctx, { name: "Normal", regime: "normal", cstCsosn: "102" })).rejects.toThrow(/CST/);
     const tg = await saveTaxGroup(ctx, { name: "Normal 00", regime: "normal", cstCsosn: "00", cfopInternal: "5102", cfopInterstate: "6102", icmsRateBps: 1800 });
     expect(tg.icmsRateBps).toBe(1800);
+  });
+});
+
+describe("produtos — isolamento e cadastro completo", () => {
+  it("categoria e marca de outra empresa não são alteradas pelo id", async () => {
+    const { store, ctx } = await setup();
+    const cat = await store.create("categories", { companyId: "OTHER", name: "Alheia", status: "active" });
+    const brand = await store.create("brands", { companyId: "OTHER", name: "Marca alheia", status: "active" });
+    await expect(saveCategory(ctx, { id: cat.id, name: "HACK", status: "inactive" })).rejects.toThrow(/não encontrada/);
+    await expect(saveBrand(ctx, { id: brand.id, name: "HACK", status: "inactive" })).rejects.toThrow(/não encontrada/);
+    expect(await store.get("categories", cat.id)).toMatchObject({ name: "Alheia", status: "active" });
+    expect(await store.get("brands", brand.id)).toMatchObject({ name: "Marca alheia", status: "active" });
+    // a própria empresa continua editando normalmente
+    const own = await saveBrand(ctx, { name: "Nova Marca" });
+    expect((await saveBrand(ctx, { id: own.id, name: "Nova Marca 2" })).name).toBe("Nova Marca 2");
+  });
+
+  it("parâmetros de estoque recusam SKU de outra empresa", async () => {
+    const { store, refs, ctx } = await setup();
+    const wh = refs.warehouses["matriz-main"].id;
+    const foreign = await store.create("skus", { companyId: "OTHER", productId: "p-other", sku: "ALHEIO", name: "SKU alheio", costTotal: 9999, active: true });
+    await expect(saveStockParams(ctx, { warehouseId: wh, skuId: foreign.id, minQty: 1000, maxQty: 0, safetyQty: 0, reorderMultiple: 0 })).rejects.toThrow(/SKU/);
+    expect(await store.get("stock_balances", balanceId(wh, foreign.id))).toBeNull();
+  });
+
+  it("sem tabela de preço padrão, nada é gravado; a repetição após corrigir completa o cadastro", async () => {
+    const { store, ctx } = await setup();
+    const table = (await defaultPriceTableId(store, ctx.companyId))!;
+    await store.update("price_tables", table, { isDefault: false });
+    const input = { type: "product" as const, name: "Garrafa Inox 1 L", unitCode: "UN" };
+    const extras = { idemKey: "form-garrafa", price: 8990, costAcquisition: 3000 };
+    await expect(createProduct(ctx, input, extras)).rejects.toThrow(/tabela de preço padrão/);
+    expect(await listAll(store, "products", { filters: [["eq", "name", "Garrafa Inox 1 L"]] })).toHaveLength(0);
+    expect(await listAll(store, "skus", { filters: [["eq", "name", "Garrafa Inox 1 L"]] })).toHaveLength(0);
+    await store.update("price_tables", table, { isDefault: true });
+    const p = await createProduct(ctx, input, extras);
+    const skus = await listAll(store, "skus", { filters: [["eq", "productId", p.id]] });
+    expect(skus).toHaveLength(1);
+    expect(await listAll(store, "prices", { filters: [["eq", "productId", p.id]] })).toHaveLength(1);
+  });
+
+  it("sem permissão de saldo inicial, o produto não é criado pela metade", async () => {
+    const { store, refs } = await setup();
+    const fiscal = await refs.ctxFor("fiscal", "matriz"); // produtos: sim; estoque: não
+    const wh = refs.warehouses["matriz-main"].id;
+    await expect(createProduct(fiscal, { type: "product", name: "Produto do fiscal", unitCode: "UN" }, { idemKey: "f-1", price: 1000, stock: { warehouseId: wh, qty: 5000 } })).rejects.toThrow(/saldo inicial/);
+    expect(await listAll(store, "products", { filters: [["eq", "name", "Produto do fiscal"]] })).toHaveLength(0);
+    // sem o saldo inicial, cadastra (parâmetros zerados não exigem permissão de estoque)
+    const p = await createProduct(fiscal, { type: "product", name: "Produto do fiscal", unitCode: "UN" }, { idemKey: "f-1", price: 1000, stock: { warehouseId: wh, qty: 0 } });
+    expect(await listAll(store, "prices", { filters: [["eq", "productId", p.id]] })).toHaveLength(1);
+  });
+
+  it("repetição depois de queda no meio do cadastro completa preço, parâmetros e saldo inicial", async () => {
+    const { store, refs, ctx } = await setup();
+    const wh = refs.warehouses["matriz-main"].id;
+    const input = { type: "product" as const, name: "Luminária LED", unitCode: "UN" };
+    const extras = { idemKey: "form-lum", price: 12990, costAcquisition: 5000, stock: { warehouseId: wh, qty: 4000, minQty: 2000, maxQty: 10000 } };
+    // queda simulada ao gravar o preço (depois de produto e SKU gravados)
+    const orig = (store as any).create.bind(store);
+    let armed = true;
+    (store as any).create = async (c: string, d: any, id?: string) => {
+      if (armed && c === "prices") {
+        armed = false;
+        throw new Error("Tempo esgotado");
+      }
+      return orig(c, d, id);
+    };
+    await expect(createProduct(ctx, input, extras)).rejects.toThrow(/Tempo esgotado/);
+    delete (store as any).create;
+    const p = await createProduct(ctx, input, extras);
+    const skus = await listAll(store, "skus", { filters: [["eq", "productId", p.id]] });
+    expect(skus).toHaveLength(1);
+    expect(await listAll(store, "prices", { filters: [["eq", "productId", p.id]] })).toHaveLength(1);
+    const b = (await store.get("stock_balances", balanceId(wh, skus[0].id)))!;
+    expect(b.physical).toBe(4000);
+    expect(b.minQty).toBe(2000);
+    // terceira repetição não duplica nada
+    await createProduct(ctx, input, extras);
+    expect(await listAll(store, "stock_movements", { filters: [["eq", "skuId", skus[0].id]] })).toHaveLength(1);
+    expect(await listAll(store, "skus", { filters: [["eq", "productId", p.id]] })).toHaveLength(1);
   });
 });
 

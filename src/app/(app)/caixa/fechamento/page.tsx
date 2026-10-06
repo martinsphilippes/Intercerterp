@@ -9,6 +9,7 @@ import { formatDateTime } from "@/lib/dates";
 import { sp, type SearchParams } from "@/lib/list";
 import { getSetting } from "@/lib/core/settings";
 import { lookups, nameMap } from "@/lib/server/lookups";
+import { canDo } from "@/lib/permissions";
 import { requiredChecklist, sessionSummary } from "@/domain/cash";
 import { resolveTerminal } from "../../pdv/terminal";
 import { ClosingForm } from "./closing-form";
@@ -35,6 +36,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     session = r.session;
     if (!session) return <>{header}<Notice tone="info" title={`Nenhum caixa aberto em ${r.terminal?.name ?? "terminal"}`}>Não há sessão a fechar. <LinkButton className="ml-2" href="/caixa" size="sm">Ver sessões</LinkButton></Notice></>;
   }
+  if (!s.branch) return <>{header}<Notice tone="warn" title="Selecione a filial da sessão para operar">O contexto consolidado é somente consulta: o fechamento é registrado na filial do caixa.</Notice></>;
+  if (session.branchId !== s.ctx.branchId) return <>{header}<Notice tone="warn" title="Sessão de outra filial">Este caixa pertence a outra filial. Selecione a filial da sessão para fechá-lo.</Notice></>;
+  if (session.operatorId !== s.user.id && !canDo(s.user, "cash.reopen")) {
+    return <>{header}<Notice tone="warn" title="Caixa de outro operador">Somente o operador desta sessão (ou um supervisor de caixa) pode conferir e fechar esta gaveta.</Notice></>;
+  }
   if (!["open", "reopened"].includes(session.status)) {
     return <>{header}<Notice tone="info" title={`Caixa nº ${session.number} já está fechado`}>Consulte a conferência registrada. <LinkButton className="ml-2" size="sm" href={`/caixa/${session.id}`}>Ver sessão</LinkButton></Notice></>;
   }
@@ -44,6 +50,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const cancelled = sales.filter((x) => x.status === "cancelled");
   const count = (t: string) => sum.movements.filter((m) => m.type === t).length;
   const blind = Boolean(await getSetting(store, s.ctx.companyId, session.branchId, "cash.blindClose", false));
+  // conferência cega já apurada nesta versão: o previsto pode ser exibido junto com a contagem registrada
+  const blindCounted = blind && session.blindCount?.version === (session.version ?? 1) ? (session.blindCount.counted as Record<string, number>) : null;
   const methods = Object.entries(sum.byMethod)
     .map(([k, v]) => ({ key: k, label: v.label, count: v.count, expected: k === "cash" ? sum.expected.cash : v.expected }))
     .sort((a, b) => (a.key === "cash" ? -1 : b.key === "cash" ? 1 : a.label.localeCompare(b.label)));
@@ -66,7 +74,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       <ClosingForm
         sessionId={session.id}
         blind={blind}
-        methods={blind ? methods.map((m) => ({ ...m, expected: null })) : methods}
+        methods={blind && !blindCounted ? methods.map((m) => ({ ...m, expected: null })) : methods}
+        initialCounted={blindCounted}
         cashBreakdown={{ opening: sum.totals.opening, cashSales: sum.totals.cashSales, supply: sum.totals.supply, withdrawal: sum.totals.withdrawal, refunds: sum.totals.refunds }}
         checklist={requiredChecklist(sum).map(({ key, label, hint }) => ({ key, label, hint }))}
         accounts={accounts.filter((a) => a.value !== cashAcc?.id)}

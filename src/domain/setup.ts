@@ -51,7 +51,7 @@ export async function createCompanyWithDefaults(
   await put("warehouses", "main", { ...base, branchId: branch.id, code: "PRINC", name: "Depósito principal", kind: "available", isDefault: true, status: "active" });
   await put("warehouses", "damaged", { ...base, branchId: branch.id, code: "AVARIA", name: "Avarias", kind: "damaged", isDefault: false, status: "active" });
   const roles: Record<string, Doc> = {};
-  for (const r of DEFAULT_ROLES) roles[r.key] = await put("roles", r.key, { ...base, key: r.key, name: r.name, description: r.description, permissions: r.permissions, actions: r.actions, discountLimitBps: r.discountLimitBps, system: true, active: true });
+  for (const r of DEFAULT_ROLES) roles[r.key] = await put("roles", r.key, { ...base, key: r.key, name: r.name, description: r.description, permissions: r.permissions, actions: r.actions, templateActions: r.actions, discountLimitBps: r.discountLimitBps, system: true, active: true });
   const table = await put("price_tables", "varejo", { ...base, name: "Varejo", kind: "retail", active: true, isDefault: true });
   await store.update("branches", branch.id, { defaultPriceTableId: table.id });
   for (const u of [["UN", "Unidade"], ["PC", "Peça"], ["CX", "Caixa"], ["KG", "Quilograma"], ["M", "Metro"], ["H", "Hora"]]) await put("units", u[0], { ...base, code: u[0], name: u[1], decimals: u[0] === "KG" ? 3 : 0, status: "active" });

@@ -5,6 +5,7 @@ import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { DEFAULT_SETTINGS, setSetting } from "@/lib/core/settings";
+import { DEFAULT_TZ } from "@/lib/dates";
 import { TIMEZONES } from "@/domain/companies";
 import { PARAMS, PARAM_MAP, type ParamDef } from "./catalog";
 
@@ -16,7 +17,7 @@ export interface ParamState {
   company: unknown;
   branch: unknown;
   effective: unknown;
-  source: "padrão" | "empresa" | "filial";
+  source: "padrão" | "empresa" | "filial" | "instalação";
   updatedAt: string | null;
 }
 
@@ -24,6 +25,11 @@ export interface ParamState {
 export async function loadParameters(store: Store, companyId: string, branchId: string | null): Promise<ParamState[]> {
   const out: ParamState[] = [];
   for (const def of PARAMS) {
+    if (def.installation) {
+      // fuso único da instalação (APP_TIMEZONE): valor efetivo real, sem gravação por empresa/filial
+      out.push({ def, company: undefined, branch: undefined, effective: DEFAULT_TZ, source: "instalação", updatedAt: null });
+      continue;
+    }
     const c = await store.get("settings", settingId(companyId, null, def.key));
     const b = branchId ? await store.get("settings", settingId(companyId, branchId, def.key)) : null;
     const fallback = (DEFAULT_SETTINGS as Record<string, unknown>)[def.key] ?? def.default;
@@ -80,6 +86,7 @@ export async function saveParameters(ctx: Ctx, branchId: string | null, values: 
   for (const [key, raw] of Object.entries(values)) {
     const def = PARAM_MAP[key];
     if (!def) continue;
+    if (def.installation) throw new BusinessError(`${def.label}: definido para toda a instalação (variável APP_TIMEZONE do servidor); não pode ser alterado por empresa ou filial.`, "installation_setting");
     if (!def.scopes.includes(branchId ? "branch" : "company")) continue;
     if (clear.includes(key)) continue;
     parsed[key] = coerce(def, raw);

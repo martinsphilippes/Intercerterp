@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { listAll } from "@/lib/db";
 import { requireSession } from "@/lib/server/session";
+import { canSeeBranch } from "../queries";
 import { audit } from "@/lib/core/audit";
 import { Danfce, Danfe, Danfse, printStamp } from "./print-docs";
 import { PrintToolbar } from "./print-toolbar";
@@ -9,7 +10,7 @@ import { PrintToolbar } from "./print-toolbar";
 export async function PrintPage({ model, id }: { model: "nfe" | "nfce" | "nfse"; id: string }) {
   const s = await requireSession("fiscal");
   const doc = await s.ctx.store.get("fiscal_documents", id);
-  if (!doc || doc.companyId !== s.ctx.companyId) notFound();
+  if (!doc || doc.companyId !== s.ctx.companyId || !canSeeBranch(s.ctx, doc.branchId)) notFound();
   if (doc.model !== model) redirect(`/fiscal/${doc.model}/${id}/imprimir`);
   const company = await s.ctx.store.getOrThrow("companies", doc.companyId);
   const branch = doc.branchId ? await s.ctx.store.get("branches", doc.branchId) : null;

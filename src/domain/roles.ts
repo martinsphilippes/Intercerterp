@@ -6,6 +6,7 @@ import { audit } from "@/lib/core/audit";
 import { searchable } from "@/lib/core/text";
 import { unscoped } from "@/lib/db/scoped-store";
 import { resolveRoleId } from "@/lib/auth/users";
+import { syncRoleTemplate, templateSyncPlan } from "@/lib/auth/role-sync";
 import { MODULES, SPECIAL_ACTIONS, type Crud, type ModuleKey, type PermissionMatrix, type SpecialAction } from "@/lib/permissions";
 
 /**
@@ -48,6 +49,7 @@ export const ACTION_MODULE: Record<string, ModuleKey> = {
   data: "reports",
   admin: "admin",
   support: "support",
+  customer: "customers",
 };
 
 export function actionModule(action: string): ModuleKey {
@@ -162,6 +164,8 @@ async function guard(ctx: Ctx, op: Crud, summary: string, entityId?: string | nu
 
 export async function listRoles(store: Store, companyId: string) {
   const roles = await listAll(store, "roles", { filters: [["eq", "companyId", companyId]] });
+  // perfis de sistema recebem as operações novas dos modelos padrão (idempotente; nada configurado é removido)
+  for (const [i, r] of roles.entries()) if (templateSyncPlan(r)) roles[i] = await syncRoleTemplate(store, r).catch(() => r);
   return roles.sort((a, b) => Number(Boolean(b.system)) - Number(Boolean(a.system)) || String(a.name).localeCompare(String(b.name), "pt-BR"));
 }
 

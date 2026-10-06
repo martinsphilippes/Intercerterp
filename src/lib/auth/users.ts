@@ -2,6 +2,7 @@ import { findOne } from "../db";
 import type { Doc, Store } from "../db/types";
 import type { CtxUser } from "../core/ctx";
 import { ScopedStore, unscoped } from "../db/scoped-store";
+import { syncRoleTemplate, templateSyncPlan } from "./role-sync";
 
 /**
  * Perfil por empresa: o vínculo usuário × empresa define o perfil (`roleByCompany[companyId]`).
@@ -47,7 +48,9 @@ export async function userRoleIn(store: Store, u: Record<string, any>, companyId
  */
 export async function toCtxUser(store: Store, u: Doc, companyId?: string | null): Promise<CtxUser> {
   const cid = companyId ?? (store instanceof ScopedStore ? store.companyId : null);
-  const role = cid ? await userRoleIn(store, u, cid) : u.roleId ? await store.get("roles", u.roleId) : null;
+  let role = cid ? await userRoleIn(store, u, cid) : u.roleId ? await store.get("roles", u.roleId) : null;
+  // perfil de sistema com operações novas no modelo padrão: aplica (idempotente, auditado); falha não bloqueia o acesso
+  if (role && templateSyncPlan(role)) role = await syncRoleTemplate(store, role).catch(() => role);
   return {
     id: u.id,
     name: u.name,

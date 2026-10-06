@@ -1,7 +1,7 @@
 "use server";
 
-import { runAction, fstr, fopt, fint, fjson, fbool } from "@/lib/server/action";
-import { addCashMovement, closeSession, openSession, previewClose, reopenSession } from "@/domain/cash";
+import { runAction, fstr, fopt, fint, fjson } from "@/lib/server/action";
+import { addCashMovement, closeSession, openSession, previewClose, reopenSession, retryCloseTransfer } from "@/domain/cash";
 import { formatMoney } from "@/lib/money";
 
 export async function openSessionAction(fd: FormData) {
@@ -26,14 +26,15 @@ export async function addMovementAction(sessionId: string, fd: FormData) {
 }
 
 export async function previewCloseAction(sessionId: string, counted: Record<string, number>) {
-  return runAction({ module: "cash", op: "edit" }, async (s) => previewClose(s.ctx, sessionId, counted));
+  return runAction({ module: "cash", op: "edit", requireBranch: true }, async (s) => previewClose(s.ctx, sessionId, counted));
 }
 
 export async function closeSessionAction(sessionId: string, fd: FormData) {
-  return runAction({ module: "cash", op: "edit", revalidate: ["/caixa", `/caixa/${sessionId}`, "/pdv"] }, async (s) => {
+  return runAction({ module: "cash", op: "edit", requireBranch: true, revalidate: ["/caixa", `/caixa/${sessionId}`, "/pdv"] }, async (s) => {
     const counted = fjson<Record<string, number>>(fd, "counted", {});
+    // conferência cega: decidida pelo parâmetro no servidor (a contagem registrada na apuração prevalece)
     const session = await closeSession(s.ctx, {
-      sessionId, counted, justification: fopt(fd, "justification"), checklist: fjson(fd, "checklist", {}), enforceChecklist: true, blind: fbool(fd, "blind"),
+      sessionId, counted, justification: fopt(fd, "justification"), checklist: fjson(fd, "checklist", {}), enforceChecklist: true,
       transferToAccountId: fopt(fd, "transferToAccountId"), transferAmount: fint(fd, "transferAmount"), idemKey: `close:${sessionId}:${fstr(fd, "_idem")}`,
     });
     const diff = Object.values(session.differences ?? {}).reduce((a: number, b: any) => a + Number(b), 0);
@@ -45,5 +46,13 @@ export async function reopenSessionAction(sessionId: string, fd: FormData) {
   return runAction({ module: "cash", requireBranch: true, revalidate: ["/caixa", `/caixa/${sessionId}`] }, async (s) => {
     const r = await reopenSession(s.ctx, sessionId, fstr(fd, "reason"));
     return { ok: true as const, message: `Caixa nº ${(r as any).number} reaberto (versão ${r.version}). O fechamento anterior foi preservado.` };
+  });
+}
+
+/** Conclui o recolhimento de um fechamento interrompido (transferência Caixa → conta de destino). */
+export async function retryCloseTransferAction(sessionId: string) {
+  return runAction({ module: "cash", op: "edit", requireBranch: true, revalidate: [`/caixa/${sessionId}`, "/caixa"] }, async (s) => {
+    const tr = await retryCloseTransfer(s.ctx, sessionId);
+    return { ok: true as const, message: `Recolhimento de ${formatMoney(tr.amount)} transferido.` };
   });
 }

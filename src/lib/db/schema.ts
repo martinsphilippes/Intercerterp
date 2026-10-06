@@ -107,6 +107,8 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       companyId: id(), key: s(40), name: s(120, true), description: s(500), permissions: json, actions: strings,
       discountLimitBps: int, system: bool, active: bool, isDemo: bool, createdBy: id(),
+      // perfis de sistema: operações do modelo padrão já aplicadas (sincronização de operações novas do modelo)
+      templateActions: strings,
     },
     indexes: [k("i_company", "companyId")],
   },

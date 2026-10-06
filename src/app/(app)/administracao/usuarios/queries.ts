@@ -3,13 +3,16 @@ import { listAll } from "@/lib/db";
 import type { Ctx } from "@/lib/core/ctx";
 import { normalizeSearch, type ListParams } from "@/lib/list";
 import { companyUsers, inviteState } from "@/domain/users";
+import { unscoped } from "@/lib/db/scoped-store";
+import { resolveRoleId } from "@/lib/auth/users";
 import { listRoles, roleCoverage, roleUsers } from "@/domain/roles";
 
 /** Consulta única da listagem de usuários (tela e exportação). */
 export async function queryUsers(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   const [users, roles, branches] = await Promise.all([
     companyUsers(ctx.store, ctx.companyId),
-    listAll(ctx.store, "roles"),
+    // todos os perfis (somente leitura) para resolver o perfil de cada usuário NESTA empresa (perfil por empresa)
+    listAll(unscoped(ctx.store), "roles"),
     listAll(ctx.store, "branches", { filters: [["eq", "companyId", ctx.companyId]] }),
   ]);
   const roleMap = new Map(roles.map((r) => [r.id, r]));
@@ -17,13 +20,16 @@ export async function queryUsers(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   let rows = users.map((u) => {
     const inv = inviteState(u);
     const ownBranches = (u.branchIds ?? []).filter((b: string) => branchMap.has(b));
+    const roleId = u.isAdmin ? null : resolveRoleId(u, ctx.companyId, roleMap, roles);
+    const role = roleId ? roleMap.get(roleId) : null;
     return {
       ...u,
-      roleName: u.isAdmin ? "Administrador (acesso total)" : (roleMap.get(u.roleId)?.name ?? "—"),
+      roleId,
+      roleName: u.isAdmin ? "Administrador (acesso total)" : (role?.name ?? "Sem perfil nesta empresa"),
       statusKey: inv === "expired" ? "invite_expired" : u.status,
       invite: inv,
       branchesLabel: u.isAdmin || !ownBranches.length ? "Todas as filiais" : ownBranches.map((b: string) => branchMap.get(b)!.name).join(", "),
-      effectiveDiscountBps: u.discountLimitBps ?? (u.isAdmin ? 10000 : (roleMap.get(u.roleId)?.discountLimitBps ?? 0)),
+      effectiveDiscountBps: u.discountLimitBps ?? (u.isAdmin ? 10000 : (role?.discountLimitBps ?? 0)),
       discountSource: u.discountLimitBps != null ? "usuário" : "perfil",
       companiesCount: u.isAdmin ? null : (u.companyIds ?? []).length,
     };

@@ -219,6 +219,33 @@ describe("renegociação: estorno, concorrência, duplicidade e desfazer", () =>
   });
 });
 
+describe("renegociação: desfazer concorrente com recebimento do título novo", () => {
+  it("só uma das operações vence; o título novo nunca fica cancelado com recebimento ativo", async () => {
+    for (const round of [1, 2, 3]) {
+      const t = await receivable([10000], `rn-uc-${round}`);
+      const [i] = await insts(t.id);
+      const nt = await renegotiate(ctx, { titleId: t.id, installmentIds: [i.id], charges: 0, discount: 0, installments: [{ amount: 10000, dueDate: addDays(today(), 30) }], reason: "acordo", idemKey: `rn-uc-n-${round}` });
+      const [n1] = await insts(nt.id);
+      const results = await Promise.allSettled([
+        settleInstallment(ctx, { installmentId: n1.id, date: today(), principal: 2500, accountId: refs.accounts.banco.id, idemKey: `rn-uc-s-${round}` }),
+        undoRenegotiation(ctx, nt.id, "desistência"),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      const active = await listAll(ctx.store, "settlements", { filters: [["eq", "titleId", nt.id], ["eq", "status", "active"], ["eq", "kind", "settlement"]] });
+      const ntNow = await title(nt.id);
+      const iNow = await ctx.store.getOrThrow("installments", i.id);
+      if (ntNow.status === "cancelled") {
+        expect(active).toHaveLength(0);
+        expect(iNow).toMatchObject({ status: "open", balance: 10000 });
+      } else {
+        expect(active).toHaveLength(1);
+        expect(iNow).toMatchObject({ status: "renegotiated", balance: 0 });
+        expect(ntNow.balance).toBe(7500);
+      }
+    }
+  });
+});
+
 describe("conciliação: baixar parcela de novo após desfazer", () => {
   it("depois de desfazer a conciliação e estornar, 'Baixar parcela' na mesma linha cria baixa nova e concilia", async () => {
     const bank = refs.accounts.banco.id;

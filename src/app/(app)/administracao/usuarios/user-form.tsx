@@ -18,6 +18,8 @@ export function UserForm({
   branches,
   canGrantAdmin,
   currentCompanyId,
+  kept,
+  self = false,
 }: {
   user?: Record<string, any> | null;
   roles: RoleOpt[];
@@ -25,6 +27,10 @@ export function UserForm({
   branches: Array<Opt & { companyId: string }>;
   canGrantAdmin: boolean;
   currentCompanyId: string;
+  /** vínculos do usuário com empresas/filiais fora do alcance do editor (preservados pelo servidor) */
+  kept?: { companies: number; branches: number };
+  /** editor (não administrador) editando o próprio cadastro: vínculo, perfil e limite ficam somente leitura */
+  self?: boolean;
 }) {
   const u = user ?? {};
   const router = useRouter();
@@ -102,10 +108,25 @@ export function UserForm({
             </FormSection>
           )}
 
-          <FormSection title="Perfil e permissões" description="O perfil define a matriz por módulo e as operações específicas.">
+          {self && (
+            <>
+              <Notice tone="info">Você está editando o próprio cadastro: perfil, empresas, filiais e limite de desconto só podem ser alterados por outro gestor de usuários.</Notice>
+              <input type="hidden" name="roleId" value={roleId} />
+              {companyIds.map((c) => <input key={c} type="hidden" name="companyIds" value={c} />)}
+              {branchIds.map((b) => <input key={b} type="hidden" name="branchIds" value={b} />)}
+              {u.discountLimitBps != null && (
+                <>
+                  <input type="hidden" name="ownDiscount" value="on" />
+                  <input type="hidden" name="discountPct" value={String(u.discountLimitBps / 100)} />
+                </>
+              )}
+            </>
+          )}
+          <fieldset disabled={self} className="space-y-5">
+          <FormSection title="Perfil e permissões" description="O perfil define a matriz por módulo e as operações específicas. Vale na empresa em uso; nas demais empresas do usuário, o perfil de cada uma é mantido.">
             <FormGrid cols={3}>
-              <Field label="Perfil de acesso" required={!isAdmin}>
-                <Select name="roleId" value={roleId} onChange={(e) => setRoleId(e.target.value)} options={roles} placeholder={isAdmin ? "— (administrador)" : "Selecione"} />
+              <Field label="Perfil de acesso nesta empresa" required={!isAdmin}>
+                <Select name={self ? undefined : "roleId"} value={roleId} onChange={(e) => setRoleId(e.target.value)} options={roles} placeholder={isAdmin ? "— (administrador)" : "Selecione"} />
               </Field>
               <div className="flex flex-col justify-end gap-2 sm:col-span-2">
                 <Checkbox
@@ -164,8 +185,14 @@ export function UserForm({
                 </div>
               </div>
             )}
-            {isAdmin && companyIds.map((c) => <input key={c} type="hidden" name="companyIds" value={c} />)}
+            {isAdmin && !self && companyIds.map((c) => <input key={c} type="hidden" name="companyIds" value={c} />)}
+            {!isAdmin && kept && (kept.companies > 0 || kept.branches > 0) && (
+              <p className="mt-3 text-xs text-slate-500">
+                Este usuário também está vinculado a {kept.companies > 0 ? `${kept.companies} empresa(s)` : ""}{kept.companies > 0 && kept.branches > 0 ? " e " : ""}{kept.branches > 0 ? `${kept.branches} filial(is)` : ""} fora do seu acesso. Esses vínculos são mantidos ao salvar.
+              </p>
+            )}
           </FormSection>
+          </fieldset>
 
           {error && <Notice tone="bad">{error}</Notice>}
           <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap justify-end gap-2 border-t border-line bg-canvas/95 px-1 py-3 backdrop-blur">

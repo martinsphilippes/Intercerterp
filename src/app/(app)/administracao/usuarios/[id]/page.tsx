@@ -15,6 +15,8 @@ import { formatDateTime } from "@/lib/dates";
 import { formatPhone } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import { inviteState } from "@/domain/users";
+import { userRoleIn } from "@/lib/auth/users";
+import { unscoped } from "@/lib/db/scoped-store";
 import { MatrixView } from "../perfis/matrix-view";
 import { setUserStatusAction, cancelInviteAction } from "../actions";
 import { ResendInviteButton } from "../invite-link";
@@ -28,9 +30,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const { tab = "resumo" } = await searchParams;
   const u = await s.ctx.store.get("users", id);
   if (!u || !(u.isAdmin || (u.companyIds ?? []).includes(s.ctx.companyId))) notFound();
-  const role = u.roleId ? await s.ctx.store.get("roles", u.roleId) : null;
-  const [companies, branches] = await Promise.all([listAll(s.ctx.store, "companies"), listAll(s.ctx.store, "branches")]);
-  const manage = can(s.user, "admin", "edit") && canDo(s.user, "admin.users");
+  // perfil do usuário NESTA empresa (perfil por empresa)
+  const role = u.isAdmin ? null : await userRoleIn(s.ctx.store, u, s.ctx.companyId);
+  // nomes de empresas/filiais vinculadas (somente leitura, inclusive de outras empresas)
+  const [companies, branches] = await Promise.all([listAll(unscoped(s.ctx.store), "companies"), listAll(unscoped(s.ctx.store), "branches")]);
+  // quem não é administrador não gerencia o acesso de um administrador
+  const manage = can(s.user, "admin", "edit") && canDo(s.user, "admin.users") && (!u.isAdmin || s.user.isAdmin);
   const self = u.id === s.user.id;
   const inv = inviteState(u);
   const statusKey = inv === "expired" ? "invite_expired" : u.status;
@@ -108,7 +113,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <Card title="Acesso">
             <DefinitionList
               items={[
-                { label: "Perfil", value: u.isAdmin ? "Administrador (acesso total)" : role ? <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/perfis/${role.id}`}>{role.name}</Link> : "—" },
+                { label: "Perfil nesta empresa", value: u.isAdmin ? "Administrador (acesso total)" : role ? <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/perfis/${role.id}`}>{role.name}</Link> : "Sem perfil nesta empresa" },
                 { label: "Limite de desconto", value: `${(discount / 100).toLocaleString("pt-BR")}% (${u.discountLimitBps != null ? "próprio do usuário" : "do perfil"})` },
                 { label: "Empresas", value: companyNames },
                 { label: "Filiais", value: branchNames },

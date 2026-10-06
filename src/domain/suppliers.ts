@@ -106,28 +106,45 @@ function buildData(input: SupplierInput, doc: string | null, code: string) {
   };
 }
 
-export async function createSupplier(ctx: Ctx, input: SupplierInput, opts: { source?: string } = {}) {
+const docLabel = (personType: string | null | undefined) => (personType === "PF" ? "CPF" : "CNPJ");
+
+/**
+ * Cadastro de fornecedor. A unicidade do CPF/CNPJ fica com o índice único `u_doc` (companyId, doc) sobre o
+ * documento ATUAL — corrigir/remover o documento libera o anterior na mesma gravação. O id NÃO deriva do
+ * documento (não é previsível pelo CNPJ); a idempotência vem da chave do formulário (`idemKey`): repetir o
+ * mesmo envio devolve o fornecedor já criado.
+ */
+export async function createSupplier(ctx: Ctx, input: SupplierInput, opts: { source?: string; idemKey?: string | null } = {}) {
   requirePerm(ctx, "suppliers", "create");
+  const sid = opts.idemKey ? detId("supplier", ctx.companyId, "idem", opts.idemKey) : undefined;
+  if (sid) {
+    const existing = await ctx.store.get("suppliers", sid);
+    if (existing && existing.companyId === ctx.companyId) return existing; // repetição do mesmo envio
+  }
   assert(input.name?.trim(), "Informe a razão social / nome.");
   const doc = normalizeSupplierDoc(input.personType, input.doc);
   if (doc) {
     const dup = await findSupplierByDoc(ctx.store, ctx.companyId, doc);
-    if (dup) throw new BusinessError(`Já existe fornecedor com este ${input.personType === "PF" ? "CPF" : "CNPJ"}: ${dup.tradeName || dup.name}.`, "duplicate", { id: dup.id });
+    if (dup) throw new BusinessError(`Já existe fornecedor com este ${docLabel(input.personType)}: ${dup.tradeName || dup.name}.`, "duplicate", { id: dup.id });
   }
   const seq = await nextNumber(ctx.store, `supplier:${ctx.companyId}`);
   const code = input.code?.trim() || `F${String(seq).padStart(5, "0")}`;
   try {
-    const s = await ctx.store.create(
-      "suppliers",
-      { companyId: ctx.companyId, branchId: ctx.branchId, createdBy: ctx.user.id, ...buildData(input, doc, code) },
-      doc ? detId("supplier", ctx.companyId, doc) : undefined,
-    );
+    const s = await ctx.store.create("suppliers", { companyId: ctx.companyId, branchId: ctx.branchId, createdBy: ctx.user.id, ...buildData(input, doc, code) }, sid);
     await audit(ctx, { module: "suppliers", action: "supplier.create", entityType: "supplier", entityId: s.id, summary: `Fornecedor ${s.tradeName || s.name} cadastrado${opts.source ? ` (${opts.source})` : ""}` });
     return s;
   } catch (e) {
-    if (isConflict(e) && doc) {
-      const dup = await findSupplierByDoc(ctx.store, ctx.companyId, doc);
-      throw new BusinessError(`Já existe fornecedor com este documento${dup ? `: ${dup.tradeName || dup.name}` : ""}.`, "duplicate", { id: dup?.id });
+    if (isConflict(e)) {
+      // envio concorrente com a mesma chave: devolve o registro gravado pelo outro envio
+      if (sid) {
+        const again = await ctx.store.get("suppliers", sid);
+        if (again && again.companyId === ctx.companyId) return again;
+      }
+      // documento gravado ao mesmo tempo por outro cadastro (índice único)
+      if (doc) {
+        const dup = await findSupplierByDoc(ctx.store, ctx.companyId, doc);
+        throw new BusinessError(`Já existe fornecedor com este ${docLabel(input.personType)}${dup ? `: ${dup.tradeName || dup.name}` : ""}.`, "duplicate", dup ? { id: dup.id } : undefined);
+      }
     }
     throw e;
   }
@@ -140,7 +157,7 @@ export async function updateSupplier(ctx: Ctx, id: string, input: SupplierInput)
   const doc = normalizeSupplierDoc(input.personType, input.doc);
   if (doc && doc !== before.doc) {
     const dup = await findSupplierByDoc(ctx.store, ctx.companyId, doc);
-    if (dup && dup.id !== id) throw new BusinessError(`Documento já usado pelo fornecedor ${dup.tradeName || dup.name}.`, "duplicate", { id: dup.id });
+    if (dup && dup.id !== id) throw new BusinessError(`${docLabel(input.personType)} já usado pelo fornecedor ${dup.tradeName || dup.name}.`, "duplicate", { id: dup.id });
   }
   // situação bloqueado/inativo só muda pelas ações próprias (com motivo)
   const data = buildData({ ...input, status: ["blocked", "inactive"].includes(before.status) && input.status !== "draft" ? before.status : input.status }, doc, input.code?.trim() || before.code);
@@ -150,7 +167,10 @@ export async function updateSupplier(ctx: Ctx, id: string, input: SupplierInput)
     if (Object.keys(d.after).length) await audit(ctx, { module: "suppliers", action: "supplier.update", entityType: "supplier", entityId: id, summary: `Cadastro do fornecedor ${after.tradeName || after.name} alterado`, before: d.before, after: d.after });
     return after;
   } catch (e) {
-    if (isConflict(e)) throw new BusinessError("Documento já usado por outro fornecedor.", "duplicate");
+    if (isConflict(e) && doc) {
+      const dup = await findSupplierByDoc(ctx.store, ctx.companyId, doc);
+      throw new BusinessError(`${docLabel(input.personType)} já usado ${dup && dup.id !== id ? `pelo fornecedor ${dup.tradeName || dup.name}` : "por outro fornecedor"}.`, "duplicate", dup ? { id: dup.id } : undefined);
+    }
     throw e;
   }
 }

@@ -8,7 +8,6 @@ import { Notice } from "@/components/ui/empty";
 import { listAll } from "@/lib/db";
 import { can, canDo } from "@/lib/permissions";
 import { sp, type SearchParams } from "@/lib/list";
-import { TIMEZONES } from "@/domain/companies";
 import { getSchedule } from "@/domain/backup";
 import { loadParameters } from "./params";
 import { PARAM_GROUPS, describeSchedule } from "./catalog";
@@ -55,7 +54,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
               {canDo(s.user, "admin.backup") ? <Link className="text-brand-700 hover:underline" href="/administracao/backups?tab=programacao">Alterar programação</Link> : null}
             </p>
           </Card>
-          <ParamsForm scope={scope} states={JSON.parse(JSON.stringify(states))} groups={PARAM_GROUPS} timezones={TIMEZONES} readOnly={!can(s.user, "admin", "edit")} />
+          <ParamsForm scope={scope} states={JSON.parse(JSON.stringify(states))} groups={PARAM_GROUPS} readOnly={!can(s.user, "admin", "edit")} />
         </div>
       )}
       {tab === "historico" && (

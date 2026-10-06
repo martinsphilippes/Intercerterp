@@ -19,7 +19,14 @@ import { createSupplier, findSupplierByDoc, supplierLabel } from "./suppliers";
 /**
  * Recebimento de mercadorias (Tela 29).
  *  - Importação real de XML de NF-e (upload) ou chave + itens dos pedidos (sem XML).
- *  - Mesma chave/XML não duplica: índice único `receipts.scopeKey` = empresa|nfe|chave.
+ *  - Mesma chave/XML não duplica: índice único `receipts.scopeKey` = empresa|nfe|chave. O id do registro vem
+ *    do número (não da chave): cancelar muda o scopeKey e a mesma NF-e pode ser importada de novo.
+ *  - NF-e denegada é recusada; de homologação (sem valor fiscal) só em empresa de demonstração; XML sem
+ *    protocolo de autorização só é confirmado com justificativa.
+ *  - Sem XML: IPI e desconto geral do pedido proporcionais ao alocado; frete/seguro/outras despesas do pedido
+ *    cobrados uma única vez (marcador por pedido na confirmação). O total faturado informado é comparado ao
+ *    devido (tolerância `purchase.receiptValueTolerance`, padrão 0) e a divergência exige justificativa.
+ *  - Escritas exigem a filial do recebimento (contexto consolidado é somente consulta).
  *  - Mapeamento código do fornecedor (cProd) → SKU interno, aprendido em `supplier_products`.
  *  - Comparação previsto (saldo do pedido) × faturado (XML) × recebido (conferência).
  *  - Confirmação: entrada de estoque (custo médio com frete/despesas rateados), atualização de custo
@@ -384,11 +391,18 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
   if (!supplier) {
     if (input.createSupplier === false) throw new BusinessError(`Fornecedor ${nfe.emitter.name} (${emitterDoc}) não cadastrado.`, "supplier_missing");
     if (!ctx.user.isAdmin && !ctx.user.permissions?.suppliers?.create) throw new BusinessError(`Fornecedor ${nfe.emitter.name} (CNPJ ${emitterDoc}) não está cadastrado e seu perfil não permite cadastrar fornecedores. Peça o cadastro em Compras → Fornecedores e importe o XML novamente.`, "supplier_missing");
-    supplier = await createSupplier(
-      ctx,
-      { personType: nfe.emitter.cnpj ? "PJ" : "PF", doc: emitterDoc, name: nfe.emitter.name, tradeName: nfe.emitter.tradeName, ie: nfe.emitter.ie, addresses: [{ type: "principal", ...Object.fromEntries(Object.entries(nfe.emitter.address).map(([k, v]) => [k, v ?? undefined])) }], status: "active" },
-      { source: `a partir do XML da NF-e ${nfe.number}` },
-    );
+    try {
+      supplier = await createSupplier(
+        ctx,
+        { personType: nfe.emitter.cnpj ? "PJ" : "PF", doc: emitterDoc, name: nfe.emitter.name, tradeName: nfe.emitter.tradeName, ie: nfe.emitter.ie, addresses: [{ type: "principal", ...Object.fromEntries(Object.entries(nfe.emitter.address).map(([k, v]) => [k, v ?? undefined])) }], status: "active" },
+        { source: `a partir do XML da NF-e ${nfe.number}` },
+      );
+    } catch (e) {
+      // outra importação do mesmo emitente cadastrou o fornecedor ao mesmo tempo (índice único do documento)
+      const again = e instanceof BusinessError && e.code === "duplicate" ? await findSupplierByDoc(ctx.store, ctx.companyId, emitterDoc) : null;
+      if (!again) throw e;
+      supplier = again;
+    }
   }
   assert(supplier.status !== "inactive", `Fornecedor ${supplierLabel(supplier)} está inativo — reative antes de receber.`);
   let orderIds: string[];

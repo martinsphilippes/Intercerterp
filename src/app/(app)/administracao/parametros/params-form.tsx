@@ -11,7 +11,7 @@ import type { ParamDef } from "./catalog";
 
 type State = { def: ParamDef; company: unknown; branch: unknown; effective: unknown; source: string; updatedAt: string | null };
 
-export function ParamsForm({ scope, states, groups, timezones, readOnly }: { scope: string; states: State[]; groups: string[]; timezones: string[]; readOnly: boolean }) {
+export function ParamsForm({ scope, states, groups, readOnly }: { scope: string; states: State[]; groups: string[]; readOnly: boolean }) {
   const isBranch = scope !== "company";
   const [clear, setClear] = useState<string[]>([]);
   const visible = states.filter((s) => s.def.scopes.includes(isBranch ? "branch" : "company"));
@@ -43,7 +43,7 @@ export function ParamsForm({ scope, states, groups, timezones, readOnly }: { sco
                           <p className="text-sm font-medium text-ink">{d.label}</p>
                           <p className="mt-0.5 text-xs text-slate-500">{d.help}</p>
                           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                            <Badge tone={st.source === "filial" ? "accent" : st.source === "empresa" ? "brand" : "neutral"}>{st.source === "padrão" ? "Valor padrão" : `Definido na ${st.source}`}</Badge>
+                            <Badge tone={st.source === "filial" ? "accent" : st.source === "empresa" ? "brand" : "neutral"}>{st.source === "padrão" ? "Valor padrão" : st.source === "instalação" ? "Definido na instalação (somente leitura)" : `Definido na ${st.source}`}</Badge>
                             <span>Usado em: {d.usedBy}</span>
                             {isBranch && st.source === "filial" && !readOnly && (
                               <button type="button" className="text-brand-700 underline" onClick={() => setClear((c) => (c.includes(d.key) ? c.filter((x) => x !== d.key) : [...c, d.key]))}>
@@ -65,7 +65,7 @@ export function ParamsForm({ scope, states, groups, timezones, readOnly }: { sco
                           {d.type === "bps" && <Input name={name} type="number" step={0.01} min={(d.min ?? 0) / 100} max={(d.max ?? 10000) / 100} defaultValue={String(Number(v ?? 0) / 100)} disabled={cleared} className="w-32" aria-label={d.label} />}
                           {d.type === "money" && <MoneyInput name={name} defaultValue={Number(v ?? 0)} disabled={cleared} ariaLabel={d.label} />}
                           {d.type === "select" && <Select name={name} defaultValue={String(v ?? "")} options={d.options ?? []} disabled={cleared} aria-label={d.label} />}
-                          {d.type === "timezone" && <Select name={name} defaultValue={String(v ?? "America/Sao_Paulo")} options={timezones.map((t) => ({ value: t, label: t }))} disabled={cleared} aria-label={d.label} />}
+                          {d.type === "timezone" && <span className="text-sm font-medium text-ink" aria-label={d.label}>{String(v ?? "")}</span>}
                           {d.unit && <span className="text-sm text-slate-500">{d.unit}</span>}
                         </div>
                       </li>

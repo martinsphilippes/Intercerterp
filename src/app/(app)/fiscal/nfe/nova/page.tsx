@@ -55,7 +55,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
   if (sp.rascunho) {
     const d = await s.ctx.store.get("fiscal_documents", sp.rascunho);
     if (!d || d.companyId !== s.ctx.companyId || d.model !== "nfe") loadError = "Rascunho não encontrado.";
-    else if (!["draft", "pending", "rejected"].includes(d.status)) redirect(`/fiscal/nfe/${d.id}`);
+    else if (!["draft", "pending", "rejected"].includes(d.status) || d.branchId !== branchId) redirect(`/fiscal/nfe/${d.id}`);
     else {
       initial = docToInput(d);
       draftId = d.id;

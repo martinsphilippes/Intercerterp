@@ -14,7 +14,7 @@ import { notify, resolveOccurrence } from "@/lib/core/notify";
 import { markNotifications, archiveNotifications, setNotificationPrefs, queryNotifications } from "@/domain/notifications";
 import { createTicket, replyTicket, updateTicket, ticketMessages, queryTickets } from "@/domain/support";
 import { createBranch, createCompany, updateBranch } from "@/domain/companies";
-import { createTerminal, checkConnectorFromServer, recordBrowserPrintPage } from "@/domain/terminals";
+import { createTerminal, recordConnectorNotConfigured, recordBrowserPrintPage } from "@/domain/terminals";
 import { ensureHelpArticles, HELP_ARTICLES, articlesForRoute, searchArticles } from "@/domain/help-content";
 import type { Ctx } from "@/lib/core/ctx";
 import { saveParameters, loadParameters } from "@/app/(app)/administracao/parametros/params";
@@ -157,7 +157,8 @@ describe("suspensão e último administrador", () => {
     const mgrRole = await createRole(admin, { name: "Gestor de acessos", permissions: { admin: { view: true, create: true, edit: true } } as any, actions: ["admin.users"], discountLimitBps: 0 });
     const { user: mgr } = await createUser(admin, { name: "Gestor", email: "gestor@teste.local", roleId: mgrRole.id, companyIds: [refs.company.id], branchIds: [], mode: "password", password: "Senha@1234" });
     const mctx = await ctxOfUser(mgr.id);
-    await expect(setUserStatus(mctx, a.id, "suspended", "teste")).rejects.toThrow(/último administrador/);
+    // (e, não sendo administrador, não gerencia administrador algum)
+    await expect(setUserStatus(mctx, a.id, "suspended", "teste")).rejects.toThrow(/Somente administradores/);
     // e não pode conceder acesso de administrador
     await expect(updateUser(mctx, mgr.id, { name: mgr.name, email: mgr.email, roleId: mgrRole.id, isAdmin: true, companyIds: [refs.company.id], branchIds: [] })).rejects.toThrow(/Somente administradores/);
     // com um segundo administrador ativo, o primeiro pode ser rebaixado
@@ -260,12 +261,14 @@ describe("empresas, filiais e terminais", () => {
     const t = await createTerminal(admin, { branchId: refs.branches.matriz.id, code: "CX09", name: "Caixa 09", nfceSeries: 9, printerMode: "browser", paperWidth: 58, scannerMode: "keyboard_wedge", tefProvider: "manual_pos", allowNegativeStock: false });
     const msg = await recordBrowserPrintPage(admin, t.id, { userAgent: "vitest" });
     expect(msg).toMatch(/não confirma a impressão física/);
-    const nv = await checkConnectorFromServer(admin, t.id);
+    const nv = await recordConnectorNotConfigured(admin, t.id);
     expect(nv.verified).toBe(false);
     expect(nv.message).toMatch(/Não verificado/);
     await expect(createTerminal(admin, { branchId: refs.branches.matriz.id, code: "CX10", name: "Caixa 10", printerMode: "connector", paperWidth: 80, scannerMode: "keyboard_wedge", tefProvider: "manual_pos", allowNegativeStock: false })).rejects.toThrow(/URL do conector/);
     const t2 = await createTerminal(admin, { branchId: refs.branches.matriz.id, code: "CX10", name: "Caixa 10", printerMode: "connector", connectorUrl: "http://127.0.0.1:9", paperWidth: 80, scannerMode: "keyboard_wedge", tefProvider: "manual_pos", allowNegativeStock: false });
-    const fail = await checkConnectorFromServer(admin, t2.id);
+    // falha real medida pelo navegador do caixa é registrada (o servidor não contata o conector)
+    const { recordConnectorCheck } = await import("@/domain/terminals");
+    const fail = await recordConnectorCheck(admin, t2.id, { ok: false, verified: true, origin: "browser", latencyMs: 12, message: "Falha ao contatar o conector a partir do navegador: connection refused" });
     expect(fail.verified).toBe(true);
     expect(fail.ok).toBe(false);
     expect((await store.get("terminals", t2.id))!.lastPrinterTestResult).toMatch(/Conector com falha/);

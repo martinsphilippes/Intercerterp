@@ -11,6 +11,8 @@ import { formatMoney } from "@/lib/money";
 import { formatDoc, formatPhone, isValidCnpj, isValidCpf, onlyDigits } from "@/lib/core/text";
 import { quickCustomerAction } from "../clientes/actions";
 
+const newIdemKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+
 export interface CustomerInfo {
   id: string;
   name: string;
@@ -78,6 +80,8 @@ export function CustomerPicker({
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ personType: "PF", name: "", doc: "", mobile: "", email: "" });
+  // chave de idempotência do cadastro rápido: estável até o sucesso (duplo clique/repetição não duplica o cliente)
+  const [quickIdem, setQuickIdem] = useState(newIdemKey);
 
   useEffect(() => {
     if (open) {
@@ -123,12 +127,15 @@ export function CustomerPicker({
   const formDocValid = !formDocDigits || (form.personType === "PF" ? isValidCpf(formDocDigits) : isValidCnpj(formDocDigits));
 
   const createQuick = () => {
+    if (pending) return;
     setError(null);
     const fd = new FormData();
     for (const [k, v] of Object.entries(form)) fd.set(k, v);
+    fd.set("_idem", quickIdem);
     start(async () => {
       const res = await quickCustomerAction(fd);
       if (!res.ok) return setError(res.error);
+      setQuickIdem(newIdemKey());
       const c = res.data as any;
       onSelect({ id: c.id, name: c.name, personType: c.personType, doc: c.doc ?? null, email: c.email ?? null, mobile: c.mobile ?? null, creditLimit: c.creditLimit ?? 0, openBalance: 0, creditAvailable: c.creditLimit ?? 0, status: "active" });
       setForm({ personType: "PF", name: "", doc: "", mobile: "", email: "" });

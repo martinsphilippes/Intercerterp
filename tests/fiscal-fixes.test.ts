@@ -142,6 +142,7 @@ describe("Uma operação → um documento fiscal ativo (critical)", () => {
     expect(nfce.status).toBe("pending");
     expect(nfce.attempts ?? 0).toBe(0);
     expect(nfce.statusMessage).toMatch(/NF-e/);
+    expect(nfce.contingency).toBe(false); // saiu da fila retida sem envio
     const authorized = (await listAll(store, "fiscal_documents", { filters: [["eq", "originType", "sale"], ["eq", "originId", s.id]] })).filter((d) => d.status === "authorized");
     expect(authorized).toHaveLength(1);
   });

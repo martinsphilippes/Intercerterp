@@ -3,6 +3,7 @@ import { ensureHelpArticles } from "../../help-content";
 import { createTicket, replyTicket } from "../../support";
 import { createUser } from "../../users";
 import { createBackup } from "../../backup";
+import { syncSystemRoles } from "@/lib/auth/role-sync";
 
 /**
  * Cenários de demonstração do módulo (admin/suporte). Idempotente (chaves determinísticas):
@@ -13,6 +14,8 @@ import { createBackup } from "../../backup";
  */
 export async function seed(refs: DemoRefs): Promise<unknown> {
   const store = refs.seeder.store;
+  // perfis de sistema recebem as operações novas dos modelos padrão (repetível; nada configurado é removido)
+  await syncSystemRoles(store, refs.company.id);
   const help = await ensureHelpArticles(store);
   const admin = await refs.ctxFor("admin", "matriz");
   const cashier = await refs.ctxFor("cashier", "matriz");

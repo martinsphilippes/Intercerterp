@@ -57,7 +57,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "lastAccessAt", label: "Acesso", sortable: true, cell: (r) => <span className="flex flex-col items-start gap-0.5"><StatusBadge kind="user" status={r.statusKey} /><span className="text-xs text-slate-500">{accessDetail(r)}</span></span> },
     { key: "firstAccessAt", label: "Primeiro acesso", sortable: true, hidden: true, cell: (r) => formatDateTime(r.firstAccessAt) },
     { key: "inviteExpiresAt", label: "Convite expira", sortable: true, hidden: true, cell: (r) => (r.status === "invited" ? formatDateTime(r.inviteExpiresAt) : "—") },
-    { key: "actions", label: "Ações", align: "right", cell: (r) => (manageUsers ? <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/${r.id}/editar`}>Editar</Link> : <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/${r.id}`}>Abrir</Link>) },
+    { key: "actions", label: "Ações", align: "right", cell: (r) => (manageUsers && (!r.isAdmin || s.user.isAdmin) ? <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/${r.id}/editar`}>Editar</Link> : <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/${r.id}`}>Abrir</Link>) },
   ];
   const count = (st: string) => all.filter((u) => u.statusKey === st).length;
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

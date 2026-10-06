@@ -21,10 +21,12 @@ const ICON: Record<string, React.ReactNode> = { cash: <Banknote className="size-
  * Diferenças nunca são ajustadas automaticamente: exigem justificativa e ficam preservadas no fechamento.
  * Conferência cega (parâmetro cash.blindClose): o previsto só é revelado após informar os valores contados.
  */
-export function ClosingForm({ sessionId, blind, methods, cashBreakdown, checklist, accounts }: { sessionId: string; blind: boolean; methods: Method[]; cashBreakdown: { opening: number; cashSales: number; supply: number; withdrawal: number; refunds: number }; checklist: Array<{ key: string; label: string; hint: string }>; accounts: Array<{ value: string; label: string }> }) {
+export function ClosingForm({ sessionId, blind, methods, initialCounted, cashBreakdown, checklist, accounts }: { sessionId: string; blind: boolean; methods: Method[]; initialCounted?: Record<string, number> | null; cashBreakdown: { opening: number; cashSales: number; supply: number; withdrawal: number; refunds: number }; checklist: Array<{ key: string; label: string; hint: string }>; accounts: Array<{ value: string; label: string }> }) {
   const toast = useToast();
-  const [counted, setCounted] = useState<Record<string, number | null>>(Object.fromEntries(methods.map((m) => [m.key, null])));
-  const [expected, setExpected] = useState<Record<string, number> | null>(blind ? null : Object.fromEntries(methods.map((m) => [m.key, m.expected ?? 0])));
+  const [counted, setCounted] = useState<Record<string, number | null>>(Object.fromEntries(methods.map((m) => [m.key, initialCounted ? (initialCounted[m.key] ?? 0) : null])));
+  // conferência cega: o previsto só chega do servidor depois que a contagem é registrada (apuração)
+  const [expected, setExpected] = useState<Record<string, number> | null>(blind && !initialCounted ? null : Object.fromEntries(methods.map((m) => [m.key, m.expected ?? 0])));
+  const countLocked = blind && expected != null;
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [justification, setJustification] = useState("");
   const [transferTo, setTransferTo] = useState("");
@@ -38,12 +40,16 @@ export function ClosingForm({ sessionId, blind, methods, cashBreakdown, checklis
   const totalDiff = totalExpected == null ? null : totalCounted - totalExpected;
   const hasDiff = diffs ? Object.values(diffs).some((d) => d !== 0) : false;
   const allChecked = checklist.every((c) => checks[c.key]);
-  const canClose = filled && expected != null && allChecked && (!hasDiff || justification.trim().length > 0);
+  const transferOver = Boolean(transferTo) && transferAmount > (numeric.cash ?? 0);
+  const canClose = filled && expected != null && allChecked && (!hasDiff || justification.trim().length > 0) && !transferOver;
   const reveal = () =>
     startReveal(async () => {
       const res = await previewCloseAction(sessionId, numeric);
       if (!res.ok) return toast("error", res.error);
       setExpected(res.data!.expected);
+      // a contagem que vale é a registrada no servidor (não pode ser alterada depois da revelação)
+      const reg = res.data!.counted ?? {};
+      setCounted(Object.fromEntries(methods.map((m) => [m.key, reg[m.key] ?? 0])));
     });
   return (
     <ActionForm action={closeSessionAction.bind(null, sessionId)} confirm={hasDiff ? `Fechar o caixa com divergência de ${formatMoney(totalDiff ?? 0)}? A diferença ficará registrada com a justificativa.` : undefined}>
@@ -65,7 +71,7 @@ export function ClosingForm({ sessionId, blind, methods, cashBreakdown, checklis
                         </td>
                         <td className="tabular text-right">{expected ? formatMoney(expected[m.key] ?? 0) : <span className="flex items-center justify-end gap-1 text-slate-400"><EyeOff className="size-4" /> oculto</span>}</td>
                         <td className="w-44 text-right">
-                          <MoneyInput value={counted[m.key] ?? 0} onChange={(v) => setCounted({ ...counted, [m.key]: v })} ariaLabel={`Informado ${m.label}`} />
+                          <MoneyInput value={counted[m.key] ?? 0} onChange={(v) => setCounted({ ...counted, [m.key]: v })} ariaLabel={`Informado ${m.label}`} disabled={countLocked} />
                           {!blind && expected && counted[m.key] == null && <button type="button" className="mt-0.5 text-xs text-brand-700 underline" onClick={() => setCounted({ ...counted, [m.key]: expected[m.key] ?? 0 })}>conferido = esperado</button>}
                         </td>
                         <td className={cn("tabular text-right font-medium", d == null ? "text-slate-400" : d === 0 ? "text-emerald-700" : "text-red-700")}>{d == null ? "—" : `${d > 0 ? "+" : ""}${formatMoney(d)}`}</td>
@@ -91,7 +97,7 @@ export function ClosingForm({ sessionId, blind, methods, cashBreakdown, checklis
             {blind && (
               <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3 text-sm">
                 <EyeOff className="size-4 text-slate-500" />
-                <span className="flex-1 text-slate-600">Conferência cega: a coluna “Esperado” fica oculta e só é exibida após informar a contagem.</span>
+                <span className="flex-1 text-slate-600">Conferência cega: a coluna “Esperado” fica oculta e só é exibida após informar a contagem. Ao apurar, a contagem fica registrada e não pode mais ser alterada.</span>
                 <Button type="button" size="sm" variant="primary" onClick={reveal} loading={revealing} disabled={!filled || Boolean(expected)}>{expected ? "Previsto revelado" : "Apurar diferenças"}</Button>
               </div>
             )}
@@ -123,20 +129,22 @@ export function ClosingForm({ sessionId, blind, methods, cashBreakdown, checklis
                 <div className="mt-2 grid gap-2">
                   <Select value={transferTo} onChange={(e) => setTransferTo(e.target.value)} placeholder="Não recolher agora" options={accounts} aria-label="Conta de destino" />
                   {transferTo && <MoneyInput value={transferAmount} onChange={setTransferAmount} ariaLabel="Valor recolhido" />}
+                  {transferOver && <p className="text-xs text-red-700">O recolhimento não pode passar do dinheiro contado ({formatMoney(numeric.cash ?? 0)}).</p>}
                   <p className="text-xs text-slate-500">Gera transferência entre contas (Caixa → destino) com o valor informado, limitado ao dinheiro contado.</p>
                 </div>
               </details>
               <input type="hidden" name="counted" value={JSON.stringify(numeric)} />
               <input type="hidden" name="checklist" value={JSON.stringify(checks)} />
-              <input type="hidden" name="blind" value={blind ? "1" : ""} />
               <input type="hidden" name="transferToAccountId" value={transferTo} />
               <input type="hidden" name="transferAmount" value={transferTo ? transferAmount : 0} />
               <button type="submit" disabled={pending || !canClose} className={buttonClass("accent", "lg", "w-full")}>
                 <Lock className="size-4" /> Confirmar e fechar caixa
               </button>
-              <Link href={`/caixa/${sessionId}/relatorio`} target="_blank" className={buttonClass("secondary", "md", "w-full")}>
-                <FileText className="size-4" /> Visualizar relatório antes de fechar
-              </Link>
+              {(!blind || expected) && (
+                <Link href={`/caixa/${sessionId}/relatorio`} target="_blank" className={buttonClass("secondary", "md", "w-full")}>
+                  <FileText className="size-4" /> Visualizar relatório antes de fechar
+                </Link>
+              )}
               {!allChecked && <p className="text-xs text-amber-800">Marque todas as conferências finais para liberar o fechamento.</p>}
               <p className="text-xs text-slate-500">O fechamento não poderá ser alterado sem autorização administrativa (reabertura gera nova versão e preserva esta conferência).</p>
             </section>

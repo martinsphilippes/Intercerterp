@@ -1194,7 +1194,9 @@ export async function transmitDocument(ctx: Ctx, documentId: string) {
   const hold = async (message: string) => {
     const status = absent ? "pending" : "error";
     const msg = absent ? message : `${message} Documento já enviado antes e sem confirmação do provedor: consulte a situação antes de descartar.`;
-    doc = await ctx.store.update("fiscal_documents", doc.id, { status, statusMessage: msg.slice(0, 4000) });
+    // fora da fila retida: a marca de contingência (retenção interna, nunca enviado) deixa de valer
+    const leftQueue = (doc.attempts ?? 0) === 0 && doc.contingency ? { contingency: false } : {};
+    doc = await ctx.store.update("fiscal_documents", doc.id, { status, statusMessage: msg.slice(0, 4000), ...leftQueue });
     await addEvent(ctx, doc.id, "validation", status, msg);
     await raiseFiscalIssue(ctx, doc, msg);
     await syncOrigin(ctx, doc);

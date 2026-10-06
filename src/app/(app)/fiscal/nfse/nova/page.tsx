@@ -26,7 +26,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ i
   if (sp.id) {
     const d = await s.ctx.store.get("fiscal_documents", sp.id);
     if (!d || d.companyId !== s.ctx.companyId || d.model !== "nfse") redirect("/fiscal/nfse");
-    if (!["draft", "pending", "rejected"].includes(d.status)) redirect(`/fiscal/nfse/${d.id}`);
+    // edição só na filial do documento (o detalhe orienta a trocar a filial)
+    if (!["draft", "pending", "rejected"].includes(d.status) || d.branchId !== s.branch.id) redirect(`/fiscal/nfse/${d.id}`);
     doc = d;
   }
   const cfg = await getFiscalConfig(s.ctx.store, s.ctx.companyId, s.branch.id);
