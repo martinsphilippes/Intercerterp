@@ -19,6 +19,14 @@ O app abre em tela cheia, com atalhos para PDV, Painel, Produtos e Contas a rece
 
 **Acesso rápido (ambiente de teste):** com `SHOW_DEMO_LOGIN=1`, a tela de login lista os usuários da empresa de demonstração por setor, com a senha e um botão “Entrar” de um clique. Só aparecem usuários marcados como demonstração (nunca contas reais nem o administrador geral). Remova a variável ao entrar em operação real.
 
+## Gestão contábil (escritórios de contabilidade)
+
+Uma empresa pode ser criada como **escritório contábil** (Administração → Empresas → Nova empresa → tipo). O escritório tem menu próprio (`/contabil`): carteira de clientes contábeis (PF/PJ, sócios, estabelecimentos, regime com vigência, grupos), departamentos e responsáveis (carteira restrita por responsável), caixa de entrada de entregas e o financeiro/fiscal de serviços do próprio escritório. Vários escritórios convivem na mesma instalação sem se enxergar.
+
+**Vínculo com empresas que usam o ERP:** o escritório emite um código de vínculo para o cliente; o administrador da empresa informa o código em Administração → Integrações → Área da contabilidade. Com o vínculo ativo, o escritório consulta a situação fiscal da empresa (somente leitura) e o pacote mensal de XMLs chega sozinho na caixa de entrada do escritório. Regras em `docs/regras-assumidas.md` §21; o que falta para o escopo completo está em `docs/analise-gestao-contabil.md`.
+
+Na demonstração: escritório "Contábil Horizonte (DEMO)" com os usuários `contador` (sócio) e `analista` (carteira restrita), 4 clientes e a loja de demonstração já vinculada.
+
 ## Instalação automatizada (sem a tela de primeiro acesso)
 
 `GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação) e `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema).
