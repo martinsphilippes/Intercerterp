@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { freshStore } from "./helpers";
 import { seedBase, type DemoRefs } from "@/domain/seed/base";
 import "@/domain/jobs-registry";
@@ -61,22 +59,31 @@ describe("Central de integrações — estados medidos", () => {
     expect((await testIntegration(c, "bank", null)).status).toBe("unavailable");
   });
 
-  it("TEF via conector: teste real HTTP (operacional / recusado / inacessível)", async () => {
+  it("TEF via conector: estado vem da verificação feita pelo navegador do caixa; o servidor nunca acessa o conector", async () => {
     const c = await ctx();
-    const server = http.createServer((req, res) => {
-      res.writeHead(req.headers.authorization === "Bearer tok-ok" ? 200 : 401, { "Content-Type": "application/json" });
-      res.end("{}");
-    });
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
-    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    process.env.TEF_TOK_X = "tok-ok";
-    await saveIntegration(c, { kind: "card_tef", branchId: refs.branches.matriz.id, provider: "tef_connector", config: { connectorUrl: url }, secretRefs: { connectorToken: "TEF_TOK_X" } });
+    const { updateTerminal, recordConnectorCheck } = await import("@/domain/terminals");
+    const t = refs.terminals.cx1;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await saveIntegration(c, { kind: "card_tef", branchId: refs.branches.matriz.id, provider: "tef_connector", config: {} });
+    // nenhum terminal usa o conector → sem teste, com orientação
+    expect((await testIntegration(c, "card_tef", refs.branches.matriz.id)).status).toBe("configured_untested");
+    const cur = (await store.get("terminals", t.id))!;
+    await updateTerminal(c, t.id, { branchId: cur.branchId, code: cur.code, name: cur.name, nfceSeries: cur.nfceSeries, printerMode: cur.printerMode, printerName: cur.printerName, connectorUrl: "http://127.0.0.1:9100", paperWidth: cur.paperWidth, scannerMode: cur.scannerMode, tefProvider: "tef_connector", tefConfig: cur.tefConfig, allowNegativeStock: Boolean(cur.allowNegativeStock), defaultWarehouseId: cur.defaultWarehouseId, drawerOnCash: Boolean(cur.drawerOnCash) });
+    // terminal com conector, sem verificação → configurada sem teste
+    const untested = await testIntegration(c, "card_tef", refs.branches.matriz.id);
+    expect(untested.status).toBe("configured_untested");
+    expect(untested.message).toMatch(/Testar conector/);
+    // verificação OK pelo navegador → operacional
+    await recordConnectorCheck(c, t.id, { ok: true, verified: true, origin: "browser", httpStatus: 200, message: "TEF pronto" });
     expect((await testIntegration(c, "card_tef", refs.branches.matriz.id)).status).toBe("operational");
-    process.env.TEF_TOK_X = "tok-ruim";
-    expect((await testIntegration(c, "card_tef", refs.branches.matriz.id)).status).toBe("error");
-    server.close();
-    await new Promise((r) => setTimeout(r, 50));
-    expect((await testIntegration(c, "card_tef", refs.branches.matriz.id)).status).toBe("unavailable");
+    // falha medida pelo navegador → erro
+    await new Promise((r) => setTimeout(r, 5));
+    await recordConnectorCheck(c, t.id, { ok: false, verified: true, origin: "browser", message: "Conector inacessível" });
+    const failed = await testIntegration(c, "card_tef", refs.branches.matriz.id);
+    expect(failed.status).toBe("error");
+    expect(failed.message).toMatch(/Caixa 01/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it("e-mail sem canal configurado → erro medido (envio de teste não entregue)", async () => {

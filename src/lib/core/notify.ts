@@ -1,3 +1,4 @@
+import { resolveRoleId } from "@/lib/auth/users";
 import { detId, isConflict, listAll } from "../db";
 import type { Store } from "../db/types";
 import { can, canDo, type ModuleKey, type SpecialAction } from "../permissions";
@@ -22,13 +23,16 @@ export interface NotifyInput {
 async function resolveAudience(store: Store, input: NotifyInput): Promise<string[]> {
   if (input.audience.userIds) return input.audience.userIds;
   const users = await listAll(store, "users", { filters: [["eq", "status", "active"]] });
-  const roles = new Map((await listAll(store, "roles")).map((r) => [r.id, r]));
+  const roleList = await listAll(store, "roles");
+  const roles = new Map(roleList.map((r) => [r.id, r]));
   return users
     .filter((u) => (u.companyIds ?? []).includes(input.companyId) || u.isAdmin)
     .filter((u) => !input.branchId || u.isAdmin || (u.branchIds ?? []).length === 0 || u.branchIds.includes(input.branchId))
     .filter((u) => {
       if (input.audience.all) return true;
-      const role = u.roleId ? roles.get(u.roleId) : null;
+      // perfil do usuário NA empresa da notificação (perfil por empresa)
+      const roleId = resolveRoleId(u, input.companyId, roles, roleList);
+      const role = roleId ? roles.get(roleId) : null;
       const subject = { isAdmin: Boolean(u.isAdmin), permissions: role?.permissions ?? {}, actions: role?.actions ?? [] };
       if (input.audience.action) return canDo(subject, input.audience.action);
       if (input.audience.module) return can(subject, input.audience.module, "view");

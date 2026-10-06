@@ -42,7 +42,7 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     description: "Cartões de débito e crédito. Sem TEF integrado, o PDV registra NSU/autorização da maquininha como pagamento manual.",
     providers: [
       { id: "manual_pos", label: "Maquininha (registro manual de NSU)", secrets: [], config: ["acquirer", "debitFeeBps", "creditFeeBps", "debitDays", "creditDays"], test: "Sem teste: não há conexão remota — o operador registra NSU/autorização manualmente." },
-      { id: "tef_connector", label: "TEF via conector local", secrets: ["connectorToken"], config: ["connectorUrl"], defaultRefs: { connectorToken: "TEF_CONNECTOR_TOKEN" }, test: "Chamada GET {connectorUrl}/status do conector local." },
+      { id: "tef_connector", label: "TEF via conector local", secrets: [], config: [], test: "Resultado medido pelo navegador de cada caixa (Administração → Terminais → Testar conector). O servidor não acessa o conector, que roda no computador do caixa." },
     ],
     consumer: "PDV → Pagamento da venda; Financeiro → Liquidação de cartões",
     consumers: [{ label: "PDV — cartões", href: "/pdv" }, { label: "Recebíveis de cartão", href: "/financeiro/cartoes" }],
@@ -242,15 +242,38 @@ export interface TestOutcome {
   message: string;
 }
 
-async function fetchStatus(url: string, token?: string): Promise<TestOutcome> {
-  try {
-    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(8000) });
-    if (res.status === 401 || res.status === 403) return { status: "error", ok: false, message: `Conector recusou a credencial (HTTP ${res.status}).` };
-    if (!res.ok) return { status: "unavailable", ok: false, message: `Conector respondeu HTTP ${res.status}.` };
-    return { status: "operational", ok: true, message: `Conector respondeu HTTP ${res.status}.` };
-  } catch (e: any) {
-    return { status: "unavailable", ok: false, message: `Conector inacessível: ${e?.cause?.code ?? e.message}` };
+const CONNECTOR_CHECK_MAX_AGE_DAYS = 7;
+
+/**
+ * TEF via conector local: o conector roda no computador de cada caixa (ex.: http://127.0.0.1:9100), alcançável apenas
+ * pelo navegador daquele computador. O estado vem das verificações registradas pelos navegadores dos terminais
+ * (Administração → Terminais → Testar conector) — o servidor nunca faz requisições à URL cadastrada (sem SSRF).
+ */
+async function tefFromTerminalChecks(ctx: Ctx, branchId: string | null): Promise<TestOutcome> {
+  const terminals = (await listAll(ctx.store, "terminals", { filters: [["eq", "companyId", ctx.companyId], ...(branchId ? [["eq", "branchId", branchId] as any] : [])] })).filter(
+    (t) => t.status === "active" && t.tefProvider === "tef_connector",
+  );
+  if (!terminals.length) return { status: "configured_untested", ok: true, message: "Nenhum terminal ativo usa o conector TEF. Configure o terminal em Administração → Terminais (Pagamentos → TEF via conector local)." };
+  const since = new Date(Date.now() - CONNECTOR_CHECK_MAX_AGE_DAYS * 86400000).toISOString();
+  const ok: string[] = [];
+  const failed: string[] = [];
+  const unchecked: string[] = [];
+  for (const t of terminals) {
+    const last = (
+      await ctx.store.list("audit_logs", {
+        filters: [["eq", "companyId", ctx.companyId], ["eq", "entityType", "terminal"], ["eq", "entityId", t.id], ["eq", "action", "terminal.connector_check"], ["gte", "occurredAt", since]],
+        orderBy: [{ field: "occurredAt", dir: "desc" }],
+        limit: 1,
+      })
+    ).items[0];
+    const verified = Boolean(last?.after?.verified) && last?.after?.origin === "browser";
+    if (!verified) unchecked.push(t.name);
+    else if (last.result === "failure") failed.push(t.name);
+    else ok.push(t.name);
   }
+  if (failed.length) return { status: "error", ok: false, message: `Conector com falha na última verificação pelo navegador: ${failed.join(", ")}.${unchecked.length ? ` Sem verificação recente: ${unchecked.join(", ")}.` : ""}` };
+  if (unchecked.length) return { status: "configured_untested", ok: true, message: `Sem verificação recente (últimos ${CONNECTOR_CHECK_MAX_AGE_DAYS} dias) pelo navegador do caixa: ${unchecked.join(", ")}. Use Administração → Terminais → Testar conector em cada computador.${ok.length ? ` Verificados: ${ok.join(", ")}.` : ""}` };
+  return { status: "operational", ok: true, message: `Conector verificado pelo navegador em ${ok.length} terminal(is): ${ok.join(", ")}.` };
 }
 
 /** Executa o teste real da integração e grava o estado medido + histórico. */
@@ -286,8 +309,7 @@ export async function testIntegration(ctx: Ctx, kind: IntegrationKind, branchId:
       }
     } else if (kind === "card_tef") {
       if (integ.provider === "tef_connector") {
-        const url = String(integ.config?.connectorUrl ?? "").replace(/\/$/, "");
-        out = url ? await fetchStatus(`${url}/status`, process.env[integ.secretRefs?.connectorToken ?? ""]) : { status: "error", ok: false, message: "URL do conector não informada." };
+        out = await tefFromTerminalChecks(ctx, branchId);
       } else out = { status: "configured_untested", ok: true, message: "Maquininha com registro manual de NSU: não há conexão remota a testar. Os pagamentos dependem da conferência do operador e da conciliação de recebíveis." };
     } else if (kind === "bank") {
       out =

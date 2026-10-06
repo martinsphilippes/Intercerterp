@@ -1,3 +1,4 @@
+import { resolveRoleId } from "@/lib/auth/users";
 import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { BusinessError, assert } from "@/lib/core/errors";
@@ -122,8 +123,15 @@ export { tierFor };
 
 async function usersWithRoles(store: Store, companyId: string) {
   const users = await listAll(store, "users", { filters: [["eq", "status", "active"]] });
-  const roles = new Map((await listAll(store, "roles")).map((r) => [r.id, r]));
-  return users.filter((u) => u.isAdmin || (u.companyIds ?? []).includes(companyId)).map((u) => ({ ...u, role: u.roleId ? roles.get(u.roleId) : null }));
+  const roleList = await listAll(store, "roles");
+  const roles = new Map(roleList.map((r) => [r.id, r]));
+  // perfil do usuário NA empresa (perfil por empresa)
+  return users
+    .filter((u) => u.isAdmin || (u.companyIds ?? []).includes(companyId))
+    .map((u) => {
+      const companyRoleId = resolveRoleId(u, companyId, roles, roleList);
+      return { ...u, companyRoleId, role: companyRoleId ? roles.get(companyRoleId) : null };
+    });
 }
 
 /** Resolve os usuários responsáveis por uma etapa (perfil, usuários nomeados ou ação "Aprovar compras"). */
@@ -131,7 +139,7 @@ export async function stepResponsibles(store: Store, companyId: string, step: Po
   const users = await usersWithRoles(store, companyId);
   const canApprove = (u: any) => u.isAdmin || (u.role?.actions ?? []).includes("purchase.approve");
   if (step.kind === "users") return users.filter((u) => (step.userIds ?? []).includes(u.id) && canApprove(u));
-  if (step.kind === "role") return users.filter((u) => u.roleId && (step.roleIds ?? []).includes(u.roleId) && canApprove(u));
+  if (step.kind === "role") return users.filter((u) => u.companyRoleId && (step.roleIds ?? []).includes(u.companyRoleId) && canApprove(u));
   return users.filter((u) => !u.isAdmin && canApprove(u));
 }
 
