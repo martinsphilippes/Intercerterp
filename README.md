@@ -7,6 +7,20 @@ ERP web para lojas de varejo: PDV, vendas e caixa, produtos e estoque, clientes,
 - **Hospedagem:** Vercel (aplicação + Cron em `/api/jobs`)
 - **Referência funcional:** `docs/referencia/Intercert_ERP_48_Telas_Comentadas.pdf` e a especificação extraída em `docs/referencia/especificacao-telas.md`
 
+**No ar:** https://intercerterp.vercel.app — instalável como aplicativo (PWA).
+
+## Aplicativo (PWA)
+
+- **Android (Chrome):** abra o site → menu ⋮ → *Instalar app* (ou o botão **Instalar app** no topo).
+- **iPhone/iPad (Safari):** Compartilhar → *Adicionar à Tela de Início*.
+- **Windows/macOS (Chrome/Edge):** ícone de instalação na barra de endereço ou o botão **Instalar app**.
+
+O app abre em tela cheia, com atalhos para PDV, Painel, Produtos e Contas a receber. O service worker guarda só arquivos estáticos; dados e ações sempre passam pelo servidor (sem cópia local de dados da empresa). Sem conexão, aparece uma página informando que o ERP precisa de internet — o PDV não opera offline.
+
+## Instalação automatizada (sem a tela de primeiro acesso)
+
+`GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação) e `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema).
+
 ## Início rápido (desenvolvimento local, sem Appwrite)
 
 ```bash

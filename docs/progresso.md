@@ -12,8 +12,10 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] Varredura de navegação (230 páginas, 0 problemas) e 62 evidências (48 telas + 14 visões).
 - [x] Documentação: README, arquitetura, matriz de cobertura (gerada), regras assumidas, integrações, validação, pendências externas.
 
+- [x] Publicado: https://intercerterp.vercel.app (Vercel, região fra1, acesso público) com Appwrite Cloud (fra) provisionado — 83 tabelas, bucket único, demonstração carregada e administrador geral criado pela instalação em etapas (`/api/setup/run`, encerrada com `step=finish`).
+- [x] PWA: manifesto, ícones (inclusive maskable e Apple), service worker (estáticos em cache, dados sempre pela rede, página offline), botão “Instalar app” e atalhos (PDV, Painel, Produtos, Receber).
+
 ## Pendente (depende de terceiros)
-- Código publicado na Vercel (https://intercerterp.vercel.app, estado READY, mostra “configuração pendente”); falta Endpoint e Project ID do Appwrite e as variáveis do projeto (ver `docs/pendencias-externas.md`).
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).
 
 ## Como retomar
