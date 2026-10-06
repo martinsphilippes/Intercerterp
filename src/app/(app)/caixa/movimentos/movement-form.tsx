@@ -16,14 +16,15 @@ const REASONS = {
 };
 
 /** Nova movimentação: tipo, valor, motivo, origem/destino (conta → transferência), responsável pela conferência e observações. */
-export function MovementForm({ sessionId, available, limit, accounts, users }: { sessionId: string; available: number; limit: number; accounts: Array<{ value: string; label: string }>; users: Array<{ value: string; label: string }> }) {
+export function MovementForm({ sessionId, available, limit, accounts, users }: { sessionId: string; available: number | null; limit: number; accounts: Array<{ value: string; label: string }>; users: Array<{ value: string; label: string }> }) {
   const [type, setType] = useState<"withdrawal" | "supply">("withdrawal");
   const [amount, setAmount] = useState(0);
   const [reason, setReason] = useState(REASONS.withdrawal[0]);
   // nova chave de idempotência a cada movimento registrado (remonta o formulário)
   const [round, setRound] = useState(0);
   const needsApproval = type === "withdrawal" && limit > 0 && amount > limit;
-  const over = type === "withdrawal" && amount > available;
+  // conferência cega: o disponível não é exibido (o servidor confere o limite)
+  const over = type === "withdrawal" && available != null && amount > available;
   return (
     <ActionForm key={round} action={addMovementAction.bind(null, sessionId)} onSuccess={() => { setAmount(0); setRound((r) => r + 1); }}>
       {({ pending }) => (
@@ -39,7 +40,7 @@ export function MovementForm({ sessionId, available, limit, accounts, users }: {
                 </button>
               ))}
             </div>
-            <Field label="Valor" required error={over ? `Maior que o dinheiro disponível (${formatMoney(available)})` : null} hint={type === "withdrawal" ? `Disponível em dinheiro: ${formatMoney(available)}` : undefined}>
+            <Field label="Valor" required error={over ? `Maior que o dinheiro disponível (${formatMoney(available)})` : null} hint={type === "withdrawal" && available != null ? `Disponível em dinheiro: ${formatMoney(available)}` : undefined}>
               <MoneyInput name="amount" value={amount} onChange={setAmount} ariaLabel="Valor" required />
             </Field>
             <Field label="Motivo" required>

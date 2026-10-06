@@ -5,7 +5,7 @@ import type { Ctx } from "@/lib/core/ctx";
 import { addDays, dayRange, today } from "@/lib/dates";
 import type { ListParams } from "@/lib/list";
 import { nameMap } from "@/lib/server/lookups";
-import { CASH_MOVEMENT_LABEL, sessionSummary } from "@/domain/cash";
+import { blindCloseEnabled, CASH_MOVEMENT_LABEL, expectedVisible, sessionSummary } from "@/domain/cash";
 
 export function cashPeriod(f: Record<string, string>) {
   const to = f.ate || today();
@@ -34,12 +34,17 @@ export async function querySessions(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   for (let i = 0; i < ids.length; i += 100) sales.push(...(await listAll(ctx.store, "sales", { filters: [["eq", "cashSessionId", ids.slice(i, i + 100)]] })));
   const [users, terminals, branches] = await Promise.all([nameMap(ctx, "users"), nameMap(ctx, "terminals"), nameMap(ctx, "branches")]);
   const rows = [];
+  const blindByBranch = new Map<string, boolean>();
   for (const s of sessions) {
     const own = sales.filter((x) => x.cashSessionId === s.id);
     const done = own.filter((x) => x.status === "completed");
     const open = ["open", "reopened"].includes(s.status);
     let expectedCash = s.expected?.cash ?? null;
-    if (open) expectedCash = (await sessionSummary(ctx, s.id)).expected.cash;
+    if (open) {
+      // conferência cega: o previsto de sessão aberta só aparece depois da contagem (ou para supervisor)
+      if (!blindByBranch.has(s.branchId)) blindByBranch.set(s.branchId, await blindCloseEnabled(ctx, s.branchId));
+      expectedCash = (await expectedVisible(ctx, s, blindByBranch.get(s.branchId))) ? (await sessionSummary(ctx, s.id)).expected.cash : null;
+    }
     const diffs: Record<string, number> = open ? {} : (s.differences ?? {});
     const totalDiff = Object.values(diffs).reduce((a: number, b: any) => a + Number(b), 0);
     rows.push({

@@ -218,6 +218,8 @@ export async function queryReturns(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
       status: r.status as string,
       reason: r.reason as string,
       itemsTotal: (r.itemsTotal ?? 0) as number,
+      abatedAmount: (r.abatedAmount ?? 0) as number,
+      compensatedAmount: (r.compensatedAmount ?? r.itemsTotal ?? 0) as number,
       costTotal: (r.costTotal ?? 0) as number,
       voucherCode: (v?.code ?? null) as string | null,
       voucherBalance: (v?.balance ?? null) as number | null,

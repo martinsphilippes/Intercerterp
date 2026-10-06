@@ -89,10 +89,12 @@ export async function simulatePixAction(intentId: string, status: "confirmed" | 
   });
 }
 
+/** Cancela a cobrança no provedor; se ela já tiver sido paga, devolve "confirmed" para o PDV aplicar o Pix. */
 export async function cancelPixAction(intentId: string) {
   return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const i = await cancelIntent(s.ctx, intentId);
-    return { id: i.id, status: i.status };
+    const message = i.status === "confirmed" ? "O Pix já foi pago: a cobrança não pode ser cancelada — aplique-o na venda ou providencie a devolução." : i.status === "cancelled" ? "Cobrança cancelada no provedor." : `Situação da cobrança no provedor: ${i.status}.`;
+    return { ok: true as const, message, data: { id: i.id, status: i.status as string } };
   });
 }
 

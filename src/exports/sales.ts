@@ -69,6 +69,8 @@ defineExport("returns", {
     { key: "status", label: "Situação" },
     { key: "reason", label: "Motivo" },
     { key: "itemsTotal", label: "Valor devolvido", type: "money" },
+    { key: "abatedAmount", label: "Abatido do título a prazo", type: "money" },
+    { key: "compensatedAmount", label: "Compensado ao cliente", type: "money" },
     { key: "costTotal", label: "Custo retornado", type: "money" },
     { key: "voucherCode", label: "Vale-crédito" },
     { key: "voucherBalance", label: "Saldo do vale", type: "money" },

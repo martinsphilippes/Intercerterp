@@ -40,7 +40,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "openingFund", label: "Fundo", align: "right", hidden: true, cell: (r) => formatMoney(r.openingFund) },
     { key: "salesCount", label: "Vendas", align: "right", sortable: true, cell: (r) => r.salesCount },
     { key: "salesTotal", label: "Total vendido", align: "right", sortable: true, cell: (r) => formatMoney(r.salesTotal) },
-    { key: "expectedCash", label: "Dinheiro esperado", align: "right", cell: (r) => formatMoney(r.expectedCash) },
+    { key: "expectedCash", label: "Dinheiro esperado", align: "right", cell: (r) => (r.expectedCash == null && r.status !== "closed" ? <span className="text-slate-400">oculto</span> : formatMoney(r.expectedCash)) },
     { key: "countedCash", label: "Dinheiro contado", align: "right", cell: (r) => (r.countedCash == null ? "—" : formatMoney(r.countedCash)) },
     { key: "totalDiff", label: "Diferença", align: "right", sortable: true, cell: (r) => (r.status !== "closed" ? "—" : r.hasDiff ? <Badge tone="bad">{formatMoney(r.totalDiff)}</Badge> : <Badge tone="good">Sem diferença</Badge>) },
   ];

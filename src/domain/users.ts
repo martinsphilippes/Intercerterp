@@ -8,7 +8,7 @@ import { audit, diff } from "@/lib/core/audit";
 import { sendEmail } from "@/lib/core/email";
 import { getSetting } from "@/lib/core/settings";
 import { onlyDigits } from "@/lib/core/text";
-import { nowIso } from "@/lib/dates";
+import { DEFAULT_TZ, nowIso } from "@/lib/dates";
 import { getAuth } from "@/lib/auth/provider";
 import { findUserByLogin, toCtxUser, userRoleIn } from "@/lib/auth/users";
 import { resolveOccurrence } from "@/lib/core/notify";
@@ -185,7 +185,7 @@ async function sendInvite(ctx: Ctx, user: Doc, token: string, origin: string, ex
   const sent = await sendEmail(ctx.companyId, {
     to: user.email,
     subject: `Convite de acesso — ${companyName}`,
-    html: `<p>Olá, ${user.name}.</p><p>${ctx.user.name} convidou você para acessar o ERP de <b>${companyName}</b>.</p><p>Para definir sua senha e ativar o acesso, abra: <a href="${link}">${link}</a></p><p>O convite expira em ${new Date(expiresAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.</p>`,
+    html: `<p>Olá, ${user.name}.</p><p>${ctx.user.name} convidou você para acessar o ERP de <b>${companyName}</b>.</p><p>Para definir sua senha e ativar o acesso, abra: <a href="${link}">${link}</a></p><p>O convite expira em ${new Date(expiresAt).toLocaleString("pt-BR", { timeZone: DEFAULT_TZ })}.</p>`,
   });
   const delivery = sent.delivered ? `Entregue ao provedor (${sent.channel}) em ${nowIso()}` : `Não enviado: ${sent.message ?? sent.channel}`;
   return { link, delivered: sent.delivered, channel: sent.channel, message: sent.message ?? null, delivery };

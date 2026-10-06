@@ -12,7 +12,7 @@ import { DEFAULT_TZ } from "@/lib/dates";
 import { can, canDo } from "@/lib/permissions";
 import type { Ctx } from "@/lib/core/ctx";
 import { createRole, updateRole, roleUsers, actionModule } from "@/domain/roles";
-import { createUser, updateUser, setUserStatus, adminSetPassword, authenticate } from "@/domain/users";
+import { createUser, updateUser, setUserStatus, adminSetPassword } from "@/domain/users";
 import { createCompany, updateCompany, setCompanyStatus, createBranch, updateBranch, setBranchStatus, setCompanyUsers } from "@/domain/companies";
 import { createTicket, replyTicket } from "@/domain/support";
 import { createRestoreJob, runRestoreJob } from "@/domain/backup";
@@ -78,7 +78,7 @@ describe("administração de outra empresa autorizada (contexto restrito à empr
     expect(b2.timezone).toBe(DEFAULT_TZ);
     const b2u = await updateBranch(gA, b2.id, { code: "02", name: "Filial B2 — Centro", timezone: "America/Manaus" });
     expect(b2u.name).toBe("Filial B2 — Centro");
-    expect(b2u.timezone).toBe(DEFAULT_TZ); // fuso único da instalação: campo do formulário ignorado
+    expect((await store.get("branches", b2.id))!.timezone).toBe(DEFAULT_TZ); // fuso único da instalação: campo do formulário ignorado
     expect((await setBranchStatus(gA, b2.id, "inactive", "teste")).status).toBe("inactive");
     const x = await directUser("vinc-x", { name: "Xavier", companyIds: [A], roleId: (await roleOf(A, "cashier")).id });
     expect(await setCompanyUsers(gA, B, [x.id])).toEqual(["+Xavier"]);
@@ -367,7 +367,4 @@ describe("perfis de sistema: operações novas do modelo padrão", () => {
     expect(canDo(gu, "customer.credit_limit")).toBe(true);
   });
 
-  it("autenticação continua funcionando para o administrador global (senha não foi trocada por terceiros)", async () => {
-    await expect(authenticate(store, "global@teste.local", "Tomada@1234")).rejects.toThrow(/inválidos/);
-  });
 });

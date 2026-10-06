@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Stat } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { canDo } from "@/lib/permissions";
 import { parseList, sp, type SearchParams } from "@/lib/list";
 import { getSetting } from "@/lib/core/settings";
 import { lookups, nameMap } from "@/lib/server/lookups";
-import { sessionSummary } from "@/domain/cash";
+import { expectedVisible, sessionSummary } from "@/domain/cash";
 import { resolveTerminal } from "../../pdv/terminal";
 import { queryCashMovements } from "../queries";
 import { MovementForm } from "./movement-form";
@@ -46,6 +47,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       );
     }
   }
+  if (s.ctx.branchId && session.branchId !== s.ctx.branchId) notFound();
+  // operar a gaveta: filial ativa da sessão e operador da sessão (ou supervisor de caixa)
+  const canOperate = s.ctx.branchId === session.branchId && (session.operatorId === s.user.id || canDo(s.user, "cash.reopen"));
+  const showExpected = await expectedVisible(s.ctx, session);
   const users = await nameMap(s.ctx, "users");
   const terminals = await nameMap(s.ctx, "terminals");
   terminalName = terminals.get(session.terminalId) ?? terminalName;
@@ -68,26 +73,28 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           <>
             <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-right">
               <p className="text-xs text-brand-700">Saldo em dinheiro estimado</p>
-              <p className="tabular text-xl font-bold text-brand-800">{formatMoney(sum.expected.cash)}</p>
+              <p className="tabular text-xl font-bold text-brand-800">{showExpected ? formatMoney(sum.expected.cash) : "oculto (conferência cega)"}</p>
             </div>
-            {open && <LinkButton href={`/caixa/fechamento?sessao=${session.id}`}>Fechar caixa</LinkButton>}
+            {open && canOperate && <LinkButton href={`/caixa/fechamento?sessao=${session.id}`}>Fechar caixa</LinkButton>}
           </>
         }
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Fundo de abertura" value={formatMoney(sum.totals.opening)} hint="Não é receita" />
-        <Stat label="Vendas em dinheiro" value={formatMoney(sum.totals.cashSales)} hint={`valor aplicado (troco já descontado: ${formatMoney(sum.totals.change)})`} tone="good" href={`/caixa/${session.id}?tab=vendas`} />
+        <Stat label="Vendas em dinheiro" value={showExpected ? formatMoney(sum.totals.cashSales) : "oculto"} hint={showExpected ? `valor aplicado (troco já descontado: ${formatMoney(sum.totals.change)})` : "conferência cega: revelado após a contagem"} tone="good" href={`/caixa/${session.id}?tab=vendas`} />
         <Stat label="Suprimentos" value={formatMoney(sum.totals.supply)} hint={`${count("supply")} movimentação(ões)`} tone="good" />
         <Stat label="Sangrias" value={formatMoney(sum.totals.withdrawal)} hint={`${count("withdrawal")} movimentação(ões)`} tone="bad" />
         <Stat label="Devoluções em espécie" value={formatMoney(sum.totals.refunds)} hint={`${count("refund")} saída(s) a clientes`} tone={sum.totals.refunds ? "warn" : "default"} />
       </div>
-      <p className="mb-4 text-xs text-slate-500">Saldo estimado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções {formatMoney(sum.totals.refunds)} = <b>{formatMoney(sum.expected.cash)}</b>. Sangria não reduz faturamento; suprimento não é venda.</p>
+      {showExpected && <p className="mb-4 text-xs text-slate-500">Saldo estimado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções {formatMoney(sum.totals.refunds)} = <b>{formatMoney(sum.expected.cash)}</b>. Sangria não reduz faturamento; suprimento não é venda.</p>}
       <div className="grid gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
         <div>
-          {open && canDo(s.user, "cash.withdrawal") ? (
-            <MovementForm sessionId={session.id} available={sum.expected.cash} limit={limit} accounts={accounts.filter((a) => a.value !== cashAcc?.id)} users={userOpts} />
+          {open && canDo(s.user, "cash.withdrawal") && canOperate ? (
+            <MovementForm sessionId={session.id} available={showExpected ? sum.expected.cash : null} limit={limit} accounts={accounts.filter((a) => a.value !== cashAcc?.id)} users={userOpts} />
+          ) : !s.ctx.branchId && open ? (
+            <Notice tone="warn" title="Selecione a filial da sessão para operar">O contexto consolidado é somente consulta.</Notice>
           ) : (
-            <Notice tone="info" title={open ? "Sem permissão" : "Sessão encerrada"}>{open ? "Seu perfil não pode registrar sangria/suprimento." : "Movimentos só podem ser registrados em caixa aberto."}</Notice>
+            <Notice tone="info" title={!open ? "Sessão encerrada" : !canOperate ? "Caixa de outro operador" : "Sem permissão"}>{!open ? "Movimentos só podem ser registrados em caixa aberto." : !canOperate ? "Somente o operador desta sessão (ou um supervisor de caixa) movimenta esta gaveta." : "Seu perfil não pode registrar sangria/suprimento."}</Notice>
           )}
         </div>
         <section className="rounded-lg border border-line bg-white">

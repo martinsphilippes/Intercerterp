@@ -15,8 +15,8 @@ import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/dates";
 import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
-import { CASH_MOVEMENT_LABEL, sessionSummary } from "@/domain/cash";
-import { reopenSessionAction } from "../actions";
+import { CASH_MOVEMENT_LABEL, expectedVisible, pendingCloseTransfer, sessionSummary } from "@/domain/cash";
+import { reopenSessionAction, retryCloseTransferAction } from "../actions";
 import { ClosureTable, METHOD_LABEL, SessionVersions } from "../session-views";
 
 export const metadata = { title: "Sessão de caixa" };
@@ -28,7 +28,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const store = s.ctx.store;
   const session = await store.get("cash_sessions", id);
   if (!session || session.companyId !== s.ctx.companyId) notFound();
+  if (!s.user.isAdmin && (s.user.branchIds ?? []).length && !s.user.branchIds.includes(session.branchId)) notFound();
   const sum = await sessionSummary(s.ctx, id);
+  // conferência cega: previsto de sessão aberta oculto até a contagem (exceto supervisor de caixa)
+  const showExpected = await expectedVisible(s.ctx, session);
+  const pendingTransfer = await pendingCloseTransfer(s.ctx, session);
+  const sameBranch = s.ctx.branchId === session.branchId;
   const [users, terminals, branches, accounts] = await Promise.all([nameMap(s.ctx, "users"), nameMap(s.ctx, "terminals"), nameMap(s.ctx, "branches"), nameMap(s.ctx, "financial_accounts")]);
   const sales = await listAll(store, "sales", { filters: [["eq", "cashSessionId", id]], orderBy: [{ field: "completedAt", dir: "desc" }] });
   const open = ["open", "reopened"].includes(session.status);
@@ -49,18 +54,28 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <>
             <LinkButton href={`${base}/relatorio`} target="_blank"><FileText className="size-4" /> Relatório</LinkButton>
             {open && s.ctx.branchId === session.branchId && <LinkButton href={`/caixa/movimentos?sessao=${id}`}><Wallet className="size-4" /> Suprimento / sangria</LinkButton>}
-            {open && can(s.user, "cash", "edit") && <LinkButton href={`/caixa/fechamento?sessao=${id}`} variant="primary"><Lock className="size-4" /> Fechar caixa</LinkButton>}
+            {open && sameBranch && can(s.user, "cash", "edit") && <LinkButton href={`/caixa/fechamento?sessao=${id}`} variant="primary"><Lock className="size-4" /> Fechar caixa</LinkButton>}
+            {pendingTransfer && sameBranch && can(s.user, "cash", "edit") && (
+              <ActionButton action={retryCloseTransferAction.bind(null, id)} label="Concluir recolhimento" icon={<Wallet className="size-4" />} variant="primary" confirm={`Transferir ${formatMoney(pendingTransfer.amount)} da conta Caixa para ${accounts.get(pendingTransfer.toAccountId) ?? "a conta de destino"}?`} />
+            )}
             {session.status === "closed" && canDo(s.user, "cash.reopen") && s.ctx.branchId === session.branchId && (
               <ActionButton action={reopenSessionAction.bind(null, id)} label="Reabrir caixa" icon={<RotateCcw className="size-4" />} askReason="Motivo da reabertura (obrigatório). O fechamento atual é preservado e uma nova versão de conferência será criada." />
             )}
           </>
         }
       />
+      {pendingTransfer && (
+        <div className="mb-4">
+          <Notice tone="warn" title="Recolhimento do fechamento pendente">
+            O fechamento registrou o recolhimento de {formatMoney(pendingTransfer.amount)} para {accounts.get(pendingTransfer.toAccountId) ?? "a conta de destino"}, mas a transferência não foi concluída. Use “Concluir recolhimento” (a operação não duplica a transferência).
+          </Notice>
+        </div>
+      )}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Fundo de abertura" value={formatMoney(sum.totals.opening)} hint="Não é receita" />
         <Stat label="Vendas concluídas" value={sum.totals.salesCount} hint={formatMoney(sum.totals.sales)} href={`/vendas?sessao=${id}`} />
         <Stat label="Suprimentos / sangrias" value={`${formatMoney(sum.totals.supply)} / ${formatMoney(sum.totals.withdrawal)}`} href={`${base}?tab=movimentos`} />
-        <Stat label="Dinheiro esperado (agora)" value={formatMoney(sum.expected.cash)} hint={`troco entregue ${formatMoney(sum.totals.change)} · devoluções ${formatMoney(sum.totals.refunds)}`} />
+        <Stat label="Dinheiro esperado (agora)" value={showExpected ? formatMoney(sum.expected.cash) : "oculto"} hint={showExpected ? `troco entregue ${formatMoney(sum.totals.change)} · devoluções ${formatMoney(sum.totals.refunds)}` : "conferência cega: revelado após a contagem"} />
         <Stat label={open ? "Situação" : "Diferença do fechamento"} value={open ? (session.status === "reopened" ? "Reaberto" : "Aberto") : formatMoney(totalDiff)} tone={open ? "default" : totalDiff || Object.keys(diffs).length ? "bad" : "good"} hint={!open && session.justification ? `Justificativa: ${session.justification}` : undefined} />
       </div>
       <LinkTabs
@@ -77,7 +92,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       {tab === "resumo" && (
         <div className="grid gap-4 lg:grid-cols-3">
           <Card title={open ? "Previsto por meio de pagamento (em tempo real)" : `Conferência registrada — versão ${session.version ?? 1}`} className="lg:col-span-2" bodyClass="p-0">
-            {open ? (
+            {open && !showExpected ? (
+              <p className="px-4 py-6 text-sm text-slate-500">Conferência cega ativa: o previsto por meio só é exibido depois que a contagem for registrada na tela de fechamento.</p>
+            ) : open ? (
               <table className="table-base w-full text-sm">
                 <thead><tr><th>Forma</th><th className="text-right">Transações</th><th className="text-right">Esperado</th></tr></thead>
                 <tbody>{Object.entries(liveExpected).map(([k, v]) => <tr key={k}><td>{METHOD_LABEL[k] ?? k}</td><td className="tabular text-right">{sum.byMethod[k]?.count ?? 0}</td><td className="tabular text-right">{formatMoney(v)}</td></tr>)}</tbody>
@@ -86,7 +103,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               <ClosureTable expected={session.expected ?? {}} counted={session.counted ?? {}} differences={diffs} />
             )}
             {!open && session.justification && <p className="border-t border-line px-4 py-2 text-sm">Justificativa: {session.justification}</p>}
-            <p className="border-t border-line px-4 py-2 text-xs text-slate-500">Dinheiro esperado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções em espécie {formatMoney(sum.totals.refunds)}.</p>
+            {showExpected && <p className="border-t border-line px-4 py-2 text-xs text-slate-500">Dinheiro esperado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções em espécie {formatMoney(sum.totals.refunds)}.</p>}
           </Card>
           <Card title="Abertura e conferência do terminal">
             <DefinitionList

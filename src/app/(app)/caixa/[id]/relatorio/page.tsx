@@ -5,7 +5,7 @@ import { listAll } from "@/lib/db";
 import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/dates";
 import { nameMap } from "@/lib/server/lookups";
-import { CASH_MOVEMENT_LABEL, sessionSummary } from "@/domain/cash";
+import { CASH_MOVEMENT_LABEL, expectedVisible, sessionSummary } from "@/domain/cash";
 import { AutoPrint } from "../../../vendas/sale-widgets";
 import { PrintStyles } from "../../../vendas/print-styles";
 import { ClosureTable, METHOD_LABEL, SessionVersions } from "../../session-views";
@@ -20,7 +20,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const store = s.ctx.store;
   const session = await store.get("cash_sessions", id);
   if (!session || session.companyId !== s.ctx.companyId) notFound();
+  if (!s.user.isAdmin && (s.user.branchIds ?? []).length && !s.user.branchIds.includes(session.branchId)) notFound();
   const sum = await sessionSummary(s.ctx, id);
+  // conferência cega: prévia de sessão aberta não revela o previsto antes da contagem
+  const showExpected = await expectedVisible(s.ctx, session);
   const [users, terminals, branches] = await Promise.all([nameMap(s.ctx, "users"), nameMap(s.ctx, "terminals"), nameMap(s.ctx, "branches")]);
   const sales = await listAll(store, "sales", { filters: [["eq", "cashSessionId", id]], orderBy: [{ field: "completedAt", dir: "asc" }] });
   const company = await store.get("companies", session.companyId);
@@ -37,13 +40,15 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <div className="text-right text-xs"><p>Operador: {users.get(session.operatorId)}</p><p>Abertura: {formatDateTime(session.openedAt)}</p><p>Fechamento: {session.closedAt ? `${formatDateTime(session.closedAt)} (${users.get(session.closedBy) ?? "—"})` : "—"}</p><p>Versão: {session.version ?? 1}</p></div>
         </header>
         <section className="grid grid-cols-4 gap-2 text-center">
-          {[["Fundo", sum.totals.opening], ["Vendas (" + sum.totals.salesCount + ")", sum.totals.sales], ["Suprimentos", sum.totals.supply], ["Sangrias", sum.totals.withdrawal], ["Devoluções em espécie", sum.totals.refunds], ["Vendas em dinheiro", sum.totals.cashSales], ["Troco entregue", sum.totals.change], ["Dinheiro esperado", sum.expected.cash]].map(([l, v]) => (
-            <div key={String(l)} className="rounded border border-line p-2"><p className="text-xs text-slate-600">{l}</p><p className="font-semibold">{formatMoney(v as number)}</p></div>
+          {[["Fundo", sum.totals.opening], ["Vendas (" + sum.totals.salesCount + ")", sum.totals.sales], ["Suprimentos", sum.totals.supply], ["Sangrias", sum.totals.withdrawal], ["Devoluções em espécie", sum.totals.refunds], ["Vendas em dinheiro", showExpected ? sum.totals.cashSales : null], ["Troco entregue", sum.totals.change], ["Dinheiro esperado", showExpected ? sum.expected.cash : null]].map(([l, v]) => (
+            <div key={String(l)} className="rounded border border-line p-2"><p className="text-xs text-slate-600">{l}</p><p className="font-semibold">{v == null ? "oculto (conferência cega)" : formatMoney(v as number)}</p></div>
           ))}
         </section>
         <section>
           <h2 className="mb-1 font-semibold">{open ? "Previsto por meio de pagamento" : "Conferência (versão atual)"}</h2>
-          {open ? (
+          {open && !showExpected ? (
+            <p>Conferência cega ativa: o previsto é revelado somente depois que a contagem for registrada no fechamento.</p>
+          ) : open ? (
             <table className="table-base w-full"><thead><tr><th>Forma</th><th className="text-right">Transações</th><th className="text-right">Esperado</th></tr></thead><tbody>{Object.entries(live).map(([k, v]) => <tr key={k}><td>{METHOD_LABEL[k] ?? k}</td><td className="text-right">{sum.byMethod[k]?.count ?? 0}</td><td className="text-right">{formatMoney(v)}</td></tr>)}</tbody></table>
           ) : (
             <ClosureTable expected={session.expected ?? {}} counted={session.counted ?? {}} differences={session.differences ?? {}} />

@@ -500,7 +500,14 @@ function PixForm({ method, remaining, onAdd, props, existing }: { method: Method
       if (!intent) return;
       const res = await cancelPixAction(intent.id);
       if (!res.ok) return toast("error", res.error);
-      setIntent(null);
+      const status = (res.data as any)?.status as string;
+      if (status === "confirmed") {
+        // pago no provedor antes do cancelamento: mantém a cobrança para aplicar na venda
+        toast("info", res.message ?? "Pix já confirmado pelo provedor.");
+        return setIntent({ ...intent, status: "confirmed" });
+      }
+      toast("success", res.message ?? "Cobrança cancelada no provedor.");
+      setIntent(status === "cancelled" ? null : { ...intent, status: status as any });
     });
 
   if (manual) {
@@ -527,7 +534,7 @@ function PixForm({ method, remaining, onAdd, props, existing }: { method: Method
         <form onSubmit={(e) => { e.preventDefault(); generate(); }} className="flex flex-wrap items-end gap-3">
           <Field label="Valor da cobrança" className="min-w-[200px]"><MoneyInput value={amount} onChange={setAmount} autoFocus ariaLabel="Valor da cobrança Pix" /></Field>
           <Button type="submit" variant="primary" loading={busy} disabled={amount <= 0 || amount > remaining}><QrCode className="size-4" /> Gerar cobrança Pix</Button>
-          {intent && <p className="w-full text-sm text-red-700"><XCircle className="mr-1 inline size-4" />Cobrança anterior {intent.status === "failed" ? "falhou" : intent.status === "expired" ? "expirou" : "foi cancelada"} (ref. {intent.reference}). Uma nova cobrança só é criada após consultar a anterior.</p>}
+          {intent && <p className="w-full text-sm text-red-700"><XCircle className="mr-1 inline size-4" />Cobrança anterior {intent.status === "failed" ? "falhou" : intent.status === "expired" ? "expirou" : "foi cancelada no provedor"} (ref. {intent.reference}). Uma nova cobrança só é criada após consultar a anterior.</p>}
         </form>
       ) : (
         <div className="flex flex-wrap gap-4">

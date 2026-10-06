@@ -24,7 +24,7 @@ export function Badge({ tone = "neutral", children, className, title }: { tone?:
 /** Dicionário central de estados → rótulo e tom (consistência entre telas). */
 export const STATUS: Record<string, Record<string, [string, Tone]>> = {
   sale: { completed: ["Concluída", "good"], cancelled: ["Cancelada", "bad"], draft: ["Rascunho", "neutral"], presale: ["Pré-venda", "info"] },
-  payment: { paid: ["Pago", "good"], pending: ["A receber", "warn"], partial: ["Parcial", "warn"], refunded: ["Estornado", "bad"], confirmed: ["Confirmado", "good"], failed: ["Falhou", "bad"], cancelled: ["Cancelado", "bad"], unknown: ["Indeterminado", "warn"], expired: ["Expirado", "neutral"] },
+  payment: { paid: ["Pago", "good"], pending: ["A receber", "warn"], partial: ["Parcial", "warn"], refunded: ["Estornado", "bad"], confirmed: ["Confirmado", "good"], failed: ["Falhou", "bad"], cancelled: ["Cancelado", "bad"], unknown: ["Indeterminado", "warn"], expired: ["Expirado", "neutral"], refund_pending: ["Estorno pendente no provedor", "warn"], refund_manual: ["Devolver ao cliente (manual)", "warn"] },
   fiscal: {
     not_required: ["Sem documento", "neutral"], pending: ["Pendente", "warn"], queued: ["Na fila", "info"], processing: ["Processando", "info"], authorized: ["Autorizado", "good"], rejected: ["Rejeitado", "bad"],
     denied: ["Denegado", "bad"], cancelled: ["Cancelado", "neutral"], error: ["Erro de comunicação", "bad"], draft: ["Rascunho", "neutral"], unused: ["Inutilizado", "neutral"], discarded: ["Descartado", "neutral"], contingency: ["Contingência", "warn"],

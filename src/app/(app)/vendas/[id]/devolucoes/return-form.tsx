@@ -26,6 +26,8 @@ export function ReturnForm(props: {
   accounts: Array<{ value: string; label: string }>;
   defaultPixAccountId: string | null;
   cashSession: { id: string; number: number; terminalName: string } | null;
+  /** venda a prazo: saldo em aberto do título e valor pago ainda não devolvido */
+  deferred?: { open: number; paidAvailable: number } | null;
 }) {
   const [sel, setSel] = useState<Record<string, { on: boolean; qty: string; reason: string; condition: "resellable" | "damaged" }>>(() =>
     Object.fromEntries(props.items.map((i) => [i.id, { on: false, qty: String(Math.min(1, i.returnable / QTY)).replace(".", ","), reason: "", condition: "resellable" as const }])),
@@ -56,21 +58,29 @@ export function ReturnForm(props: {
   const estimated = chosen.reduce((a, l) => a + (l.value ?? roundDiv(l.item.total * l.qty, l.item.qty)), 0);
   const invalid = chosen.some((l) => l.over || !l.reason) || chosen.length === 0;
   const step = chosen.length === 0 ? 1 : invalid ? 1 : 3;
+  // mesmo cálculo do servidor: abate o título a prazo primeiro; só o excedente pago vira reembolso/vale
+  const abate = props.deferred ? Math.min(estimated, props.deferred.open) : 0;
+  const compensate = estimated - abate;
+  const overPaid = Boolean(props.deferred) && compensate > (props.deferred?.paidAvailable ?? 0);
   const needsCustomer = compensation === "store_credit" && !props.sale.customerId;
-  const cashBlocked = compensation === "refund" && refundMethod === "cash" && !props.cashSession;
+  const cashBlocked = compensation === "refund" && refundMethod === "cash" && !props.cashSession && compensate > 0;
   const damaged = chosen.some((l) => l.condition === "damaged");
   const resellable = chosen.some((l) => l.condition === "resellable" && !l.item.service);
 
-  const financeImpact =
-    compensation === "store_credit"
-      ? `Será emitido um vale-crédito de ${formatMoney(estimated)} para ${props.sale.customerName ?? "o cliente"} (saldo consumível em novas compras, validade de 12 meses).`
-      : compensation === "exchange"
-        ? `Será emitido um vale de troca de ${formatMoney(estimated)} e o PDV abrirá a nova venda com o vale aplicado; a diferença será paga pelo cliente ou ficará no vale.`
-        : refundMethod === "cash"
-          ? `Saída de ${formatMoney(estimated)} em dinheiro do caixa ${props.cashSession ? `nº ${props.cashSession.number}` : "(nenhum caixa aberto!)"}; reduz o dinheiro esperado no fechamento.`
-          : refundMethod === "card_reversal"
-            ? `Estorno de ${formatMoney(estimated)} no cartão: fica uma obrigação “em processamento” no contas a pagar até a confirmação da adquirente.`
-            : `Saída de ${formatMoney(estimated)} da conta selecionada (${props.accounts.find((a) => a.value === accountId)?.label ?? "—"}).`;
+  const abateText = abate > 0 ? `${formatMoney(abate)} abatem o saldo em aberto do crediário/boleto desta venda (o cliente deixa de dever esse valor). ` : "";
+  const compensationText =
+    compensate <= 0
+      ? "Nada é devolvido em dinheiro ou vale: o cliente ainda não pagou esse valor."
+      : compensation === "store_credit"
+        ? `Será emitido um vale-crédito de ${formatMoney(compensate)} para ${props.sale.customerName ?? "o cliente"} (saldo consumível em novas compras, validade de 12 meses).`
+        : compensation === "exchange"
+          ? `Será emitido um vale de troca de ${formatMoney(compensate)} e o PDV abrirá a nova venda com o vale aplicado; a diferença será paga pelo cliente ou ficará no vale.`
+          : refundMethod === "cash"
+            ? `Saída de ${formatMoney(compensate)} em dinheiro do caixa ${props.cashSession ? `nº ${props.cashSession.number}` : "(nenhum caixa seu aberto!)"}; reduz o dinheiro esperado no fechamento.`
+            : refundMethod === "card_reversal"
+              ? `Estorno de ${formatMoney(compensate)} no cartão: fica uma obrigação “em processamento” no contas a pagar até a confirmação da adquirente.`
+              : `Saída de ${formatMoney(compensate)} da conta selecionada (${props.accounts.find((a) => a.value === accountId)?.label ?? "—"}).`;
+  const financeImpact = abateText + compensationText;
 
   if (done) {
     return (
@@ -174,7 +184,7 @@ export function ReturnForm(props: {
                       <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} options={props.accounts} />
                     </Field>
                   )}
-                  {refundMethod === "cash" && <p className={cn("self-end text-xs", props.cashSession ? "text-slate-600" : "text-red-700")}>{props.cashSession ? `Saída registrada no caixa nº ${props.cashSession.number}${props.cashSession.terminalName ? ` (${props.cashSession.terminalName})` : ""}.` : "Nenhum caixa aberto para você nesta filial: abra o caixa antes de devolver em dinheiro."}</p>}
+                  {refundMethod === "cash" && <p className={cn("self-end text-xs", props.cashSession ? "text-slate-600" : "text-red-700")}>{props.cashSession ? `Saída registrada no caixa nº ${props.cashSession.number}${props.cashSession.terminalName ? ` (${props.cashSession.terminalName})` : ""}.` : compensate > 0 ? "Nenhum caixa aberto para você nesta filial: abra o caixa antes de devolver em dinheiro." : "Sem saída de dinheiro: o valor apenas abate o título a prazo."}</p>}
                 </div>
               )}
               <Field label="Observações da operação" className="mt-3">
@@ -197,6 +207,12 @@ export function ReturnForm(props: {
                 <div className="flex justify-between"><dt>Produtos selecionados</dt><dd className="tabular">{chosen.length}</dd></div>
                 <div className="flex justify-between"><dt>Taxas ou diferenças</dt><dd className="tabular">{formatMoney(0)}</dd></div>
                 <div className="flex justify-between text-base font-semibold text-accent-700"><dt>Valor da operação</dt><dd className="tabular">{formatMoney(estimated)}</dd></div>
+                {props.deferred && (
+                  <>
+                    <div className="flex justify-between text-xs text-slate-600"><dt>Abatido do título a prazo</dt><dd className="tabular">{formatMoney(abate)}</dd></div>
+                    <div className="flex justify-between text-xs text-slate-600"><dt>Devolvido ao cliente (reembolso/vale)</dt><dd className="tabular">{formatMoney(compensate)}</dd></div>
+                  </>
+                )}
               </dl>
               <input type="hidden" name="items" value={JSON.stringify(chosen.map((l) => ({ saleItemId: l.item.id, qty: l.qty, condition: l.item.service ? "resellable" : l.condition, reason: l.reason })))} />
               <input type="hidden" name="compensation" value={compensation} />
@@ -205,7 +221,8 @@ export function ReturnForm(props: {
               <input type="hidden" name="notes" value={notes} />
               {chosen.some((l) => !l.reason) && <p className="mt-2 text-xs text-amber-800">Informe o motivo de cada item selecionado.</p>}
               {needsCustomer && <p className="mt-2 text-xs text-red-700">Vale-crédito exige cliente identificado.</p>}
-              <button type="submit" disabled={pending || invalid || needsCustomer || cashBlocked} aria-busy={pending || undefined} className={buttonClass("accent", "md", "mt-3 w-full")}>
+              {overPaid && <p className="mt-2 text-xs text-red-700">O valor a devolver excede o que o cliente pagou: o título a prazo foi alterado no Financeiro (renegociado/cancelado). Regularize o título antes da devolução.</p>}
+              <button type="submit" disabled={pending || invalid || needsCustomer || cashBlocked || overPaid} aria-busy={pending || undefined} className={buttonClass("accent", "md", "mt-3 w-full")}>
                 {pending ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden /> : <CheckCircle2 className="size-4" />} Confirmar {compensation === "exchange" ? "troca" : "devolução"}
               </button>
               {(invalid || needsCustomer || cashBlocked) && <p className="mt-2 text-xs text-slate-500">O servidor valida novamente quantidades, permissões e caixa antes de registrar.</p>}

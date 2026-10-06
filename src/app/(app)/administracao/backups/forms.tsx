@@ -58,7 +58,7 @@ export function ScheduleForm({ schedule, readOnly, weekdays, frequencies }: { sc
                 <Select name="weekday" defaultValue={String(schedule.weekday ?? 0)} options={weekdays.map((w, i) => ({ value: String(i), label: w }))} />
               </Field>
             )}
-            <Field label="Horário" hint="Fuso da empresa (Parâmetros).">
+            <Field label="Horário" hint="No fuso único da instalação (variável APP_TIMEZONE do servidor).">
               <Input name="time" type="time" defaultValue={schedule.time ?? "02:00"} required />
             </Field>
             <Field label="Retenção (dias)" hint="Artefatos vencidos são removidos; a cópia válida mais recente é sempre mantida.">

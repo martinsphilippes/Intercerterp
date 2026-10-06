@@ -461,7 +461,7 @@ export async function createRestoreJob(ctx: Ctx, b: Doc, target: "test" | "appwr
     if (ex) return ex;
   }
   const job = await ctx.store.create("restore_jobs", { companyId: ctx.companyId, branchId: null, createdBy: ctx.user.id, backupId: b.id, target, status: "pending", preview: restorePreview(b, target, databaseId) }, id);
-  await audit(ctx, { module: "admin", action: "restore.request", entityType: "restore_job", entityId: job.id, summary: `Restauração solicitada da cópia de ${new Date(b.finishedAt ?? b.startedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} → ${target === "test" ? "base de teste isolada" : `nova base Appwrite ${databaseId}`}`, related: [`backup:${b.id}`] });
+  await audit(ctx, { module: "admin", action: "restore.request", entityType: "restore_job", entityId: job.id, summary: `Restauração solicitada da cópia de ${new Date(b.finishedAt ?? b.startedAt).toLocaleString("pt-BR", { timeZone: DEFAULT_TZ })} → ${target === "test" ? "base de teste isolada" : `nova base Appwrite ${databaseId}`}`, related: [`backup:${b.id}`] });
   return job;
 }
 

@@ -9,7 +9,7 @@ import { listAll } from "@/lib/db";
 import { canDo } from "@/lib/permissions";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { formatDateTime } from "@/lib/dates";
-import { returnableItems } from "@/domain/sales";
+import { resolveCashSession, returnableItems, returnCompensationPlan } from "@/domain/sales";
 import { resolveTerminal } from "../../../pdv/terminal";
 import { ReturnForm } from "./return-form";
 
@@ -48,8 +48,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const doc = sale.fiscalDocumentId ? await store.get("fiscal_documents", sale.fiscalDocumentId) : null;
   const accounts = await lookups.accounts(s.ctx);
   const branches = await nameMap(s.ctx, "branches");
-  const { terminal, session } = await resolveTerminal(s, sale.terminalId);
-  const mySession = session ?? (await store.list("cash_sessions", { filters: [["eq", "branchId", sale.branchId], ["eq", "operatorId", s.user.id], ["eq", "status", ["open", "reopened"]]], limit: 1 })).items[0] ?? null;
+  // mesma regra do servidor: gaveta do próprio operador (ou do terminal, para supervisor de caixa)
+  const { terminal } = await resolveTerminal(s, null);
+  const mySession = await resolveCashSession(s.ctx, sale.branchId, [terminal?.id, sale.terminalId]);
+  // venda a prazo: o valor devolvido abate primeiro o saldo em aberto do título; só o que já foi pago volta ao cliente
+  const previous = await listAll(store, "returns", { filters: [["eq", "saleId", id]] });
+  const plan = await returnCompensationPlan(s.ctx, sale, 0, previous);
+  const deferred = plan.titles.length ? { open: plan.open, paidAvailable: plan.paidAvailable } : null;
   const pixMethod = (await listAll(store, "payment_methods", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "kind", "pix"]] }))[0];
   return (
     <>
@@ -62,6 +67,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         accounts={accounts}
         defaultPixAccountId={pixMethod?.accountId ?? null}
         cashSession={mySession ? { id: mySession.id, number: mySession.number, terminalName: terminal?.id === mySession.terminalId ? terminal?.name ?? "" : "" } : null}
+        deferred={deferred}
       />
     </>
   );

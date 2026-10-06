@@ -30,7 +30,8 @@ export function templateSyncPlan(role: Record<string, any> | null | undefined): 
   const tpl = DEFAULT_ROLES.find((t) => t.key === role.key);
   if (!tpl) return null;
   const tplActions = [...tpl.actions] as string[];
-  const applied: string[] | null = Array.isArray(role.templateActions) ? role.templateActions : null;
+  // sem registro (campo ausente, nulo ou lista vazia — colunas de lista podem voltar vazias): perfil anterior à sincronização
+  const applied: string[] | null = Array.isArray(role.templateActions) && role.templateActions.length ? role.templateActions : null;
   if (applied && applied.length === tplActions.length && tplActions.every((a) => applied.includes(a))) return null;
   const candidates = applied ? tplActions.filter((a) => !applied.includes(a)) : tplActions.filter((a) => ACTIONS_ADDED_TO_TEMPLATES.includes(a));
   const have = new Set<string>(role.actions ?? []);
