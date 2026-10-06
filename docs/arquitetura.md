@@ -65,3 +65,16 @@ Toda função de domínio recebe `ctx: Ctx` (`store`, `user`, `companyId`, `bran
 - Rotinas diárias: `src/domain/routines/<área>.ts` (`registerRoutine`).
 - Tarefas duráveis: `src/domain/jobs/<área>.ts` (`registerJob`).
 - Exportações: `src/exports/<área>.ts` (`defineExport`).
+
+## Gestão contábil (`src/domain/accounting`)
+
+| Arquivo | Conteúdo |
+|---|---|
+| `common.ts` | conceitos, catálogos (situação, serviços, tipos de pessoa/departamento/grupo), `requireFirm` |
+| `clients.ts` | clientes contábeis (PF/PJ), código sequencial, situação, regime com vigência, consulta de CNPJ (BrasilAPI: CNAEs, natureza, porte, QSA) |
+| `people.ts` | sócios/representantes/contatos e estabelecimentos |
+| `team.ts` | departamentos, membros, responsáveis por cliente, grupos; `visibleClientIds` (carteira restrita) |
+| `link.ts` | código de vínculo, aceite/revogação, `linkedCompanyReader` (Store restrito à empresa vinculada e somente leitura), `linkedSnapshot` |
+| `deliveries.ts` | caixa de entrada: `deliverPackageToFirm` (chamado por `fiscal/export.ts`), conferência, autorização de download por entrega |
+
+Pontos de integração: `companies.kind` decide parametrização (`setup.ts`), perfis (`roleTemplatesFor`), menu (`navFor`) e painel; a rota `/api/files/[id]` aceita arquivos de outra empresa somente quando existe uma entrega para o escritório; `src/lib/db/read-only.ts` é a única forma de ler outra empresa sem poder gravar.
