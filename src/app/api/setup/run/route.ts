@@ -7,7 +7,7 @@ import { configuredBackend, appwriteConfig, getStore, findOne, detId } from "@/l
  *   ?step=provision — cria tabelas/índices/buckets (repita até done=true)
  *   ?step=demo      — carrega a empresa de demonstração (idempotente; repita se o tempo acabar)
  *   ?step=owner     — cria o administrador geral (e-mail informado; senha gerada e devolvida UMA vez)
- *   ?step=finish    — encerra a instalação: a rota deixa de funcionar
+ *   ?step=finish    — encerra a instalação: a rota deixa de funcionar (exceto provision e demo-update, idempotentes)
  * Exige o SETUP_TOKEN (cabeçalho x-setup-token ou ?token=). Depois de "finish" responde 410.
  */
 export const maxDuration = 300;
@@ -39,6 +39,17 @@ export async function GET(req: NextRequest) {
 
   // a partir daqui o banco precisa estar provisionado
   const completed = await store.get("operations", DONE_ID).catch(() => null);
+
+  if (step === "demo-update") {
+    // atualização da DEMONSTRAÇÃO após uma nova versão (módulos novos, idempotente): só quando a empresa de demonstração existe
+    const { listAll } = await import("@/lib/db");
+    const demo = (await listAll(store, "companies", { filters: [["eq", "isDemo", true]] })).find((c) => c.kind !== "accounting");
+    if (!demo) return NextResponse.json({ ok: false, error: "Não há empresa de demonstração nesta instalação." }, { status: 404 });
+    const { seedDemo } = await import("@/domain/seed");
+    const r = await seedDemo(store, { historyDays: 1, deadline: started + 150000 });
+    return NextResponse.json({ ok: true, step, done: r.done, companyId: r.companyId, modules: (r as Record<string, unknown>).modules ?? null, ms: Date.now() - started });
+  }
+
   if (completed) return NextResponse.json({ ok: false, error: "Instalação já concluída." }, { status: 410 });
 
   if (step === "demo") {
@@ -99,5 +110,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, step, completed: true });
   }
 
-  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | status | check-login | owner | finish)." }, { status: 400 });
+  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | demo-update | status | check-login | owner | finish)." }, { status: 400 });
 }
