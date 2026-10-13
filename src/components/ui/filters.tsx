@@ -11,7 +11,7 @@ export type FilterDef =
   | { type: "text"; name: string; label: string; placeholder?: string };
 
 /** Barra de filtros por GET: o estado fica na URL e é preservado ao voltar dos detalhes. */
-export function FilterBar({ filters, values, basePath, children }: { filters: FilterDef[]; values: Record<string, string | string[] | undefined>; basePath: string; children?: React.ReactNode }) {
+export function FilterBar({ filters, values, basePath, clearHref, children }: { filters: FilterDef[]; values: Record<string, string | string[] | undefined>; basePath: string; /** destino do "Limpar" quando a tela tem abas (padrão: basePath) */ clearHref?: string; children?: React.ReactNode }) {
   const v = (k: string) => {
     const x = values[k];
     return (Array.isArray(x) ? x[0] : x) ?? "";
@@ -61,7 +61,7 @@ export function FilterBar({ filters, values, basePath, children }: { filters: Fi
         <button type="submit" className={buttonClass("primary")}>
           Filtrar
         </button>
-        <Link href={basePath} className={buttonClass("ghost")}>
+        <Link href={clearHref ?? basePath} className={buttonClass("ghost")}>
           Limpar
         </Link>
       </div>

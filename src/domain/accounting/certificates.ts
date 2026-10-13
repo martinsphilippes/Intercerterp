@@ -412,7 +412,7 @@ export async function sendCertificateCharge(ctx: Ctx, id: string, input: SendCha
   await logEvent(ctx, r, {
     action: (r.chargeSends ?? 0) > 0 ? "certificate.charge_resent" : "certificate.charge_sent",
     summary: `${(r.chargeSends ?? 0) > 0 ? "Reenvio da" : "Envio da"} cobrança de ${r.protocol} (${formatMoney(r.amount)}, vencimento ${formatDate(dueDate)}) por ${CHARGE_CHANNEL_LABEL[input.channel]} para ${to}${dueDate !== r.dueDate ? ` — vencimento atualizado de ${formatDate(r.dueDate)}` : ""}`,
-    after: { channel: input.channel, to, dueDate, sends: after.chargeSends, link: msg.link },
+    after: { channel: input.channel, to, dueDate, sends: after.chargeSends, link: msg.link, message: input.message?.trim() || null },
   });
   if ((r.chargeSends ?? 0) === 0) await notifyTeam(ctx.store, after, { title: `Cobrança enviada — ${r.protocol} (${r.holderName})`, body: `${formatMoney(r.amount)}, vencimento ${formatDate(dueDate)}. Confirme o pagamento quando a transação chegar.`, key: "charge" });
   return { channel: input.channel, to, delivered, message: detail };

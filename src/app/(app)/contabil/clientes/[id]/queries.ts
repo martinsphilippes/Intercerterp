@@ -4,14 +4,15 @@ import type { Doc } from "@/lib/db/types";
 import { REGIMES, CRT_OPTIONS } from "@/domain/companies";
 import {
   getClient, listPeople, listEstablishments, clientRegimeHistory, listAssignments, listDepartments, listDeliveries, linkedSnapshot, linkedCompanyReader,
-  SERVICE_LABEL, PEOPLE_KIND_LABEL, type LinkedSnapshot,
+  listKnownCertificates, listCertificateRequests, clientTrackingAllowed,
+  SERVICE_LABEL, PEOPLE_KIND_LABEL, type LinkedSnapshot, type KnownCertificate,
 } from "@/domain/accounting";
 import { portfolioRefs, REGIME_LABEL_MAP } from "../../queries";
 
 export const CRT_LABEL_MAP: Record<string, string> = Object.fromEntries(CRT_OPTIONS.map((c) => [c.value, c.label]));
 
-export type ClientTab = "resumo" | "pessoas" | "estabelecimentos" | "regime" | "responsaveis" | "fiscal" | "entregas" | "historico";
-export const CLIENT_TABS: ClientTab[] = ["resumo", "pessoas", "estabelecimentos", "regime", "responsaveis", "fiscal", "entregas", "historico"];
+export type ClientTab = "resumo" | "pessoas" | "estabelecimentos" | "regime" | "responsaveis" | "fiscal" | "entregas" | "certificados" | "historico";
+export const CLIENT_TABS: ClientTab[] = ["resumo", "pessoas", "estabelecimentos", "regime", "responsaveis", "fiscal", "entregas", "certificados", "historico"];
 
 export type PersonRow = Doc & { kindLabel: string; sharePct: number | null };
 export type RegimeRow = Doc & { regimeLabel: string; crtLabel: string | null };
@@ -64,6 +65,14 @@ export async function clientDetail(ctx: Ctx, id: string, tab: ClientTab) {
     }
   }
 
+  // certificados digitais (Tela 67): conhecidos, solicitações e autorização de acompanhamento — só na aba Certificados
+  let certificates: KnownCertificate[] | null = null;
+  let certificateRequests: Doc[] | null = null;
+  let tracking: { allowed: boolean; linked: boolean } | null = null;
+  if (tab === "certificados") {
+    [certificates, certificateRequests, tracking] = await Promise.all([listKnownCertificates(ctx, { clientId: id }), listCertificateRequests(ctx, { clientId: id }), clientTrackingAllowed(ctx, client)]);
+  }
+
   const departmentName = new Map(departments.map((d) => [d.id, d.name as string]));
   const activePartners = people.filter((p) => p.kind === "partner" && p.active !== false);
   const partnerShareBps = activePartners.reduce((a, p) => a + (p.shareBps ?? 0), 0);
@@ -94,6 +103,9 @@ export async function clientDetail(ctx: Ctx, id: string, tab: ClientTab) {
     deliveredFileIds,
     snapshot,
     snapshotError,
+    certificates,
+    certificateRequests,
+    tracking,
     refs,
     regimeOptions: REGIMES.map((r) => ({ value: r.value, label: r.label, crt: r.crt })),
     crtOptions: CRT_OPTIONS,

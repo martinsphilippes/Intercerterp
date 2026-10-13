@@ -11,6 +11,7 @@ import { formatDateTime } from "@/lib/dates";
 import { formatDoc } from "@/lib/core/text";
 import { revokeLinkByCompanyAction } from "@/app/(app)/contabil/actions";
 import { AcceptLinkForm } from "./accounting-link-form";
+import { AccountingCertificates } from "./accounting-certificates";
 
 /**
  * Lado da EMPRESA no ERP: vínculo com o escritório contábil que também usa o Intercert.
@@ -108,6 +109,7 @@ export async function AccountingLink({ companyId, store, canEdit }: { companyId:
         ) : (
           <p className="text-xs text-slate-500">Desfazer o vínculo exige a permissão “Configurar integrações”. O escritório também pode desfazê-lo pelo lado dele.</p>
         )}
+        <AccountingCertificates companyId={companyId} store={store} canEdit={canEdit} firmName={firmName} />
         {history}
       </div>
     </Card>

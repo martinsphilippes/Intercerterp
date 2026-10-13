@@ -2,6 +2,7 @@
 
 import { runAction, fstr, fopt, fbool, fjson } from "@/lib/server/action";
 import { parseMoney } from "@/lib/money";
+import { BusinessError } from "@/lib/core/errors";
 import {
   createCertificateRequest, sendCertificateCharge, cancelCertificateRequest, requestCertificateEmission, recordCertificateAuthorization, requestDownloadAuthorization, requestTrackingAccess, registerKnownCertificate,
   confirmCertificatePayment, scheduleCertificateValidation, approveCertificateValidation, rejectCertificateValidation, registerCertificateEmission, registerCertificateEmissionFailure, saveCertificationSettings,
@@ -17,6 +18,16 @@ async function upload(fd: FormData, key: string): Promise<{ name: string; mime: 
   return { name: file.name || "arquivo", mime: file.type || "application/octet-stream", data: Buffer.from(await file.arrayBuffer()) };
 }
 
+/** Valor em reais digitado ("199,00", "1.234,56"); texto ilegível vira mensagem de regra, não erro inesperado. */
+function money(raw: string | null, label: string): number | null {
+  if (!raw) return null;
+  try {
+    return parseMoney(raw);
+  } catch {
+    throw new BusinessError(`${label}: informe um valor como 199,00.`, "amount");
+  }
+}
+
 /** `datetime-local` (sem fuso) é interpretado no horário de Brasília (o fuso padrão do sistema). */
 function localToIso(v: string): string {
   const t = v.trim();
@@ -30,7 +41,7 @@ export async function createCertificateRequestAction(fd: FormData) {
   return runAction({ module: "accounting", op: "create", revalidate: PATHS }, async (s) => {
     const amountRaw = fopt(fd, "amount");
     const r = await createCertificateRequest(s.ctx, {
-      clientId: fstr(fd, "clientId"), kind: (fstr(fd, "kind") as "new" | "renewal") || "new", product: fstr(fd, "product"), amount: amountRaw ? parseMoney(amountRaw) : null, dueDate: fstr(fd, "dueDate"),
+      clientId: fstr(fd, "clientId"), kind: (fstr(fd, "kind") as "new" | "renewal") || "new", product: fstr(fd, "product"), amount: money(amountRaw, "Valor da cobrança"), dueDate: fstr(fd, "dueDate"),
       contactEmail: fopt(fd, "contactEmail"), contactPhone: fopt(fd, "contactPhone"), notes: fopt(fd, "notes"), previousCertificateId: fopt(fd, "previousCertificateId"), responsibleUserId: fopt(fd, "responsibleUserId"),
     });
     return { ok: true as const, data: { id: r.id, protocol: r.protocol }, message: `Solicitação ${r.protocol} criada. Próxima etapa: conferir e enviar a cobrança.`, redirect: `/contabil/certificados/${r.id}` };
@@ -92,7 +103,7 @@ export async function confirmPaymentAction(fd: FormData) {
   return runAction({ module: "admin", op: "view", revalidate: PATHS }, async (s) => {
     const amountRaw = fopt(fd, "amount");
     const paidAt = fopt(fd, "paidAt");
-    const r = await confirmCertificatePayment(s.ctx, fstr(fd, "id"), { ref: fstr(fd, "ref"), paidAt: paidAt ? localToIso(paidAt) : null, amount: amountRaw ? parseMoney(amountRaw) : null });
+    const r = await confirmCertificatePayment(s.ctx, fstr(fd, "id"), { ref: fstr(fd, "ref"), paidAt: paidAt ? localToIso(paidAt) : null, amount: money(amountRaw, "Valor recebido") });
     return { ok: true as const, message: `Pagamento de ${r.protocol} confirmado. Próxima etapa: validação do titular.` };
   });
 }
@@ -149,7 +160,7 @@ export async function teamCancelRequestAction(fd: FormData) {
 
 export async function saveCertificationSettingsAction(fd: FormData) {
   return runAction({ module: "admin", op: "view", revalidate: PATHS }, async (s) => {
-    const catalog = fjson<any[]>(fd, "catalog", []).map((p) => ({ ...p, price: typeof p.price === "string" ? parseMoney(p.price) : p.price }));
+    const catalog = fjson<any[]>(fd, "catalog", []).map((p) => ({ ...p, price: typeof p.price === "string" ? money(p.price, `Preço de ${p.label ?? p.key ?? "produto"}`) : p.price }));
     await saveCertificationSettings(s.ctx, { catalog, paymentInstructions: fopt(fd, "paymentInstructions") ?? "", paymentUrlBase: fopt(fd, "paymentUrlBase") });
     return { ok: true as const, message: "Parâmetros da certificação salvos." };
   });

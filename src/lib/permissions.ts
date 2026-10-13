@@ -73,7 +73,8 @@ export interface RoleTemplate {
 }
 
 const RETAIL_MODULES = MODULES.filter((m) => !ACCOUNTING_MODULES.includes(m.key));
-const RETAIL_ACTIONS = SPECIAL_ACTIONS.filter((a) => !a.key.startsWith("accounting."));
+// perfis de loja: sem as operações do escritório e sem a da equipe de certificação (só administradores da plataforma ou perfil dedicado)
+const RETAIL_ACTIONS = SPECIAL_ACTIONS.filter((a) => !a.key.startsWith("accounting.") && !a.key.startsWith("certification."));
 const FIRM_MODULES = MODULES.filter((m) => !RETAIL_ONLY_MODULES.includes(m.key));
 
 /** Perfis padrão das EMPRESAS OPERACIONAIS (varejo). */

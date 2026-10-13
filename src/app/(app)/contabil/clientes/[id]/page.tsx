@@ -1,25 +1,27 @@
 import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
-import { Download, ExternalLink, Pencil, ShieldCheck, Trash2, UserX } from "lucide-react";
+import { Download, ExternalLink, KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserX } from "lucide-react";
 import { requireFirmSession } from "../../guard";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
 import { Badge, SimBadge, StatusBadge } from "@/components/ui/badge";
-import { LinkButton } from "@/components/ui/button";
+import { buttonClass, LinkButton } from "@/components/ui/button";
 import { LinkTabs } from "@/components/ui/tabs";
-import { ActionButton } from "@/components/ui/action-form";
+import { ActionButton, ActionForm } from "@/components/ui/action-form";
 import { Timeline } from "@/components/ui/timeline";
 import { EmptyState, Notice } from "@/components/ui/empty";
 import { formatDate, formatDateTime, formatMonth, today } from "@/lib/dates";
+import { formatMoney } from "@/lib/money";
 import { formatDoc, formatPhone } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import { BusinessError } from "@/lib/core/errors";
 import { NotFoundError } from "@/lib/db/types";
 import { UFS } from "@/domain/companies";
-import { CLIENT_STATUS, LINK_CODE_DAYS } from "@/domain/accounting";
+import { CERT_KIND_LABEL, CERT_SOURCE_LABEL, CERT_STATUS_LABEL, CLIENT_STATUS, LINK_CODE_DAYS, requestDisplayStatus, requestIsOpen } from "@/domain/accounting";
 import { OBLIGATION_KIND_LABEL } from "@/domain/fiscal/obligations";
 import { REGIME_LABEL_MAP } from "../../queries";
 import { removePersonAction, removeEstablishmentAction, endAssignmentAction } from "../../actions";
+import { requestTrackingAccessAction } from "../../certificados/actions";
 import { clientDetail, CLIENT_TABS, type ClientDetail, type ClientTab } from "./queries";
 import { StatusForm } from "./status-form";
 import { LinkCard } from "./link-card";
@@ -36,6 +38,8 @@ const SOURCE_LABEL: Record<string, string> = { manual: "Registro manual" };
 
 const n = (count: number, one: string, many: string) => `${count.toLocaleString("pt-BR")} ${count === 1 ? one : many}`;
 const pct = (bps: number) => `${(bps / 100).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`;
+/** "Vence em 12 dias" / "Vence hoje" / "Vencido há 8 dias" — ou null sem validade informada. */
+const validityPhrase = (daysLeft: number | null) => (daysLeft == null ? null : daysLeft < 0 ? `Vencido há ${n(-daysLeft, "dia", "dias")}` : daysLeft === 0 ? "Vence hoje" : `Vence em ${n(daysLeft, "dia", "dias")}`);
 /** Período dos pacotes vem como "início:fim" (datas); competência das obrigações como AAAA-MM ou AAAA. */
 const periodLabel = (p: string | null | undefined) => {
   if (!p) return "—";
@@ -85,6 +89,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const canEdit = can(s.user, "accounting", "edit");
   const canLink = canDo(s.user, "accounting.link");
   const canTeam = canDo(s.user, "accounting.manage_team");
+  const canCert = canDo(s.user, "accounting.certificates");
   const activeAssignments = d.assignments.filter((a) => a.isActive);
   const t = today();
   // vigência em curso hoje (a que o cadastro reflete), a última registrada (sem fim, referência do domínio) e uma futura, se houver
@@ -104,6 +109,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     { key: "responsaveis", label: "Responsáveis", count: activeAssignments.length + (c.responsibleUserId ? 1 : 0) },
     { key: "fiscal", label: "Fiscal (ERP)" },
     { key: "entregas", label: "Entregas", count: d.deliveries.length },
+    { key: "certificados", label: "Certificados", count: d.certificates?.length },
     { key: "historico", label: "Histórico" },
   ];
 
@@ -567,12 +573,178 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         </Card>
       )}
 
+      {tab === "certificados" && d.certificates && d.certificateRequests && d.tracking && <CertificatesTab d={d} certificates={d.certificates} requests={d.certificateRequests} tracking={d.tracking} clientId={id} canCert={canCert} canEdit={canEdit} canCreate={can(s.user, "accounting", "create")} />}
+
       {tab === "historico" && (
         <Card title="Linha do tempo" description="Tudo o que aconteceu com este cliente: cadastro, situação, regime, pessoas, responsáveis, vínculo e entregas.">
           <Timeline store={s.ctx.store} refs={[`accounting_client:${id}`]} />
         </Card>
       )}
     </>
+  );
+}
+
+/**
+ * Aba Certificados (Tela 67): certificados conhecidos do cliente (emitidos pelo Intercert, informados pelo escritório ou
+ * lidos do ERP com autorização do titular) e as solicitações abertas para ele. Nada é alterado aqui: as ações acontecem
+ * no protocolo (/contabil/certificados/<id>) e na nova solicitação.
+ */
+function CertificatesTab({
+  d, certificates, requests, tracking, clientId, canCert, canEdit, canCreate,
+}: {
+  d: ClientDetail;
+  certificates: NonNullable<ClientDetail["certificates"]>;
+  requests: NonNullable<ClientDetail["certificateRequests"]>;
+  tracking: NonNullable<ClientDetail["tracking"]>;
+  clientId: string;
+  canCert: boolean;
+  canEdit: boolean;
+  canCreate: boolean;
+}) {
+  const open = requests.find(requestIsOpen) ?? null;
+  const closed = d.client.status === "closed";
+  const canNew = canCert && canCreate && tracking.allowed && !open && !closed;
+  return (
+    <div className="space-y-4">
+      {tracking.linked && !tracking.allowed && (
+        <Notice tone="warn" title="Acompanhamento não autorizado">
+          <p>
+            {d.name} ainda não autorizou o escritório a acompanhar seus certificados digitais. A autorização é dada pelo administrador da empresa no ERP (Administração → Integrações → Contabilidade → Certificados digitais) e é independente das demais autorizações do vínculo. Sem ela, o escritório não abre solicitações nem vê o certificado de emissão fiscal da empresa.
+          </p>
+          {canCert && canEdit ? (
+            <ActionForm action={requestTrackingAccessAction} className="mt-2">
+              <input type="hidden" name="clientId" value={clientId} />
+              <button type="submit" className={buttonClass("secondary", "sm")}>
+                <KeyRound className="size-3.5" aria-hidden /> Preparar pedido de acesso
+              </button>
+            </ActionForm>
+          ) : (
+            <p className="mt-1 text-xs">Preparar o pedido de acesso exige a permissão “Solicitar, cobrar e baixar certificados digitais dos clientes”.</p>
+          )}
+        </Notice>
+      )}
+
+      <Card
+        title="Certificados conhecidos"
+        description="Emitidos pelo Intercert, informados pelo escritório ou lidos do ERP da empresa vinculada (com autorização do titular). A validade considera a data de hoje."
+        actions={<Link href={`/contabil/certificados?tab=validades&cliente=${clientId}`} className="text-xs text-brand-700 hover:underline">Ver validades e renovações</Link>}
+        bodyClass="p-0"
+      >
+        {certificates.length === 0 ? (
+          <EmptyState title="Nenhum certificado conhecido" description={tracking.linked && !tracking.allowed ? "Os certificados emitidos pelo Intercert entram aqui automaticamente. O certificado de emissão fiscal da empresa só aparece depois que o titular autorizar o acompanhamento." : "Os certificados emitidos pelo Intercert entram aqui automaticamente; um certificado emitido por outra origem pode ser registrado em Certificados digitais → Validades e renovações."} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table-base w-full text-sm">
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th>Origem</th>
+                  <th>Série</th>
+                  <th>Validade</th>
+                  <th>Situação</th>
+                  <th>Solicitação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {certificates.map((k) => {
+                  const phrase = validityPhrase(k.daysLeft);
+                  return (
+                    <tr key={k.id}>
+                      <td>
+                        <span className="font-medium text-ink">{k.productLabel}</span>
+                        {k.branchName && <span className="block text-xs text-slate-500">{k.branchName}</span>}
+                        {k.issuer && <span className="block text-xs text-slate-500">{k.issuer}</span>}
+                      </td>
+                      <td className="text-xs">{CERT_SOURCE_LABEL[k.source] ?? k.source}</td>
+                      <td className="font-mono text-xs">{k.serial ?? "—"}</td>
+                      <td className="whitespace-nowrap">{k.validTo ? <span>{k.validFrom ? `${formatDate(k.validFrom)} a ` : "Até "}{formatDate(k.validTo)}</span> : <span className="text-slate-500">Não informada</span>}</td>
+                      <td>
+                        <StatusBadge kind="certificate_validity" status={k.validity} />
+                        {phrase && <span className={`block text-xs ${k.validity === "expired" ? "text-red-700" : k.validity === "due_soon" ? "text-amber-700" : "text-slate-500"}`}>{phrase}</span>}
+                      </td>
+                      <td className="text-xs">
+                        {k.openRequest ? (
+                          <Link href={`/contabil/certificados/${k.openRequest.id}`} className="text-brand-700 hover:underline">
+                            {k.openRequest.protocol} · {CERT_STATUS_LABEL[k.openRequest.status] ?? k.openRequest.status}
+                          </Link>
+                        ) : k.requestId ? (
+                          <Link href={`/contabil/certificados/${k.requestId}`} className="text-brand-700 hover:underline">
+                            Protocolo da emissão
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card
+        title="Solicitações"
+        description="Solicitações de certificado abertas para este cliente, do pagamento à entrega. Cada protocolo mostra a próxima ação e quem responde por ela."
+        actions={
+          canNew ? (
+            <LinkButton href={`/contabil/certificados/nova?cliente=${clientId}`} variant="primary" size="sm">
+              <Plus className="size-4" aria-hidden /> Nova solicitação
+            </LinkButton>
+          ) : open ? (
+            <Link href={`/contabil/certificados/${open.id}`} className="text-xs text-brand-700 hover:underline">
+              Em andamento: {open.protocol}
+            </Link>
+          ) : null
+        }
+        bodyClass="p-0"
+      >
+        {requests.length === 0 ? (
+          <EmptyState
+            title="Nenhuma solicitação de certificado"
+            description={canNew ? "Abra a primeira em Nova solicitação: o pedido é cadastrado, a cobrança é enviada ao cliente e a equipe de certificação cuida do restante." : closed ? "Cliente encerrado: reative-o antes de solicitar um certificado." : !tracking.allowed ? "A empresa precisa autorizar o acompanhamento antes de o escritório abrir uma solicitação." : "Nenhum certificado foi solicitado para este cliente até agora."}
+            action={canNew ? <LinkButton href={`/contabil/certificados/nova?cliente=${clientId}`} variant="primary" size="sm"><Plus className="size-4" aria-hidden /> Nova solicitação</LinkButton> : undefined}
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table-base w-full text-sm">
+              <thead>
+                <tr>
+                  <th>Protocolo</th>
+                  <th>Tipo</th>
+                  <th>Produto</th>
+                  <th>Etapa</th>
+                  <th className="text-right">Valor</th>
+                  <th>Aberta em</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map((r) => (
+                  <tr key={r.id}>
+                    <td className="font-mono text-xs text-ink">{r.protocol}</td>
+                    <td>{CERT_KIND_LABEL[r.kind] ?? r.kind}</td>
+                    <td>{r.productLabel}</td>
+                    <td>
+                      <StatusBadge kind="certificate_request" status={requestDisplayStatus(r)} />
+                      {r.status === "awaiting_payment" && r.dueDate && <span className="block text-xs text-slate-500">Vencimento {formatDate(r.dueDate)}</span>}
+                    </td>
+                    <td className="tabular whitespace-nowrap text-right">{formatMoney(r.amount)}</td>
+                    <td className="whitespace-nowrap" title={formatDateTime(r.createdAt)}>{formatDate(r.createdAt)}</td>
+                    <td>
+                      <Link href={`/contabil/certificados/${r.id}`} className="inline-flex items-center gap-1 text-brand-700 hover:underline">
+                        Abrir <ExternalLink className="size-3" aria-hidden />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 

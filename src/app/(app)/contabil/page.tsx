@@ -9,7 +9,7 @@ import { EmptyState } from "@/components/ui/empty";
 import { BarList } from "@/components/charts/bars";
 import { can, canDo } from "@/lib/permissions";
 import { formatDateTime, formatMonth } from "@/lib/dates";
-import { CLIENT_STATUS } from "@/domain/accounting";
+import { CERT_DUE_SOON_DAYS, certificateOverview, CLIENT_STATUS } from "@/domain/accounting";
 import { portfolioOverview } from "./queries";
 
 export const metadata = { title: "Painel da carteira" };
@@ -21,7 +21,7 @@ const n = (count: number, one: string, many: string) => `${count.toLocaleString(
 
 export default async function Page() {
   const s = await requireFirmSession();
-  const o = await portfolioOverview(s.ctx);
+  const [o, cert] = await Promise.all([portfolioOverview(s.ctx), certificateOverview(s.ctx)]);
   // carteira restrita: quem não vê toda a carteira enxerga só os clientes em que é responsável ou tem atribuição
   const wholePortfolio = s.user.isAdmin || canDo(s.user, "accounting.all_clients");
   const withRegime = o.byRegime.reduce((a, r) => a + r.count, 0);
@@ -64,6 +64,20 @@ export default async function Page() {
           const count = o.byStatus[st.value] ?? 0;
           return <Stat key={st.value} label={st.label} value={count.toLocaleString("pt-BR")} href={`/contabil/clientes?status=${st.value}`} tone={count ? STATUS_TONE[st.value] : "default"} />;
         })}
+      </section>
+      <section aria-label="Certificados digitais" className="mb-5">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Certificados digitais</h2>
+          <Link href="/contabil/certificados" className="text-xs text-brand-700 hover:underline">
+            Abrir certificados digitais
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat label="Certificados a renovar" value={cert.needRenewal.toLocaleString("pt-BR")} href="/contabil/certificados?tab=validades" hint={`Clientes com certificado vencido ou a vencer em até ${CERT_DUE_SOON_DAYS} dias`} tone={cert.needRenewal ? "bad" : "default"} />
+          <Stat label="Cobranças de certificado vencidas" value={cert.overdueCharges.toLocaleString("pt-BR")} href="/contabil/certificados?status=overdue" hint="Aguardando pagamento com vencimento passado: atualize e reenvie" tone={cert.overdueCharges ? "bad" : "default"} />
+          <Stat label="Certificados prontos para baixar" value={cert.readyToDownload.toLocaleString("pt-BR")} href="/contabil/certificados?status=ready_to_download" hint="Emitidos e autorizados; download com confirmação de senha" tone={cert.readyToDownload ? "good" : "default"} />
+          <Stat label="Solicitações em atendimento" value={cert.open.toLocaleString("pt-BR")} href="/contabil/certificados?status=open" hint="Do pagamento à entrega do certificado" />
+        </div>
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">

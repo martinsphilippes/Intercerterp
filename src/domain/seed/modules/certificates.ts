@@ -12,7 +12,7 @@ import { addDays, today } from "@/lib/dates";
 import { createRole } from "../../roles";
 import {
   saveCertificationSettings, setCertificateTracking, registerKnownCertificate, createCertificateRequest, sendCertificateCharge, confirmCertificatePayment, scheduleCertificateValidation,
-  approveCertificateValidation, requestCertificateEmission, registerCertificateEmission, recordCertificateAuthorization,
+  approveCertificateValidation, requestCertificateEmission, registerCertificateEmission, recordCertificateAuthorization, createClient,
 } from "../../accounting";
 
 /**
@@ -91,8 +91,15 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   await scheduleCertificateValidation(team, r4.id, { at: new Date().toISOString(), mode: "in_person" });
   await approveCertificateValidation(team, r4.id);
 
+  // 5) cliente sem solicitação aberta, com certificado a vencer em 12 dias: mostra o caminho "Renovar" na aba Validades
+  const oficina = (await findOne(store, "accounting_clients", [["eq", "companyId", firm.id], ["eq", "doc", "77889900000166"]])) ?? (await createClient(owner, {
+    personType: "PJ", doc: "77889900000166", name: "Oficina Nordeste Ltda", tradeName: "Oficina Nordeste", regime: "simples", cnae: "4520001", status: "active", onboardedAt: addDays(today(), -400), serviceStartAt: addDays(today(), -400),
+    address: { cityName: "Recife", cityCode: "2611606", uf: "PE" }, services: ["accounting", "fiscal"], employeesCount: 6, responsibleUserId: contador.id, idemKey: "demo-oficina",
+  }));
+  await registerKnownCertificate(owner, oficina.id, { productLabel: "e-CNPJ A1 · 12 meses", serial: "DEMO-A1-6705", issuer: "AC Intercert (DEMO)", validFrom: addDays(today(), 12 - 365), validTo: addDays(today(), 12) });
+
   await setSetting(store, firm.id, null, "demo.certificates.done", true);
-  return { firmId: firm.id, requests: 4, teamUser: teamUser.login };
+  return { firmId: firm.id, requests: 4, clients: 5, teamUser: teamUser.login };
 }
 
 /** .pfx autoassinado para a demonstração (a senha é descartada após a leitura da validade). */

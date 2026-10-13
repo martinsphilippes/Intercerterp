@@ -11,7 +11,7 @@ import { buttonClass } from "@/components/ui/button";
 import { Field, FormGrid, Input, Select, Checkbox } from "@/components/ui/form";
 import { Timeline } from "@/components/ui/timeline";
 import { formatDateTime } from "@/lib/dates";
-import { canDo } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
 import { CONFIG_LABEL, cscRefProblem, INTEGRATION_CATALOG, integrationJobs, integrationLogs, providerSecretProblem, SECRET_LABEL, usageSummary, type IntegrationKind } from "@/domain/integrations";
 import { REGIME_LABEL } from "@/domain/fiscal/config";
 import { integrationOverview } from "../queries";
@@ -31,7 +31,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const kind = k as IntegrationKind;
   const cat = INTEGRATION_CATALOG[kind];
   const o = await integrationOverview(s.ctx, kind);
-  const canEdit = canDo(s.user, "admin.integrations");
+  const canEdit = canDo(s.user, "admin.integrations") && can(s.user, "admin", "edit");
   const fiscal = kind === "fiscal_nfe" || kind === "fiscal_nfse";
   const scope: "branch" | "company" = s.branch ? "branch" : "company";
   const jobs = await integrationJobs(s.ctx, kind, ["retry", "dead", "pending", "running"]);

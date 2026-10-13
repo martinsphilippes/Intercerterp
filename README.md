@@ -29,7 +29,7 @@ Telas do escritório: painel da carteira (`/contabil`), clientes (lista com filt
 
 **Certificados digitais (Tela 67):** o escritório solicita certificados (e-CNPJ/e-CPF A1) para os clientes em `/contabil/certificados` — cobrança da Intercert separada da mensalidade (e-mail real ou envio manual identificado), confirmação de pagamento com referência, validação do titular, emissão com o arquivo .pfx, autorização do titular e download com confirmação de senha, tudo registrado por protocolo. A equipe de certificação atende em Administração → Certificação digital; a empresa vinculada autoriza acompanhamento e download em Integrações → Contabilidade. Regras em `docs/regras-assumidas.md` §22.
 
-Na demonstração: escritório "Contábil Horizonte (DEMO)" com os usuários `contador` (sócio), `analista` (carteira restrita) e `certificacao` (equipe de certificação), 4 clientes, 4 solicitações de certificado em etapas diferentes, a loja de demonstração já vinculada e dois pacotes recebidos (fechamento do mês anterior e parcial do mês corrente).
+Na demonstração: escritório "Contábil Horizonte (DEMO)" com os usuários `contador` (sócio), `analista` (carteira restrita) e `certificacao` (equipe de certificação), 5 clientes, 4 solicitações de certificado em etapas diferentes (e um cliente com certificado a vencer, para a renovação), a loja de demonstração já vinculada e dois pacotes recebidos (fechamento do mês anterior e parcial do mês corrente).
 
 ## Instalação automatizada (sem a tela de primeiro acesso)
 
