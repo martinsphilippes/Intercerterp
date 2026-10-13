@@ -33,6 +33,11 @@ export function fileAccessDenial(user: PermissionSubject, meta: Record<string, a
   if (meta.kind === "certificate_a1" || meta.entityType === "fiscal_config") {
     return canDo(user, "fiscal.configure") ? null : "Sem permissão para o certificado digital";
   }
+  // certificado emitido para um cliente do escritório: só pela rota própria, com confirmação de senha e registro
+  if (meta.kind === "certificate_issued") return "O certificado emitido só pode ser baixado pela solicitação, com confirmação de identidade";
+  if (meta.kind === "certificate_auth_evidence" || meta.entityType === "certificate_request") {
+    return can(user, "accounting", "view") ? null : "Sem permissão para este arquivo";
+  }
   if (meta.kind === "accounting_package" || meta.entityType === "fiscal_export") {
     if (!can(user, "fiscal", "view")) return "Sem permissão para este arquivo";
     return canDo(user, "data.export") ? null : "Sem permissão para exportar dados: o pacote contábil contém os XML e planilhas com CPF/CNPJ do período";

@@ -19,6 +19,7 @@ const SECTORS: Record<string, { sector: string; order: number }> = {
   fiscal: { sector: "Fiscal", order: 7 },
   contador: { sector: "Escritório contábil — sócio", order: 8 },
   analista: { sector: "Escritório contábil — analista", order: 9 },
+  certificacao: { sector: "Equipe de certificação Intercert", order: 10 },
 };
 
 /** Somente usuários da empresa de demonstração, ativos e com acesso criado — nunca contas reais. */

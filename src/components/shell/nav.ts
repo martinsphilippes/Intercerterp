@@ -1,10 +1,12 @@
-import type { ModuleKey } from "@/lib/permissions";
+import type { ModuleKey, SpecialAction } from "@/lib/permissions";
 
 export interface NavItem {
   href: string;
   label: string;
   module: ModuleKey;
   icon: string;
+  /** operação especial exigida além do módulo (ex.: fila da certificação só para quem opera a certificação) */
+  action?: SpecialAction;
 }
 export interface NavGroup {
   label: string;
@@ -84,6 +86,7 @@ export const NAV: NavGroup[] = [
       { href: "/administracao/backups", label: "Backup e restauração", module: "admin", icon: "DatabaseBackup" },
       { href: "/administracao/historico", label: "Histórico e auditoria", module: "admin", icon: "History" },
       { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
+      { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },
     ],
   },
   {
@@ -104,6 +107,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/contabil/clientes", label: "Clientes contábeis", module: "accounting", icon: "Users" },
       { href: "/contabil/grupos", label: "Grupos de clientes", module: "accounting", icon: "Building2" },
       { href: "/contabil/entregas", label: "Caixa de entrada (entregas)", module: "accounting", icon: "PackageCheck" },
+      { href: "/contabil/certificados", label: "Certificados digitais", module: "accounting", icon: "BadgeCheck" },
       { href: "/contabil/equipe", label: "Departamentos e equipe", module: "accounting", icon: "ShieldCheck" },
     ],
   },
@@ -134,6 +138,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/administracao/backups", label: "Backup e restauração", module: "admin", icon: "DatabaseBackup" },
       { href: "/administracao/historico", label: "Histórico e auditoria", module: "admin", icon: "History" },
       { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
+      { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },
     ],
   },
   {

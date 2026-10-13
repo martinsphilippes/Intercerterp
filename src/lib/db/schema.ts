@@ -885,6 +885,26 @@ export const COLLECTIONS: CollectionDef[] = [
     indexes: [k("i_company", "companyId", "status"), k("i_client", "clientId"), k("i_file", "fileId")],
   },
   {
+    id: "certificate_requests",
+    label: "Solicitações de certificado digital (escritório)",
+    fields: {
+      ...ctx, clientId: id(true), protocol: s(20, true), kind: s(20), product: s(40), productLabel: s(80), months: int, holderName: s(200), holderDoc: s(20), linkedCompanyId: id(),
+      contactEmail: s(200), contactPhone: s(40), amount: money, dueDate: date, status: s(30), responsibleUserId: id(), previousCertificateId: id(), notes: s(1000),
+      chargeSends: int, chargeSentAt: dt, chargeChannel: s(20), chargeTo: s(200), chargeLink: s(300), paymentConfirmedAt: dt, paymentRef: s(120), paymentBy: id(),
+      validationStatus: s(20), validationAt: dt, validationMode: s(20), validationNotes: s(500), validatedAt: dt, validatedBy: id(),
+      emissionRequestedAt: dt, emissionAttempts: int, emissionFailedAt: dt, emissionFailure: s(500), issuedAt: dt, issuedBy: id(), serial: s(120), issuer: s(160), validFrom: date, validTo: date, fileId: id(), fileName: s(250), certificateId: id(),
+      downloadAuthorized: bool, downloadAuthorizedAt: dt, downloadAuthorizedBy: s(20), downloadAuthEvidenceFileId: id(), downloadAuthNotes: s(300), downloads: int, lastDownloadAt: dt, lastDownloadBy: id(),
+      cancelledAt: dt, cancelledBy: id(), cancelReason: s(300),
+    },
+    indexes: [k("i_company", "companyId", "status"), u("u_protocol", "companyId", "protocol"), k("i_client", "clientId"), k("i_linked", "linkedCompanyId"), k("i_file", "fileId")],
+  },
+  {
+    id: "accounting_certificates",
+    label: "Certificados digitais conhecidos (carteira do escritório)",
+    fields: { ...ctx, clientId: id(true), holderName: s(200), holderDoc: s(20), product: s(40), productLabel: s(80), serial: s(120), issuer: s(160), validFrom: date, validTo: date, source: s(20), requestId: id(), fileId: id(), notes: s(500), active: bool },
+    indexes: [k("i_client", "clientId"), k("i_company", "companyId", "validTo"), k("i_request", "requestId")],
+  },
+  {
     id: "files",
     label: "Arquivos",
     fields: { ...ctx, name: s(250), mime: s(120), sizeBytes: int, sha256: s(80), storageId: s(120), bucket: s(60), entityType: s(40), entityId: id(), kind: s(40) },

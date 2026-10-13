@@ -3,3 +3,4 @@ import "./purchases";
 import "./fiscal";
 import "./admin";
 import "./stock";
+import "./accounting";

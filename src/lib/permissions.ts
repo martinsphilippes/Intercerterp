@@ -53,6 +53,8 @@ export const SPECIAL_ACTIONS = [
   { key: "accounting.all_clients", label: "Ver toda a carteira de clientes (não só os seus)" },
   { key: "accounting.link", label: "Vincular/desvincular empresas do ERP a clientes" },
   { key: "accounting.manage_team", label: "Gerir departamentos e responsáveis da carteira" },
+  { key: "accounting.certificates", label: "Solicitar, cobrar e baixar certificados digitais dos clientes" },
+  { key: "certification.operate", label: "Operar a certificação digital (equipe de certificação Intercert)" },
 ] as const;
 
 export type SpecialAction = (typeof SPECIAL_ACTIONS)[number]["key"];
@@ -139,7 +141,7 @@ export const FIRM_ROLES: RoleTemplate[] = [
     name: "Sócio / Administrador do escritório",
     description: "Acesso integral: carteira, equipe, financeiro do escritório, fiscal de serviços e administração.",
     permissions: Object.fromEntries(FIRM_MODULES.map((m) => [m.key, all()])),
-    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
+    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
     discountLimitBps: 10000,
   },
   {
@@ -147,7 +149,7 @@ export const FIRM_ROLES: RoleTemplate[] = [
     name: "Gestor de departamento",
     description: "Toda a carteira, responsáveis e equipe; financeiro em consulta.",
     permissions: { dashboard: all(), accounting: all(), finance: ro(), fiscal: ro(), admin: ro(), support: rw() },
-    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "data.export"],
+    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "data.export"],
     discountLimitBps: 0,
   },
   {

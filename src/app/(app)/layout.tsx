@@ -7,13 +7,13 @@ import { UnitSwitcher } from "@/components/shell/unit-switcher";
 import { GlobalSearch } from "@/components/shell/global-search";
 import { UserMenu } from "@/components/shell/user-menu";
 import { InstallAppButton } from "@/components/pwa/install-button";
-import { can } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
 import { listAll, getStore, configuredBackend } from "@/lib/db";
 import { accessibleUnits } from "@/lib/auth/users";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireSession();
-  const groups = navFor(s.company.kind).map((g) => ({ ...g, items: g.items.filter((i) => can(s.user, i.module)) })).filter((g) => g.items.length);
+  const groups = navFor(s.company.kind).map((g) => ({ ...g, items: g.items.filter((i) => can(s.user, i.module) && (!i.action || canDo(s.user, i.action))) })).filter((g) => g.items.length);
   const [units, unread] = await Promise.all([
     getStore().get("users", s.user.id).then((userDoc) => accessibleUnits(getStore(), userDoc!)),
     s.ctx.store.list("notifications", { filters: [["eq", "userId", s.user.id], ["isNull", "readAt"], ["isNull", "archivedAt"], ["eq", "companyId", s.ctx.companyId]], limit: 1 }),

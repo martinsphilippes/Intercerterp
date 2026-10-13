@@ -59,6 +59,12 @@ export const STATUS: Record<string, Record<string, [string, Tone]>> = {
   accounting_client: { onboarding: ["Em implantação", "accent"], active: ["Ativo", "good"], offboarding: ["Em encerramento", "warn"], closed: ["Encerrado", "neutral"] },
   link: { none: ["Sem vínculo", "neutral"], pending: ["Código emitido — aguardando a empresa", "warn"], active: ["Vinculado ao ERP", "good"], revoked: ["Vínculo desfeito", "bad"] },
   delivery: { received: ["Recebida — a conferir", "warn"], reviewed: ["Conferida", "good"] },
+  certificate_request: {
+    awaiting_payment: ["Aguardando pagamento", "warn"], overdue: ["Cobrança vencida", "bad"], validation: ["Validação do titular", "accent"], ready_to_issue: ["Pronto para emitir", "info"],
+    issuing: ["Emissão em andamento", "info"], issue_failed: ["Falha na emissão", "bad"], awaiting_authorization: ["Aguardando autorização", "warn"], ready_to_download: ["Pronto para baixar", "good"],
+    downloaded: ["Download realizado", "good"], cancelled: ["Cancelada", "neutral"],
+  },
+  certificate_validity: { expired: ["Vencido", "bad"], due_soon: ["Vence em breve", "warn"], ok: ["Válido", "good"], unknown: ["Validade não informada", "neutral"] },
   generic: { active: ["Ativo", "good"], inactive: ["Inativo", "neutral"], draft: ["Rascunho", "neutral"], completed: ["Concluído", "good"], cancelled: ["Cancelado", "neutral"], pending: ["Pendente", "warn"], processing: ["Processando", "info"], reconciled: ["Conciliado", "good"], ignored: ["Ignorado", "neutral"] },
 };
 
