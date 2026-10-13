@@ -25,6 +25,13 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] tsc, lint, suíte completa (392 testes × 2 modos), build de produção e varredura com build de produção em memória: admin 230 páginas/140 padrões, contador 138/95, analista 74/64 — 0 problemas, 0 erros de console, 14 rotas `/contabil` por perfil. Matriz: `docs/matriz-gestao-contabil.md`.
 - Próximas fases (ver `docs/analise-gestao-contabil.md`): 1 obrigações da carteira, trabalhos recorrentes, revisão, documentos; 2 contratos, honorários, NFS-e, cobrança; 3 portal do cliente e atendimento com SLA; 4 horas, rentabilidade, comercial; 5 BPO, regularidade, migração, IA.
 
+## Tela 67 — Certificados digitais · 13/10/2026
+- [x] Leitura do guia visual comentado (13 p.); plano de correções aprovado no chat ("Vai"). Decisões: equipe de certificação = administradores da plataforma (operação delegável); cobrança da Intercert, separada da mensalidade; catálogo configurável (e-CNPJ A1 padrão).
+- [x] Núcleo e domínio: `certificate_requests`, `accounting_certificates`; operações `accounting.certificates` e `certification.operate`; `src/domain/accounting/certificates.ts` (solicitação, cobrança real/manual, pagamento com referência, validação, emissão com .pfx, falha/nova tentativa, autorizações, download com confirmação de senha, cancelamento, certificados conhecidos, indicadores, fila, parâmetros); rotina diária; rota `POST /api/certificados/[id]`; componente de download protegido.
+- [x] Testes `tests/certificates.test.ts` (11 cenários) e demonstração (usuário `certificacao`, catálogo, 4 protocolos com .pfx de demonstração emitido de verdade).
+- [ ] Telas (frentes paralelas + revisores): carteira/validades/nova, protocolo, fila da equipe, lado do titular + aba no 360° + painel.
+- [ ] Build, varredura (admin, contador, analista, certificacao), publicação e `demo-update` em produção.
+
 ## Pendente (depende de terceiros)
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).
 

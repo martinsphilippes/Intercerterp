@@ -14,6 +14,8 @@ Itens que dependem de recurso externo, credencial ou ação do titular. O códig
 | 8 | **Parâmetros fiscais da empresa real** | NCM/CFOP/CST por produto, grupos tributários, prazos de cancelamento e calendário de obrigações validados pela contabilidade | Produtos / Fiscal | Os valores da demonstração são exemplos |
 | 9 | **Restauração em nova base Appwrite** | Plano do Appwrite que permita múltiplos bancos no mesmo projeto | Appwrite | Restauração em base de teste continua disponível |
 | 10 | **Validação contábil das regras fiscais** | Conferir com a contabilidade a lista de CFOP que não compõem o faturamento (transferências, remessas, devoluções), CST 20 com redução de base e PIS/COFINS por CST | Fiscal → Relatórios / grupos tributários | Faturamento fiscal e tributos aproximados seguem as regras documentadas em `docs/regras-assumidas.md` |
+| 11 | **Gateway de pagamento dos certificados (Intercert)** | Link de pagamento e confirmação automática do pagamento único do certificado digital (hoje: instruções de pagamento na mensagem e confirmação pela equipe com a referência; a base do link é parâmetro da certificação ou `CERT_PAYMENT_URL_BASE`) | Administração → Certificação digital → Parâmetros | Confirmação manual com referência; cobrança por e-mail (canal do escritório) ou envio manual identificado |
+| 12 | **WhatsApp/SMS para clientes do escritório** | Provedor de mensagens (ex.: API oficial do WhatsApp) para enviar cobranças e avisos aos clientes | Integrações | Envio manual identificado: o texto é copiado e o sistema registra quem/quando/para quem |
 
 ## Riscos residuais conhecidos (não dependem de terceiros)
 
