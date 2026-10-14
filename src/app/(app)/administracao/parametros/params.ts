@@ -7,6 +7,7 @@ import { audit } from "@/lib/core/audit";
 import { DEFAULT_SETTINGS, setSetting } from "@/lib/core/settings";
 import { DEFAULT_TZ } from "@/lib/dates";
 import { TIMEZONES } from "@/domain/companies";
+import { parseCfopPairs } from "@/domain/cfop-entry";
 import { PARAMS, PARAM_MAP, type ParamDef } from "./catalog";
 
 const scopeKey = (companyId: string, branchId: string | null, key: string) => `${companyId}|${branchId ?? "*"}|${key}`;
@@ -68,6 +69,12 @@ function coerce(def: ParamDef, raw: string): unknown {
     case "timezone":
       assert(TIMEZONES.includes(raw), `${def.label}: fuso inválido.`);
       return raw;
+    case "cfopPairs":
+      try {
+        return parseCfopPairs(raw);
+      } catch (e) {
+        throw new BusinessError(`${def.label}: ${(e as Error).message}`, "invalid");
+      }
   }
 }
 

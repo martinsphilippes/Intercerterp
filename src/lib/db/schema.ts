@@ -655,6 +655,8 @@ export const COLLECTIONS: CollectionDef[] = [
       dueTotal: money, emitter: json, differenceAction: s(30), searchText: s(1000), confirmedBy: id(),
       entryCfop: s(10), categoryId: id(), costCenterId: id(), paymentMethodId: id(), effects: json,
       orderCharges: json,
+      // origem da entrada (xml | manual) e vínculo com pedido (with_order | without_order) — COM-03
+      origin: s(20), orderLink: s(20),
     },
     indexes: [u("u_scope", "scopeKey"), k("i_supplier", "supplierId")],
   },

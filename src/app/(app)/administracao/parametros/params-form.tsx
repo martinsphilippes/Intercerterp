@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/empty";
 import { saveParametersAction } from "./actions";
 import type { ParamDef } from "./catalog";
+import { DEFAULT_CFOP_PAIRS, formatCfopPairs } from "@/domain/cfop-entry";
 
 type State = { def: ParamDef; company: unknown; branch: unknown; effective: unknown; source: string; updatedAt: string | null };
 
@@ -66,6 +67,7 @@ export function ParamsForm({ scope, states, groups, readOnly }: { scope: string;
                           {d.type === "money" && <MoneyInput name={name} defaultValue={Number(v ?? 0)} disabled={cleared} ariaLabel={d.label} />}
                           {d.type === "select" && <Select name={name} defaultValue={String(v ?? "")} options={d.options ?? []} disabled={cleared} aria-label={d.label} />}
                           {d.type === "timezone" && <span className="text-sm font-medium text-ink" aria-label={d.label}>{String(v ?? "")}</span>}
+                          {d.type === "cfopPairs" && <CfopPairsInput name={name} value={v as Record<string, string> | null} disabled={cleared} label={d.label} />}
                           {d.unit && <span className="text-sm text-slate-500">{d.unit}</span>}
                         </div>
                       </li>
@@ -90,5 +92,24 @@ export function ParamsForm({ scope, states, groups, readOnly }: { scope: string;
         </fieldset>
       )}
     </ActionForm>
+  );
+}
+
+/** Tabela de pares de CFOP editada como texto (um par "5102=1102" por linha), com restauração da tabela padrão. */
+function CfopPairsInput({ name, value, disabled, label }: { name: string; value: Record<string, string> | null; disabled: boolean; label: string }) {
+  const [text, setText] = useState(formatCfopPairs(value));
+  const count = text.split(/[\n;,]+/).filter((x) => x.trim()).length;
+  return (
+    <div className="w-full">
+      <Textarea name={name} rows={8} value={text} onChange={(e) => setText(e.target.value)} disabled={disabled} aria-label={label} className="font-mono text-xs" spellCheck={false} />
+      <p className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <span>{count} par(es)</span>
+        {!disabled && (
+          <button type="button" className="text-brand-700 underline" onClick={() => setText(formatCfopPairs(DEFAULT_CFOP_PAIRS))}>
+            Restaurar tabela padrão
+          </button>
+        )}
+      </p>
+    </div>
   );
 }

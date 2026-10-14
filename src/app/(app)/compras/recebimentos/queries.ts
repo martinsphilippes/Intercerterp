@@ -36,6 +36,9 @@ export async function queryReceipts(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
     rows = rows.filter((r) => r.date >= rg.start && r.date < rg.end);
   }
   if (p.f.divergence === "1") rows = rows.filter((r) => r.divergenceCount > 0);
+  // vínculo com pedido (COM-03): com pedido × entrada sem pedido
+  if (p.f.order === "with") rows = rows.filter((r) => r.orderNumbers.length > 0);
+  if (p.f.order === "without") rows = rows.filter((r) => r.orderNumbers.length === 0);
   if (p.q) {
     const term = normalizeSearch(p.q);
     const d = onlyDigits(p.q);

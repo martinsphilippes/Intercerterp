@@ -1,9 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { runAction, fstr, fopt, fint, fjson } from "@/lib/server/action";
+import { runAction, fstr, fopt, fint, fjson, fbool } from "@/lib/server/action";
 import { BusinessError } from "@/lib/core/errors";
-import { importNfeXml, fetchXmlByKey, createManualReceipt, updateReceipt, confirmReceipt, cancelReceipt, type ReceiptUpdate } from "@/domain/receipts";
+import { importNfeXml, fetchXmlByKey, createManualReceipt, updateReceipt, confirmReceipt, cancelReceipt, type ManualReceiptItemInput, type ReceiptUpdate } from "@/domain/receipts";
+import { createProductsFromReceipt, type NewProductRow } from "@/domain/receipt-products";
 
 const PATHS = ["/compras/recebimentos", "/compras/pedidos"];
 
@@ -26,8 +27,9 @@ export async function importXmlAction(fd: FormData) {
     if (!(file instanceof File) || file.size === 0) return { ok: false as const, error: "Selecione o arquivo XML da NF-e." };
     if (file.size > 5_000_000) return { ok: false as const, error: "Arquivo muito grande (máx. 5 MB)." };
     const xml = await file.text();
-    const orderIds = fd.getAll("orderIds").map(String).filter(Boolean);
-    return importOrRedirect(() => importNfeXml(s.ctx, { xml, fileName: file.name, orderIds: orderIds.length ? orderIds : null }));
+    const withoutOrder = fbool(fd, "withoutOrder");
+    const orderIds = withoutOrder ? [] : fd.getAll("orderIds").map(String).filter(Boolean);
+    return importOrRedirect(() => importNfeXml(s.ctx, { xml, fileName: file.name, orderIds: orderIds.length ? orderIds : null, withoutOrder }));
   });
 }
 
@@ -46,8 +48,21 @@ export async function manualReceiptAction(fd: FormData) {
     const orderIds = fd.getAll("orderIds").map(String).filter(Boolean);
     if (!fstr(fd, "supplierId")) return { ok: false as const, error: "Selecione o fornecedor." };
     const inv = fstr(fd, "invoicedTotal");
+    // entrada sem pedido: itens, encargos e condição de pagamento informados no formulário
+    const noOrder = fstr(fd, "orderMode") === "none";
+    const extra = noOrder
+      ? {
+          items: fjson<ManualReceiptItemInput[]>(fd, "itemsJson", []),
+          freight: fint(fd, "freight"),
+          otherExpenses: fint(fd, "otherExpenses"),
+          discount: fint(fd, "discount"),
+          paymentTermId: fopt(fd, "paymentTermId"),
+          paymentMethodId: fopt(fd, "paymentMethodId"),
+        }
+      : {};
+    if (!noOrder && !orderIds.length) return { ok: false as const, error: "Selecione ao menos um pedido ou escolha “Sem pedido”." };
     return importOrRedirect(() =>
-      createManualReceipt(s.ctx, { supplierId: fstr(fd, "supplierId"), orderIds, nfeKey: fopt(fd, "nfeKey"), nfeNumber: fopt(fd, "nfeNumber"), nfeSeries: fopt(fd, "nfeSeries"), issueDate: fopt(fd, "issueDate"), invoicedTotal: inv && inv !== "0" ? fint(fd, "invoicedTotal") : null, idemKey: fstr(fd, "_idem") }),
+      createManualReceipt(s.ctx, { supplierId: fstr(fd, "supplierId"), orderIds: noOrder ? [] : orderIds, nfeKey: fopt(fd, "nfeKey"), nfeNumber: fopt(fd, "nfeNumber"), nfeSeries: fopt(fd, "nfeSeries"), issueDate: fopt(fd, "issueDate"), invoicedTotal: inv && inv !== "0" ? fint(fd, "invoicedTotal") : null, idemKey: fstr(fd, "_idem"), ...extra }),
     );
   });
 }
@@ -56,6 +71,8 @@ function parseUpdate(fd: FormData): ReceiptUpdate {
   const optInt = (k: string) => (fstr(fd, k) === "" ? undefined : fint(fd, k));
   return {
     items: fjson(fd, "items", []),
+    addItems: fjson<ManualReceiptItemInput[]>(fd, "addItems", []),
+    removeItems: fjson<number[]>(fd, "removeItems", []),
     orderIds: fd.has("orderIdsJson") ? fjson(fd, "orderIdsJson", []) : undefined,
     warehouseId: fopt(fd, "warehouseId"),
     freight: optInt("freight"),
@@ -107,5 +124,23 @@ export async function cancelReceiptAction(id: string, fd: FormData) {
   return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     await cancelReceipt(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Recebimento cancelado. A chave pode ser importada novamente." };
+  });
+}
+
+/** Cadastro de produtos a partir dos itens do XML sem vínculo (prévia confirmada na conferência). */
+export async function createProductsFromReceiptAction(fd: FormData) {
+  const id = fstr(fd, "id");
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, "/produtos"] }, async (s) => {
+    const all = fjson<Array<NewProductRow & { include?: boolean }>>(fd, "rows", []);
+    // botão "Cadastrar" de uma linha envia only=<item>; "Cadastrar todos os selecionados" usa as linhas marcadas
+    const only = fstr(fd, "only");
+    const rows = only ? all.filter((r) => String(r.idx) === only) : all.filter((r) => r.include !== false);
+    const res = await createProductsFromReceipt(s.ctx, id, rows);
+    const created = res.filter((x) => x.action === "created").length;
+    const linked = res.filter((x) => x.action === "linked_existing");
+    return {
+      ok: true as const,
+      message: [`${created} produto(s) cadastrado(s) e associado(s) aos itens da nota.`, ...linked.map((x) => x.message)].join(" "),
+    };
   });
 }

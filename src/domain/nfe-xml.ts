@@ -16,6 +16,8 @@ export interface NfeItem {
   cEAN: string | null;
   xProd: string;
   ncm: string | null;
+  /** CEST (7 dígitos) quando informado no item */
+  cest: string | null;
   cfop: string | null;
   uCom: string;
   qCom: number; // milésimos
@@ -112,6 +114,7 @@ export function parseNfeXml(xml: string): ParsedNfe {
       cEAN: str(p.cEAN) && !/SEM GTIN/i.test(str(p.cEAN)!) ? str(p.cEAN) : null,
       xProd: str(p.xProd) ?? "",
       ncm: str(p.NCM),
+      cest: str(p.CEST),
       cfop: str(p.CFOP),
       uCom: str(p.uCom) ?? "UN",
       qCom: parseQty(qRaw),
@@ -176,7 +179,7 @@ export interface SampleNfeInput {
   code?: number;
   emitter: { cnpj: string; name: string; tradeName?: string; ie?: string; uf?: string; cityCode?: string; cityName?: string };
   recipient: { cnpj: string; name: string; ie?: string };
-  items: Array<{ cProd: string; cEAN?: string | null; xProd: string; ncm?: string; cfop?: string; uCom?: string; qCom: number; vUnCom: number; vDesc?: number }>;
+  items: Array<{ cProd: string; cEAN?: string | null; xProd: string; ncm?: string; cest?: string; cfop?: string; uCom?: string; qCom: number; vUnCom: number; vDesc?: number }>;
   freight?: number;
   other?: number;
   duplicatas?: Array<{ dVenc: string; vDup?: number }>;
@@ -220,7 +223,7 @@ export function buildSampleNfeXml(i: SampleNfeInput) {
   const dupVals = dups.length ? (dups.every((d) => d.vDup != null) ? dups.map((d) => d.vDup!) : splitEven(vNF, dups.length)) : [];
   const det = lines
     .map(
-      (l, n) => `<det nItem="${n + 1}"><prod><cProd>${esc(l.cProd)}</cProd><cEAN>${l.cEAN ?? "SEM GTIN"}</cEAN><xProd>${esc(l.xProd)}</xProd><NCM>${l.ncm ?? "61091000"}</NCM><CFOP>${l.cfop ?? "5102"}</CFOP><uCom>${l.uCom ?? "UN"}</uCom><qCom>${q4(l.qCom)}</qCom><vUnCom>${(l.vUnCom / 100).toFixed(10)}</vUnCom><vProd>${dec(l.vProd)}</vProd><cEANTrib>${l.cEAN ?? "SEM GTIN"}</cEANTrib><uTrib>${l.uCom ?? "UN"}</uTrib><qTrib>${q4(l.qCom)}</qTrib><vUnTrib>${(l.vUnCom / 100).toFixed(10)}</vUnTrib>${shares[n] ? `<vFrete>${dec(shares[n])}</vFrete>` : ""}${l.vDesc ? `<vDesc>${dec(l.vDesc)}</vDesc>` : ""}<indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISOutr><CST>49</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS><COFINS><COFINSOutr><CST>49</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS></imposto></det>`,
+      (l, n) => `<det nItem="${n + 1}"><prod><cProd>${esc(l.cProd)}</cProd><cEAN>${l.cEAN ?? "SEM GTIN"}</cEAN><xProd>${esc(l.xProd)}</xProd><NCM>${l.ncm ?? "61091000"}</NCM>${l.cest ? `<CEST>${l.cest}</CEST>` : ""}<CFOP>${l.cfop ?? "5102"}</CFOP><uCom>${l.uCom ?? "UN"}</uCom><qCom>${q4(l.qCom)}</qCom><vUnCom>${(l.vUnCom / 100).toFixed(10)}</vUnCom><vProd>${dec(l.vProd)}</vProd><cEANTrib>${l.cEAN ?? "SEM GTIN"}</cEANTrib><uTrib>${l.uCom ?? "UN"}</uTrib><qTrib>${q4(l.qCom)}</qTrib><vUnTrib>${(l.vUnCom / 100).toFixed(10)}</vUnTrib>${shares[n] ? `<vFrete>${dec(shares[n])}</vFrete>` : ""}${l.vDesc ? `<vDesc>${dec(l.vDesc)}</vDesc>` : ""}<indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISOutr><CST>49</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS><COFINS><COFINSOutr><CST>49</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS></imposto></det>`,
     )
     .join("");
   const cobr = dups.length

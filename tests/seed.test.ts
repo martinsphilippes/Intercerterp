@@ -13,6 +13,12 @@ describe("seed de demonstração", () => {
     expect(r2.companyId).toBe(r1.companyId);
     const sales2 = await listAll(store, "sales");
     expect(sales2.length).toBe(sales1.length);
+    // compras sem pedido (COM-03/04/09): nota manual concluída e XML em conferência, sem duplicar na repetição
+    const noOrder = (await listAll(store, "receipts")).filter((r) => r.orderLink === "without_order" && r.status !== "cancelled");
+    expect(noOrder.map((r) => `${r.origin}:${r.status}`).sort()).toEqual(["manual:confirmed", "xml:draft"]);
+    const xmlDraft = noOrder.find((r) => r.origin === "xml")!;
+    expect(xmlDraft.items.filter((i: any) => !i.skuId)).toHaveLength(2);
+    expect(xmlDraft.items[0].entryCfop).toBe("1403");
     // estoque físico nunca negativo na demonstração
     const bals = await listAll(store, "stock_balances");
     expect(bals.every((b) => b.physical >= 0)).toBe(true);
