@@ -113,6 +113,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   product: "Cadastro de produto",
   import: "Importação de produtos",
   seed: "Carga inicial (demonstração)",
+  sales_document: "Pedido de venda (reserva)",
 };
 
 export function originHref(originType: string | null | undefined, originId: string | null | undefined): string | null {
@@ -140,6 +141,8 @@ export function originHref(originType: string | null | undefined, originId: stri
       return `/produtos/${originId}?tab=estoque`;
     case "import":
       return `/produtos/importar/${originId}`;
+    case "sales_document":
+      return `/vendas/pedidos/${originId}`;
     default:
       return null;
   }

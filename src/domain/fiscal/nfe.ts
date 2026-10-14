@@ -31,9 +31,12 @@ import {
  * vez na autorização, por chaves de idempotência).
  * Recebimento (devolução a fornecedor, COM-11): várias NF-e por recebimento (uma em andamento por vez), limitadas ao
  * restante devolvível por item; efeitos na autorização — estoque e abatimento no pagar (ver src/domain/supplier-returns.ts).
+ * Pedido de venda (FIS-05): várias NF-e por pedido (faturamento parcial, uma em andamento por vez), quantidades limitadas
+ * ao saldo a faturar, preços do pedido e xPed/nItemPed nos itens; o pedido NÃO movimenta estoque/financeiro — esta NF-e
+ * baixa o estoque e gera o título na autorização (ver src/domain/sales-documents.ts).
  */
 
-export type NfeOriginType = "sale" | "transfer" | "purchase_order" | "return" | "receipt" | "manual";
+export type NfeOriginType = "sale" | "transfer" | "purchase_order" | "return" | "receipt" | "sales_document" | "manual";
 
 export interface NfeRecipient {
   partyType: "customer" | "supplier" | "branch" | "other";
@@ -59,6 +62,9 @@ export interface NfeItemInput {
   cstCsosn?: string | null;
   /** origem recebimento: item (idx) do recebimento devolvido */
   sourceIdx?: number | null;
+  /** origem pedido de venda: número do pedido (xPed) e item do pedido (nItemPed = sequência do item no pedido) */
+  xPed?: string | null;
+  nItemPed?: number | null;
 }
 
 export interface NfeInput {
@@ -178,7 +184,7 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
   // somente documento ATIVO bloqueia/reaproveita; encerrados (cancelado, denegado, inutilizado, descartado) permitem nova emissão
   // recebimento: devoluções parciais sucessivas — só a NF-e em andamento (não autorizada) é reaproveitada; as autorizadas
   // contam no restante devolvível e, como as encerradas, avançam a geração (nova referência)
-  const multi = type === "receipt";
+  const multi = type === "receipt" || type === "sales_document";
   const existing = mine.find((d) => !INACTIVE.includes(d.status) && (!multi || d.status !== "authorized"));
   const prior = mine.filter((d) => (multi ? d.id !== existing?.id : INACTIVE.includes(d.status)));
   const generation = prior.length;
@@ -189,6 +195,11 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
     const { receiptReturnPrefill } = await import("../supplier-returns");
     const pre = await receiptReturnPrefill(ctx, id, branchId, existing?.id ?? null, base);
     return { input: pre.input, effectsLocked: false, label: pre.label, href: pre.href, warnings: [...warnings, ...pre.warnings], blockers: [...blockers, ...pre.blockers], existingDocId: existing?.id ?? null, generation, returnable: pre.returnable };
+  }
+  if (type === "sales_document") {
+    const { salesDocumentNfePrefill } = await import("../sales-documents");
+    const pre = await salesDocumentNfePrefill(ctx, id, branchId, existing?.id ?? null, base);
+    return { input: pre.input, effectsLocked: false, label: pre.label, href: pre.href, warnings: [...warnings, ...pre.warnings], blockers: [...blockers, ...pre.blockers], existingDocId: existing?.id ?? null, generation };
   }
   if (type === "sale") {
     const sale = await ctx.store.getOrThrow("sales", id);
@@ -328,7 +339,7 @@ export async function buildNfe(ctx: Ctx, input: NfeInput) {
   const kind = operationKind(input);
   const items = await buildItems(
     ctx,
-    input.items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount ?? 0, description: i.description, taxGroupId: i.taxGroupId || null, cfopOverride: i.cfop || undefined, cstOverride: i.cstCsosn || undefined })),
+    input.items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount ?? 0, description: i.description, taxGroupId: i.taxGroupId || null, cfopOverride: i.cfop || undefined, cstOverride: i.cstCsosn || undefined, ...(input.origin.type === "sales_document" && i.xPed ? { xPed: i.xPed, nItemPed: i.nItemPed ?? null } : {}) })),
     { branchId: input.branchId, interstate, freight: input.freight, insurance: input.insurance, other: input.other, kind },
   );
   const totals = computeTotals(items, { insurance: input.insurance });
@@ -370,7 +381,8 @@ function effectsFor(input: NfeInput, locked: boolean, supplierReturn?: SupplierR
   if (!input.effects.stock && !input.effects.financial) return { stock: false, financial: false, note: "Somente documento (sem efeitos de estoque/financeiro)." };
   return {
     stock: input.effects.stock,
-    financial: input.origin.type === "manual" ? input.effects.financial : false,
+    // título a receber: operação avulsa e pedido de venda (o pedido não gera financeiro — quem fatura é a NF-e)
+    financial: input.origin.type === "manual" || input.origin.type === "sales_document" ? input.effects.financial : false,
     warehouseId: input.effects.warehouseId || null,
     dueDate: input.effects.dueDate || today(),
     paymentTermId: input.effects.paymentTermId || null,
@@ -384,6 +396,11 @@ const lockedOrigins = (t: NfeOriginType) => ["sale", "transfer", "return"].inclu
  * valores, destinatário e chave vindos do recebimento (o formulário escolhe só itens e quantidades). Demais origens: sem mudança.
  */
 export async function normalizeNfeInput(ctx: Ctx, input: NfeInput, draftId?: string | null): Promise<{ input: NfeInput; supplierReturn: SupplierReturnPlan | null }> {
+  if (input.origin.type === "sales_document") {
+    // pedido de venda: quantidades limitadas ao saldo a faturar; preço, desconto, acréscimo e xPed/nItemPed vêm do pedido
+    const { normalizeSalesDocumentNfe } = await import("../sales-documents");
+    return { input: await normalizeSalesDocumentNfe(ctx, input, { excludeDocId: draftId ?? null }), supplierReturn: null };
+  }
   if (input.origin.type !== "receipt") return { input, supplierReturn: null };
   const { prepareReceiptReturn } = await import("../supplier-returns");
   const prep = await prepareReceiptReturn(ctx, input, { excludeDocId: draftId ?? null });
@@ -410,7 +427,7 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
     }
   }
   let supplierReturn: SupplierReturnPlan | null = null;
-  if (input.origin.type === "receipt") ({ input, supplierReturn } = await normalizeNfeInput(ctx, input, opts.draftId ?? null));
+  if (input.origin.type === "receipt" || input.origin.type === "sales_document") ({ input, supplierReturn } = await normalizeNfeInput(ctx, input, opts.draftId ?? null));
   const locked = lockedOrigins(input.origin.type);
   // depósito dos efeitos de estoque: sempre da filial emitente (nunca movimenta estoque de outra filial)
   if (!locked && input.effects?.stock && input.effects.warehouseId) {
@@ -451,7 +468,7 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
   } else {
     const ref = nfeRefFor(input.origin, opts.idemKey, generation);
     const prev = await ctx.store.get("fiscal_documents", detId("fiscaldoc", ref));
-    if (prev && (INACTIVE.includes(prev.status) || (input.origin.type === "receipt" && prev.status === "authorized"))) throw new BusinessError(`A referência ${ref} já pertence a um documento ${DOC_STATUS_LABEL[prev.status].toLowerCase()}. Atualize a página e emita novamente.`, "duplicate_origin");
+    if (prev && (INACTIVE.includes(prev.status) || ((input.origin.type === "receipt" || input.origin.type === "sales_document") && prev.status === "authorized"))) throw new BusinessError(`A referência ${ref} já pertence a um documento ${DOC_STATUS_LABEL[prev.status].toLowerCase()}. Atualize a página e emita novamente.`, "duplicate_origin");
     doc = await createDocument(ctx, {
       model: "nfe",
       ref,
@@ -530,7 +547,7 @@ export function docToInput(doc: Doc): NfeInput {
     operationType: doc.operationType ?? "saida",
     presence: doc.presence ?? "1",
     recipient: { partyType: doc.partyType ?? doc.recipient?.partyType ?? "other", partyId: doc.partyId ?? null, name: doc.recipient?.name ?? "", doc: doc.recipient?.doc ?? "", ie: doc.recipient?.ie, ieIndicator: doc.recipient?.ieIndicator, email: doc.recipient?.email, finalConsumer: doc.recipient?.finalConsumer, address: doc.recipient?.address ?? {} },
-    items: items.filter((i) => i.skuId).map((i, k) => ({ skuId: i.skuId!, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount, description: i.description, taxGroupId: i.overrides?.taxGroupId ?? null, cfop: i.overrides?.cfop ?? null, cstCsosn: i.overrides?.cstCsosn ?? null, ...(doc.effects?.supplierReturn?.lines?.[k] ? { sourceIdx: doc.effects.supplierReturn.lines[k].idx } : {}) })),
+    items: items.filter((i) => i.skuId).map((i, k) => ({ skuId: i.skuId!, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount, description: i.description, taxGroupId: i.overrides?.taxGroupId ?? null, cfop: i.overrides?.cfop ?? null, cstCsosn: i.overrides?.cstCsosn ?? null, ...(doc.effects?.supplierReturn?.lines?.[k] ? { sourceIdx: doc.effects.supplierReturn.lines[k].idx } : {}), ...(i.xPed ? { xPed: i.xPed, nItemPed: i.nItemPed ?? null } : {}) })),
     freight: items.reduce((a, i) => a + i.freight, 0),
     insurance: items.reduce((a, i) => a + (i.insurance ?? 0), 0),
     other: items.reduce((a, i) => a + i.other, 0),

@@ -4,3 +4,4 @@ import "./fiscal";
 import "./admin";
 import "./stock";
 import "./accounting";
+import "./sales";
