@@ -27,6 +27,8 @@ export interface ProductHit {
   maxDiscountBps: number | null;
   priced: boolean;
   available: number | null;
+  /** produto com controle de lote (recurso ligado): o item pode ter o lote escolhido */
+  lotControl?: boolean;
 }
 
 export interface ProductSearchHandle {

@@ -6,6 +6,7 @@ import type { Doc } from "@/lib/db/types";
 import { searchable } from "@/lib/core/text";
 import { resolvePrices } from "@/domain/pricing";
 import { availableMap } from "@/domain/stock";
+import { lotsEnabled } from "@/domain/lots";
 
 /**
  * Busca de produtos do PDV (Tela 5): descrição, SKU, código de barras e categoria.
@@ -86,6 +87,8 @@ export async function GET(req: NextRequest) {
   const priceDocs = priceIds.length ? await listAll(store, "prices", { filters: [["eq", "id", priceIds]] }) : [];
   const prmap = new Map(priceDocs.map((p) => [p.id, p]));
   const avail = await availableMap(store, branchId, skus.map((k) => k.id));
+  // lotes e validades (EST-02): a linha do PDV oferece a escolha do lote
+  const lotsOn = products.some((p) => p.lotControl) && (await lotsEnabled(store, cid, branchId));
   const siblings = new Map<string, number>();
   for (const k of skus) siblings.set(k.productId, (siblings.get(k.productId) ?? 0) + 1);
 
@@ -116,6 +119,7 @@ export async function GET(req: NextRequest) {
       maxDiscountBps: pr.maxDiscountBps,
       priced: pr.price > 0,
       available: service ? null : (avail.get(k.id)?.available ?? 0),
+      lotControl: !service && lotsOn && Boolean(p.lotControl),
     };
   });
   return NextResponse.json({ items, exact, priceTableId });

@@ -133,6 +133,7 @@ export function rastroOf(movement: Doc | null | undefined): Array<{ nLote: strin
 }
 
 export interface LotRow {
+  id: string;
   balanceId: string;
   branchId: string;
   warehouseId: string;
@@ -172,7 +173,7 @@ export async function listLots(store: Store, companyId: string, opts: { branchId
         const p = pmap.get(b.productId)!;
         const status = expiryStatus(l.expiry, ref, opts.alertDays);
         rows.push({
-          balanceId: b.id, branchId: b.branchId, warehouseId: b.warehouseId, warehouseName: whs.get(b.warehouseId)?.name ?? "—", skuId: b.skuId, sku: sku?.sku ?? "", productId: p.id,
+          id: `${b.id}:${l.lot}`, balanceId: b.id, branchId: b.branchId, warehouseId: b.warehouseId, warehouseName: whs.get(b.warehouseId)?.name ?? "—", skuId: b.skuId, sku: sku?.sku ?? "", productId: p.id,
           name: sku?.name ?? p.name, unitCode: sku?.unitCode ?? p.unitCode ?? null, lot: l.lot, expiry: l.expiry ?? null, mfg: l.mfg ?? null, qty: l.qty, status, days: l.expiry ? daysToExpiry(l.expiry, ref) : null,
         });
       }

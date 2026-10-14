@@ -17,7 +17,9 @@ import { can } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { categoryPath, effectiveFiscal, fiscalIssues, fiscalStatus, formatCest, formatNcm, productAxes, productUsage, ORIGINS } from "@/domain/products";
 import { defaultPriceTableId, priceMetrics, priceValidity } from "@/domain/pricing";
-import { setProductStatusAction, deleteProductAction } from "../actions";
+import { setProductStatusAction, deleteProductAction, setLotControlAction } from "../actions";
+import { lotAlertDays, lotsEnabled } from "@/domain/lots";
+import { expiryStatus, sortFefo, unlottedQty, type LotEntry } from "@/domain/lot-calc";
 import { productFormOptions } from "../form-options";
 import { ProductEditForm } from "../product-form";
 import { VariantsForm } from "../variants-editor";
@@ -75,6 +77,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const supplier = p.supplierId ? await ctx.store.get("suppliers", p.supplierId) : null;
   const brand = p.brandId ? await ctx.store.get("brands", p.brandId) : null;
   const isService = p.type === "service";
+  // lotes e validades (EST-02)
+  const lotsOn = !isService && (await lotsEnabled(ctx.store, ctx.companyId, ctx.branchId));
+  const alertDays = lotsOn || p.lotControl ? await lotAlertDays(ctx.store, ctx.companyId, ctx.branchId) : 30;
 
   const tabs = [
     { key: "geral", label: "Dados gerais" },
@@ -341,6 +346,58 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               </div>
             )}
           </Card>
+          {(lotsOn || p.lotControl) && (
+            <Card
+              bodyClass="p-0"
+              title="Lotes e validades"
+              description={p.lotControl ? "Saldo por lote em cada depósito. A venda baixa primeiro o lote que vence antes (FEFO) ou o lote escolhido no PDV; o recebimento exige o lote; devolução e cancelamento voltam ao lote de origem." : "Ligue para controlar o saldo por lote e validade deste produto (recebimento com lote, FEFO na venda, alertas de vencimento e rastro na nota)."}
+              actions={
+                canEdit ? (
+                  p.lotControl ? (
+                    <ActionButton action={setLotControlAction.bind(null, id, false)} label="Desligar controle de lote" size="sm" confirm="Desligar o controle de lote? Só é permitido com todos os lotes zerados." />
+                  ) : lotsOn ? (
+                    <ActionButton action={setLotControlAction.bind(null, id, true)} label="Controlar lote e validade" size="sm" variant="primary" confirm="Ligar o controle de lote e validade? O saldo atual fica “sem lote” até ser classificado por inventário com contagem por lote." />
+                  ) : null
+                ) : null
+              }
+            >
+              {!p.lotControl ? (
+                <p className="px-4 py-3 text-sm text-slate-500">Produto sem controle de lote.</p>
+              ) : (() => {
+                const rows = balances.flatMap((b) => {
+                  const lots = sortFefo(((b.lots ?? []) as LotEntry[]).filter((l) => l.qty !== 0));
+                  const free = unlottedQty(b.physical, lots);
+                  return [...lots.map((l) => ({ b, lot: l.lot as string | null, expiry: l.expiry, qty: l.qty })), ...(free ? [{ b, lot: null, expiry: null, qty: free }] : [])];
+                });
+                return rows.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-slate-500">Sem saldo em lotes. Os lotes entram pelo recebimento, por ajuste de entrada com lote ou por inventário.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="table-base w-full text-sm">
+                      <thead>
+                        <tr><th>Filial · depósito</th><th>SKU</th><th>Lote</th><th>Validade</th><th className="text-right">Saldo</th><th>Situação</th></tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => {
+                          const st = r.lot ? expiryStatus(r.expiry, date, alertDays) : null;
+                          return (
+                            <tr key={`${r.b.id}:${r.lot ?? "-"}`}>
+                              <td className="whitespace-nowrap text-xs">{branchName.get(r.b.branchId)}<span className="block text-slate-500">{whById.get(r.b.warehouseId)?.name}</span></td>
+                              <td className="whitespace-nowrap font-mono text-xs">{skuById.get(r.b.skuId)?.sku}</td>
+                              <td className="font-mono text-xs">{r.lot ?? <span className="font-sans text-slate-500">sem lote</span>}</td>
+                              <td className="whitespace-nowrap">{r.expiry ? formatDate(r.expiry) : "—"}</td>
+                              <td className={`tabular text-right ${r.qty < 0 ? "text-red-700" : ""}`}>{formatQty(r.qty)}</td>
+                              <td>{st === "expired" ? <Badge tone="bad">Vencido</Badge> : st === "expiring" ? <Badge tone="warn">A vencer</Badge> : st === "ok" ? <Badge tone="good">No prazo</Badge> : r.lot ? <Badge>Sem validade</Badge> : <span className="text-xs text-slate-500">classificar por inventário</span>}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </Card>
+          )}
           <Card title="Saldo inicial" description="Gera um movimento identificado “Saldo inicial” — permitido apenas enquanto o saldo do depósito não tem movimentos. Depois, use ajuste ou inventário.">
             {!s.branch ? (
               <Notice tone="info">Selecione uma filial (o consolidado é somente consulta).</Notice>
