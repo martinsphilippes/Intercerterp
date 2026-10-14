@@ -23,6 +23,9 @@ import { ProductEditForm } from "../product-form";
 import { VariantsForm } from "../variants-editor";
 import { ImagePanel, ConversionsPanel, CostDialogButton, PriceDialogButton, DeletePriceButton, StockParamsButton, InitialBalanceForm } from "./panels";
 import { canSeeBranch } from "../../estoque/queries";
+import { featureOn } from "@/lib/server/features";
+import { scaleConfig } from "@/domain/scale";
+import { ScalePanel } from "./scale-panel";
 
 export const metadata = { title: "Produto" };
 
@@ -75,6 +78,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const supplier = p.supplierId ? await ctx.store.get("suppliers", p.supplierId) : null;
   const brand = p.brandId ? await ctx.store.get("brands", p.brandId) : null;
   const isService = p.type === "service";
+  // balança etiquetadora (CAD-16): aba só para mercadorias com o recurso ligado
+  const scale = !isService && (await featureOn(s, "balanca")) ? await scaleConfig(ctx.store, ctx.companyId, ctx.branchId) : null;
 
   const tabs = [
     { key: "geral", label: "Dados gerais" },
@@ -82,6 +87,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     { key: "precos", label: "Custos e preços", count: prices.length },
     ...(isService ? [] : [{ key: "estoque", label: "Estoque" }]),
     { key: "fiscal", label: "Fiscal" },
+    ...(scale ? [{ key: "balanca", label: "Balança" }] : []),
     { key: "historico", label: "Histórico" },
   ];
   const skuOpts = activeSkus.map((x) => ({ id: x.id, sku: x.sku, name: x.name, costTotal: x.costTotal ?? 0 }));
@@ -396,6 +402,18 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             </Card>
           )}
         </div>
+      )}
+
+      {tab === "balanca" && scale && (
+        <ScalePanel
+          productId={id}
+          unitCode={p.unitCode ?? "UN"}
+          hasVariants={Boolean(p.hasVariants)}
+          canEdit={canEdit}
+          price={priceRef}
+          config={{ layout: scale.layout, content: scale.content }}
+          data={{ plu: p.plu ?? null, shelfLifeDays: p.shelfLifeDays ?? null, scaleTare: p.scaleTare ?? null, scaleEnabled: Boolean(p.scaleEnabled), nutrition: p.nutrition ?? null }}
+        />
       )}
 
       {tab === "historico" && (

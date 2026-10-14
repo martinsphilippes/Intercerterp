@@ -7,6 +7,7 @@ import { listAll } from "@/lib/db";
 import { searchable } from "@/lib/core/text";
 import { resolvePrices } from "@/domain/pricing";
 import { availableMap } from "@/domain/stock";
+import { skuForScaleBarcode } from "@/domain/scale";
 import {
   approveQuote, cancelOrder, convertQuoteToOrder, createSalesDocument, docLabel, docPath, duplicateSalesDocument, markQuoteSent, rejectQuote, renewReservation, sendDocumentEmail,
   updateSalesDocument, whatsappText, type SalesDocInput, type SalesDocType,
@@ -148,6 +149,11 @@ export async function searchDocSkusAction(q: string, priceTableId: string | null
     if (term.length < 2) return [] as DocSkuHit[];
     const store = s.ctx.store;
     const res = await store.list("skus", { filters: [["eq", "companyId", s.ctx.companyId], ["or", [["contains", "searchText", searchable(term)], ["eq", "barcode", term], ["eq", "sku", term.toUpperCase()]]]], limit: 20 });
+    // etiqueta de balança (PDV-06): localiza o produto pelo PLU (a quantidade é informada no documento)
+    if (!res.items.length) {
+      const scaleSku = await skuForScaleBarcode(store, s.ctx.companyId, s.ctx.branchId, term);
+      if (scaleSku) res.items.push(scaleSku);
+    }
     const skus = res.items.filter((k) => k.active !== false);
     if (!skus.length) return [] as DocSkuHit[];
     const products = new Map((await listAll(store, "products", { filters: [["eq", "id", [...new Set(skus.map((k) => k.productId))]]] })).map((p) => [p.id, p]));

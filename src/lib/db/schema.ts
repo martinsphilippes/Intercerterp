@@ -206,8 +206,11 @@ export const COLLECTIONS: CollectionDef[] = [
       availableEcommerce: bool, hasVariants: bool, variantAxes: json, ncm: s(10), cest: s(10), origin: s(2),
       taxGroupId: id(), cfop: s(10), cstCsosn: s(5), serviceListItem: s(10), municipalServiceCode: s(30),
       issRateBps: int, cnaeService: s(20), weightGrams: int, searchText: s(1000), status: s(20),
+      // balança etiquetadora (CAD-16/PDV-06, opcionais): código na balança, validade em dias, tara (milésimos de kg),
+      // informação nutricional (json simples) e "enviar à balança" (entra no arquivo de carga)
+      plu: int, shelfLifeDays: int, scaleTare: qty, nutrition: json, scaleEnabled: bool,
     },
-    indexes: [k("i_company", "companyId"), u("u_code", "companyId", "code"), k("i_category", "categoryId")],
+    indexes: [k("i_company", "companyId"), u("u_code", "companyId", "code"), k("i_category", "categoryId"), u("u_plu", "companyId", "plu")],
   },
   {
     id: "skus",

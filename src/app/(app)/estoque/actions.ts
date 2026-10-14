@@ -9,6 +9,7 @@ import { adjustStock, balanceId, localDateTimeToIso, type ManualType } from "@/d
 import { transferCode, createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, type TransferReceiptLine } from "@/domain/transfers";
 import { createInventory, saveCounts, concludeInventory, cancelInventory, addInventoryItem, resumeInventoryOpening, type CountEntry } from "@/domain/inventory";
 import type { Ctx } from "@/lib/core/ctx";
+import { skuForScaleBarcode } from "@/domain/scale";
 import { canSeeBranch } from "./queries";
 
 /** Depósito consultável: da empresa ativa e de filial permitida ao usuário. */
@@ -25,6 +26,11 @@ export async function searchSkusAction(q: string, warehouseId?: string | null) {
     if (term.length < 2) return [];
     const n = normalizeSearch(term);
     const res = await s.ctx.store.list("skus", { filters: [["eq", "companyId", s.ctx.companyId], ["or", [["contains", "searchText", n], ["eq", "barcode", term], ["eq", "sku", term.toUpperCase()], ["contains", "extraBarcodes", term]]]], limit: 20 });
+    // etiqueta de balança (PDV-06): localiza o produto pelo PLU
+    if (!res.items.length) {
+      const scaleSku = await skuForScaleBarcode(s.ctx.store, s.ctx.companyId, s.ctx.branchId, term);
+      if (scaleSku) res.items.push(scaleSku);
+    }
     const products = new Map((await listAll(s.ctx.store, "products", { filters: [["eq", "id", [...new Set(res.items.map((x) => x.productId))]]] })).map((p) => [p.id, p]));
     const wh = await visibleWarehouse(s.ctx, warehouseId);
     const out = [];

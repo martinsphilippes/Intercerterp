@@ -17,7 +17,7 @@ import { cn } from "@/components/ui/cn";
 import { formatMoney, formatQty, formatBps, QTY, pct } from "@/lib/money";
 import { formatDoc, formatPhone } from "@/lib/core/text";
 import { cartTotals, effectiveUnitPrice, tablePrice, type CartItem } from "@/domain/cart-calc";
-import { ProductSearch, type ProductHit, type ProductSearchHandle } from "./product-search";
+import { ProductSearch, type ProductHit, type ProductSearchHandle, type ScaleHit } from "./product-search";
 import { CustomerPicker, type CustomerInfo } from "./customer-picker";
 import { OverdueAlert } from "./overdue-alert";
 import { cancelCartAction, importDocumentAction, parkCartAction, resumeCartAction, saveCartAction, startExchangeAction, type PlainCart } from "./actions";
@@ -191,12 +191,13 @@ export function PdvApp(props: PdvProps) {
     return null;
   };
 
-  const addHit = (hit: ProductHit, qty: number) => {
+  const addHit = (hit: ProductHit, qty: number, scale?: ScaleHit) => {
     if (!hit.priced) {
       toast("error", `${hit.name} sem preço vigente na tabela selecionada.`);
       return false;
     }
-    const existing = items.findIndex((l) => l.skuId === hit.skuId && l.unitPrice == null && !l.itemDiscount && !l.itemSurcharge);
+    // etiqueta de balança vira linha própria (o total de cada etiqueta fica visível e não se mistura a outra leitura)
+    const existing = scale ? -1 : items.findIndex((l) => l.skuId === hit.skuId && l.unitPrice == null && !l.itemDiscount && !l.itemSurcharge && !l.scale);
     const block = stockBlocks({ ...hit }, existing >= 0 ? items[existing].qty + qty : qty, existing);
     if (block) {
       toast("error", block);
@@ -212,11 +213,13 @@ export function PdvApp(props: PdvProps) {
         list.push({
           skuId: hit.skuId, qty, unitPrice: null, itemDiscount: 0, itemSurcharge: 0, sku: hit.sku, name: hit.name, unitCode: hit.unitCode, listPrice: hit.listPrice,
           wholesalePrice: hit.wholesalePrice, wholesaleMinQty: hit.wholesaleMinQty, available: hit.available, service: hit.service, maxDiscountBps: hit.maxDiscountBps, attributes: hit.attributes,
+          ...(scale ? { scale: { barcode: scale.barcode, content: scale.content, labelValue: scale.labelValue } } : {}),
         });
         setSelected(list.length - 1);
       }
       return { ...c, items: list };
     });
+    if (scale?.difference) toast("info", `${scale.message}. Diferença de ${formatMoney(scale.difference)} pelo arredondamento da quantidade ao milésimo.`);
     return true;
   };
 
@@ -229,7 +232,8 @@ export function PdvApp(props: PdvProps) {
       toast("error", block);
       return;
     }
-    update((c) => ({ ...c, items: (c.items as Line[]).map((l, i) => (i === idx ? { ...l, qty } : l)) }));
+    // quantidade alterada à mão deixa de ser a da etiqueta de balança
+    update((c) => ({ ...c, items: (c.items as Line[]).map((l, i) => (i === idx ? { ...l, qty, scale: null } : l)) }));
   };
 
   const removeLine = (idx: number) => {
@@ -535,7 +539,11 @@ export function PdvApp(props: PdvProps) {
                             {[l.sku, ...Object.values(l.attributes ?? {}), l.unitCode].filter(Boolean).join(" • ")}
                             {wholesale && <Badge tone="accent" className="ml-2">atacado</Badge>}
                             {short && <Badge tone="warn" className="ml-2">sem saldo ({formatQty(l.available)})</Badge>}
+                            {l.scale && <Badge tone="info" className="ml-2" title={`Etiqueta de balança ${l.scale.barcode}`}>balança</Badge>}
                           </p>
+                          {l.scale?.labelValue != null && calc && calc.grossTotal !== l.scale.labelValue && (
+                            <p className="text-xs text-amber-700">Etiqueta {formatMoney(l.scale.labelValue)} · calculado {formatMoney(calc.grossTotal)} (quantidade arredondada ao milésimo)</p>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-center gap-1">

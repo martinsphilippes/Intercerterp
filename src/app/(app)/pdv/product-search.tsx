@@ -4,6 +4,10 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { LayoutGrid, List, Loader2, ScanBarcode, Search, X } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 import { formatMoney, formatQty } from "@/lib/money";
+import type { ScaleResolution } from "@/domain/scale";
+
+/** Etiqueta de balança resolvida pelo servidor (PLU → SKU, quantidade pelo peso ou pelo valor). */
+export type ScaleHit = Extract<ScaleResolution, { ok: true }>;
 
 export interface ProductHit {
   skuId: string;
@@ -57,7 +61,7 @@ export const ProductSearch = forwardRef<ProductSearchHandle, {
   brands: Array<{ value: string; label: string }>;
   branchName: string;
   allowNegative: boolean;
-  onAdd: (hit: ProductHit, qty: number) => boolean | void;
+  onAdd: (hit: ProductHit, qty: number, scale?: ScaleHit) => boolean | void;
   onKeyPassthrough?: (e: React.KeyboardEvent<HTMLInputElement>) => boolean;
   disabled?: boolean;
 }>(function ProductSearch({ priceTableId, categories, brands, branchName, allowNegative, onAdd, onKeyPassthrough, disabled }, ref) {
@@ -95,7 +99,7 @@ export const ProductSearch = forwardRef<ProductSearchHandle, {
         const body = await res.json();
         if (id !== reqId.current) return null;
         if (!res.ok) throw new Error(body.error ?? `Erro ${res.status}`);
-        return body as { items: ProductHit[]; exact: boolean };
+        return body as { items: ProductHit[]; exact: boolean; scale?: ScaleResolution };
       } catch (e: any) {
         if (id === reqId.current) setError(e.message ?? "Falha na busca");
         return null;
@@ -151,8 +155,8 @@ export const ProductSearch = forwardRef<ProductSearchHandle, {
     return [...m.values()];
   }, [hits]);
 
-  const add = (hit: ProductHit, qty: number) => {
-    const ok = onAdd(hit, qty);
+  const add = (hit: ProductHit, qty: number, scale?: ScaleHit) => {
+    const ok = onAdd(hit, qty, scale);
     if (ok !== false) {
       setText("");
       setHits([]);
@@ -167,6 +171,14 @@ export const ProductSearch = forwardRef<ProductSearchHandle, {
     // 1) leitor / código digitado: SKU exato
     if (looksLikeCode(term.toUpperCase())) {
       const r = await fetchHits({ code: term });
+      // etiqueta de balança: quantidade da etiqueta (peso ou valor ÷ preço); erro de leitura/PLU aparece no painel
+      if (r?.scale && !r.scale.ok) {
+        setHits([]);
+        setOpen(true);
+        setError(r.scale.error);
+        return;
+      }
+      if (r?.exact && r.items[0] && r.scale?.ok) return add(r.items[0], r.scale.qty, r.scale);
       if (r?.exact && r.items[0]) return add(r.items[0], qty);
     }
     // 2) resultado único da busca por texto

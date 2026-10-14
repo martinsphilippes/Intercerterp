@@ -73,6 +73,9 @@ function clampItems(items: CartItem[]): CartItem[] {
       service: Boolean(i.service),
       maxDiscountBps: i.maxDiscountBps ?? null,
       attributes: i.attributes && typeof i.attributes === "object" ? i.attributes : undefined,
+      ...(i.scale && typeof i.scale === "object" && typeof i.scale.barcode === "string"
+        ? { scale: { barcode: i.scale.barcode.slice(0, 20), content: i.scale.content === "value" ? ("value" as const) : ("weight" as const), labelValue: Number.isFinite(i.scale.labelValue) ? Math.round(i.scale.labelValue!) : null } }
+        : {}),
     }));
 }
 

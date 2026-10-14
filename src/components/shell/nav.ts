@@ -41,6 +41,7 @@ export const NAV: NavGroup[] = [
       { href: "/estoque/inventarios", label: "Inventário e contagem", module: "stock", icon: "ClipboardList" },
       { href: "/produtos/alteracao-em-massa", label: "Alteração em massa", module: "products", icon: "ListChecks", action: "products.bulk_edit", feature: "alteracaoMassa" },
       { href: "/produtos/etiquetas", label: "Etiquetas de produtos", module: "products", icon: "Tag", feature: "etiquetas" },
+      { href: "/produtos/balanca", label: "Balança (carga e PLU)", module: "products", icon: "Weight", feature: "balanca" },
       { href: "/produtos/cadastros", label: "Cadastros auxiliares", module: "products", icon: "Tags" },
     ],
   },
