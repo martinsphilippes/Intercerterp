@@ -17,9 +17,12 @@ import { formatDoc } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import { getFiscalConfig, measuredStatus, PRESENCE_LABEL } from "@/domain/fiscal/service";
 import { certificateDaysLeft, CRT_LABEL, issuerChecklist, numberingStatus, REGIME_LABEL, taxGroupUsage } from "@/domain/fiscal/config";
-import { deleteTaxGroupAction, saveConfigAction, saveIssuerAction, saveReformAdherenceAction, saveTaxGroupAction, setNumberAction, testConnectionAction, uploadCertificateAction } from "../actions";
+import { deleteTaxGroupAction, saveCompleteSettingsAction, saveConfigAction, saveIssuerAction, saveNatureAction, saveReformAdherenceAction, saveSimplesCreditAction, saveTaxGroupAction, setNumberAction, testConnectionAction, uploadCertificateAction } from "../actions";
 import { featureOn } from "@/lib/server/features";
-import { ReformGroupFields } from "../../produtos/cadastros/aux-forms";
+import { CompleteGroupFields, NatureGroupField, ReformGroupFields } from "../../produtos/cadastros/aux-forms";
+import { getSetting } from "@/lib/core/settings";
+import type { Store } from "@/lib/db/types";
+import { DIFAL_MODE_LABEL, formatDifalModes, formatUfRates, listNatures, NATURE_KIND_LABEL, TC_SETTINGS, type OperationNature } from "@/domain/fiscal/tax-complete";
 import { cscRefProblem, fiscalTokenRefProblem, secretRefProblem } from "@/domain/integrations";
 
 export const metadata = { title: "Configurações fiscais" };
@@ -44,9 +47,9 @@ function RefBadge({ problem, defined, definedLabel = "definida no servidor", mis
 const submit = (label: string) => <button type="submit" className={buttonClass("accent")}>{label}</button>;
 const discard = <button type="reset" className={buttonClass("ghost")}>Descartar</button>;
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string; grupo?: string }> }) {
+export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string; grupo?: string; natureza?: string }> }) {
   const s = await requireSession("fiscal");
-  const { tab = "dados", grupo } = await searchParams;
+  const { tab = "dados", grupo, natureza } = await searchParams;
   const branch = s.branch;
   const cfg = await getFiscalConfig(s.ctx.store, s.ctx.companyId, branch?.id ?? null);
   const own = cfg ? (cfg.branchId ?? null) === (branch?.id ?? null) : false;
@@ -61,6 +64,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   const scopeNote = branch ? (own ? `Configuração própria da filial ${branch.name}.` : `Filial ${branch.name} usando a configuração da empresa — ao salvar, a filial passa a ter configuração própria (herdando os valores atuais).`) : "Contexto consolidado: configuração padrão da empresa (vale para filiais sem configuração própria).";
   const taxGroups = await listAll(s.ctx.store, "tax_groups", { filters: [["eq", "companyId", s.ctx.companyId]], orderBy: [{ field: "name" }] });
   const reformOn = await featureOn(s, "reformaTributaria");
+  // Fase 7 (tributação): aba "Operações" só com algum dos recursos ligados
+  const tcOn = await featureOn(s, "tributacaoCompleta");
+  const natOn = await featureOn(s, "naturezasOperacao");
+  const credOn = await featureOn(s, "creditoSimples");
+  const natures = natOn ? await listNatures(s.ctx.store, s.ctx.companyId, null) : [];
+  const natureOptions = natOn ? natures.map((n) => ({ value: n.key, label: n.label })) : null;
+  const tabs = tcOn || natOn || credOn ? [...TABS.slice(0, 4), { key: "operacoes", label: "Operações" }, ...TABS.slice(4)] : TABS;
   const tgOptions = taxGroups.map((g) => ({ value: g.id, label: g.name }));
   // nomes não permitidos (segredos do sistema, gravados antes da validação) nunca são consultados no ambiente
   // (o motivo aparece como "nome não permitido", não como "não definida" — redefinir a variável não resolveria)
@@ -86,7 +96,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <Stat label="Documentos ativos" value={`${enabledDocs.length} de 3`} hint={enabledDocs.join(", ") || "Nenhum habilitado"} href="/fiscal/configuracoes?tab=documentos" />
         <Stat label="Última verificação" value={cfg?.lastTestAt ? formatDateTime(cfg.lastTestAt) : "Nunca"} hint={cfg?.lastTestAt ? (cfg.lastTestResult ?? "—") : "Sem teste registrado — execute o teste de conexão"} href="/fiscal/configuracoes?tab=conexao" tone={["operational", "simulated"].includes(measuredStatus(cfg)) ? "good" : measuredStatus(cfg) === "error" ? "bad" : "warn"} />
       </div>
-      <LinkTabs basePath="/fiscal/configuracoes" active={tab} tabs={TABS} />
+      <LinkTabs basePath="/fiscal/configuracoes" active={tab} tabs={tabs} />
       {!canEdit && <div className="mb-4"><Notice tone="info">Somente leitura: alterar exige a permissão “Configurar fiscal e certificados”.</Notice></div>}
 
       {tab === "dados" && (
@@ -264,8 +274,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
               </table>
             </div>
           </Card>
-          {grupo && canEdit && <TaxGroupForm group={grupo === "novo" ? null : (taxGroups.find((g) => g.id === grupo) ?? null)} reformOn={reformOn} />}
+          {grupo && canEdit && <TaxGroupForm group={grupo === "novo" ? null : (taxGroups.find((g) => g.id === grupo) ?? null)} reformOn={reformOn} tcOn={tcOn} natureOptions={natureOptions} />}
         </div>
+      )}
+
+      {tab === "operacoes" && (tcOn || natOn || credOn) && (
+        <OperationsTab store={s.ctx.store} companyId={s.ctx.companyId} canEdit={canEdit} natOn={natOn} tcOn={tcOn} credOn={credOn} natures={natures} natureza={natureza ?? null} simples={["simples", "mei"].includes(String(company.regime))} />
       )}
 
       {tab === "conexao" && (
@@ -359,7 +373,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   );
 }
 
-function TaxGroupForm({ group, reformOn }: { group: Record<string, any> | null; reformOn: boolean }) {
+function TaxGroupForm({ group, reformOn, tcOn, natureOptions }: { group: Record<string, any> | null; reformOn: boolean; tcOn: boolean; natureOptions: Array<{ value: string; label: string }> | null }) {
   const g = group ?? {};
   const pc = (v?: number | null) => (v ? String(v / 100).replace(".", ",") : "");
   return (
@@ -386,6 +400,8 @@ function TaxGroupForm({ group, reformOn }: { group: Record<string, any> | null; 
           <Field label="Vigente de"><Input type="date" name="validFrom" defaultValue={g.validFrom ?? ""} /></Field>
           <Field label="Vigente até"><Input type="date" name="validTo" defaultValue={g.validTo ?? ""} /></Field>
         </FormGrid>
+        {tcOn && <CompleteGroupFields row={g} />}
+        {natureOptions && <NatureGroupField row={g} options={natureOptions} />}
         {reformOn && <ReformGroupFields row={g} />}
         <Field label="Observações"><Textarea name="notes" defaultValue={g.notes ?? ""} /></Field>
         <Checkbox name="active" label="Ativo" defaultChecked={g.active !== false} />
@@ -396,5 +412,100 @@ function TaxGroupForm({ group, reformOn }: { group: Record<string, any> | null; 
         </div>
       </ActionForm>
     </Card>
+  );
+}
+
+const PURPOSE_OPTS = [
+  { value: "normal", label: "1 — Normal" },
+  { value: "devolucao", label: "4 — Devolução" },
+  { value: "complementar", label: "2 — Complementar" },
+  { value: "ajuste", label: "3 — Ajuste" },
+];
+
+/**
+ * Aba "Operações" (Fase 7): naturezas de operação (FIS-11/07), opções da tributação completa (DIFAL por UF, PIS/COFINS sem
+ * ICMS, alíquotas internas por UF — FIS-12/16) e crédito do Simples (FIS-13). Cada bloco só aparece com o seu recurso.
+ */
+async function OperationsTab({ store, companyId, canEdit, natOn, tcOn, credOn, natures, natureza, simples }: { store: Store; companyId: string; canEdit: boolean; natOn: boolean; tcOn: boolean; credOn: boolean; natures: OperationNature[]; natureza: string | null; simples: boolean }) {
+  const [pisCofins, difalDefault, difalModes, ufRates, credit] = await Promise.all([
+    getSetting<boolean>(store, companyId, null, TC_SETTINGS.pisCofinsExcludeIcms, false),
+    getSetting<string>(store, companyId, null, TC_SETTINGS.difalDefaultMode, "fora"),
+    getSetting<Record<string, any>>(store, companyId, null, TC_SETTINGS.difalModeByUf, {}),
+    getSetting<Record<string, any>>(store, companyId, null, TC_SETTINGS.ufRates, {}),
+    getSetting<number | null>(store, companyId, null, TC_SETTINGS.simplesCreditBps, null),
+  ]);
+  const editing = natureza === "nova" ? null : (natures.find((n) => n.key === natureza) ?? null);
+  return (
+    <div className="space-y-4">
+      <Notice tone="warn">Regras de tributação da Fase 7 — hipóteses de implementação: valide com a contabilidade e emita primeiro em homologação. Os parâmetros valem para a empresa inteira.</Notice>
+      {natOn && (
+        <Card title="Naturezas de operação" description="Escolhidas no assistente da NF-e: definem o CFOP interno/interestadual e o CST/CSOSN padrão dos itens (vazio = do grupo tributário). Um grupo tributário marcado com a natureza vale para todos os itens." actions={canEdit && <Link href="/fiscal/configuracoes?tab=operacoes&natureza=nova" className={buttonClass("secondary", "sm")}>Nova natureza</Link>} bodyClass="p-0">
+          <div className="overflow-x-auto">
+            <table className="table-base w-full text-sm">
+              <thead><tr><th>Natureza</th><th>Código</th><th>Operação</th><th>CFOP int./inter.</th><th>CSOSN / CST</th><th>Situação</th></tr></thead>
+              <tbody>
+                {natures.map((n) => (
+                  <tr key={n.key}>
+                    <td>{canEdit ? <Link className="text-brand-700 hover:underline" href={`/fiscal/configuracoes?tab=operacoes&natureza=${n.key}`}>{n.label}</Link> : n.label}</td>
+                    <td className="font-mono text-xs">{n.key}</td>
+                    <td className="text-xs">{n.operationType === "entrada" ? "Entrada" : "Saída"} · {NATURE_KIND_LABEL[n.kind]}{n.purpose !== "normal" ? ` · finalidade ${PURPOSE_OPTS.find((o) => o.value === n.purpose)?.label ?? n.purpose}` : ""}</td>
+                    <td className="font-mono text-xs">{n.cfopInternal ?? "grupo"}/{n.cfopInterstate ?? "grupo"}</td>
+                    <td className="font-mono text-xs">{n.cstSimples ?? "grupo"} / {n.cstNormal ?? "grupo"}</td>
+                    <td>{n.active === false ? <Badge>Inativa</Badge> : <Badge tone="good">Ativa</Badge>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+      {natOn && natureza && canEdit && (
+        <Card title={editing ? `Editar natureza: ${editing.label}` : "Nova natureza de operação"}>
+          <ActionForm action={saveNatureAction} className="space-y-4">
+            {editing && <input type="hidden" name="originalKey" value={editing.key} />}
+            <FormGrid cols={4}>
+              <Field label="Descrição (natOp)" required className="sm:col-span-2"><Input name="label" defaultValue={editing?.label ?? ""} maxLength={60} required /></Field>
+              <Field label="Código" required hint="Letras minúsculas, números e _."><Input name="key" defaultValue={editing?.key ?? ""} maxLength={40} className="font-mono" required /></Field>
+              <Field label="Tipo"><Select name="kind" defaultValue={editing?.kind ?? "other"} options={Object.entries(NATURE_KIND_LABEL).map(([value, label]) => ({ value, label }))} /></Field>
+              <Field label="Operação"><Select name="operationType" defaultValue={editing?.operationType ?? "saida"} options={[{ value: "saida", label: "Saída" }, { value: "entrada", label: "Entrada" }]} /></Field>
+              <Field label="Finalidade"><Select name="purpose" defaultValue={editing?.purpose ?? "normal"} options={PURPOSE_OPTS} /></Field>
+              <Field label="CFOP interno" hint="Vazio = do grupo."><Input name="cfopInternal" defaultValue={editing?.cfopInternal ?? ""} maxLength={4} className="font-mono" /></Field>
+              <Field label="CFOP interestadual" hint="Vazio = do grupo."><Input name="cfopInterstate" defaultValue={editing?.cfopInterstate ?? ""} maxLength={4} className="font-mono" /></Field>
+              <Field label="CSOSN padrão (Simples)" hint="Vazio = do grupo."><Input name="cstSimples" defaultValue={editing?.cstSimples ?? ""} maxLength={3} className="font-mono" /></Field>
+              <Field label="CST padrão (regime normal)" hint="Vazio = do grupo."><Input name="cstNormal" defaultValue={editing?.cstNormal ?? ""} maxLength={2} className="font-mono" /></Field>
+            </FormGrid>
+            <Checkbox name="active" label="Ativa (disponível no assistente da NF-e)" defaultChecked={editing?.active ?? true} />
+            <div className="flex justify-end gap-2">
+              <Link href="/fiscal/configuracoes?tab=operacoes" className={buttonClass("ghost")}>Fechar</Link>
+              {submit("Salvar natureza")}
+            </div>
+          </ActionForm>
+        </Card>
+      )}
+      {tcOn && (
+        <Card title="Tributação completa — DIFAL, PIS/COFINS e alíquotas por UF" description="DIFAL na venda interestadual a consumidor final não contribuinte (EC 87/2015): por fora (base única) ou por dentro (base dupla), conforme a legislação da UF de destino. A alíquota interna do destino vem do grupo tributário ou desta tabela.">
+          <ActionForm action={saveCompleteSettingsAction} className="space-y-3">
+            <FormGrid cols={3}>
+              <Field label="Modo padrão do DIFAL"><Select name="difalDefaultMode" defaultValue={difalDefault === "dentro" ? "dentro" : "fora"} options={Object.entries(DIFAL_MODE_LABEL).map(([value, label]) => ({ value, label }))} /></Field>
+              <Field label="Modo por UF" hint="Uma por linha: “MG dentro”, “SP fora”."><Textarea name="difalModes" defaultValue={formatDifalModes(difalModes as Record<string, "fora" | "dentro">)} rows={3} className="font-mono" /></Field>
+              <Field label="Alíquotas internas por UF" hint="UF alíquota [FCP] [MVA ajustada] — ex.: “RJ 20 2”. O grupo tributário sobrepõe."><Textarea name="ufRates" defaultValue={formatUfRates(ufRates as any)} rows={3} className="font-mono" /></Field>
+            </FormGrid>
+            <Checkbox name="pisCofinsExcludeIcms" label="Excluir o ICMS próprio da base do PIS e da COFINS (regime normal — tema 69 do STF)" defaultChecked={Boolean(pisCofins)} />
+            {canEdit && <div className="flex justify-end gap-2">{discard}{submit("Salvar opções")}</div>}
+          </ActionForm>
+        </Card>
+      )}
+      {credOn && (
+        <Card title="Crédito do Simples Nacional (CSOSN 101 e 201)" description="Alíquota do Anexo da LC 123/2006 correspondente à faixa de receita do mês anterior (art. 23, § 2º) — atualize todo mês. A NF-e leva pCredSN/vCredICMSSN e a mensagem do crédito nas informações complementares.">
+          <ActionForm action={saveSimplesCreditAction} className="space-y-3">
+            <FormGrid cols={3}>
+              <Field label="Percentual de crédito (pCredSN, %)"><Input name="simplesCredit" inputMode="decimal" defaultValue={credit ? String(credit / 100).replace(".", ",") : ""} placeholder="2,56" /></Field>
+            </FormGrid>
+            {!simples && <p className="text-xs text-amber-700">A empresa não está no Simples Nacional: o crédito não é calculado.</p>}
+            {canEdit && <div className="flex justify-end gap-2">{discard}{submit("Salvar percentual")}</div>}
+          </ActionForm>
+        </Card>
+      )}
+    </div>
   );
 }

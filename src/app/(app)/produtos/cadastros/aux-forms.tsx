@@ -10,6 +10,7 @@ import { Notice } from "@/components/ui/empty";
 import type { ActionResult } from "@/lib/server/action";
 import { saveCategoryAction, saveBrandAction, saveUnitAction, savePriceTableAction, saveTaxGroupAction } from "./actions";
 import { IBS_CBS_CST_OPTIONS } from "@/domain/fiscal/reform-codes";
+import { formatUfRates } from "@/domain/fiscal/tax-complete-codes";
 
 type Opt = { value: string; label: string };
 type Kind = "categoria" | "marca" | "unidade" | "tabela" | "grupo";
@@ -26,7 +27,7 @@ const NEW_LABEL: Record<Kind, string> = { categoria: "Nova categoria", marca: "N
 const pctText = (bps: number | null | undefined) => (bps == null ? "" : String(bps / 100).replace(".", ","));
 
 /** Botão + diálogo de criação/edição para os cadastros auxiliares. */
-export function AuxDialog({ kind, row, parents = [], cstSimples = [], cstNormal = [], reformOn = false }: { kind: Kind; row?: Record<string, any>; parents?: Opt[]; cstSimples?: Opt[]; cstNormal?: Opt[]; reformOn?: boolean }) {
+export function AuxDialog({ kind, row, parents = [], cstSimples = [], cstNormal = [], reformOn = false, tcOn = false, natureOptions = null }: { kind: Kind; row?: Record<string, any>; parents?: Opt[]; cstSimples?: Opt[]; cstNormal?: Opt[]; reformOn?: boolean; tcOn?: boolean; natureOptions?: Opt[] | null }) {
   const [open, setOpen] = useState(false);
   const r = row ?? {};
   const [regime, setRegime] = useState<string>(r.regime ?? "simples");
@@ -98,6 +99,8 @@ export function AuxDialog({ kind, row, parents = [], cstSimples = [], cstNormal 
                     <Field label="Vigência — início"><Input type="date" name="validFrom" defaultValue={r.validFrom ?? ""} /></Field>
                     <Field label="Vigência — fim"><Input type="date" name="validTo" defaultValue={r.validTo ?? ""} /></Field>
                   </FormGrid>
+                  {tcOn && <CompleteGroupFields row={r} />}
+                  {natureOptions && <NatureGroupField row={r} options={natureOptions} />}
                   {reformOn && <ReformGroupFields row={r} />}
                   <Field label="Observações"><Textarea name="notes" defaultValue={r.notes ?? ""} rows={2} /></Field>
                   <Checkbox name="active" label="Ativo" defaultChecked={r.active ?? true} />
@@ -136,6 +139,42 @@ export function ReformGroupFields({ row }: { row: Record<string, any> }) {
         <Field label="IS — Imposto Seletivo (%)" hint="A partir de 2027."><Input name="isRate" inputMode="decimal" defaultValue={pctText(row.isRateBps)} /></Field>
       </FormGrid>
       <p className="whitespace-normal break-words text-xs text-slate-500">Os grupos IBS/CBS só entram na NF-e/NFC-e quando a empresa aderiu (Fiscal › Configurações › Tributação padrão) e a data de início chegou. ICMS, PIS, COFINS e o total da nota não mudam. Valide a classificação com a contabilidade e em homologação.</p>
+    </div>
+  );
+}
+
+/**
+ * Bloco "ICMS-ST, MVA e alíquotas por UF" do grupo tributário (FIS-12/16) — exibido só com `feature.tributacaoCompleta`.
+ * O marcador `tcBlock` diz ao servidor que os campos foram enviados (sem ele, os valores gravados são mantidos).
+ */
+export function CompleteGroupFields({ row }: { row: Record<string, any> }) {
+  return (
+    <div className="min-w-0 space-y-3 rounded-md border border-line p-3">
+      <p className="text-sm font-semibold">Tributação completa — ICMS-ST, MVA e alíquotas por UF</p>
+      <input type="hidden" name="tcBlock" value="1" />
+      <FormGrid cols={4}>
+        <Field label="MVA original da ST (%)" hint="CST 10/70 e CSOSN 201–203."><Input name="stMva" inputMode="decimal" defaultValue={pctText(row.stMvaBps)} placeholder="40" /></Field>
+        <Field label="Alíquota interna da ST (%)" hint="Operação interna; vazio = ICMS do grupo."><Input name="stRate" inputMode="decimal" defaultValue={pctText(row.stRateBps)} placeholder="18" /></Field>
+        <Field label="Redução da base da ST (%)" hint="Somente CST 70."><Input name="stBaseReduction" inputMode="decimal" defaultValue={pctText(row.stBaseReductionBps)} /></Field>
+      </FormGrid>
+      <Field label="Alíquotas por UF de destino" hint="Uma UF por linha: UF alíquota-interna [FCP] [MVA ajustada]. Ex.: “RJ 20 2” ou “MG 18 - 54,2”. Sobrepõe a tabela da empresa (Fiscal › Configurações › Operações).">
+        <Textarea name="ufRates" defaultValue={formatUfRates(row.ufRates)} rows={3} className="font-mono" />
+      </Field>
+      <p className="whitespace-normal break-words text-xs text-slate-500">Na operação interestadual o ICMS próprio usa 4%, 7% ou 12% conforme as UFs e a origem; a ST usa a alíquota interna do destino e a MVA ajustada (informada ou pela fórmula). O FCP do grupo vale na operação interna. Valide com a contabilidade e emita primeiro em homologação.</p>
+    </div>
+  );
+}
+
+/** Natureza de operação a que o grupo se destina (FIS-11/07) — exibido só com `feature.naturezasOperacao`. */
+export function NatureGroupField({ row, options }: { row: Record<string, any>; options: Opt[] }) {
+  return (
+    <div className="min-w-0 space-y-2 rounded-md border border-line p-3">
+      <input type="hidden" name="natureBlock" value="1" />
+      <FormGrid cols={2}>
+        <Field label="Natureza de operação do grupo" hint="Com a natureza escolhida na NF-e, este grupo vale para todos os itens (CFOP e CST do grupo).">
+          <Select name="operationKey" defaultValue={row.operationKey ?? ""} options={options} placeholder="— (grupo de produto, sem natureza)" />
+        </Field>
+      </FormGrid>
     </div>
   );
 }

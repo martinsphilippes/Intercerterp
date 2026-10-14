@@ -9,6 +9,8 @@ import { getFiscalConfig, DOC_STATUS_LABEL } from "@/domain/fiscal/service";
 import { docToInput, loadOrigin, partyRecipient, type NfeInput, type NfeOriginType } from "@/domain/fiscal/nfe";
 import { BusinessError } from "@/lib/core/errors";
 import { NfeWizard } from "./nfe-wizard";
+import { featureOn } from "@/lib/server/features";
+import { listNatures } from "@/domain/fiscal/tax-complete";
 
 export const metadata = { title: "Emitir NF-e" };
 
@@ -111,6 +113,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
     const prods = new Map((await listAll(s.ctx.store, "products", { filters: [["eq", "id", [...new Set(skus.map((k) => k.productId))]]] })).map((p) => [p.id, p]));
     for (const k of skus) skuNames[k.id] = { sku: k.sku, name: k.name ?? prods.get(k.productId)?.name ?? k.sku, unit: k.unitCode ?? "UN", ncm: prods.get(k.productId)?.ncm ?? "" };
   }
+  // naturezas de operação cadastradas (FIS-11/07) — só com o recurso ligado
+  const operationNatures = (await featureOn(s, "naturezasOperacao")) ? (await listNatures(s.ctx.store, s.ctx.companyId, branchId)).filter((n) => n.active !== false) : null;
   const env = cfg?.provider === "simulated" ? "Simulação (sem validade fiscal)" : cfg?.environment === "producao" ? "Produção" : "Homologação";
   return (
     <>
@@ -142,6 +146,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
         branchUf={s.branch.uf ?? s.branch.address?.uf ?? ""}
         context={`Modelo 55 · Série ${cfg?.nfeSeries ?? 1} · ${env} · ${s.branch.name}`}
         natures={NATURES}
+        operationNatures={operationNatures}
         skuNames={skuNames}
         returnable={returnable}
       />

@@ -14,6 +14,7 @@ import { useToast } from "@/components/ui/toast";
 import { useIdemKey } from "@/components/ui/action-form";
 import { cn } from "@/components/ui/cn";
 import type { NfeInput, NfeRecipient } from "@/domain/fiscal/nfe";
+import type { OperationNature } from "@/domain/fiscal/tax-complete-codes";
 import { previewNfeAction, saveNfeAction, searchSkusAction } from "../../actions";
 
 type Opt = { value: string; label: string };
@@ -67,6 +68,8 @@ export interface WizardProps {
   branchUf: string;
   context: string;
   natures: string[];
+  /** naturezas cadastradas (FIS-11/07) — presentes só com `feature.naturezasOperacao` ligado */
+  operationNatures?: OperationNature[] | null;
   skuNames: Record<string, { sku: string; name: string; unit: string; ncm: string }>;
   /** origem recebimento (devolução a fornecedor): restante devolvível por item do recebimento */
   returnable?: Record<number, { received: number; returned: number; max: number }> | null;
@@ -193,6 +196,20 @@ export function NfeWizard(props: WizardProps) {
 
         {STEPS[step].key === "operacao" && (
           <FormGrid cols={2}>
+            {props.operationNatures && (
+              <Field label="Natureza cadastrada" hint="Define CFOP e CST/CSOSN padrão dos itens (Fiscal › Configurações › Operações)." className="sm:col-span-2">
+                <Select
+                  value={input.operationKey ?? ""}
+                  placeholder="— (natureza livre: CFOP e CST do grupo tributário)"
+                  options={props.operationNatures.map((n) => ({ value: n.key, label: `${n.label}${n.cfopInternal ? ` — CFOP ${n.cfopInternal}/${n.cfopInterstate ?? "—"}` : ""}` }))}
+                  onChange={(e) => {
+                    const n = props.operationNatures!.find((x) => x.key === e.target.value);
+                    if (!n) return set({ operationKey: null });
+                    set({ operationKey: n.key, nature: n.label, ...(isManual ? { purpose: n.purpose, operationType: n.operationType } : {}) });
+                  }}
+                />
+              </Field>
+            )}
             <Field label="Natureza da operação" required>
               <Input list="natures" value={input.nature} onChange={(e) => set({ nature: e.target.value })} required />
               <datalist id="natures">{props.natures.map((n) => <option key={n} value={n} />)}</datalist>
@@ -338,7 +355,7 @@ export function NfeWizard(props: WizardProps) {
                           <td><Select value={it.taxGroupId ?? ""} placeholder={`Do produto${pv?.taxGroupName ? ` (${pv.taxGroupName})` : ""}`} options={props.taxGroups} onChange={(e) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, taxGroupId: e.target.value || null } : x)) })} /></td>
                           <td><Input value={it.cfop ?? ""} placeholder={pv?.cfop ?? ""} maxLength={4} onChange={(e) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, cfop: e.target.value || null } : x)) })} /></td>
                           <td><Input value={it.cstCsosn ?? ""} placeholder={pv?.cstCsosn ?? ""} maxLength={3} onChange={(e) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, cstCsosn: e.target.value || null } : x)) })} /></td>
-                          <td className="text-xs">{pv ? <>CFOP <b>{pv.cfop || "—"}</b> · CST <b>{pv.cstCsosn || "—"}</b> · NCM {pv.ncm || <span className="text-red-700">ausente</span>} · base {money(pv.icmsBase)} · ICMS {money(pv.icms)} · trib. aprox. {money(pv.approxTax)}{pv.taxGroupIssue && <span className="block text-red-700">{pv.taxGroupIssue}</span>}</> : "—"}</td>
+                          <td className="text-xs">{pv ? <>CFOP <b>{pv.cfop || "—"}</b> · CST <b>{pv.cstCsosn || "—"}</b> · NCM {pv.ncm || <span className="text-red-700">ausente</span>} · base {money(pv.icmsBase)} · ICMS {money(pv.icms)}{pv.tc?.st ? <> · ST {money(pv.tc.st.value)}</> : null}{pv.tc?.st?.fcp ? <> · FCP-ST {money(pv.tc.st.fcp)}</> : null}{pv.tc?.fcp ? <> · FCP {money(pv.tc.fcp.value)}</> : null}{pv.tc?.difal ? <> · DIFAL {money(pv.tc.difal.dest)}</> : null}{pv.tc?.credSn ? <> · crédito SN {money(pv.tc.credSn.value)}</> : null} · trib. aprox. {money(pv.approxTax)}{pv.taxGroupIssue && <span className="block text-red-700">{pv.taxGroupIssue}</span>}</> : "—"}</td>
                         </tr>
                       );
                     })}

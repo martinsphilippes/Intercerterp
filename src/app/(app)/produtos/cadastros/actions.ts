@@ -2,6 +2,7 @@
 
 import { runAction, fstr, fopt, fbool, fint } from "@/lib/server/action";
 import { reformFromForm } from "@/domain/fiscal/reform";
+import { completeFromForm, natureKeyFromForm } from "@/domain/fiscal/tax-complete";
 import { saveCategory, deleteCategory, saveBrand, deleteBrand, saveUnit, deleteUnit, savePriceTable, deletePriceTable, saveTaxGroup, deleteTaxGroup, setAuxStatus } from "@/domain/products";
 
 const P = "/produtos/cadastros";
@@ -44,6 +45,8 @@ export async function saveTaxGroupAction(fd: FormData) {
       cstCsosn: fopt(fd, "cstCsosn"), icmsRateBps: bps(fd, "icmsRate"), icmsBaseReductionBps: bps(fd, "icmsBaseReduction"), fcpRateBps: bps(fd, "fcpRate"), pisCst: fopt(fd, "pisCst"), pisRateBps: bps(fd, "pisRate"),
       cofinsCst: fopt(fd, "cofinsCst"), cofinsRateBps: bps(fd, "cofinsRate"), ipiCst: fopt(fd, "ipiCst"), ipiRateBps: bps(fd, "ipiRate"), validFrom: fopt(fd, "validFrom"), validTo: fopt(fd, "validTo"), active: fbool(fd, "active"), notes: fopt(fd, "notes"),
       reform: reformFromForm(fd),
+      complete: completeFromForm(fd),
+      operationKey: natureKeyFromForm(fd),
     });
     return { ok: true as const, message: "Grupo tributário salvo." };
   });

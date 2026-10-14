@@ -12,6 +12,7 @@ import { formatDate } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import { categoryPath, CSOSN_OPTIONS, CST_ICMS_OPTIONS } from "@/domain/products";
 import { AuxDialog } from "./aux-forms";
+import { listNatures } from "@/domain/fiscal/tax-complete";
 import { featureOn } from "@/lib/server/features";
 import { setAuxStatusAction, deleteAuxAction } from "./actions";
 
@@ -36,6 +37,8 @@ function RowActions({ collection, id, active, used, canEdit, canDelete, kindLabe
 export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const s = await requireSession("products");
   const reformOn = await featureOn(s, "reformaTributaria");
+  const tcOn = await featureOn(s, "tributacaoCompleta");
+  const natureOptions = (await featureOn(s, "naturezasOperacao")) ? (await listNatures(s.ctx.store, s.ctx.companyId, null)).map((n) => ({ value: n.key, label: n.label })) : null;
   const { tab = "categorias" } = await searchParams;
   const ctx = s.ctx;
   const cf = [["eq", "companyId", ctx.companyId]] as any[];
@@ -157,7 +160,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         </Card>
       )}
       {tab === "grupos" && (
-        <Card title="Grupos tributários" description="CFOP por operação e CST/CSOSN conforme o regime; alíquotas por grupo — nada é fixo para todos os produtos." actions={canCreate && <AuxDialog kind="grupo" cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} reformOn={reformOn} />} bodyClass="p-0">
+        <Card title="Grupos tributários" description="CFOP por operação e CST/CSOSN conforme o regime; alíquotas por grupo — nada é fixo para todos os produtos." actions={canCreate && <AuxDialog kind="grupo" cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} reformOn={reformOn} tcOn={tcOn} natureOptions={natureOptions} />} bodyClass="p-0">
           {groups.length === 0 ? <EmptyState title="Nenhum grupo tributário" /> : (
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
@@ -177,7 +180,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                         <td className="text-xs">{g.validFrom || g.validTo ? `${formatDate(g.validFrom)} a ${formatDate(g.validTo)}` : "—"}</td>
                         <td className="tabular text-right">{used}</td>
                         <td><StatusBadge kind="generic" status={g.active === false ? "inactive" : "active"} /></td>
-                        <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="grupo" row={g} cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} reformOn={reformOn} />}<RowActions collection="tax_groups" id={g.id} active={g.active !== false} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="o grupo" /></div></td>
+                        <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="grupo" row={g} cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} reformOn={reformOn} tcOn={tcOn} natureOptions={natureOptions} />}<RowActions collection="tax_groups" id={g.id} active={g.active !== false} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="o grupo" /></div></td>
                       </tr>
                     );
                   })}

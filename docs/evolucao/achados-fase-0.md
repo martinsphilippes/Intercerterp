@@ -6,6 +6,8 @@ congelam o comportamento (pontos ainda abertos marcados com "ATENÇÃO (comporta
 **Situação (aprovado em 14/10/2026):** itens 1, 3, 4, 5 e 6 **corrigidos** na branch `fix/calculos-fase-0`, com os testes
 atualizados explicitamente (comentário "Corrigido (achado N)"). Item 2 fica para a Fase 2 (validação contábil). Item 7 sem mudança.
 
+**Item 2 (Fase 7, tributação):** corrigido **somente com o recurso `feature.tributacaoCompleta` ligado** (desligado por padrão) — ICMS próprio no CST 10/70, alíquota interestadual 4/7/12% e base do PIS/COFINS sem ICMS (este como parâmetro separado). Sem o recurso o comportamento atual continua (teste de igualdade em `tests/tax-complete.test.ts`; regras em `docs/regras-assumidas.md` §38 — validar com a contabilidade e em homologação).
+
 Detalhe das correções:
 - 1: `lateChargeParams` mescla empresa + filial campo a campo.
 - 3: `computeTotals` aplica a mesma regra (itens, senão total informado) a frete, seguro e outras.

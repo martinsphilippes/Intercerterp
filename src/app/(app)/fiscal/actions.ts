@@ -23,6 +23,7 @@ import {
 import { buildNfe, normalizeNfeInput, refreshFromCatalog, saveNfe, type NfeInput } from "@/domain/fiscal/nfe";
 import { saveIssuer, setNextNumber, uploadCertificate, saveTaxGroup, deleteTaxGroup, saveReformAdherence, type TaxGroupInput } from "@/domain/fiscal/config";
 import { reformFromForm } from "@/domain/fiscal/reform";
+import { completeFromForm, natureKeyFromForm, saveCompleteSettings, saveNature, saveSimplesCredit } from "@/domain/fiscal/tax-complete";
 import { requireFeature } from "@/lib/server/features";
 import { buildAccountingPackage, sendAccountingPackage, saveAccountingSchedule } from "@/domain/fiscal/export";
 import { completeObligation, deleteObligation, generateObligations, saveObligation, saveTemplates, setObligationStatus, type ObligationTemplate } from "@/domain/fiscal/obligations";
@@ -205,6 +206,39 @@ export async function saveReformAdherenceAction(fd: FormData) {
   });
 }
 
+// ───────────────────────────── Operações (Fase 7): naturezas, DIFAL, PIS/COFINS sem ICMS, alíquotas por UF e crédito do Simples
+
+const OPS = "/fiscal/configuracoes";
+
+export async function saveNatureAction(fd: FormData) {
+  return runAction({ module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
+    await requireFeature(s, "naturezasOperacao");
+    const n = await saveNature(
+      s.ctx,
+      { key: fstr(fd, "key"), label: fstr(fd, "label"), operationType: fstr(fd, "operationType"), purpose: fstr(fd, "purpose") || "normal", kind: fstr(fd, "kind"), cfopInternal: fopt(fd, "cfopInternal"), cfopInterstate: fopt(fd, "cfopInterstate"), cstSimples: fopt(fd, "cstSimples"), cstNormal: fopt(fd, "cstNormal"), active: fbool(fd, "active") },
+      { originalKey: fopt(fd, "originalKey") },
+    );
+    return { ok: true as const, message: `Natureza "${n.label}" salva.`, redirect: `${OPS}?tab=operacoes` };
+  });
+}
+
+export async function saveCompleteSettingsAction(fd: FormData) {
+  return runAction({ module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
+    await requireFeature(s, "tributacaoCompleta");
+    await saveCompleteSettings(s.ctx, { pisCofinsExcludeIcms: fbool(fd, "pisCofinsExcludeIcms"), difalDefaultMode: fstr(fd, "difalDefaultMode"), difalModes: fstr(fd, "difalModes"), ufRates: fstr(fd, "ufRates") });
+    return { ok: true as const, message: "Opções de tributação salvas." };
+  });
+}
+
+export async function saveSimplesCreditAction(fd: FormData) {
+  return runAction({ module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
+    await requireFeature(s, "creditoSimples");
+    const v = fstr(fd, "simplesCredit");
+    await saveSimplesCredit(s.ctx, v ? parseBps(v) : null);
+    return { ok: true as const, message: "Percentual de crédito do Simples salvo." };
+  });
+}
+
 export async function saveConfigAction(fd: FormData) {
   return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     const scope = fstr(fd, "scope") === "company" ? null : requireBranch(s.ctx);
@@ -310,6 +344,8 @@ function parseTaxGroup(fd: FormData): TaxGroupInput {
     notes: fopt(fd, "notes"),
     approxTaxBps: bps("approxTax"),
     reform: reformFromForm(fd),
+    complete: completeFromForm(fd),
+    operationKey: natureKeyFromForm(fd),
   };
 }
 
