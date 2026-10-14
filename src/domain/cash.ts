@@ -16,7 +16,8 @@ import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
  *  - Fundo de troco não é receita; suprimento não é venda; sangria não reduz faturamento.
  *  - Uma única sessão aberta por terminal (chave de trava única).
  *  - Fechamento preserva previsto × informado e divergências; reabertura gera nova versão.
- *  - Dinheiro esperado = fundo + recebimentos em espécie (líquidos de troco) + suprimentos − sangrias − devoluções em espécie.
+ *  - Dinheiro esperado = fundo + recebimentos em espécie (líquidos de troco) + suprimentos − sangrias − devoluções em espécie
+ *    + recebimentos de parcelas do crediário em dinheiro no PDV (líquidos de estornos; Fase 4 — docs/regras-assumidas.md §26).
  */
 
 export const CASH_MOVEMENT_LABEL: Record<string, string> = {
@@ -26,6 +27,7 @@ export const CASH_MOVEMENT_LABEL: Record<string, string> = {
   sale: "Recebimento de venda",
   refund: "Devolução ao cliente",
   closing_adjust: "Ajuste de fechamento",
+  receivable: "Recebimento de crediário",
 };
 
 export async function currentSession(ctx: Ctx, terminalId: string): Promise<Doc | null> {
@@ -236,6 +238,11 @@ export interface SessionSummary {
   expected: { cash: number };
   movements: Doc[];
   totals: { sales: number; salesCount: number; supply: number; withdrawal: number; refunds: number; change: number; cashSales: number; opening: number };
+  /**
+   * Recebimentos de parcelas do crediário/contas a receber no PDV (movimentos "receivable", já líquidos dos estornos).
+   * `cash` entra no dinheiro esperado; os demais meios entram no previsto do próprio meio (`byMethod`).
+   */
+  receivables: { total: number; cash: number; count: number; byMethod: Record<string, { label: string; amount: number; count: number }> };
 }
 
 /** Previsto por meio de pagamento (dinheiro físico separado de cartões/Pix). */
@@ -265,8 +272,25 @@ export async function sessionSummary(ctx: Ctx, sessionId: string): Promise<Sessi
   const cashSales = sum("sale"); // valor aplicado à venda (já líquido do troco)
   const change = payments.reduce((a, p) => a + (p.change ?? 0), 0);
   const adjust = sum("closing_adjust");
+  // Recebimentos de parcelas no PDV: o dinheiro entra na gaveta (esperado); cartão/Pix entram no previsto do meio.
+  // Estorno = movimento do mesmo tipo com valor negativo (a contagem de transações também é líquida).
+  const receivables: SessionSummary["receivables"] = { total: 0, cash: 0, count: 0, byMethod: {} };
+  for (const m of movements) {
+    if (m.type !== "receivable") continue;
+    const k = m.method || "other";
+    const step = m.amount >= 0 ? 1 : -1;
+    receivables.total += m.amount;
+    receivables.count += step;
+    receivables.byMethod[k] ??= { label: labels[k] ?? k, amount: 0, count: 0 };
+    receivables.byMethod[k].amount += m.amount;
+    receivables.byMethod[k].count += step;
+    if (k === "cash") receivables.cash += m.amount;
+    byMethod[k] ??= { label: labels[k] ?? k, expected: 0, count: 0 };
+    byMethod[k].expected += m.amount;
+    byMethod[k].count += step;
+  }
   // Troco não é deduzido novamente: o movimento "sale" registra apenas o valor aplicado.
-  const cash = opening + cashSales + supply - withdrawal - refunds + adjust;
+  const cash = opening + cashSales + receivables.cash + supply - withdrawal - refunds + adjust;
   byMethod.cash ??= { label: "Dinheiro", expected: 0, count: 0 };
   const salesCompleted = sales.filter((s) => s.status === "completed");
   return {
@@ -275,6 +299,7 @@ export async function sessionSummary(ctx: Ctx, sessionId: string): Promise<Sessi
     expected: { cash },
     movements,
     totals: { sales: salesCompleted.reduce((a, s) => a + s.total, 0), salesCount: salesCompleted.length, supply, withdrawal, refunds, change, cashSales, opening },
+    receivables,
   };
 }
 

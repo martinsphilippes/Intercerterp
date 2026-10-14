@@ -43,6 +43,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const per = session.peripheralsCheck ?? {};
   const liveExpected: Record<string, number> = { cash: sum.expected.cash };
   for (const [k, v] of Object.entries(sum.byMethod)) if (k !== "cash") liveExpected[k] = v.expected;
+  // recebimentos de parcelas no PDV: recibo pelo recebimento (operação) da baixa
+  const receivableMovs = sum.movements.filter((m) => m.type === "receivable");
+  const receiptOf = new Map<string, string>();
+  for (const m of receivableMovs) {
+    const st = m.settlementId ? await store.get("settlements", m.settlementId) : null;
+    if (st?.operationId) receiptOf.set(m.id, st.operationId);
+  }
   return (
     <>
       <PageHeader
@@ -71,7 +78,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           </Notice>
         </div>
       )}
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className={`mb-5 grid grid-cols-2 gap-3 ${receivableMovs.length ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
         <Stat label="Fundo de abertura" value={formatMoney(sum.totals.opening)} hint="Não é receita" />
         <Stat label="Vendas concluídas" value={sum.totals.salesCount} hint={showExpected ? formatMoney(sum.totals.sales) : "valor oculto até a contagem cega"} href={`/vendas?sessao=${id}`} />
         <Stat
@@ -80,6 +87,14 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           hint={showExpected ? undefined : `${sum.movements.filter((m) => m.type === "supply").length} suprimento(s) · ${sum.movements.filter((m) => m.type === "withdrawal").length} sangria(s) — valores revelados após a contagem`}
           href={`${base}?tab=movimentos`}
         />
+        {receivableMovs.length > 0 && (
+          <Stat
+            label="Recebimentos de crediário"
+            value={showExpected ? formatMoney(sum.receivables.total) : "oculto"}
+            hint={showExpected ? `em dinheiro ${formatMoney(sum.receivables.cash)} · ${sum.receivables.count} parcela(s)` : `${sum.receivables.count} parcela(s) — valores revelados após a contagem`}
+            href={`${base}?tab=movimentos`}
+          />
+        )}
         <Stat label="Dinheiro esperado (agora)" value={showExpected ? formatMoney(sum.expected.cash) : "oculto"} hint={showExpected ? `troco entregue ${formatMoney(sum.totals.change)} · devoluções ${formatMoney(sum.totals.refunds)}` : "conferência cega: revelado após a contagem"} />
         <Stat label={open ? "Situação" : "Diferença do fechamento"} value={open ? (session.status === "reopened" ? "Reaberto" : "Aberto") : formatMoney(totalDiff)} tone={open ? "default" : totalDiff || Object.keys(diffs).length ? "bad" : "good"} hint={!open && session.justification ? `Justificativa: ${session.justification}` : undefined} />
       </div>
@@ -108,7 +123,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               <ClosureTable expected={session.expected ?? {}} counted={session.counted ?? {}} differences={diffs} />
             )}
             {!open && session.justification && <p className="border-t border-line px-4 py-2 text-sm">Justificativa: {session.justification}</p>}
-            {showExpected && <p className="border-t border-line px-4 py-2 text-xs text-slate-500">Dinheiro esperado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções em espécie {formatMoney(sum.totals.refunds)}.</p>}
+            {showExpected && <p className="border-t border-line px-4 py-2 text-xs text-slate-500">Dinheiro esperado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)}{receivableMovs.length ? ` + recebimentos de crediário em dinheiro ${formatMoney(sum.receivables.cash)}` : ""} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções em espécie {formatMoney(sum.totals.refunds)}.</p>}
           </Card>
           <Card title="Abertura e conferência do terminal">
             <DefinitionList
@@ -138,8 +153,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   <td>{m.reason}{m.saleId && <Link className="ml-1 text-xs text-brand-700 hover:underline" href={`/vendas/${m.saleId}`}>venda</Link>}{m.returnId && <Link className="ml-1 text-xs text-brand-700 hover:underline" href={`/vendas/devolucoes/${m.returnId}`}>devolução</Link>}</td>
                   <td>{m.accountId ? accounts.get(m.accountId) : "—"}</td>
                   <td>{m.recipient ?? users.get(m.createdBy)}</td>
-                  <td className={`tabular text-right ${m.amount < 0 ? "text-red-700" : ""}`}>{formatMoney(m.amount)}</td>
-                  <td>{["opening", "supply", "withdrawal"].includes(m.type) && <Link className="text-xs text-brand-700 hover:underline" href={`/caixa/movimentos/${m.id}/comprovante`}>Comprovante</Link>}</td>
+                  <td className={`tabular text-right ${m.amount < 0 ? "text-red-700" : ""}`}>{m.type === "receivable" && !showExpected ? <span className="text-slate-400">oculto</span> : formatMoney(m.amount)}</td>
+                  <td>
+                    {["opening", "supply", "withdrawal"].includes(m.type) && <Link className="text-xs text-brand-700 hover:underline" href={`/caixa/movimentos/${m.id}/comprovante`}>Comprovante</Link>}
+                    {receiptOf.get(m.id) && <Link className="text-xs text-brand-700 hover:underline" href={`/caixa/recebimentos/${receiptOf.get(m.id)}`}>Recibo</Link>}
+                  </td>
                 </tr>
               ))}
             </tbody>

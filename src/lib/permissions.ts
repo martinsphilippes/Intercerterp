@@ -34,6 +34,8 @@ export const SPECIAL_ACTIONS = [
   { key: "sale.overdue_override", label: "Liberar venda para cliente inadimplente" },
   { key: "cash.reopen", label: "Reabrir caixa" },
   { key: "cash.withdrawal", label: "Registrar sangria/suprimento" },
+  { key: "pdv.receive_installments", label: "Receber parcelas do crediário no PDV" },
+  { key: "pdv.reverse_receipt", label: "Estornar recebimento de parcelas no PDV" },
   { key: "stock.adjust", label: "Ajustar estoque" },
   { key: "stock.inventory_close", label: "Concluir inventário" },
   { key: "finance.settle", label: "Baixar títulos" },
@@ -98,7 +100,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
       dashboard: all(), pdv: all(), sales: all(), cash: all(), products: all(), stock: all(), customers: all(),
       suppliers: all(), finance: rw(), purchases: all(), fiscal: rw(), reports: all(), admin: ro(), support: rw(),
     },
-    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "stock.adjust", "stock.inventory_close", "finance.settle", "purchase.approve", "purchase.receive", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override"],
+    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "finance.settle", "purchase.approve", "purchase.receive", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override"],
     discountLimitBps: 2000,
   },
   {
@@ -106,7 +108,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     name: "Caixa",
     description: "Operação do PDV, abertura e fechamento de caixa.",
     permissions: { dashboard: ro(), pdv: all(), sales: { view: true, create: true }, cash: rw(), customers: rw(), products: ro(), support: rw() },
-    actions: ["cash.withdrawal", "sale.return", "fiscal.issue"],
+    actions: ["cash.withdrawal", "sale.return", "fiscal.issue", "pdv.receive_installments"],
     discountLimitBps: 500,
   },
   {

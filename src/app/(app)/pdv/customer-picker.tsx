@@ -63,15 +63,19 @@ export function CustomerPicker({
   onConsumer,
   canCreate,
   total,
+  title,
 }: {
   open: boolean;
   onClose: () => void;
   current: CustomerInfo | null;
   cpfOnInvoice: string | null;
   onSelect: (c: CustomerInfo) => void;
-  onConsumer: (cpf: string | null) => void;
+  /** ausente: oculta a opção “consumidor final” (ex.: recebimento de parcelas, que exige cliente) */
+  onConsumer?: (cpf: string | null) => void;
   canCreate: boolean;
-  total: number;
+  total?: number;
+  /** título do diálogo (padrão: identificação do cliente da venda) */
+  title?: string;
 }) {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<CustomerInfo[]>([]);
@@ -149,7 +153,7 @@ export function CustomerPicker({
     <Dialog
       open={open}
       onClose={onClose}
-      title={`Identificar cliente — total ${formatMoney(total)}`}
+      title={title ?? `Identificar cliente — total ${formatMoney(total ?? 0)}`}
       size="lg"
       footer={
         mode === "search" ? (
@@ -254,7 +258,7 @@ export function CustomerPicker({
         </div>
       )}
       {error && <p role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-      <div className="mt-4 rounded-md border border-line bg-slate-50 p-3">
+      {onConsumer && <div className="mt-4 rounded-md border border-line bg-slate-50 p-3">
         <p className="flex items-center gap-2 text-sm font-medium text-ink">
           <UserRound className="size-4" /> Continuar como consumidor final
         </p>
@@ -267,7 +271,7 @@ export function CustomerPicker({
           </Button>
         </div>
         {current && <p className="mt-2 text-xs text-slate-500">Cliente atual: {current.name}. Continuar como consumidor final remove a identificação.</p>}
-      </div>
+      </div>}
     </Dialog>
   );
 }

@@ -419,25 +419,31 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
     }
     throw e;
   }
-  if (!tx && !reused) {
-    await refreshTitleStatus(ctx.store, settlement.titleId);
-    await audit(ctx, {
-      module: "finance",
-      action: "settlement.create",
-      entityType: "title",
-      entityId: settlement.titleId,
-      summary: `Baixa de ${(settlement.total / 100).toFixed(2)} (principal ${(settlement.principal / 100).toFixed(2)})`,
-      after: { principal: settlement.principal, interest, fine, discount, fee, accountId: input.accountId },
-      related: [`installment:${input.installmentId}`, `settlement:${settlement.id}`],
-      operationId: input.operationId,
-    });
-    const inst = await ctx.store.get("installments", input.installmentId);
-    if (inst?.status === "paid") {
-      await resolveOccurrence(ctx.store, `overdue:${inst.id}`);
-      await resolveOccurrence(ctx.store, `payable_due:${inst.id}`);
-    }
-  }
+  if (!tx && !reused) await settlementPostCommit(ctx, settlement);
   return settlement;
+}
+
+/**
+ * Conclusão de uma baixa depois do commit (situação do título, auditoria e avisos de vencimento). Chamada pela própria
+ * `settleInstallment`; quem grava a baixa dentro de uma transação própria (`tx`) chama esta função depois do commit.
+ */
+export async function settlementPostCommit(ctx: Ctx, settlement: Doc) {
+  await refreshTitleStatus(ctx.store, settlement.titleId);
+  await audit(ctx, {
+    module: "finance",
+    action: "settlement.create",
+    entityType: "title",
+    entityId: settlement.titleId,
+    summary: `Baixa de ${(settlement.total / 100).toFixed(2)} (principal ${(settlement.principal / 100).toFixed(2)})`,
+    after: { principal: settlement.principal, interest: settlement.interest, fine: settlement.fine, discount: settlement.discount, fee: settlement.fee, accountId: settlement.accountId },
+    related: [`installment:${settlement.installmentId}`, `settlement:${settlement.id}`],
+    operationId: settlement.operationId ?? undefined,
+  });
+  const inst = await ctx.store.get("installments", settlement.installmentId);
+  if (inst?.status === "paid") {
+    await resolveOccurrence(ctx.store, `overdue:${inst.id}`);
+    await resolveOccurrence(ctx.store, `payable_due:${inst.id}`);
+  }
 }
 
 export async function refreshTitleStatus(store: Store, titleId: string) {
@@ -564,11 +570,17 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
   if (tx) await run(tx);
   else await retryOnConflict(() => ctx.store.transaction(run));
   if (already) return ctx.store.getOrThrow("settlements", s.id);
+  // dentro de transação externa a conclusão fica para depois do commit (reversalPostCommit)
+  if (!tx) await reversalPostCommit(ctx, s, reason);
+  return ctx.store.getOrThrow("settlements", s.id);
+}
+
+/** Conclusão do estorno depois do commit (situação do título, auditoria e reabertura do aviso de atraso). */
+export async function reversalPostCommit(ctx: Ctx, s: Doc, reason: string) {
   await refreshTitleStatus(ctx.store, s.titleId);
   await audit(ctx, { module: "finance", action: "settlement.reverse", entityType: "title", entityId: s.titleId, summary: `Estorno de baixa (${(s.total / 100).toFixed(2)})`, reason, related: [`settlement:${s.id}`, `installment:${s.installmentId}`] });
   const inst = await ctx.store.get("installments", s.installmentId);
   if (inst && inst.status !== "paid" && inst.dueDate < today()) await reopenOccurrence(ctx.store, `overdue:${inst.id}`);
-  return ctx.store.getOrThrow("settlements", s.id);
 }
 
 /** Limite de escritas por transação do Appwrite. */

@@ -90,13 +90,25 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           href={`/vendas?sessao=${session.id}&situacao=cancelled`}
         />
       </div>
+      {sum.movements.some((m) => m.type === "receivable") && (
+        <div className="mb-4 rounded-lg border border-line bg-white px-4 py-3 text-sm">
+          <p className="font-medium text-ink">Recebimentos de crediário</p>
+          <p className="text-xs text-slate-500">
+            {count("receivable")} lançamento(s) no PDV (líquidos de estornos) ·{" "}
+            {showAmounts
+              ? Object.entries(sum.receivables.byMethod).filter(([, v]) => v.amount !== 0).map(([, v]) => `${v.label} ${formatMoney(v.amount)}`).join(" · ") || "sem saldo"
+              : "valores ocultos até a contagem"}
+            . O dinheiro recebido já está no dinheiro esperado; cartão e Pix no previsto do meio.
+          </p>
+        </div>
+      )}
       <ClosingForm
         sessionId={session.id}
         blind={blind}
         methods={blind && !blindCounted ? methods.map((m) => ({ ...m, expected: null })) : methods}
         initialCounted={blindCounted}
         initialBlind={blindResult}
-        cashBreakdown={blind ? null : { opening: sum.totals.opening, cashSales: sum.totals.cashSales, supply: sum.totals.supply, withdrawal: sum.totals.withdrawal, refunds: sum.totals.refunds }}
+        cashBreakdown={blind ? null : { opening: sum.totals.opening, cashSales: sum.totals.cashSales, supply: sum.totals.supply, withdrawal: sum.totals.withdrawal, refunds: sum.totals.refunds, receivablesCash: sum.receivables.cash }}
         checklist={requiredChecklist(sum).map(({ key, label, hint }) => ({ key, label, hint }))}
         accounts={accounts.filter((a) => a.value !== cashAcc?.id)}
       />

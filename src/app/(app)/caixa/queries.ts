@@ -6,6 +6,7 @@ import { addDays, dayRange, today } from "@/lib/dates";
 import type { ListParams } from "@/lib/list";
 import { nameMap } from "@/lib/server/lookups";
 import { blindCloseEnabled, CASH_MOVEMENT_LABEL, expectedVisible, sessionSummary } from "@/domain/cash";
+import { RECEIVABLE_KIND_LABEL } from "@/domain/pdv-receivables";
 
 export function cashPeriod(f: Record<string, string>) {
   const to = f.ate || today();
@@ -89,17 +90,18 @@ export async function queryCashMovements(ctx: Ctx, p: Pick<ListParams, "q" | "f"
     const branch = ctx.branchId ?? p.f.filial ?? null;
     if (branch) filters.push(["eq", "branchId", branch]);
   }
-  const types = p.f.tipo === "vendas" ? ["sale"] : p.f.tipo ? [p.f.tipo] : ["opening", "supply", "withdrawal", "refund", "closing_adjust"];
+  const types = p.f.tipo === "vendas" ? ["sale"] : p.f.tipo ? [p.f.tipo] : ["opening", "supply", "withdrawal", "refund", "closing_adjust", "receivable"];
   filters.push(["eq", "type", types]);
   let rows = await listAll(ctx.store, "cash_movements", { filters, orderBy: [{ field: "occurredAt", dir: p.f.ordem === "antigos" ? "asc" : "desc" }] });
-  // conferência cega: recebimentos de venda em dinheiro de sessão ainda não contada não são listados (tela e CSV)
-  if (rows.some((m) => m.type === "sale")) {
+  // conferência cega: recebimentos de venda e de parcelas (crediário) de sessão ainda não contada não são listados (tela e CSV)
+  const blindTypes = ["sale", "receivable"];
+  if (rows.some((m) => blindTypes.includes(m.type))) {
     const hidden = new Set<string>();
-    for (const sid of new Set(rows.filter((m) => m.type === "sale").map((m) => m.sessionId as string))) {
+    for (const sid of new Set(rows.filter((m) => blindTypes.includes(m.type)).map((m) => m.sessionId as string))) {
       const sess = await ctx.store.get("cash_sessions", sid);
       if (sess && !(await expectedVisible(ctx, sess))) hidden.add(sid);
     }
-    if (hidden.size) rows = rows.filter((m) => !(m.type === "sale" && hidden.has(m.sessionId)));
+    if (hidden.size) rows = rows.filter((m) => !(blindTypes.includes(m.type) && hidden.has(m.sessionId)));
   }
   const [users, accounts, sessions] = await Promise.all([nameMap(ctx, "users"), nameMap(ctx, "financial_accounts"), nameMap(ctx, "cash_sessions", (s) => `nº ${s.number}`)]);
   return rows.map((m) => ({
@@ -121,6 +123,9 @@ export async function queryCashMovements(ctx: Ctx, p: Pick<ListParams, "q" | "f"
     returnId: (m.returnId ?? null) as string | null,
     notes: (m.notes ?? null) as string | null,
     transferId: (m.transferId ?? null) as string | null,
+    settlementId: (m.settlementId ?? null) as string | null,
+    method: (m.method ?? null) as string | null,
+    methodLabel: (m.type === "receivable" ? (RECEIVABLE_KIND_LABEL[m.method] ?? m.method ?? null) : null) as string | null,
   }));
 }
 

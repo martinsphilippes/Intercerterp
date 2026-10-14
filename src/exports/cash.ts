@@ -42,6 +42,7 @@ defineExport("cash_movements", {
     { key: "createdByName", label: "Lançado por" },
     { key: "approvedByName", label: "Autorizado por" },
     { key: "amount", label: "Valor", type: "money" },
+    { key: "methodLabel", label: "Meio (recebimento de crediário)" },
     { key: "notes", label: "Observações" },
   ],
   rows: (s, params) => queryCashMovements(s.ctx, parseList(params)),
