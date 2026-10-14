@@ -18,6 +18,7 @@ import { getFiscalConfig } from "@/domain/fiscal/service";
 import { customerOverdueStatus } from "@/domain/delinquency";
 import { can, canDo } from "@/lib/permissions";
 import { nonBusinessDayRule } from "@/domain/finance";
+import { LOYALTY_METHOD_ID, LOYALTY_METHOD_NAME, loyaltyBalance, loyaltyEnabled, loyaltyParams } from "@/domain/loyalty";
 
 export const metadata = { title: "Pagamento da venda" };
 export const dynamic = "force-dynamic";
@@ -84,6 +85,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     creditAvailable = Math.max(0, customer.creditLimit - open.reduce((a, i) => a + i.balance, 0));
   }
   const overdue = customer ? await customerOverdueStatus(store, s.ctx.companyId, s.ctx.branchId, customer.id) : null;
+  // fidelidade (CAD-21): resgate de pontos como forma de pagamento sintética, só com o programa ligado e cliente identificado
+  let loyalty: { points: number; pointValue: number; minRedeemPoints: number; nextExpiry: { date: string; points: number } | null } | null = null;
+  if (customer && (await loyaltyEnabled(store, s.ctx.companyId, s.ctx.branchId))) {
+    const [bal, lp] = await Promise.all([loyaltyBalance(store, s.ctx.companyId, customer.id), loyaltyParams(store, s.ctx.companyId)]);
+    loyalty = { points: bal.points, pointValue: lp.pointValue, minRedeemPoints: lp.minRedeemPoints, nextExpiry: bal.nextExpiry };
+  }
   let exchangeVoucher: { code: string; balance: number; returnNumber: number } | null = null;
   if (cart.exchangeReturnId) {
     const ret = await store.get("returns", cart.exchangeReturnId);
@@ -97,13 +104,17 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     <PaymentApp
       cartId={cart.id}
       total={prep.calc.total}
-      summary={{ subtotal: prep.calc.subtotal, discount: prep.calc.discountTotal, surcharge: prep.calc.surchargeTotal, items: prep.lines.map((l, i) => ({ name: l.sku.name ?? l.product.name, sku: l.sku.sku, qty: l.input.qty, unitCode: l.sku.unitCode ?? l.product.unitCode, total: prep!.calc.items[i].total })) }}
+      summary={{ subtotal: prep.calc.subtotal, discount: prep.calc.discountTotal, promo: prep.calc.promoDiscount, surcharge: prep.calc.surchargeTotal, items: prep.lines.map((l, i) => ({ name: l.sku.name ?? l.product.name, sku: l.sku.sku, qty: l.input.qty, unitCode: l.sku.unitCode ?? l.product.unitCode, total: prep!.calc.items[i].total, promoName: l.promoName })) }}
       stockWarnings={prep.stockWarnings}
       terminal={{ id: terminal.id, name: terminal.name }}
       session={session ? { id: session.id, number: session.number, operatorName: users.get(session.operatorId) ?? "—" } : null}
       customer={customer ? { id: customer.id, name: customer.name, doc: customer.doc ?? null, email: customer.email ?? null, creditLimit: customer.creditLimit ?? 0, creditAvailable } : null}
       cpfOnInvoice={cart.cpfOnInvoice ?? null}
-      methods={methods.map((m) => ({ id: m.id, name: m.name, kind: m.kind, maxInstallments: m.maxInstallments ?? 1, requiresCustomer: Boolean(m.requiresCustomer), allowsChange: Boolean(m.allowsChange) || m.kind === "cash", feeBps: m.feeBps ?? 0, hasAccount: Boolean(m.accountId) }))}
+      methods={[
+        ...methods.map((m) => ({ id: m.id, name: m.name, kind: m.kind, maxInstallments: m.maxInstallments ?? 1, requiresCustomer: Boolean(m.requiresCustomer), allowsChange: Boolean(m.allowsChange) || m.kind === "cash", feeBps: m.feeBps ?? 0, hasAccount: Boolean(m.accountId) })),
+        ...(loyalty ? [{ id: LOYALTY_METHOD_ID, name: LOYALTY_METHOD_NAME, kind: "loyalty", maxInstallments: 1, requiresCustomer: true, allowsChange: false, feeBps: 0, hasAccount: false }] : []),
+      ]}
+      loyalty={loyalty}
       terms={terms.map((t) => ({ id: t.id, name: t.name, installments: t.installments ?? 1, firstDueDays: t.firstDueDays ?? 30, intervalDays: t.intervalDays ?? 30, interestBps: t.interestBps ?? 0 }))}
       pix={{ configured: Boolean(pixProvider), provider: pixInteg?.provider ?? null, simulated: Boolean(pixProvider?.simulated), status: pixInteg?.status ?? "not_configured", label: pixProvider?.label ?? null }}
       card={{ provider: cardInteg?.provider ?? null, acquirer: cardInteg?.config?.acquirer ?? null }}

@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/dates";
 
-export const METHOD_LABEL: Record<string, string> = { cash: "Dinheiro", debit: "Cartão de débito", credit: "Cartão de crédito", pix: "Pix", store_credit: "Vale-crédito", crediario: "Crediário", boleto: "Boleto", voucher: "Voucher", other: "Outros" };
+export const METHOD_LABEL: Record<string, string> = { cash: "Dinheiro", debit: "Cartão de débito", credit: "Cartão de crédito", pix: "Pix", store_credit: "Vale-crédito", loyalty: "Pontos de fidelidade", crediario: "Crediário", boleto: "Boleto", voucher: "Voucher", other: "Outros" };
 const CHECK_LABEL: Record<string, string> = { cashCounted: "Dinheiro contado", cardsReconciled: "Cartões conferidos", pixReconciled: "Pix conferido", cashDelivered: "Numerário entregue", cardReportPrinted: "Relatório da maquininha", pixConferred: "Pix conferido" };
 
 /** Tabela de conferência (uma versão de fechamento): esperado × informado × diferença por meio. */

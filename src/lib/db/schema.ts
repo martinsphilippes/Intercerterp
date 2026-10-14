@@ -241,6 +241,19 @@ export const COLLECTIONS: CollectionDef[] = [
     indexes: [u("u_scope", "scopeKey"), k("i_sku", "skuId"), k("i_table", "priceTableId")],
   },
   {
+    // Promoções (CAD-15): REGRAS de desconto (leve X pague Y, a partir de N unidades) por SKU, produto ou categoria, com
+    // vigência, dias da semana e horário. Não guardam preço de tabela (que continua em `prices`): na venda viram desconto
+    // explícito do item (sale_items.promoDiscount/promoId). Ver src/domain/promotions.ts e docs/regras-assumidas.md §30.
+    id: "promotions",
+    label: "Promoções",
+    fields: {
+      ...ctx, name: s(120, true), kind: s(20, true), scope: s(20, true), targetIds: strings, buyQty: qty, payQty: qty, minQty: qty,
+      promoPrice: money, percentBps: int, validFrom: date, validTo: date, weekdays: json, startTime: s(5), endTime: s(5),
+      active: bool, notes: s(500), idemKey: s(120),
+    },
+    indexes: [k("i_company", "companyId"), u("u_idem", "idemKey")],
+  },
+  {
     id: "price_history",
     label: "Histórico de preços e custos",
     fields: { ...ctx, skuId: id(true), productId: id(), priceTableId: id(), field: s(40), oldValue: money, newValue: money, reason: s(300) },
@@ -386,6 +399,8 @@ export const COLLECTIONS: CollectionDef[] = [
       cancelPending: json,
       // documento comercial (orçamento/pedido) faturado por esta venda (PDV-12) — ausente = venda direta
       salesDocumentId: id(),
+      // fidelidade (CAD-21): pontos acumulados pela venda e pontos já estornados (devolução/cancelamento)
+      loyaltyPoints: int, loyaltyPointsReversed: int,
     },
     indexes: [u("u_idem", "idemKey"), k("i_branch_date", "branchId", "completedAt"), k("i_customer", "customerId"), k("i_session", "cashSessionId"), k("i_number", "companyId", "number"), k("i_sales_doc", "salesDocumentId")],
   },
@@ -426,6 +441,8 @@ export const COLLECTIONS: CollectionDef[] = [
       qty: qty, unitPrice: money, grossTotal: money, itemDiscount: money, globalDiscount: money, surcharge: money,
       total: money, unitCost: money, costTotal: money, returnedQty: qty, warehouseId: id(), ncm: s(10), cfop: s(10),
       categoryId: id(), completedAt: dt,
+      // promoção aplicada (CAD-15): parte do itemDiscount que veio da regra — ausente = item sem promoção
+      promoDiscount: money, promoId: id(), promoName: s(120),
     },
     indexes: [k("i_sale", "saleId"), k("i_sku", "skuId"), k("i_branch_date", "branchId", "completedAt")],
   },
@@ -438,6 +455,8 @@ export const COLLECTIONS: CollectionDef[] = [
       providerRef: s(120), intentId: id(), nsu: s(60), authCode: s(60), cardBrand: s(40), feeAmount: money, netAmount: money,
       settlementDate: date, confirmedAt: dt, manual: bool, voucherId: id(), titleId: id(), dueDates: json,
       refundedAt: dt, refundMessage: s(500),
+      // resgate de pontos de fidelidade (CAD-21, methodKind "loyalty"): pontos consumidos
+      loyaltyPoints: int,
     },
     indexes: [k("i_sale", "saleId")],
   },
@@ -480,6 +499,9 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, customerId: id(), code: s(30, true), originalAmount: money, balance: money, status: s(20), returnId: id(),
       expiresAt: date, seq: int,
+      // "credit" (ausente) = vale-crédito em centavos; "loyalty" = pontos de fidelidade (originalAmount/balance em PONTOS),
+      // um registro por venda que acumulou (saleId), com validade própria (CAD-21)
+      kind: s(20), saleId: id(),
     },
     indexes: [u("u_code", "code"), k("i_customer", "customerId")],
   },

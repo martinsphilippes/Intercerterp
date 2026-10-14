@@ -255,7 +255,8 @@ export async function customerSummary(ctx: Pick<Ctx, "store" | "companyId">, cus
   const installments = own ? await listAll(store, "installments", { filters: [["eq", "companyId", companyId], ["eq", "partyId", cid], ["eq", "kind", "receivable"]], orderBy: [{ field: "dueDate" }] }) : [];
   const open = installments.filter((i) => ["open", "partial"].includes(i.status));
   const t = today();
-  const vouchers = own ? await listAll(store, "credit_vouchers", { filters: [["eq", "companyId", companyId], ["eq", "customerId", cid]] }) : [];
+  // registros de pontos de fidelidade (kind "loyalty") não são vale-crédito: ficam na aba Fidelidade
+  const vouchers = own ? (await listAll(store, "credit_vouchers", { filters: [["eq", "companyId", companyId], ["eq", "customerId", cid]] })).filter((v) => v.kind !== "loyalty") : [];
   // documentos fiscais da empresa ativa: emitidos para o CPF/CNPJ atual do cliente ou vinculados ao cliente (partyId)
   const byDoc = own && customer!.doc ? await listAll(store, "fiscal_documents", { filters: [["eq", "companyId", companyId], ["eq", "recipientDoc", customer!.doc]] }, 200) : [];
   const byParty = own ? await listAll(store, "fiscal_documents", { filters: [["eq", "companyId", companyId], ["eq", "partyId", cid]] }, 200) : [];

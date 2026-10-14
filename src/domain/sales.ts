@@ -1,6 +1,6 @@
 import { detId, isConflict, listAll, retryOnConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { nowIso, today, addDays, addMonths, toLocalDate } from "@/lib/dates";
+import { nowIso, today, addDays, addMonths, toLocalDate, DEFAULT_TZ } from "@/lib/dates";
 import { pct, roundDiv, QTY, formatMoney } from "@/lib/money";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
@@ -19,6 +19,9 @@ import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
 import { auditSaleOverdue, checkSaleOverdue, type OverdueRelease } from "./delinquency";
 import { refundIntentAtProvider } from "./payments/intents";
 import type { CtxUser } from "@/lib/core/ctx";
+import { promoClock } from "./promotions-calc";
+import { livePromotionRules } from "./promotions";
+import { LOYALTY_METHOD_ID, earnLoyaltyForSale, loyaltyEnabled, loyaltyMethod, loyaltyParams, prepareRedemption, reverseLoyaltyForCancel, reverseLoyaltyForReturn } from "./loyalty";
 
 /**
  * Vendas (Telas 4–11).
@@ -48,6 +51,8 @@ export interface SalePaymentInput {
   cardBrand?: string | null;
   voucherCode?: string | null;
   reference?: string | null;
+  /** resgate de pontos (methodId "loyalty"): informativo — o servidor recalcula os pontos pelo valor */
+  loyaltyPoints?: number | null;
 }
 
 export interface FinalizeSaleInput {
@@ -107,8 +112,14 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   const warehouse = terminal.defaultWarehouseId ? await ctx.store.getOrThrow("warehouses", terminal.defaultWarehouseId) : await defaultWarehouse(ctx.store, branchId);
   const branch = await ctx.store.getOrThrow("branches", branchId);
   const priceTableId = input.priceTableId ?? branch.defaultPriceTableId ?? null;
+  // promoções vigentes (CAD-15): não valem para orçamento/pedido importado (o preço do documento prevalece)
+  const promotions = input.salesDocumentId ? [] : await livePromotionRules(ctx.store, ctx.companyId, branchId, toLocalDate(input.occurredAt ?? nowIso()));
   // cadastro, preço, totais e limites de desconto: regra única compartilhada com orçamentos/pedidos (sale-pricing.ts)
-  const { skus, lines, calc } = await priceSale(ctx, { branchId, priceTableId, items: input.items, globalDiscount: input.globalDiscount, globalDiscountBps: input.globalDiscountBps, surcharge: input.surcharge }, { approver: opts.approver });
+  const { skus, lines, calc } = await priceSale(
+    ctx,
+    { branchId, priceTableId, items: input.items, globalDiscount: input.globalDiscount, globalDiscountBps: input.globalDiscountBps, surcharge: input.surcharge, promotions, clock: promoClock(input.occurredAt ?? new Date(), DEFAULT_TZ) },
+    { approver: opts.approver },
+  );
 
   // Estoque (produtos físicos)
   const allowNegative = Boolean(terminal.allowNegativeStock) || (await getSetting(ctx.store, ctx.companyId, branchId, "sales.allowNegativeStock", false));
@@ -133,7 +144,7 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative };
 }
 
-type PreparedPay = SalePaymentInput & { method: Doc; change: number; intent?: Doc | null; voucher?: Doc | null; term?: Doc | null; status: string; manual: boolean };
+type PreparedPay = SalePaymentInput & { method: Doc; change: number; intent?: Doc | null; voucher?: Doc | null; term?: Doc | null; status: string; manual: boolean; loyalty?: { points: number; plan: Array<{ voucher: Doc; take: number }> } | null };
 
 /** Parcelas efetivas de um pagamento a prazo (as mesmas usadas para gerar o título). */
 function deferredInstallments(p: PreparedPay) {
@@ -151,6 +162,7 @@ function paymentTxOps(pays: PreparedPay[]) {
     else if (k === "pix" || k === "other" || k === "voucher") ops += 2 + (p.intent ? 2 : 0); // lançamento (2) + uso exclusivo da cobrança (2)
     else if (k === "debit" || k === "credit") ops += 1 + (k === "credit" ? Math.max(1, p.installments ?? 1) : 1);
     else if (k === "store_credit") ops += 3;
+    else if (k === "loyalty") ops += 3 * (p.loyalty?.plan.length ?? 1);
     else if (DEFERRED_KINDS.includes(k)) {
       ops += deferredInstallments(p);
       deferredTitle = true;
@@ -213,8 +225,10 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
   const pays: PreparedPay[] = [];
   const usedIntents = new Set<string>();
   const voucherUse = new Map<string, number>();
+  const loyaltyPlanned = new Map<string, number>();
   for (const p of input.payments) {
-    const method = methods.get(p.methodId);
+    // resgate de pontos (CAD-21): meio sintético, só com o programa ligado
+    const method = p.methodId === LOYALTY_METHOD_ID ? loyaltyMethod() : methods.get(p.methodId);
     assert(method && method.active !== false, "Meio de pagamento inválido.");
     assert(Number.isInteger(p.amount) && p.amount > 0, "Valores de pagamento devem ser positivos.");
     if (method.requiresCustomer) assert(customer, `${method.name} exige cliente identificado.`, "customer_required");
@@ -222,6 +236,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
     let intent: Doc | null = null;
     let voucher: Doc | null = null;
     let term: Doc | null = null;
+    let loyalty: PreparedPay["loyalty"] = null;
     const status = "confirmed";
     let manual = true;
     switch (method.kind) {
@@ -265,12 +280,21 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         assert(p.voucherCode, "Informe o código do vale-crédito.");
         const res = await ctx.store.list("credit_vouchers", { filters: [["eq", "code", p.voucherCode!.trim().toUpperCase()], ["eq", "companyId", ctx.companyId]], limit: 1 });
         voucher = res.items[0] ?? null;
-        assert(voucher && voucher.status === "active", "Vale-crédito não encontrado ou inativo.");
+        assert(voucher && voucher.status === "active" && voucher.kind !== "loyalty", "Vale-crédito não encontrado ou inativo.");
         const used = (voucherUse.get(voucher.id) ?? 0) + p.amount;
         voucherUse.set(voucher.id, used);
         assert(voucher.balance >= used, `Saldo do vale insuficiente (${formatMoney(voucher.balance)}).`);
         if (voucher.expiresAt) assert(voucher.expiresAt >= today(), "Vale-crédito vencido.");
         if (voucher.customerId && customer) assert(voucher.customerId === customer.id, "Vale-crédito emitido para outro cliente.");
+        break;
+      }
+      case "loyalty": {
+        assert(customer, "Resgate de pontos exige cliente identificado.", "customer_required");
+        assert(await loyaltyEnabled(ctx.store, ctx.companyId, branchId), "O programa de fidelidade está desligado (Administração › Parâmetros › Recursos).", "feature_off");
+        const params = await loyaltyParams(ctx.store, ctx.companyId);
+        loyalty = await prepareRedemption(ctx.store, ctx.companyId, customer!.id, p.amount, params, loyaltyPlanned);
+        for (const { voucher: v, take } of loyalty.plan) loyaltyPlanned.set(v.id, (loyaltyPlanned.get(v.id) ?? 0) + take);
+        manual = false;
         break;
       }
       case "crediario":
@@ -294,7 +318,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
       default:
         assert(method.accountId, `Meio ${method.name} sem conta financeira de destino.`);
     }
-    pays.push({ ...p, method, change, intent, voucher, term, status, manual });
+    pays.push({ ...p, method, change, intent, voucher, term, status, manual, loyalty });
   }
   // Inadimplência (VEN-07): política da filial aplicada no servidor; bloqueio só segue com liberação registrada
   const overdueCheck = customer ? await checkSaleOverdue(ctx, { branchId, customerId: customer.id, deferred: pays.some((p) => DEFERRED_KINDS.includes(p.method.kind)), release: input.overdueRelease }) : null;
@@ -353,6 +377,8 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         cfop: l.product.cfop ?? null,
         categoryId: l.product.categoryId ?? null,
         completedAt,
+        // promoção aplicada (CAD-15) — somente quando houver: venda sem promoção grava exatamente o que gravava
+        ...(it.promoDiscount > 0 ? { promoDiscount: it.promoDiscount, promoId: l.promoId, promoName: l.promoName } : {}),
       },
     };
   });
@@ -372,6 +398,16 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
       const need = pays.filter((x) => x.voucher?.id === fresh.id).reduce((a, x) => a + x.amount, 0);
       if (fresh.status !== "active" || fresh.balance < need) throw new BusinessError(`Saldo do vale ${fresh.code} insuficiente (${formatMoney(fresh.balance)}): consumido por outra operação.`, "voucher_balance");
       p.voucher = fresh;
+    }
+    // pontos de fidelidade relidos (resgate concorrente do mesmo cliente)
+    if (pays.some((p) => p.loyalty)) {
+      const params = await loyaltyParams(ctx.store, ctx.companyId);
+      const planned = new Map<string, number>();
+      for (const p of pays) {
+        if (!p.loyalty) continue;
+        p.loyalty = await prepareRedemption(ctx.store, ctx.companyId, customer!.id, p.amount, params, planned);
+        for (const { voucher: v, take } of p.loyalty.plan) planned.set(v.id, (planned.get(v.id) ?? 0) + take);
+      }
     }
     // cobrança Pix relida: uma cobrança confirmada paga uma única venda
     for (const p of pays) {
@@ -506,6 +542,17 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
           const balanceAfter = ctx.store.backend === "appwrite" ? v.balance - p.amount : after.balance;
           await t.create("credit_voucher_moves", { ...base, voucherId: v.id, seq: 0, kind: "use", amount: -p.amount, balanceAfter, saleId, idemKey: `sale:${saleId}:${i + 1}` }, detId("vmove", `sale:${saleId}:${i + 1}`));
           if (balanceAfter === 0) await t.update("credit_vouchers", v.id, { status: "used" });
+        } else if (kind === "loyalty") {
+          // resgate FIFO dos registros de pontos (saldo nunca negativo); devolvidos no cancelamento da venda
+          for (const { voucher: v, take } of p.loyalty!.plan) {
+            await t.increment("credit_vouchers", v.id, "balance", -take, { min: 0 }).catch((e) => {
+              if (isConflict(e) && e.reason === "bounds") throw new BusinessError("Saldo de pontos consumido por outra operação ao mesmo tempo. Confira o saldo e tente novamente.", "loyalty_balance");
+              throw e;
+            });
+            const idem = `sale:${saleId}:${i + 1}:${v.id}`;
+            await t.create("credit_voucher_moves", { ...base, voucherId: v.id, seq: 0, kind: "redeem", amount: -take, balanceAfter: v.balance - take, saleId, idemKey: idem }, detId("vmove", idem));
+            if (v.balance - take === 0) await t.update("credit_vouchers", v.id, { status: "used" });
+          }
         }
         await t.create(
           "sale_payments",
@@ -515,6 +562,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
             provider: p.intent?.provider ?? null, providerRef: p.intent?.reference ?? p.reference ?? null, intentId: p.intent?.id ?? null, nsu: p.nsu ?? null, authCode: p.authCode ?? null,
             cardBrand: p.cardBrand ?? null, feeAmount: fee, netAmount: p.amount - fee, settlementDate, confirmedAt: DEFERRED_KINDS.includes(kind) ? null : completedAt, manual: p.manual,
             voucherId: p.voucher?.id ?? null, titleId: titleIdForPay, dueDates,
+            ...(p.loyalty ? { loyaltyPoints: p.loyalty.points } : {}),
           },
           payId,
         );
@@ -589,7 +637,17 @@ export async function completeSalePostCommit(ctx: Ctx, sale: Doc) {
     if (ret && !ret.exchangeSaleId) await linkExchangeSale(sctx, ret.id, sale.id);
   }
   if (sale.salesDocumentId) await billSalesDocumentFromSale(sctx, sale);
+  if (sale.customerId && sale.loyaltyPoints == null) await earnLoyaltyFromSale(sctx, sale);
   return ctx.store.getOrThrow("sales", sale.id);
+}
+
+/** Gancho pós-commit da fidelidade (CAD-21): acúmulo idempotente; falha não desfaz a venda (a tarefa de efeitos repete). */
+async function earnLoyaltyFromSale(ctx: Ctx, sale: Doc) {
+  try {
+    await earnLoyaltyForSale(ctx, sale.id);
+  } catch (e: any) {
+    await audit(ctx, { module: "sales", action: "loyalty.earn", entityType: "sale", entityId: sale.id, summary: `Acúmulo de pontos da venda nº ${sale.number} pendente: ${String(e?.message ?? e).slice(0, 300)}`, result: "failure" });
+  }
 }
 
 /**
@@ -669,6 +727,7 @@ registerJob("sale.effects", async (ctx, payload) => {
   ctx.branchId = sale.branchId;
   await applySaleEffects(ctx, payload.saleId, payload.emitFiscal);
   if (sale.salesDocumentId) await billSalesDocumentFromSale(ctx, sale);
+  if (sale.customerId && sale.loyaltyPoints == null) await earnLoyaltyFromSale(ctx, sale);
   return { ok: true };
 });
 
@@ -949,6 +1008,8 @@ export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
   const pendingTitles = await cancelSaleTitles(ctx, sale, why);
   // documento comercial faturado por esta venda: as quantidades voltam ao saldo a faturar (idempotente)
   if (sale.salesDocumentId) await (await import("./sales-documents")).unbillFromSale(ctx, saleId);
+  // fidelidade (CAD-21): estorna os pontos acumulados restantes e devolve os pontos usados no pagamento (idempotente)
+  await reverseLoyaltyForCancel(ctx, saleId);
   // Pix integrado: só vira "estornado" com a confirmação do provedor
   const pays = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", saleId]] });
   const stillPending: Doc[] = [];
@@ -1349,6 +1410,8 @@ export async function applyReturnEffects(ctx: Ctx, returnId: string) {
     unitCost: l.unitCost, originType: "return", originId: returnId, operationId: sale.id, reason: `Devolução nº ${ret.number}: ${ret.reason}`, idemKey: `return:${returnId}:${l.saleItemId}`,
   }));
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
+  // fidelidade (CAD-21): estorno proporcional dos pontos acumulados pela venda (idempotente por devolução)
+  if ((sale.loyaltyPoints ?? 0) > 0) await reverseLoyaltyForReturn(ctx, returnId);
   // Documento fiscal de devolução (NF-e de entrada referenciando a NFC-e/NF-e original) — rascunho para revisão fiscal
   if (!ret.fiscalDocumentId) {
     const { createReturnDocumentDraft } = await import("./fiscal/service");
@@ -1473,7 +1536,7 @@ export async function sendSaleReceiptEmail(ctx: Ctx, saleId: string, to: string)
   const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", saleId]], orderBy: [{ field: "seq" }] });
   const pays = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", saleId]], orderBy: [{ field: "seq" }] });
   const doc = sale.fiscalDocumentId ? await ctx.store.get("fiscal_documents", sale.fiscalDocumentId) : null;
-  const rows = items.map((i) => `<tr><td>${esc(i.description)}<br><small>${esc(i.sku)} · ${(i.qty / QTY).toLocaleString("pt-BR")} ${esc(i.unitCode)} × ${formatMoney(i.unitPrice)}</small></td><td style="text-align:right">${formatMoney(i.total)}</td></tr>`).join("");
+  const rows = items.map((i) => `<tr><td>${esc(i.description)}<br><small>${esc(i.sku)} · ${(i.qty / QTY).toLocaleString("pt-BR")} ${esc(i.unitCode)} × ${formatMoney(i.unitPrice)}${i.promoDiscount ? `<br>Promoção ${esc(i.promoName)}: −${formatMoney(i.promoDiscount)}` : ""}</small></td><td style="text-align:right">${formatMoney(i.total)}</td></tr>`).join("");
   const payRows = pays.map((p) => `<tr><td>${esc(p.methodName)}${p.installments > 1 ? ` (${p.installments}x)` : ""}</td><td style="text-align:right">${formatMoney(p.amount)}</td></tr>`).join("");
   const fiscalLine = doc
     ? doc.status === "authorized"

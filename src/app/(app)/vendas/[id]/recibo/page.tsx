@@ -11,6 +11,7 @@ import { AutoPrint } from "../../sale-widgets";
 import { PrintStyles } from "../../print-styles";
 import { MODEL_NAME } from "../../labels";
 import { DOC_STATUS_LABEL } from "@/domain/fiscal/service";
+import { loyaltyBalance, loyaltyEnabled } from "@/domain/loyalty";
 
 export const metadata = { title: "Recibo da venda" };
 
@@ -33,6 +34,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const doc = sale.fiscalDocumentId ? await store.get("fiscal_documents", sale.fiscalDocumentId) : null;
   const installments = payments.some((p) => p.titleId && ["crediario", "boleto"].includes(p.methodKind)) ? await listAll(store, "installments", { filters: [["eq", "titleId", payments.filter((p) => ["crediario", "boleto"].includes(p.methodKind)).map((p) => p.titleId)]], orderBy: [{ field: "dueDate" }] }) : [];
   const c = sale.customerSnapshot;
+  // saldo de pontos no cupom só com o programa ligado (CAD-21)
+  const loyalty = sale.customerId && sale.loyaltyPoints != null && (await loyaltyEnabled(store, sale.companyId, sale.branchId)) ? await loyaltyBalance(store, sale.companyId, sale.customerId) : null;
   const addr = branch?.address;
   return (
     <div className="flex flex-col items-center gap-4">
@@ -65,7 +68,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   {String(i.seq).padStart(3, "0")} {i.description}
                   <br />
                   {formatQty(i.qty)} {i.unitCode} × {formatMoney(i.unitPrice)}
-                  {i.itemDiscount + i.globalDiscount > 0 ? ` (−${formatMoney(i.itemDiscount + i.globalDiscount)})` : ""}
+                  {i.itemDiscount + i.globalDiscount - (i.promoDiscount ?? 0) > 0 ? ` (−${formatMoney(i.itemDiscount + i.globalDiscount - (i.promoDiscount ?? 0))})` : ""}
+                  {i.promoDiscount ? (
+                    <>
+                      <br />
+                      PROMOÇÃO {i.promoName}: −{formatMoney(i.promoDiscount)}
+                    </>
+                  ) : null}
                   {i.surcharge > 0 ? ` (+${formatMoney(i.surcharge)})` : ""}
                 </td>
                 <td className="py-0.5 text-right">{formatMoney(i.total)}</td>
@@ -76,18 +85,27 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <div className="mt-1 border-t border-dashed border-black pt-1">
           <p className="flex justify-between"><span>Subtotal</span><span>{formatMoney(sale.subtotal)}</span></p>
           {sale.discountTotal > 0 && <p className="flex justify-between"><span>Descontos</span><span>−{formatMoney(sale.discountTotal)}</span></p>}
+          {items.some((i) => i.promoDiscount) && <p className="flex justify-between"><span>· economia em promoções</span><span>{formatMoney(items.reduce((a, i) => a + (i.promoDiscount ?? 0), 0))}</span></p>}
           {sale.surchargeTotal > 0 && <p className="flex justify-between"><span>Acréscimos</span><span>+{formatMoney(sale.surchargeTotal)}</span></p>}
           <p className="flex justify-between text-[13px] font-bold"><span>TOTAL</span><span>{formatMoney(sale.total)}</span></p>
         </div>
         <div className="mt-1 border-t border-dashed border-black pt-1">
           {payments.map((p) => (
             <p key={p.id} className="flex justify-between">
-              <span>{p.methodName}{p.installments > 1 ? ` ${p.installments}x` : ""}{p.nsu ? ` NSU ${p.nsu}` : ""}</span>
+              <span>{p.methodName}{p.installments > 1 ? ` ${p.installments}x` : ""}{p.nsu ? ` NSU ${p.nsu}` : ""}{p.loyaltyPoints ? ` (${p.loyaltyPoints} pts)` : ""}</span>
               <span>{formatMoney(p.methodKind === "cash" ? p.received : p.amount)}</span>
             </p>
           ))}
           {sale.changeAmount > 0 && <p className="flex justify-between font-bold"><span>Troco</span><span>{formatMoney(sale.changeAmount)}</span></p>}
         </div>
+        {sale.loyaltyPoints != null && sale.customerId && (
+          <div className="mt-1 border-t border-dashed border-black pt-1">
+            <p className="font-bold">Programa de fidelidade</p>
+            <p className="flex justify-between"><span>Pontos nesta compra</span><span>{sale.loyaltyPoints}</span></p>
+            {loyalty && <p className="flex justify-between"><span>Saldo atual</span><span>{loyalty.points} ({formatMoney(loyalty.value)})</span></p>}
+            {loyalty?.nextExpiry && <p>{loyalty.nextExpiry.points} pontos vencem em {formatDate(loyalty.nextExpiry.date)}</p>}
+          </div>
+        )}
         {installments.length > 0 && (
           <div className="mt-1 border-t border-dashed border-black pt-1">
             <p className="font-bold">Parcelas a prazo</p>

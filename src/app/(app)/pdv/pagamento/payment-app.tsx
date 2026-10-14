@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
-import { AlertTriangle, ArrowLeft, Banknote, CheckCircle2, Copy, CreditCard, FileText, Gift, Landmark, Loader2, QrCode, RefreshCcw, Trash2, Wallet, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Banknote, CheckCircle2, Copy, CreditCard, FileText, Gift, Landmark, Loader2, QrCode, RefreshCcw, Star, Trash2, Wallet, XCircle } from "lucide-react";
 import { Badge, SimBadge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
@@ -39,12 +39,13 @@ interface Draft {
   cardBrand?: string | null;
   voucherCode?: string | null;
   reference?: string | null;
+  loyaltyPoints?: number | null;
   detail?: string;
 }
 
 const ICON: Record<string, React.ReactNode> = {
   cash: <Banknote className="size-5" />, debit: <CreditCard className="size-5" />, credit: <CreditCard className="size-5" />, pix: <QrCode className="size-5" />,
-  crediario: <FileText className="size-5" />, boleto: <Landmark className="size-5" />, store_credit: <Gift className="size-5" />,
+  crediario: <FileText className="size-5" />, boleto: <Landmark className="size-5" />, store_credit: <Gift className="size-5" />, loyalty: <Star className="size-5" />,
 };
 const BRANDS = ["Visa", "Mastercard", "Elo", "Hipercard", "American Express", "Outra"];
 const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Date.now() + Math.random()));
@@ -57,7 +58,9 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 export function PaymentApp(props: {
   cartId: string;
   total: number;
-  summary: { subtotal: number; discount: number; surcharge: number; items: Array<{ name: string; sku: string; qty: number; unitCode: string; total: number }> };
+  summary: { subtotal: number; discount: number; promo?: number; surcharge: number; items: Array<{ name: string; sku: string; qty: number; unitCode: string; total: number; promoName?: string | null }> };
+  /** fidelidade (CAD-21): saldo de pontos do cliente e regras do resgate; null = programa desligado ou sem cliente */
+  loyalty?: { points: number; pointValue: number; minRedeemPoints: number; nextExpiry: { date: string; points: number } | null } | null;
   stockWarnings: string[];
   terminal: { id: string; name: string };
   session: { id: string; number: number; operatorName: string } | null;
@@ -236,6 +239,7 @@ export function PaymentApp(props: {
             </div>
             <dl className="mt-2 space-y-1 text-sm text-slate-600">
               <div className="flex justify-between"><dt>Bruto / descontos / acréscimos</dt><dd className="tabular">{formatMoney(props.summary.subtotal)} / −{formatMoney(props.summary.discount)} / +{formatMoney(props.summary.surcharge)}</dd></div>
+              {(props.summary.promo ?? 0) > 0 && <div className="flex justify-between text-emerald-700"><dt>Inclui promoções</dt><dd className="tabular">−{formatMoney(props.summary.promo)}</dd></div>}
               <div className="flex justify-between"><dt>Pago</dt><dd className="tabular">{formatMoney(paid)}</dd></div>
               <div className={cn("flex justify-between text-base font-semibold", remaining > 0 ? "text-amber-700" : "text-emerald-700")}><dt>Saldo restante</dt><dd className="tabular" data-testid="pay-remaining">{formatMoney(Math.max(0, remaining))}</dd></div>
               {change > 0 && <div className="flex justify-between text-base font-semibold text-brand-800"><dt>Troco</dt><dd className="tabular" data-testid="pay-change">{formatMoney(change)}</dd></div>}
@@ -317,7 +321,7 @@ export function PaymentApp(props: {
             <summary className="cursor-pointer font-medium">Itens ({props.summary.items.length})</summary>
             <ul className="mt-2 space-y-1">
               {props.summary.items.map((i, idx) => (
-                <li key={idx} className="flex justify-between gap-2"><span className="truncate">{formatQty(i.qty)} {i.unitCode} · {i.name}</span><span className="tabular">{formatMoney(i.total)}</span></li>
+                <li key={idx} className="flex justify-between gap-2"><span className="truncate">{formatQty(i.qty)} {i.unitCode} · {i.name}{i.promoName ? <span className="block text-xs text-emerald-700">Promoção: {i.promoName}</span> : null}</span><span className="tabular">{formatMoney(i.total)}</span></li>
               ))}
             </ul>
           </details>
@@ -352,6 +356,8 @@ function MethodForm({ method, remaining, props, onAdd, existing }: { method: Met
       return <DeferredForm method={method} remaining={remaining} onAdd={onAdd} props={props} />;
     case "store_credit":
       return <VoucherForm method={method} remaining={remaining} onAdd={onAdd} defaultCode={props.exchangeVoucher?.code ?? ""} existing={existing} />;
+    case "loyalty":
+      return props.loyalty ? <LoyaltyForm method={method} remaining={remaining} onAdd={onAdd} loyalty={props.loyalty} existing={existing} /> : null;
     default:
       return (
         <OtherForm method={method} amount={amount} setAmount={setAmount} onAdd={(reference) => onAdd({ ...base, amount, reference, detail: reference ? `Ref. ${reference}` : undefined })} />
@@ -677,6 +683,36 @@ function OtherForm({ method, amount, setAmount, onAdd }: { method: Method; amoun
       <Field label="Valor"><MoneyInput value={amount} onChange={setAmount} autoFocus ariaLabel={`Valor ${method.name}`} /></Field>
       <Field label="Referência / autorização (opcional)"><Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={120} /></Field>
       <div className="sm:col-span-2 flex justify-end"><Button type="submit" variant="primary" disabled={amount <= 0}>Lançar {method.name}</Button></div>
+    </form>
+  );
+}
+
+/** Resgate de pontos de fidelidade (CAD-21): valor → pontos (⌈valor ÷ valor do ponto⌉), conferido de novo no servidor. */
+function LoyaltyForm({ method, remaining, onAdd, loyalty, existing }: { method: Method; remaining: number; onAdd: (d: Omit<Draft, "key">) => void; loyalty: NonNullable<AppProps["loyalty"]>; existing: Draft[] }) {
+  const used = existing.filter((e) => e.kind === "loyalty").reduce((a, e) => a + (e.loyaltyPoints ?? 0), 0);
+  const free = Math.max(0, loyalty.points - used);
+  const maxAmount = Math.min(remaining, free * loyalty.pointValue);
+  const [amount, setAmount] = useState(maxAmount);
+  const points = amount > 0 ? Math.ceil(amount / Math.max(1, loyalty.pointValue)) : 0;
+  const problem = free < loyalty.minRedeemPoints ? `Saldo abaixo do mínimo de resgate (${loyalty.minRedeemPoints.toLocaleString("pt-BR")} pontos).` : amount <= 0 ? "Informe o valor." : points > free ? "Saldo de pontos insuficiente." : points < loyalty.minRedeemPoints ? `Resgate mínimo de ${loyalty.minRedeemPoints.toLocaleString("pt-BR")} pontos (${formatMoney(loyalty.minRedeemPoints * loyalty.pointValue)}).` : amount > remaining ? "Valor maior que o saldo restante." : null;
+  const submit = () => {
+    if (problem) return;
+    onAdd({ methodId: method.id, kind: "loyalty", label: method.name, amount, loyaltyPoints: points, detail: `${points.toLocaleString("pt-BR")} pontos × ${formatMoney(loyalty.pointValue)}` });
+  };
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="grid gap-3 sm:grid-cols-2">
+      <p className="sm:col-span-2 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        Saldo: <b className="tabular">{free.toLocaleString("pt-BR")} pontos</b> = {formatMoney(free * loyalty.pointValue)} (1 ponto = {formatMoney(loyalty.pointValue)}).
+        {loyalty.nextExpiry ? ` ${loyalty.nextExpiry.points.toLocaleString("pt-BR")} pontos vencem em ${formatDate(loyalty.nextExpiry.date)}.` : ""} O valor pago com pontos não gera novos pontos.
+      </p>
+      <Field label="Valor a pagar com pontos" hint={<button type="button" className="text-brand-700 underline" onClick={() => setAmount(maxAmount)}>Máximo ({formatMoney(maxAmount)})</button>}>
+        <MoneyInput value={amount} onChange={setAmount} autoFocus ariaLabel="Valor em pontos" />
+      </Field>
+      <div className="flex flex-col justify-end text-sm">
+        <span>Pontos usados: <b className="tabular">{points.toLocaleString("pt-BR")}</b></span>
+        {problem && <span className="text-xs text-amber-800">{problem}</span>}
+      </div>
+      <div className="sm:col-span-2 flex justify-end"><Button type="submit" variant="primary" disabled={Boolean(problem)}>Lançar pontos (Enter)</Button></div>
     </form>
   );
 }

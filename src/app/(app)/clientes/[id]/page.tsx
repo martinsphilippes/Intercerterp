@@ -26,6 +26,7 @@ import { overdueParams } from "@/domain/delinquency";
 import { overdueReceiveHref, overdueText, summarizeOverdue } from "@/domain/overdue";
 import { collectionContext, collectionDraft } from "@/domain/collection";
 import { WhatsAppCollectButton } from "../../financeiro/_components/whatsapp-collect";
+import { LOYALTY_MOVE_LABEL, loyaltyBalance, loyaltyEnabled, loyaltyStatement } from "@/domain/loyalty";
 
 export const metadata = { title: "Cliente" };
 
@@ -45,6 +46,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const openInsts = sum.installments.filter((i) => ["open", "partial"].includes(i.status));
   const canCollect = can(s.user, "finance", "edit") && openInsts.length > 0 && (await isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, "cobrancaWhatsapp", true));
   const waContext = canCollect && tab === "financeiro" ? await collectionContext(s.ctx.store, s.ctx.companyId, s.ctx.branchId, t0) : null;
+  // fidelidade (CAD-21): saldo e extrato com o programa ligado (ou quando o cliente já tem pontos registrados)
+  const loyaltyOn = await loyaltyEnabled(s.ctx.store, s.ctx.companyId, s.ctx.branchId);
+  const loyalty = loyaltyOn ? await loyaltyBalance(s.ctx.store, s.ctx.companyId, id) : null;
+  const statement = loyaltyOn && tab === "fidelidade" ? await loyaltyStatement(s.ctx.store, s.ctx.companyId, id, 50) : null;
   const titles = waContext ? new Map((await listAll(s.ctx.store, "titles", { filters: [["eq", "id", [...new Set(openInsts.map((i) => i.titleId))]]] })).map((x) => [x.id, x])) : new Map();
   return (
     <>
@@ -84,12 +89,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           </>
         }
       />
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className={`mb-5 grid grid-cols-2 gap-3 ${loyalty ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
         <Stat label="Compras" value={sum.salesCount} href={`${base}?tab=compras`} />
         <Stat label="Total comprado (líquido)" value={formatMoney(sum.netTotal)} hint="Vendas − devoluções" />
         <Stat label="Ticket médio" value={formatMoney(sum.ticket)} />
         <Stat label="Em aberto" value={formatMoney(sum.openBalance)} hint={sum.overdueBalance ? `${formatMoney(sum.overdueBalance)} vencido` : "Nada vencido"} tone={sum.overdueBalance ? "bad" : "default"} href={`${base}?tab=financeiro`} />
         <Stat label="Saldo de vale-crédito" value={formatMoney(sum.voucherBalance)} href={`${base}?tab=creditos`} />
+        {loyalty && <Stat label="Pontos de fidelidade" value={loyalty.points.toLocaleString("pt-BR")} hint={`${formatMoney(loyalty.value)} em resgate${loyalty.nextExpiry ? ` · ${loyalty.nextExpiry.points.toLocaleString("pt-BR")} vencem em ${formatDate(loyalty.nextExpiry.date)}` : ""}`} href={`${base}?tab=fidelidade`} />}
       </div>
       <LinkTabs
         basePath={base}
@@ -99,6 +105,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           { key: "compras", label: "Compras", count: sum.sales.length },
           { key: "financeiro", label: "Títulos", count: sum.installments.length },
           { key: "creditos", label: "Créditos", count: sum.vouchers.length },
+          ...(loyalty ? [{ key: "fidelidade", label: "Fidelidade" }] : []),
           { key: "documentos", label: "Documentos fiscais", count: sum.documents.length },
           { key: "historico", label: "Histórico" },
         ]}
@@ -227,6 +234,46 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             </table>
           )}
         </Card>
+      )}
+      {tab === "fidelidade" && statement && loyalty && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card title="Saldo de pontos">
+            <DefinitionList
+              cols={1}
+              items={[
+                { label: "Pontos disponíveis", value: loyalty.points.toLocaleString("pt-BR") },
+                { label: "Valor em resgate", value: formatMoney(loyalty.value) },
+                { label: "Próximo vencimento", value: loyalty.nextExpiry ? `${loyalty.nextExpiry.points.toLocaleString("pt-BR")} pontos em ${formatDate(loyalty.nextExpiry.date)}` : "—" },
+              ]}
+            />
+            <p className="mt-3 text-xs text-slate-500">Pontos são acumulados nas compras identificadas e resgatados no PDV como forma de pagamento. Regras em Administração › Parâmetros › Fidelidade.</p>
+          </Card>
+          <Card title="Extrato de pontos" className="lg:col-span-2" bodyClass="p-0">
+            {statement.moves.length === 0 ? (
+              <EmptyState title="Sem movimentos de pontos" description="Os pontos aparecem aqui depois da primeira compra identificada com o programa ligado." />
+            ) : (
+              <table className="table-base w-full text-sm">
+                <thead>
+                  <tr><th>Data</th><th>Movimento</th><th>Venda</th><th>Registro (validade)</th><th className="text-right">Pontos</th></tr>
+                </thead>
+                <tbody>
+                  {statement.moves.map((m) => {
+                    const v = statement.vouchers.find((x) => x.id === m.voucherId);
+                    return (
+                      <tr key={m.id}>
+                        <td>{formatDateTime(m.createdAt)}</td>
+                        <td>{LOYALTY_MOVE_LABEL[m.kind] ?? m.kind}{m.returnId ? <Link className="ml-1 text-xs text-brand-700 hover:underline" href={`/vendas/devolucoes/${m.returnId}`}>(devolução)</Link> : null}</td>
+                        <td>{m.saleId ? <Link className="text-brand-700 hover:underline" href={`/vendas/${m.saleId}`}>Ver venda</Link> : "—"}</td>
+                        <td className="text-xs text-slate-600"><span className="font-mono">{v?.code ?? "—"}</span>{v?.expiresAt ? ` · vence ${formatDate(v.expiresAt)}` : ""}</td>
+                        <td className={`tabular text-right ${m.amount < 0 ? "text-red-700" : "text-emerald-700"}`}>{m.amount > 0 ? "+" : ""}{m.amount.toLocaleString("pt-BR")}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Card>
+        </div>
       )}
       {tab === "documentos" && (
         <Card bodyClass="p-0">

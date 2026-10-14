@@ -1,14 +1,17 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { BusinessError } from "@/lib/core/errors";
-import { isFeatureOn } from "@/lib/core/settings";
+import { featureDefault, isFeatureOn } from "@/lib/core/settings";
 import type { SessionInfo } from "./session";
 
-/** Recursos novos (telas aditivas) controlados por `feature.<chave>` em Parâmetros — ligados por padrão. */
-export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "inadimplencia" | "cobrancaWhatsapp" | "baixaLote" | "carne" | "comissoes" | "documentoComercial";
+/**
+ * Recursos novos (telas aditivas) controlados por `feature.<chave>` em Parâmetros — ligados por padrão, exceto os de
+ * `FEATURES_OFF_BY_DEFAULT` (ex.: `fidelidade`, que muda o cupom e o pagamento).
+ */
+export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "inadimplencia" | "cobrancaWhatsapp" | "baixaLote" | "carne" | "comissoes" | "documentoComercial" | "promocoes" | "fidelidade";
 
 export function featureOn(s: SessionInfo, key: FeatureKey): Promise<boolean> {
-  return isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, key, true);
+  return isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, key, featureDefault(key));
 }
 
 /** Página de recurso desligado: responde como inexistente. */

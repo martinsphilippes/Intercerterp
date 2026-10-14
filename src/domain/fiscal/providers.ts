@@ -424,6 +424,8 @@ export const TPAG: Record<string, string> = {
   credit: "03",
   debit: "04",
   store_credit: "05",
+  // resgate de pontos de fidelidade (CAD-21): crédito loja, como o vale (tPag 19 "programa de fidelidade" a validar com a contabilidade)
+  loyalty: "05",
   crediario: "05",
   voucher: "10",
   boleto: "15",
@@ -440,6 +442,7 @@ export const TPAG_LABEL: Record<string, string> = {
   credit: "Cartão de crédito",
   debit: "Cartão de débito",
   store_credit: "Crédito loja / vale",
+  loyalty: "Crédito loja / pontos de fidelidade",
   crediario: "Crediário (crédito loja)",
   voucher: "Vale",
   boleto: "Boleto",

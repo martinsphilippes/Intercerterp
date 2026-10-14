@@ -14,7 +14,9 @@ import { resolveTerminal } from "./terminal";
 import { getFiscalConfig } from "@/domain/fiscal/service";
 import { overdueParams } from "@/domain/delinquency";
 import { summarizeOverdue } from "@/domain/overdue";
-import { today } from "@/lib/dates";
+import { DEFAULT_TZ, today } from "@/lib/dates";
+import { livePromotionRules } from "@/domain/promotions";
+import { loyaltyBalance, loyaltyEnabled } from "@/domain/loyalty";
 import { PdvApp } from "./pdv-app";
 import type { CustomerInfo } from "./customer-picker";
 import type { PlainCart } from "./actions";
@@ -29,7 +31,9 @@ async function customerInfo(store: any, id: string | null, companyId: string, br
   const open = await listAll(store, "installments", { filters: [["eq", "partyId", id], ["eq", "kind", "receivable"], ["eq", "status", ["open", "partial"]]] });
   const openBalance = open.reduce((a, i) => a + i.balance, 0);
   const overdue = summarizeOverdue(open, await overdueParams(store, companyId, branchId), today());
-  return { overdue, id: c.id, name: c.name, tradeName: c.tradeName ?? null, personType: c.personType, doc: c.doc ?? null, email: c.email ?? null, mobile: c.mobile ?? c.phone ?? null, vip: Boolean(c.vip), status: c.status, creditLimit: c.creditLimit ?? 0, openBalance, creditAvailable: Math.max(0, (c.creditLimit ?? 0) - openBalance), priceTableId: c.priceTableId ?? null };
+  // saldo de pontos (CAD-21) só com o programa ligado
+  const loyalty = (await loyaltyEnabled(store, companyId, branchId)) ? await loyaltyBalance(store, companyId, id) : null;
+  return { overdue, loyalty, id: c.id, name: c.name, tradeName: c.tradeName ?? null, personType: c.personType, doc: c.doc ?? null, email: c.email ?? null, mobile: c.mobile ?? c.phone ?? null, vip: Boolean(c.vip), status: c.status, creditLimit: c.creditLimit ?? 0, openBalance, creditAvailable: Math.max(0, (c.creditLimit ?? 0) - openBalance), priceTableId: c.priceTableId ?? null };
 }
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -121,6 +125,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   };
   // orçamento/pedido (PDV-12): parâmetro feature.documentoComercial + acesso a Vendas; ?importar=<id> abre a importação
   const salesDocs = can(s.user, "sales") && (await salesDocsEnabled(s.ctx)) ? { importId: sp(params, "importar") || null } : null;
+  // promoções vigentes (CAD-15): o PDV calcula na hora com a mesma função do servidor; documento importado não tem promoção
+  const promoRules = cart.salesDocumentId ? [] : await livePromotionRules(store, s.ctx.companyId, s.ctx.branchId);
   return (
     <PdvApp
       key={cart.id}
@@ -144,6 +150,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       pendingExchange={pendingExchange}
       receivables={receivables}
       salesDocs={salesDocs}
+      promotions={promoRules.length ? { rules: promoRules, tz: DEFAULT_TZ, branchId: s.ctx.branchId } : null}
     />
   );
 }

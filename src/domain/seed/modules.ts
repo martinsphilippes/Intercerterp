@@ -11,11 +11,12 @@ import * as accounting from "./modules/accounting";
 import * as certificates from "./modules/certificates";
 import * as commissions from "./modules/commissions";
 import * as salesDocuments from "./modules/sales-documents";
+import * as promotions from "./modules/promotions";
 
 /** Cenários de demonstração por módulo (ordem de dependência). */
 export async function seedModules(refs: DemoRefs, deadline = Infinity) {
   const out: Record<string, unknown> = {};
-  for (const [k, m] of Object.entries({ products, stock, sales, purchases, finance, fiscal, admin, reports, commissions, accounting, certificates, salesDocuments })) {
+  for (const [k, m] of Object.entries({ products, stock, sales, purchases, finance, fiscal, admin, reports, commissions, accounting, certificates, salesDocuments, promotions })) {
     if (Date.now() > deadline) return { out, done: false };
     out[k] = await m.seed(refs); // cada módulo é idempotente: reexecutar continua de onde parou
     console.log(`[demo] módulo ${k} pronto`);

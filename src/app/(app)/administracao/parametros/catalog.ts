@@ -25,7 +25,7 @@ export interface ParamDef {
   installation?: boolean;
 }
 
-export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Financeiro", "Notificações", "Usuários", "Regional", "Recursos"];
+export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Financeiro", "Notificações", "Usuários", "Regional", "Fidelidade", "Recursos"];
 
 export const PARAMS: ParamDef[] = [
   {
@@ -113,6 +113,20 @@ export const PARAMS: ParamDef[] = [
     help: "Mostra Vendas › Comissões: apuração por período, filial e vendedor (prévia por venda, devoluções abatendo a comissão), fechamento que gera a conta a pagar ao vendedor no Financeiro, reabertura enquanto o título estiver em aberto, relatório imprimível e CSV. Desligado, a tela some e nada é apurado; títulos já gerados continuam no Financeiro.",
     usedBy: "Vendas (comissões) e Financeiro (contas a pagar)",
   },
+  {
+    key: "feature.promocoes", group: "Recursos", label: "Promoções (leve X pague Y, a partir de N unidades, dia da semana)", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Aplica no PDV as promoções cadastradas em Produtos › Promoções: “leve X, pague Y” e “a partir de N unidades, preço Z ou P% de desconto”, por SKU, produto ou categoria, com vigência, dias da semana e horário. A promoção aparece como desconto explícito do item (com o nome da regra no cupom e na venda) e não consome o limite de desconto manual do operador. Desligado, nenhuma promoção é aplicada (a venda volta a ser calculada como antes) e a tela some; vendas já feitas mantêm o desconto registrado.",
+    usedBy: "Produtos (promoções), PDV (itens e totais) e Vendas (cupom)",
+  },
+  {
+    key: "feature.fidelidade", group: "Recursos", label: "Programa de fidelidade (pontos)", type: "bool", scopes: ["company", "branch"], default: false,
+    help: "Liga o acúmulo de pontos nas vendas com cliente identificado e o resgate de pontos como forma de pagamento no PDV, conforme o grupo “Fidelidade”. Mostra o saldo no cadastro do cliente, no PDV e no cupom. Desligado por padrão porque muda o cupom e o pagamento. Desligado, nada é acumulado nem resgatado; pontos já acumulados ficam guardados (estornos de devolução/cancelamento continuam sendo feitos).",
+    usedBy: "PDV (cliente e pagamento), Vendas (cupom, devolução e cancelamento) e Clientes (saldo)",
+  },
+  { key: "loyalty.pointsPerReal", group: "Fidelidade", label: "Pontos por R$ 1,00", help: "Pontos ganhos a cada R$ 1,00 do total da venda identificada (sem contar o que foi pago com pontos), arredondado para baixo. Ex.: 1 ponto por real numa venda de R$ 59,90 = 59 pontos. 0 = não acumula.", type: "int", scopes: ["company"], default: 1, min: 0, max: 1000, unit: "pontos", usedBy: "Vendas (acúmulo de pontos)" },
+  { key: "loyalty.pointValue", group: "Fidelidade", label: "Valor de 1 ponto no resgate", help: "Quanto cada ponto vale como pagamento no PDV. Ex.: R$ 0,01 por ponto com 1 ponto por real = 1% de retorno.", type: "money", scopes: ["company"], default: 1, min: 1, usedBy: "PDV (resgate de pontos)" },
+  { key: "loyalty.validityDays", group: "Fidelidade", label: "Validade dos pontos", help: "Dias corridos, a partir da venda que gerou os pontos, até eles vencerem. Pontos vencidos deixam de contar no saldo e não podem ser resgatados. 0 = não vencem. Vale para os pontos acumulados depois da alteração.", type: "int", scopes: ["company"], default: 365, min: 0, max: 3650, unit: "dias", usedBy: "Vendas (acúmulo) e PDV (saldo e resgate)" },
+  { key: "loyalty.minRedeemPoints", group: "Fidelidade", label: "Mínimo de pontos por resgate", help: "Menor quantidade de pontos aceita num pagamento com pontos.", type: "int", scopes: ["company"], default: 100, min: 1, max: 10000000, unit: "pontos", usedBy: "PDV (resgate de pontos)" },
   {
     key: "commission.base", group: "Vendas e PDV", label: "Base de cálculo da comissão", type: "select", scopes: ["company", "branch"], default: "invoiced",
     help: "“Venda faturada”: a comissão nasce na data da venda concluída, sobre o valor líquido dos itens (após descontos, sem acréscimos), e devoluções no período abatem a comissão da venda devolvida na proporção da quantidade devolvida. “Valor recebido”: a comissão nasce quando o dinheiro entra — à vista na data da venda e, a prazo, conforme as parcelas recebidas no período; devoluções abatem a parte reembolsada ao cliente. Vendas canceladas nunca contam (se já estavam em um fechamento, a comissão é estornada no período do cancelamento). Troque o critério só na virada de um período já fechado.",

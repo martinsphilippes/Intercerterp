@@ -33,6 +33,8 @@ export interface CustomerInfo {
   vouchers?: Array<{ code: string; balance: number; expiresAt: string | null }>;
   /** inadimplência segundo a política da filial (VEN-07) */
   overdue?: OverdueStatus | null;
+  /** saldo de pontos de fidelidade (CAD-21) — null/ausente com o programa desligado */
+  loyalty?: { points: number; value: number; nextExpiry: { date: string; points: number } | null } | null;
 }
 
 const initials = (name: string) =>
@@ -221,6 +223,7 @@ export function CustomerPicker({
                     {c.creditLimit > 0 && <span className="block">Crédito disponível: <b className="tabular text-ink">{formatMoney(c.creditAvailable)}</b></span>}
                     {c.priceTableName && <span className="block">Tabela de preço: {c.priceTableName}</span>}
                     {(c.vouchers ?? []).length > 0 && <span className="block text-emerald-700">Vale-crédito {formatMoney((c.vouchers ?? []).reduce((a, v) => a + v.balance, 0))}</span>}
+                    {c.loyalty && c.loyalty.points > 0 && <span className="block text-emerald-700">Pontos {c.loyalty.points.toLocaleString("pt-BR")} ({formatMoney(c.loyalty.value)})</span>}
                   </span>
                 </button>
               </li>
