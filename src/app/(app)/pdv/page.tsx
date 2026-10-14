@@ -92,7 +92,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     lookups.priceTables(s.ctx),
     lookups.categories(s.ctx),
     lookups.brands(s.ctx),
-    lookups.users(s.ctx),
+    lookups.sellers(s.ctx, cart?.sellerId ?? null),
     listParkedCarts(s.ctx),
     nameMap(s.ctx, "users"),
     nameMap(s.ctx, "terminals"),

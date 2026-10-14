@@ -12,7 +12,7 @@ import { saveGoalAction } from "./actions";
 type Opt = { value: string; label: string };
 
 /** Cadastro/edição de meta (filial ou empresa × mês × métrica). */
-export function GoalForm({ goal, branches, metrics, defaultPeriod, defaultBranch }: { goal?: Record<string, any> | null; branches: Opt[]; metrics: Array<Opt & { unit: "money" | "count"; hint: string }>; defaultPeriod: string; defaultBranch: string }) {
+export function GoalForm({ goal, branches, sellers = [], metrics, defaultPeriod, defaultBranch, defaultSeller = "" }: { goal?: Record<string, any> | null; branches: Opt[]; sellers?: Opt[]; metrics: Array<Opt & { unit: "money" | "count"; hint: string }>; defaultPeriod: string; defaultBranch: string; defaultSeller?: string }) {
   const [metric, setMetric] = useState<string>(goal?.metric ?? "revenue");
   const m = metrics.find((x) => x.value === metric) ?? metrics[0];
   return (
@@ -24,6 +24,11 @@ export function GoalForm({ goal, branches, metrics, defaultPeriod, defaultBranch
             <Field label="Filial" required htmlFor="goal-branch">
               <Select id="goal-branch" name="branchId" defaultValue={goal ? (goal.branchId ?? "*") : defaultBranch} options={branches} required />
             </Field>
+            {sellers.length > 0 && (
+              <Field label="Vendedor" htmlFor="goal-seller" hint="Opcional: meta individual do vendedor na filial (ou na empresa).">
+                <Select id="goal-seller" name="sellerId" defaultValue={goal ? (goal.sellerId ?? "") : defaultSeller} options={sellers} placeholder="— meta da filial/empresa —" />
+              </Field>
+            )}
             <Field label="Mês" required htmlFor="goal-period">
               <Input id="goal-period" type="month" name="period" defaultValue={goal?.period ?? defaultPeriod} required />
             </Field>
