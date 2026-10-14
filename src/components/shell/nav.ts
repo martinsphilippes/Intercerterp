@@ -81,6 +81,7 @@ export const NAV: NavGroup[] = [
       { href: "/compras/pedidos", label: "Pedidos de compra", module: "purchases", icon: "ShoppingCart" },
       { href: "/compras/aprovacoes", label: "Aprovação de compras", module: "purchases", icon: "BadgeCheck" },
       { href: "/compras/recebimentos", label: "Recebimento de mercadorias", module: "purchases", icon: "PackageCheck" },
+      { href: "/compras/aguardando-nota", label: "Compras aguardando nota", module: "purchases", icon: "FileClock", feature: "notaAConfirmar" },
       { href: "/compras/cte", label: "CT-e de frete (entrada)", module: "purchases", icon: "Truck", feature: "cteEntrada" },
       { href: "/compras/precificacao", label: "Precificação após a entrada", module: "purchases", icon: "BadgePercent", action: "purchase.pricing", feature: "precificacaoEntrada" },
     ],

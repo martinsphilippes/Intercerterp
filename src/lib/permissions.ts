@@ -50,6 +50,8 @@ export const SPECIAL_ACTIONS = [
   { key: "finance.close_period", label: "Fechar e reabrir período financeiro" },
   { key: "purchase.approve", label: "Aprovar compras" },
   { key: "purchase.receive", label: "Receber mercadorias" },
+  { key: "purchase.receive_pending_invoice", label: "Lançar entrada com nota a confirmar" },
+  { key: "purchase.confirm_invoice", label: "Confirmar com a nota e aprovar divergências" },
   { key: "purchase.pricing", label: "Precificar após a entrada de mercadorias" },
   { key: "products.bulk_edit", label: "Alterar produtos e preços em massa" },
   { key: "fiscal.issue", label: "Emitir documentos fiscais" },
@@ -106,7 +108,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
       dashboard: all(), pdv: all(), sales: all(), cash: all(), products: all(), stock: all(), customers: all(),
       suppliers: all(), finance: rw(), purchases: all(), fiscal: rw(), reports: all(), admin: ro(), support: rw(),
     },
-    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "stock.warehouses", "finance.settle", "purchase.approve", "purchase.receive", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override", "sales.commissions", "sales_doc.quote", "sales_doc.order", "sales_doc.cancel"],
+    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "stock.warehouses", "finance.settle", "purchase.approve", "purchase.receive", "purchase.receive_pending_invoice", "purchase.confirm_invoice", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override", "sales.commissions", "sales_doc.quote", "sales_doc.order", "sales_doc.cancel"],
     discountLimitBps: 2000,
   },
   {
@@ -122,7 +124,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     name: "Estoquista",
     description: "Movimentações, transferências, inventários e recebimentos.",
     permissions: { dashboard: ro(), products: rw(), stock: all(), purchases: { view: true }, suppliers: ro(), support: rw() },
-    actions: ["stock.adjust", "purchase.receive"],
+    actions: ["stock.adjust", "purchase.receive", "purchase.receive_pending_invoice"],
     discountLimitBps: 0,
   },
   {

@@ -47,6 +47,7 @@ export const REPORT_CATALOG: ReportEntry[] = [
   // Compras
   { key: "reposicao", area: "Compras", title: "Planejamento de reposição", description: "Sugestão de compra por cobertura, consumo e mínimo.", href: "/compras/reposicao", module: "purchases", exports: ["replenishment"], tags: "sugestão compra" },
   { key: "pedidos-compra", area: "Compras", title: "Pedidos de compra", description: "Pedidos por fornecedor, situação e período.", href: "/compras/pedidos", module: "purchases", exports: ["purchase_orders"] },
+  { key: "aguardando-nota", area: "Compras", title: "Compras aguardando nota", description: "Entradas de mercadoria lançadas com nota a confirmar: fornecedor, valor, data, dias em aberto, prazo e vencidas; entradas previstas (a chegar). Relatório para o contador.", href: "/compras/aguardando-nota", module: "purchases", feature: "notaAConfirmar", exports: ["purchase-pending-invoices"], tags: "nota a confirmar sem nota pendente contador entrada prevista" },
   { key: "recebimentos", area: "Compras", title: "Recebimento de mercadorias", description: "Entradas de notas, conferência e custos.", href: "/compras/recebimentos", module: "purchases", exports: ["receipts"], tags: "nota de compra entrada" },
   { key: "cotacoes", area: "Compras", title: "Cotações", description: "Cotações e propostas de fornecedores.", href: "/compras/cotacoes", module: "purchases", exports: ["quotations"] },
   // Clientes e fornecedores

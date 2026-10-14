@@ -32,6 +32,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "reserved", label: "Reservado", align: "right", sortable: true, cell: (r) => (r.reserved ? formatQty(r.reserved) : "—") },
     { key: "available", label: "Disponível", align: "right", sortable: true, cell: (r) => <span className={`font-semibold ${r.belowMin ? "text-amber-700" : ""}`}>{formatQty(r.available)}</span> },
     { key: "inTransit", label: "Em trânsito", align: "right", sortable: true, cell: (r) => (r.inTransit ? <Link className="text-brand-700 hover:underline" href={`/estoque/transferencias?status=in_transit,partial&q=${encodeURIComponent(r.skuCode)}&filial=all`}>{formatQty(r.inTransit)}</Link> : "—") },
+    { key: "incoming", label: "A chegar", align: "right", sortable: true, cell: (r) => (r.incoming ? <Link className="text-brand-700 hover:underline" title="Entrada prevista (nota a confirmar) ainda não realizada" href="/compras/aguardando-nota?situacao=scheduled">{formatQty(r.incoming)}</Link> : "—") },
     { key: "minQty", label: "Mínimo", align: "right", sortable: true, cell: (r) => (r.minQty ? formatQty(r.minQty) : "—") },
     { key: "maxQty", label: "Máx./alvo", align: "right", hidden: true, cell: (r) => (r.maxQty ? formatQty(r.maxQty) : "—") },
     { key: "safetyQty", label: "Segurança", align: "right", hidden: true, cell: (r) => (r.safetyQty ? formatQty(r.safetyQty) : "—") },
@@ -40,7 +41,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "lastMovementAt", label: "Último movimento", sortable: true, hidden: true, cell: (r) => (r.lastMovementAt ? <Link className="text-brand-700 hover:underline" href={`/estoque/movimentos?sku=${r.skuId}&deposito=${r.warehouseId}&filial=${r.branchId}`}>{formatDateTime(r.lastMovementAt)}</Link> : "—") },
     { key: "status", label: "Situação", cell: (r) => (r.physical < 0 ? <Badge tone="bad">Negativo</Badge> : r.belowMin ? <Badge tone="warn">Abaixo do mínimo</Badge> : r.physical === 0 ? <Badge>Sem saldo</Badge> : <Badge tone="good">Normal</Badge>) },
   ];
-  const sum = (k: "physical" | "reserved" | "available" | "inTransit" | "value") => all.reduce((a, r) => a + ((r as any)[k] ?? 0), 0);
+  const sum = (k: "physical" | "reserved" | "available" | "inTransit" | "value" | "incoming") => all.reduce((a, r) => a + ((r as any)[k] ?? 0), 0);
   const base = "/estoque";
   const link = (extra: Record<string, string | null>) => `${base}${qs({ ...extra, page: null }, params)}`;
   return (
@@ -48,7 +49,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       <PageHeader
         title="Saldos de estoque"
         crumbs={[{ label: "Produtos e estoque" }, { label: "Saldos" }]}
-        description={`Físico, reservado, disponível (físico − reservado), em trânsito e valor pelo custo médio ponderado — ${scope ? branches.find((b) => b.value === scope)?.label ?? "filial" : "todas as filiais"}.`}
+        description={`Físico, reservado, disponível (físico − reservado), em trânsito, a chegar (entradas previstas) e valor pelo custo médio ponderado — ${scope ? branches.find((b) => b.value === scope)?.label ?? "filial" : "todas as filiais"}.`}
         actions={
           <>
             <LinkButton href="/estoque/movimentos"><ArrowLeftRight className="size-4" /> Movimentos</LinkButton>
@@ -72,7 +73,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           { type: "select", name: "filial", label: "Filial", options: [{ value: "all", label: "Todas (consolidado)" }, ...branches], all: s.branch ? `Atual (${s.branch.name})` : "Todas" },
           { type: "select", name: "deposito", label: "Depósito", options: warehouses },
           { type: "select", name: "categoria", label: "Categoria", options: categories },
-          { type: "select", name: "situacao", label: "Situação", options: [{ value: "positive", label: "Com saldo" }, { value: "zero", label: "Sem saldo" }, { value: "negative", label: "Negativo" }, { value: "below_min", label: "Abaixo do mínimo" }, { value: "reserved", label: "Com reserva" }, { value: "transit", label: "Em trânsito" }] },
+          { type: "select", name: "situacao", label: "Situação", options: [{ value: "positive", label: "Com saldo" }, { value: "zero", label: "Sem saldo" }, { value: "negative", label: "Negativo" }, { value: "below_min", label: "Abaixo do mínimo" }, { value: "reserved", label: "Com reserva" }, { value: "transit", label: "Em trânsito" }, { value: "incoming", label: "A chegar (entrada prevista)" }] },
           { type: "select", name: "tipoDeposito", label: "Tipo de depósito", options: [{ value: "available", label: "Disponível para venda (venda e almoxarifado)" }, { value: "consumption", label: "Uso e consumo" }, { value: "damaged", label: "Avarias" }] },
         ]}
       />
@@ -87,7 +88,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         pageSize={p.pageSize}
         exportKey="stock-balances"
         rowHref={(r) => `/produtos/${r.productId}?tab=estoque`}
-        totals={{ physical: formatQty(sum("physical")), reserved: formatQty(sum("reserved")), available: formatQty(sum("available")), inTransit: formatQty(sum("inTransit")), value: formatMoney(sum("value")) }}
+        totals={{ physical: formatQty(sum("physical")), reserved: formatQty(sum("reserved")), available: formatQty(sum("available")), inTransit: formatQty(sum("inTransit")), incoming: formatQty(sum("incoming")), value: formatMoney(sum("value")) }}
       />
     </>
   );

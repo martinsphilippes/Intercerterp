@@ -33,6 +33,8 @@ export interface ProductHit {
   available: number | null;
   /** produto com controle de lote (recurso ligado): o item pode ter o lote escolhido */
   lotControl?: boolean;
+  /** §40: há entrada deste item aguardando a nota do fornecedor (aviso informativo — a venda segue normal, com NFC-e/NF-e) */
+  pendingInvoice?: boolean;
 }
 
 export interface ProductSearchHandle {
@@ -352,6 +354,7 @@ export const ProductSearch = forwardRef<ProductSearchHandle, {
                             <span className={cn("rounded-full px-1.5 text-[11px]", tone.cls)}>{tone.label}</span>
                           </span>
                           {h.wholesalePrice && h.wholesaleMinQty ? <span className="text-[11px] text-accent-700">Atacado {formatMoney(h.wholesalePrice)} a partir de {formatQty(h.wholesaleMinQty)}</span> : null}
+                          {h.pendingInvoice ? <span className="text-[11px] text-slate-500" title="Parte do estoque entrou antes da nota do fornecedor (nota a confirmar). Informativo: a venda é normal e emite o documento fiscal.">entrada aguardando nota</span> : null}
                         </button>
                       );
                     })}

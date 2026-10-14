@@ -232,6 +232,7 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
       `- Documentos de entrada: ${eb.totals.docs} · valor contábil ${formatMoney(eb.totals.value)} · base ICMS ${formatMoney(eb.totals.icmsBase)} · ICMS ${formatMoney(eb.totals.icms)} · IPI ${formatMoney(eb.totals.ipi)} · ICMS-ST ${formatMoney(eb.totals.st)}`,
       `- XMLs de compra incluídos (pasta xml-entradas: nfe = NF-e de fornecedores, cte = CT-e de frete): ${entryXmlCount}${missingEntryXml ? ` · ${missingEntryXml} ilegível(is)` : ""}`,
       eb.pendingReceipts.length ? `- ATENÇÃO: ${eb.pendingReceipts.length} recebimento(s) com NF-e emitida no período ainda em conferência (fora do livro): ${eb.pendingReceipts.map((p) => `nº ${p.number}${p.nfeNumber ? ` (NF-e ${p.nfeNumber})` : ""}`).join(", ")}` : "- Nenhum recebimento com NF-e do período pendente de conferência.",
+      ...(eb.awaitingInvoice.length ? [`- ATENÇÃO: ${eb.awaitingInvoice.length} entrada(s) de mercadoria no período AGUARDANDO A NOTA do fornecedor (fora do livro até a confirmação da nota): ${eb.awaitingInvoice.map((p) => `recebimento nº ${p.number} (${p.supplier}, ${formatMoney(p.value)} previsto)`).join(", ")}`] : []),
       "- Relatórios: relatorios/livro-registro-entradas.csv e relatorios/entradas-por-cfop.csv.",
     ];
   }

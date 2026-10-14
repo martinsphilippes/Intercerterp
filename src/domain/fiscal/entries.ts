@@ -327,6 +327,11 @@ export interface EntriesBook {
   totals: { docs: number; value: number; icmsBase: number; icms: number; ipi: number; stBase: number; st: number; exemptOther: number };
   /** recebimentos em conferência com NF-e emitida no período (ainda não escriturados) */
   pendingReceipts: Array<{ id: string; number: number; nfeNumber: string | null; supplier: string }>;
+  /**
+   * §40: entradas de mercadoria com NOTA A CONFIRMAR realizadas no período (sem documento do fornecedor ainda): ficam
+   * fora do livro até a confirmação da nota — depois entram pela data da entrada, como recebimento comum
+   */
+  awaitingInvoice: Array<{ id: string; number: number; supplier: string; value: number }>;
   /** documentos de entrada com XML no período (pacote contábil) */
   xmlFiles: Array<{ fileId: string; kind: "nfe" | "cte"; label: string }>;
 }
@@ -336,13 +341,16 @@ export async function entriesBook(ctx: Ctx, f: EntryBookFilter): Promise<Entries
   const { start, end } = dayRange(f.from, f.to);
   const branch = f.branchId ?? ctx.branchId;
   const scope: any[] = [["eq", "companyId", ctx.companyId], ...(branch ? [["eq", "branchId", branch]] : [])];
-  const [receipts, ctes, own, drafts] = await Promise.all([
+  const [allReceipts, ctes, own, drafts] = await Promise.all([
     listAll(ctx.store, "receipts", { filters: [...scope, ["eq", "status", "confirmed"], ["gte", "confirmedAt", start], ["lt", "confirmedAt", end]], orderBy: [{ field: "confirmedAt", dir: "asc" }] }),
     listAll(ctx.store, "inbound_ctes", { filters: [...scope, ["eq", "status", "registered"], ["gte", "registeredAt", start], ["lt", "registeredAt", end]], orderBy: [{ field: "registeredAt", dir: "asc" }] }),
     listAll(ctx.store, "fiscal_documents", { filters: [...scope, ["eq", "model", "nfe"], ["gte", "issuedAt", start], ["lt", "issuedAt", end]], orderBy: [{ field: "issuedAt", dir: "asc" }] }),
     listAll(ctx.store, "receipts", { filters: [...scope, ["eq", "status", ["draft", "confirming"]]] }),
   ]);
-  const supplierIds = [...new Set([...receipts.map((r) => r.supplierId), ...ctes.map((c) => c.carrierId), ...drafts.map((r) => r.supplierId)].filter(Boolean))];
+  // entrada com nota a confirmar (§40) ainda sem a nota: fora do livro (sem documento fiscal do fornecedor)
+  const receipts = allReceipts.filter((r) => r.documentStatus !== "pending_invoice");
+  const awaiting = allReceipts.filter((r) => r.documentStatus === "pending_invoice");
+  const supplierIds = [...new Set([...allReceipts.map((r) => r.supplierId), ...ctes.map((c) => c.carrierId), ...drafts.map((r) => r.supplierId)].filter(Boolean))];
   const suppliers = new Map<string, Doc>();
   for (let i = 0; i < supplierIds.length; i += 100) for (const s of await listAll(ctx.store, "suppliers", { filters: [["eq", "id", supplierIds.slice(i, i + 100)]] })) suppliers.set(s.id, s);
   const rows: EntryBookRow[] = [
@@ -353,7 +361,7 @@ export async function entriesBook(ctx: Ctx, f: EntryBookFilter): Promise<Entries
   const sum = (k: keyof EntryBookRow) => rows.reduce((a, r) => a + ((r[k] as number) ?? 0), 0);
   const docs = new Set(rows.map((r) => `${r.source}:${r.sourceId}`)).size;
   const pendingReceipts = drafts
-    .filter((r) => r.entryKind !== "no_stock" && r.nfeIssueDate && toLocalDate(r.nfeIssueDate) >= f.from && toLocalDate(r.nfeIssueDate) <= f.to)
+    .filter((r) => r.entryKind !== "no_stock" && r.documentStatus !== "pending_invoice" && r.nfeIssueDate && toLocalDate(r.nfeIssueDate) >= f.from && toLocalDate(r.nfeIssueDate) <= f.to)
     .map((r) => ({ id: r.id, number: r.number as number, nfeNumber: (r.nfeNumber as string | null) ?? null, supplier: suppliers.get(r.supplierId)?.name ?? r.emitter?.name ?? "—" }));
   const xmlFiles = [
     ...receipts.filter((r) => r.xmlFileId).map((r) => ({ fileId: r.xmlFileId as string, kind: "nfe" as const, label: `NF-e ${r.nfeNumber ?? ""} (recebimento nº ${r.number})` })),
@@ -364,6 +372,7 @@ export async function entriesBook(ctx: Ctx, f: EntryBookFilter): Promise<Entries
     byCfop: entriesByCfop(rows),
     totals: { docs, value: sum("value"), icmsBase: sum("icmsBase"), icms: sum("icms"), ipi: sum("ipi"), stBase: sum("stBase"), st: sum("st"), exemptOther: sum("exemptOther") },
     pendingReceipts,
+    awaitingInvoice: awaiting.map((r) => ({ id: r.id, number: r.number as number, supplier: suppliers.get(r.supplierId)?.name ?? r.emitter?.name ?? "—", value: (r.dueTotal as number) ?? 0 })),
     xmlFiles,
   };
 }

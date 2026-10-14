@@ -91,6 +91,17 @@ export const PARAMS: ParamDef[] = [
     help: "Arredonda o preço sugerido para cima até o final escolhido (ex.: R$ 10,13 → R$ 10,90). Pode ser trocado na própria tela antes de aplicar.",
     options: [{ value: "none", label: "Sem arredondamento" }, { value: "90", label: "Terminar em ,90" }, { value: "99", label: "Terminar em ,99" }, { value: "00", label: "Valor inteiro (,00)" }], usedBy: "Compras (precificação após a entrada)",
   },
+  {
+    key: "purchase.pendingInvoice.dueDays", group: "Compras", label: "Prazo para a nota da entrada com nota a confirmar", type: "int", scopes: ["company", "branch"], default: 15, min: 1, max: 180, unit: "dias",
+    help: "Quando a mercadoria chega antes da nota fiscal do fornecedor, a entrada pode ser lançada como “Nota a confirmar”. O prazo para receber e confirmar a nota é contado da data da entrada; depois dele a entrada aparece como vencida em Compras aguardando nota. Vale para os lançamentos feitos depois da alteração.",
+    usedBy: "Compras (entrada com nota a confirmar e painel Compras aguardando nota)",
+  },
+  {
+    key: "purchase.pendingInvoice.alert", group: "Compras", label: "Avisar sobre notas a confirmar vencendo ou vencidas", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Liga o aviso diário (Central de notificações) para quem tem a permissão “Confirmar com a nota e aprovar divergências”: uma ocorrência por recebimento quando o prazo da nota está para vencer (antecedência abaixo) ou venceu; a ocorrência é resolvida quando a nota é confirmada. Desligado, nenhum aviso é gerado — o painel continua mostrando as vencidas.",
+    usedBy: "Rotina diária de compras e Central de notificações",
+  },
+  { key: "purchase.pendingInvoice.alertLeadDays", group: "Compras", label: "Antecedência do aviso de nota a confirmar", help: "Quantos dias antes do prazo da nota o aviso é gerado. 0 = avisar só no vencimento.", type: "int", scopes: ["company", "branch"], default: 3, min: 0, max: 60, unit: "dias", usedBy: "Rotina diária de compras (aviso de nota a confirmar)" },
   { key: "purchase.monthlyBudget", group: "Compras", label: "Orçamento mensal de compras", help: "0 = sem orçamento. Usado nas aprovações para indicar consumo do orçamento.", type: "money", scopes: ["company", "branch"], default: 0, min: 0, usedBy: "Aprovação de compras" },
   { key: "feature.precificacaoEntrada", group: "Recursos", label: "Precificação após a entrada de mercadorias", help: "Mostra a tela que sugere o novo preço de venda a partir do custo de cada recebimento concluído (com prévia antes de gravar). Desligado, o atalho e a tela ficam ocultos; nada é alterado nos preços.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Compras (recebimento concluído → Precificar)" },
   { key: "feature.alteracaoMassa", group: "Recursos", label: "Alteração de produtos em massa", help: "Mostra a tela de reajuste de preços e de alteração de categoria, marca, NCM, grupo tributário e situação de vários produtos de uma vez (sempre com prévia).", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Produtos (alteração em massa)" },
@@ -145,6 +156,11 @@ export const PARAMS: ParamDef[] = [
     key: "feature.livroEntradas", group: "Recursos", label: "Livro de entradas e nota de entrada sem estoque", type: "bool", scopes: ["company", "branch"], default: true,
     help: "Mostra Fiscal › Livro de entradas: por período, cada documento de entrada (recebimentos de mercadoria concluídos, notas sem estoque, CT-e de frete e NF-e de entrada emitidas pela empresa) com emitente, chave/número/série, CFOP de entrada, valor contábil, base/ICMS, IPI e ICMS-ST do XML, totais por CFOP, impressão e CSV. Permite registrar nota de entrada SEM estoque (serviço tomado, uso e consumo, despesa com nota), que gera só a conta a pagar. Inclui no pacote da contabilidade os XMLs de compra do período (pasta xml-entradas) e o livro de entradas. Desligado, a tela some e o pacote volta a ter só as saídas; nada do que é de saída muda.",
     usedBy: "Fiscal (livro de entradas), Compras (notas sem estoque) e pacote contábil",
+  },
+  {
+    key: "feature.notaAConfirmar", group: "Recursos", label: "Entrada de mercadoria com nota a confirmar", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Permite registrar a ENTRADA de mercadoria que chegou antes da nota fiscal do fornecedor (Receber mercadorias › Nota a confirmar): o estoque entra no depósito escolhido como entrada normal, marcada “aguardando nota”, com conta a pagar provisória. Data/hora futura = entrada PREVISTA (“a chegar”, sem saldo nem custo; conta a pagar prevista), realizada automaticamente na data. Depois, “Confirmar com a nota” (XML ou dados da nota) corrige custo (ajuste de custo médio), quantidade (ajuste ou devolução) e a conta a pagar, e a nota entra no livro de entradas. Toda venda continua com NFC-e/NF-e: não há venda sem documento fiscal nem estoque separado. Desligado, a opção e o painel somem; as entradas já lançadas continuam e podem ser confirmadas pelo recebimento.",
+    usedBy: "Compras (recebimento e Compras aguardando nota), Estoque (a chegar), Financeiro (contas a pagar e fluxo previsto) e rotina diária",
   },
   {
     key: "feature.cteEntrada", group: "Recursos", label: "CT-e de entrada (frete de compra)", type: "bool", scopes: ["company", "branch"], default: true,

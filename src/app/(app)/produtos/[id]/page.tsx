@@ -32,6 +32,7 @@ import { scaleConfig } from "@/domain/scale";
 import { ScalePanel } from "./scale-panel";
 import { COMPOSITION_LABEL, componentRows, componentsCost, compositionOf, kitAvailableFrom, rowsForSku } from "@/domain/product-components";
 import { availableMap } from "@/domain/stock";
+import { pendingEntriesForSkus } from "@/domain/pending-invoice";
 
 export const metadata = { title: "Produto" };
 
@@ -76,6 +77,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const availWh = new Set(warehouses.filter((w) => w.kind === "available").map((w) => w.id));
   const available = balances.filter((b) => availWh.has(b.warehouseId)).reduce((a, b) => a + b.physical - b.reserved, 0);
   const inTransit = balances.reduce((a, b) => a + (b.inTransit ?? 0), 0);
+  // §40: entradas com nota a confirmar deste produto (previstas = "a chegar"; realizadas = aguardando a nota)
+  const pendingEntries = p.type === "service" ? [] : (await pendingEntriesForSkus(ctx.store, ctx.companyId, skus.map((x) => x.id))).filter((e) => canSeeBranch(ctx, e.branchId));
   const since = addDays(date, -90);
   const sold = await listAll(ctx.store, "stock_movements", { filters: [["eq", "productId", id], ["eq", "type", "sale"], ["gte", "occurredAt", startOfLocalDay(since)]] });
   const soldQty = Math.max(0, -sold.reduce((a, m) => a + m.qty, 0));
@@ -328,6 +331,17 @@ export default async function Page({ params, searchParams }: { params: Promise<{
 
       {tab === "estoque" && !isService && (
         <div className="space-y-4">
+          {pendingEntries.length > 0 && (
+            <Notice tone="info" title="Entradas com nota a confirmar">
+              <ul className="space-y-0.5">
+                {pendingEntries.map((e) => (
+                  <li key={e.id}>
+                    <Link className="font-medium underline" href={`/compras/recebimentos/${e.id}`}>Recebimento nº {e.number}</Link>: {formatQty(e.qty)} {e.status === "scheduled" ? `a chegar em ${formatDateTime(e.entryAt)} (entrada prevista — ainda fora do saldo)` : `entrou em ${formatDateTime(e.entryAt)}, aguardando a nota do fornecedor (custo provisório)`} · {branchName.get(e.branchId) ?? ""} · {whById.get(e.warehouseId)?.name ?? ""}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          )}
           <Card bodyClass="p-0" title="Saldos por filial e depósito" description="Disponível = físico − reservado. Em trânsito pertence ao destino, mas não está disponível em nenhuma filial." actions={<Link className="text-sm text-brand-700 hover:underline" href={`/estoque/movimentos?produto=${id}&filial=all`}>Ver movimentos</Link>}>
             {balances.length === 0 ? (
               <EmptyState title="Sem saldos" description="Lance o saldo inicial abaixo ou registre uma entrada." />

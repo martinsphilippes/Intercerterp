@@ -9,6 +9,7 @@ import { availableMap } from "@/domain/stock";
 import { resolveScaleBarcode, type ScaleResolution } from "@/domain/scale";
 import { kitAvailability } from "@/domain/product-components";
 import { lotsEnabled } from "@/domain/lots";
+import { pendingInvoiceSkus } from "@/domain/pending-invoice";
 
 /**
  * Busca de produtos do PDV (Tela 5): descrição, SKU, código de barras e categoria.
@@ -102,6 +103,8 @@ export async function GET(req: NextRequest) {
   const kitAvail = await kitAvailability(store, branchId, skus.map((k) => ({ id: k.id, productId: k.productId })), pmap);
   // lotes e validades (EST-02): a linha do PDV oferece a escolha do lote
   const lotsOn = products.some((p) => p.lotControl) && (await lotsEnabled(store, cid, branchId));
+  // §40: SKUs com entrada aguardando a nota do fornecedor (aviso discreto e só informativo — a venda é normal)
+  const piSkus = skus.length ? await pendingInvoiceSkus(store, cid, branchId).catch(() => new Map<string, unknown>()) : new Map<string, unknown>();
   const siblings = new Map<string, number>();
   for (const k of skus) siblings.set(k.productId, (siblings.get(k.productId) ?? 0) + 1);
 
@@ -133,6 +136,7 @@ export async function GET(req: NextRequest) {
       priced: pr.price > 0,
       available: service ? null : (kitAvail.get(k.id) ?? avail.get(k.id)?.available ?? 0),
       lotControl: !service && lotsOn && Boolean(p.lotControl),
+      ...(piSkus.has(k.id) ? { pendingInvoice: true } : {}),
     };
   });
   return NextResponse.json({ items, exact, priceTableId, ...(scale ? { scale } : {}) });

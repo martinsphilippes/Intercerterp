@@ -36,6 +36,8 @@ export async function queryReceipts(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
     rows = rows.filter((r) => r.date >= rg.start && r.date < rg.end);
   }
   if (p.f.divergence === "1") rows = rows.filter((r) => r.divergenceCount > 0);
+  // §40: entrada com nota a confirmar (aguardando nota / nota confirmada)
+  if (p.f.documento === "pending_invoice" || p.f.documento === "confirmed") rows = rows.filter((r) => r.documentStatus === p.f.documento);
   // vínculo com pedido (COM-03): com pedido × entrada sem pedido
   if (p.f.order === "with") rows = rows.filter((r) => r.orderNumbers.length > 0);
   if (p.f.order === "without") rows = rows.filter((r) => r.orderNumbers.length === 0);

@@ -7,6 +7,7 @@ import { addDays, dayRange, today } from "@/lib/dates";
 import { QTY, roundDiv } from "@/lib/money";
 import { MOVEMENT_LABEL, ORIGIN_LABEL, originHref, type MovementType } from "@/domain/stock";
 import { categoryDescendants } from "@/domain/products";
+import { incomingMap } from "@/domain/pending-invoice";
 import { pendingQty, transferCode, type TransferItem } from "@/domain/transfers";
 
 type P = Pick<ListParams, "q" | "f">;
@@ -97,6 +98,8 @@ export async function queryBalances(ctx: Ctx, p: P) {
   if (p.f.produto) filters.push(["eq", "productId", p.f.produto]);
   const cats = p.f.categoria ? new Set(categoryDescendants(m.categories, p.f.categoria)) : null;
   const bals = await listAll(ctx.store, "stock_balances", { filters });
+  // §40: "a chegar" = entradas PREVISTAS (nota a confirmar, data futura) ainda não realizadas, por depósito e SKU
+  const incoming = await incomingMap(ctx.store, ctx.companyId);
   return bals
     .map((b) => {
       const sku = m.sku.get(b.skuId);
@@ -118,6 +121,7 @@ export async function queryBalances(ctx: Ctx, p: P) {
         value: roundDiv((b.physical ?? 0) * (b.avgCost ?? 0), QTY),
         belowMin: Boolean(b.minQty && available <= b.minQty),
         belowSafety: Boolean(b.safetyQty && available <= b.safetyQty),
+        incoming: incoming.get(`${b.warehouseId}|${b.skuId}`)?.qty ?? 0,
       };
     })
     .filter((r) => (cats ? r.categoryId && cats.has(r.categoryId) : true))
@@ -134,6 +138,8 @@ export async function queryBalances(ctx: Ctx, p: P) {
           return (r.inTransit ?? 0) !== 0;
         case "reserved":
           return (r.reserved ?? 0) > 0;
+        case "incoming":
+          return r.incoming > 0;
         case "positive":
           return r.physical > 0;
         default:
@@ -156,6 +162,7 @@ const ORIGIN_COLLECTION: Record<string, { collection: string; label: (d: Doc) =>
   receipt: { collection: "receipts", label: (d) => `Recebimento nº ${d.number}` },
   purchase_receipt: { collection: "receipts", label: (d) => `Recebimento nº ${d.number}` },
   purchase: { collection: "receipts", label: (d) => `Recebimento nº ${d.number}` },
+  receipt_invoice: { collection: "receipts", label: (d) => `Nota confirmada — recebimento nº ${d.number}` },
   purchase_order: { collection: "purchase_orders", label: (d) => `Pedido de compra nº ${d.number}` },
   product: { collection: "products", label: (d) => `Cadastro ${d.code}` },
   import: { collection: "product_imports", label: (d) => `Importação nº ${d.number}` },

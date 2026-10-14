@@ -102,6 +102,7 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
           <>
             <StatusBadge kind="title" status={t.status} />
             {!rec && (t.approvalStatus === "approved" ? <Badge tone="good">Autorizada</Badge> : <Badge tone="warn">A autorizar</Badge>)}
+            {t.forecast ? <Badge tone="info" title="Entrada de mercadoria prevista (data futura): não pode ser baixada antes da realização da entrada">Prevista</Badge> : t.provisional ? <Badge tone="warn" title="Entrada com nota a confirmar: o valor é corrigido para o da nota na confirmação">Provisória (nota a confirmar)</Badge> : null}
             <Badge tone="brand">{ORIGIN_LABEL[t.originType] ?? t.originType}</Badge>
           </>
         }

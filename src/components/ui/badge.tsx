@@ -41,7 +41,8 @@ export const STATUS: Record<string, Record<string, [string, Tone]>> = {
   supplier: { active: ["Ativo", "good"], draft: ["Docs. pendentes", "warn"], blocked: ["Bloqueado", "bad"], inactive: ["Inativo", "neutral"] },
   receipt_item: { ok: ["Confere", "good"], divergence: ["Divergência", "bad"], pending: ["Pendente", "neutral"], ignored: ["Não estocado", "neutral"] },
   replenishment: { reorder: ["A repor", "info"], risk: ["Risco antes da entrega", "bad"], incomplete: ["Completar dados", "accent"], ok: ["Coberto", "good"] },
-  receipt: { draft: ["Em conferência", "warn"], confirming: ["Confirmando", "info"], confirmed: ["Confirmado", "good"], cancelled: ["Cancelado", "neutral"] },
+  receipt: { draft: ["Em conferência", "warn"], confirming: ["Confirmando", "info"], confirmed: ["Confirmado", "good"], cancelled: ["Cancelado", "neutral"], scheduled: ["Entrada prevista", "info"] },
+  receipt_document: { pending_invoice: ["Aguardando nota", "warn"], confirmed: ["Nota confirmada", "good"] },
   quotation: { open: ["Aberta", "info"], closed: ["Pedidos gerados", "good"], cancelled: ["Cancelada", "neutral"], received: ["Recebida", "good"], waiting: ["Aguardando proposta", "warn"], expired: ["Vencida", "bad"] },
   approval: {
     in_review: ["Em análise", "info"], approved: ["Aprovada", "good"], adjust: ["Devolvida para ajuste", "warn"], rejected: ["Rejeitada", "bad"], cancelled: ["Cancelada", "neutral"], pending: ["Aguardando decisão", "accent"],
