@@ -142,7 +142,7 @@ export interface Divergence {
   message: string;
 }
 
-export const RECEIPT_STATUS: Record<string, string> = { draft: "Em conferência", confirming: "Confirmando", confirmed: "Confirmado", cancelled: "Cancelado" };
+export const RECEIPT_STATUS: Record<string, string> = { draft: "Em conferência", confirming: "Confirmando", confirmed: "Confirmado", cancelled: "Cancelado", scheduled: "Entrada prevista" };
 
 /** Efeitos da entrada (marcáveis na conferência). Desmarcar exige justificativa nas observações. */
 export interface ReceiptEffects {
@@ -177,7 +177,7 @@ export function orderMatchRate(items: ReceiptItem[]) {
   return Math.round((sc / act.length) * 100);
 }
 
-const scopeFor = (companyId: string, key: string) => `${companyId}|nfe|${key}`;
+export const scopeFor = (companyId: string, key: string) => `${companyId}|nfe|${key}`;
 
 export async function getReceipt(ctx: Ctx, id: string) {
   const r = await ctx.store.getOrThrow("receipts", id);
@@ -272,7 +272,7 @@ async function orderLines(store: Store, orderIds: string[], companyId: string) {
 }
 
 /** Mapeia item da NF-e para SKU: vínculo do fornecedor (cProd) → código de barras (cEAN) → item único de pedido. */
-async function mapXmlItem(store: Store, companyId: string, supplierId: string | null, it: ParsedNfe["items"][number], lines: Awaited<ReturnType<typeof orderLines>>) {
+export async function mapXmlItem(store: Store, companyId: string, supplierId: string | null, it: ParsedNfe["items"][number], lines: Awaited<ReturnType<typeof orderLines>>) {
   if (supplierId && it.cProd) {
     const sp = await findOne(store, "supplier_products", [["eq", "supplierId", supplierId], ["eq", "supplierCode", it.cProd]]);
     if (sp) return { skuId: sp.skuId as string, mapping: "supplier_code" as const, conversionFactor: sp.conversionFactor || QTY };
@@ -466,7 +466,7 @@ async function valueTolerance(ctx: Ctx, branchId: string | null) {
   return Math.max(0, Math.round(Number(await getSetting(ctx.store, ctx.companyId, branchId, "purchase.receiptValueTolerance", 0)) || 0));
 }
 
-async function recompute(ctx: Ctx, r: Doc, patch: Record<string, any> = {}) {
+export async function recompute(ctx: Ctx, r: Doc, patch: Record<string, any> = {}) {
   const merged = { ...r, ...patch };
   const hasXml = Boolean(merged.xmlFileId);
   const lines = await orderLines(ctx.store, merged.orderIds ?? [], ctx.companyId);
@@ -485,7 +485,8 @@ async function recompute(ctx: Ctx, r: Doc, patch: Record<string, any> = {}) {
   if ((merged.cteFreight ?? 0) > 0) applyCteShares(comp.items, merged.cteFreight);
   const term = merged.paymentTermId ? await ctx.store.get("payment_terms", merged.paymentTermId) : null;
   const amount = effectsOf(merged).createPayable ? payableAmount({ dueTotal: comp.dueTotal, invoicedTotal: merged.invoicedTotal, differenceAction: merged.differenceAction }) : 0;
-  const base = merged.nfeIssueDate ? toLocalDate(merged.nfeIssueDate) : today();
+  // base dos vencimentos: emissão da nota; sem nota (entrada com nota a confirmar, §40), a data da entrada
+  const base = merged.nfeIssueDate ? toLocalDate(merged.nfeIssueDate) : merged.entryAt ? toLocalDate(merged.entryAt) : today();
   const inst = buildReceiptInstallments(amount, merged.emitter?.duplicatas ?? [], term ? { installments: term.installments, firstDueDays: term.firstDueDays, intervalDays: term.intervalDays } : null, base);
   const divergences = [...comp.divergences];
   if (inst.rescaled) divergences.push({ kind: "installments", message: `Duplicatas do XML somam ${formatMoney((merged.emitter?.duplicatas ?? []).reduce((a: number, d: any) => a + d.vDup, 0))}; parcelas ajustadas ao valor a pagar ${formatMoney(amount)} mantendo os vencimentos.` });
@@ -634,7 +635,7 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
 }
 
 /** Padrões fiscais/financeiros da entrada: CFOP (1102 interna / 2102 interestadual), plano de contas, centro de custo e forma de pagamento do pedido. */
-async function financialDefaults(ctx: Ctx, order: Doc | null, emitterUf: string | null) {
+export async function financialDefaults(ctx: Ctx, order: Doc | null, emitterUf: string | null) {
   const branch = ctx.branchId ? await ctx.store.get("branches", ctx.branchId) : null;
   const interstate = emitterUf && branch?.uf && emitterUf !== branch.uf;
   return {
@@ -646,7 +647,7 @@ async function financialDefaults(ctx: Ctx, order: Doc | null, emitterUf: string 
   };
 }
 
-function omit<T extends Record<string, any>>(o: T, ...keys: string[]) {
+export function omit<T extends Record<string, any>>(o: T, ...keys: string[]) {
   const out: Record<string, any> = { ...o };
   for (const k of keys) delete out[k];
   return out;
@@ -683,7 +684,7 @@ export interface ManualReceiptInput {
 }
 
 /** Monta os itens de uma nota lançada manualmente (sem pedido), validando produto, quantidade, custo e desconto. */
-async function manualItems(ctx: Ctx, supplierId: string, input: ManualReceiptItemInput[], firstIdx: number): Promise<ReceiptItem[]> {
+export async function manualItems(ctx: Ctx, supplierId: string, input: ManualReceiptItemInput[], firstIdx: number): Promise<ReceiptItem[]> {
   const out: ReceiptItem[] = [];
   for (const [n, it] of input.entries()) {
     const sku = it.skuId ? await ctx.store.get("skus", it.skuId) : null;
@@ -1100,7 +1101,7 @@ export function confirmBlockers(r: Doc): string[] {
   return out;
 }
 
-async function learnSupplierProduct(ctx: Ctx, r: Doc, it: ReceiptItem) {
+export async function learnSupplierProduct(ctx: Ctx, r: Doc, it: ReceiptItem) {
   if (!it.skuId) return;
   const id = detId("supprod", r.supplierId, it.skuId);
   const existing = (await findOne(ctx.store, "supplier_products", [["eq", "supplierId", r.supplierId], ["eq", "skuId", it.skuId]])) ?? null;
@@ -1235,7 +1236,7 @@ async function startConfirming(ctx: Ctx, id: string) {
  * Depósito de destino escolhido para o recebimento (§39): da filial, ativo e que recebe mercadoria (venda,
  * almoxarifado ou uso e consumo — avarias não recebe compra).
  */
-async function assertReceiptWarehouse(store: Store, warehouseId: string, branchId: string) {
+export async function assertReceiptWarehouse(store: Store, warehouseId: string, branchId: string) {
   const wh = await store.getOrThrow("warehouses", warehouseId);
   assert(wh.branchId === branchId, "Depósito de outra filial.");
   assert(wh.status !== "inactive", `O depósito ${wh.name} está desativado.`);
@@ -1245,6 +1246,15 @@ async function assertReceiptWarehouse(store: Store, warehouseId: string, branchI
 
 export async function confirmReceipt(ctx: Ctx, id: string) {
   requireReceive(ctx);
+  return confirmReceiptEffects(ctx, id);
+}
+
+/**
+ * Conclusão do recebimento sem a conferência de permissão (já feita pelo chamador): `confirmReceipt` (Receber
+ * mercadorias) e a realização da entrada com nota a confirmar (§40 — lançamento por quem tem "Lançar entrada com nota a
+ * confirmar", rotina diária e abertura do recebimento). Mesmas regras e efeitos idempotentes.
+ */
+export async function confirmReceiptEffects(ctx: Ctx, id: string) {
   let r = await getReceiptForWrite(ctx, id);
   if (r.status === "confirmed") return r;
   assert(["draft", "confirming"].includes(r.status), "Recebimento cancelado.");
@@ -1262,13 +1272,15 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
     blockers.push(...(await receiptLotBlockers(ctx, r)));
     if (blockers.length) throw new BusinessError(blockers.join(" "), "receipt_blocked");
     // FIN-21: conta a pagar com competência em período financeiro fechado é recusada antes de qualquer efeito (estoque)
-    if (effectsOf(r).createPayable && payableAmount(r as any) > 0) await assertPeriodOpen(ctx.store, ctx.companyId, r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : today(), "conta a pagar do recebimento (data de emissão da nota)");
+    if (effectsOf(r).createPayable && payableAmount(r as any) > 0) await assertPeriodOpen(ctx.store, ctx.companyId, r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : r.entryAt ? toLocalDate(r.entryAt) : today(), r.nfeIssueDate || !r.entryAt ? "conta a pagar do recebimento (data de emissão da nota)" : "conta a pagar do recebimento (data da entrada)");
     r = await startConfirming(ctx, id);
     if (r.status === "confirmed") return r;
   }
   const items: ReceiptItem[] = r.items ?? [];
   const active = items.filter((i) => !i.ignore && i.skuId && i.receivedQty > 0);
-  const occurredAt = nowIso();
+  // entrada com nota a confirmar (§40): os movimentos e a conclusão levam a data/hora da entrada informada
+  const occurredAt = r.entryAt && r.documentStatus === "pending_invoice" ? (r.entryAt as string) : nowIso();
+  const pendingInvoice = r.documentStatus === "pending_invoice";
   const eff = effectsOf(r);
   // 1) estoque (custo de entrada com rateio → custo médio ponderado)
   const movements = active.map((it) => ({
@@ -1315,11 +1327,11 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
       partyType: "supplier",
       partyId: supplier.id,
       partyName: supplierLabel(supplier),
-      description: `Compra — recebimento nº ${r.number}${r.nfeNumber ? ` / NF-e ${r.nfeNumber}` : ""}`,
+      description: `Compra — recebimento nº ${r.number}${r.nfeNumber ? ` / NF-e ${r.nfeNumber}` : ""}${pendingInvoice ? " (nota a confirmar)" : ""}`,
       documentNumber: r.nfeNumber ? `${r.nfeNumber}${r.nfeSeries ? `-${r.nfeSeries}` : ""}` : `REC-${r.number}`,
       originType: "purchase_receipt",
       originId: id,
-      issueDate: r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : today(),
+      issueDate: r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : r.entryAt ? toLocalDate(r.entryAt) : today(),
       categoryId: r.categoryId ?? (await getSetting(ctx.store, ctx.companyId, null, "finance.category.purchases", null)),
       costCenterId: r.costCenterId ?? null,
       installments: (r.installments ?? []).map((x: any) => ({ dueDate: x.dueDate, amount: x.amount, methodKind: method?.kind ?? undefined })),
@@ -1328,11 +1340,13 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
           r.differenceAction === "pay_invoiced" ? `Pago pelo valor faturado (${formatMoney(r.invoicedTotal)}) — divergência registrada: ${r.notes ?? ""}` : null,
           r.emitter?.environment === "homologacao" ? "NF-e de HOMOLOGAÇÃO (sem valor fiscal) — empresa de demonstração." : null,
           r.xmlFileId && r.emitter?.authorized === false ? `NF-e sem protocolo de autorização no XML — justificativa: ${r.notes ?? ""}` : null,
+          pendingInvoice ? "Valor PROVISÓRIO: entrada lançada com nota a confirmar — corrigido para o valor da nota na confirmação." : null,
         ]
           .filter(Boolean)
           .join(" ") || null,
       idemKey: `purchase_receipt:${id}`,
       branchId: r.branchId,
+      ...(pendingInvoice ? { provisional: true } : {}),
     });
     titleId = title.id;
   }

@@ -5,6 +5,9 @@ import { runAction, fstr, fopt, fint, fjson, fbool } from "@/lib/server/action";
 import { BusinessError } from "@/lib/core/errors";
 import { importNfeXml, fetchXmlByKey, createManualReceipt, updateReceipt, confirmReceipt, cancelReceipt, type ManualReceiptItemInput, type ReceiptUpdate } from "@/domain/receipts";
 import { createProductsFromReceipt, type NewProductRow } from "@/domain/receipt-products";
+import { analyzeInvoice, cancelScheduledEntry, confirmPendingInvoice, createPendingInvoiceEntry, type ConfirmInvoiceInput, type QtyAction } from "@/domain/pending-invoice";
+import { localDateTimeToIso } from "@/domain/stock";
+import { requireFeature } from "@/lib/server/features";
 
 const PATHS = ["/compras/recebimentos", "/compras/pedidos"];
 
@@ -142,5 +145,72 @@ export async function createProductsFromReceiptAction(fd: FormData) {
       ok: true as const,
       message: [`${created} produto(s) cadastrado(s) e associado(s) aos itens da nota.`, ...linked.map((x) => x.message)].join(" "),
     };
+  });
+}
+
+// ───────────────────────────── Entrada com nota a confirmar (§40)
+
+const PI_PATHS = [...PATHS, "/compras/aguardando-nota", "/estoque", "/financeiro/pagar"];
+
+/** Lança a entrada com nota a confirmar (data/hora atual/passada = realizada; futura = prevista). */
+export async function pendingInvoiceEntryAction(fd: FormData) {
+  return runAction({ module: "purchases", requireBranch: true, revalidate: PI_PATHS }, async (s) => {
+    await requireFeature(s, "notaAConfirmar");
+    if (!fstr(fd, "supplierId")) return { ok: false as const, error: "Selecione o fornecedor." };
+    const local = fstr(fd, "entryAt");
+    const entryAt = local ? localDateTimeToIso(local) : null;
+    if (!entryAt) return { ok: false as const, error: "Informe a data e a hora da entrada." };
+    const r = await createPendingInvoiceEntry(s.ctx, {
+      supplierId: fstr(fd, "supplierId"), warehouseId: fopt(fd, "warehouseId"), items: fjson<ManualReceiptItemInput[]>(fd, "itemsJson", []),
+      freight: fint(fd, "freight"), otherExpenses: fint(fd, "otherExpenses"), discount: fint(fd, "discount"),
+      paymentTermId: fd.has("paymentTermId") ? fopt(fd, "paymentTermId") : undefined, paymentMethodId: fopt(fd, "paymentMethodId"),
+      entryAt, nfeKey: fopt(fd, "nfeKey"), nfeNumber: fopt(fd, "nfeNumber"), nfeSeries: fopt(fd, "nfeSeries"), notes: fopt(fd, "notes"), idemKey: fstr(fd, "_idem"),
+    });
+    const msg = r.status === "scheduled" ? `Entrada PREVISTA registrada no recebimento nº ${r.number} (a chegar; conta a pagar prevista).` : `Entrada registrada no recebimento nº ${r.number}: estoque lançado, aguardando a nota do fornecedor.`;
+    return { ok: true as const, message: msg, redirect: `/compras/recebimentos/${r.id}` };
+  });
+}
+
+/** Lê o formulário "Confirmar com a nota" (XML ou dados informados). */
+async function invoiceInput(fd: FormData): Promise<ConfirmInvoiceInput> {
+  const mode = fstr(fd, "mode");
+  const base = { matches: fjson<Record<string, number>>(fd, "matchesJson", {}), qtyActions: fjson<Record<string, QtyAction>>(fd, "qtyActionsJson", {}), notes: fopt(fd, "notes") };
+  if (mode === "xml") {
+    const file = fd.get("xml");
+    if (!(file instanceof File) || file.size === 0) throw new BusinessError("Selecione o arquivo XML da NF-e do fornecedor.", "xml_missing");
+    if (file.size > 5_000_000) throw new BusinessError("Arquivo muito grande (máx. 5 MB).", "xml_size");
+    return { ...base, xml: await file.text(), fileName: file.name };
+  }
+  const total = fstr(fd, "total");
+  return {
+    ...base,
+    manual: {
+      nfeNumber: fstr(fd, "nfeNumber"), nfeSeries: fopt(fd, "nfeSeries"), nfeKey: fopt(fd, "nfeKey"), issueDate: fstr(fd, "issueDate"),
+      freight: fint(fd, "freight"), otherExpenses: fint(fd, "otherExpenses"), discount: fint(fd, "discount"), total: total && total !== "0" ? fint(fd, "total") : null,
+      items: fjson<Array<{ idx: number; qty: number; unitCost: number }>>(fd, "noteItemsJson", []),
+    },
+  };
+}
+
+/** Compara a nota com a entrada (intent=analyze, sem gravar) ou confirma (intent=confirm). */
+export async function invoiceConfirmAction(fd: FormData) {
+  const id = fstr(fd, "id");
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PI_PATHS] }, async (s) => {
+    const input = await invoiceInput(fd);
+    if (fstr(fd, "intent") === "confirm") {
+      const r = await confirmPendingInvoice(s.ctx, id, input);
+      return { ok: true as const, message: `Recebimento nº ${r.number} confirmado com a NF-e ${r.nfeNumber}: custo, estoque e conta a pagar ajustados pela nota.` };
+    }
+    const { parsed, ...data } = await analyzeInvoice(s.ctx, id, input);
+    void parsed;
+    return { ok: true as const, data, message: data.problems.length ? "Comparação feita: resolva as pendências antes de confirmar." : "Comparação feita: confira as diferenças e confirme." };
+  });
+}
+
+/** Cancela uma entrada PREVISTA ainda não realizada. */
+export async function cancelScheduledAction(id: string, fd: FormData) {
+  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PI_PATHS] }, async (s) => {
+    await cancelScheduledEntry(s.ctx, id, fstr(fd, "reason"));
+    return { ok: true as const, message: "Entrada prevista cancelada (nada foi lançado no estoque; a conta a pagar prevista foi cancelada)." };
   });
 }

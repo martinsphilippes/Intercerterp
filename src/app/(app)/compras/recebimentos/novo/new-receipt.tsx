@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { FileCode2, KeyRound, ClipboardList, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileCode2, KeyRound, ClipboardList, Trash2, FileClock } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
-import { Field, Input, Select, FormGrid, Checkbox } from "@/components/ui/form";
+import { Field, Input, Select, FormGrid, Checkbox, Textarea } from "@/components/ui/form";
 import { MoneyInput, QtyInput } from "@/components/ui/money-input";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
@@ -11,7 +11,7 @@ import { cn } from "@/components/ui/cn";
 import { formatMoney, formatQty, lineTotal } from "@/lib/money";
 import { formatDate, today } from "@/lib/dates";
 import { SkuPicker } from "../../_shared/sku-picker";
-import { importXmlAction, fetchByKeyAction, manualReceiptAction } from "../actions";
+import { importXmlAction, fetchByKeyAction, manualReceiptAction, pendingInvoiceEntryAction } from "../actions";
 
 export interface OpenOrder {
   id: string;
@@ -23,7 +23,7 @@ export interface OpenOrder {
   remainingValue: number;
 }
 
-type Mode = "xml" | "key" | "manual";
+type Mode = "xml" | "key" | "manual" | "pending";
 type Opt = { value: string; label: string };
 
 interface ManualRow {
@@ -47,6 +47,9 @@ export function NewReceipt({
   supplierTerms = {},
   warehouses = [],
   defaultWarehouseName = "",
+  canReceive = true,
+  pendingInvoice = null,
+  initialMode = null,
 }: {
   orders: OpenOrder[];
   suppliers: Opt[];
@@ -60,9 +63,14 @@ export function NewReceipt({
   /** §39: depósitos ativos da filial que recebem mercadoria (venda, almoxarifado, uso e consumo) */
   warehouses?: Opt[];
   defaultWarehouseName?: string;
+  /** permissão "Receber mercadorias" (sem ela, só a entrada com nota a confirmar) */
+  canReceive?: boolean;
+  /** §40: entrada com nota a confirmar (recurso ligado e permissão "Lançar entrada com nota a confirmar") */
+  pendingInvoice?: { dueDays: number } | null;
+  initialMode?: Mode | null;
 }) {
   const initialOrder = orders.find((o) => o.id === initialOrderId) ?? null;
-  const [mode, setMode] = useState<Mode>("xml");
+  const [mode, setMode] = useState<Mode>(initialMode ?? (canReceive ? "xml" : "pending"));
   const [supplierId, setSupplierId] = useState<string>(initialOrder?.supplierId ?? "");
   const [selected, setSelected] = useState<string[]>(initialOrder ? [initialOrder.id] : []);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
@@ -84,11 +92,16 @@ export function NewReceipt({
     if (noOrderEnabled && id && !orders.some((o) => o.supplierId === id)) setOrderMode("none");
   };
   const modes: Array<{ key: Mode; label: string; hint: string; icon: any }> = [
-    { key: "xml", label: "Importar XML", hint: "Arquivo da NF-e recebido do fornecedor (recomendado)", icon: FileCode2 },
-    { key: "key", label: "Ler chave de acesso", hint: "Busca o XML se houver integração capaz", icon: KeyRound },
-    noOrderEnabled
-      ? { key: "manual", label: "Lançar nota sem XML", hint: "Pelo saldo do pedido ou nota avulsa sem pedido", icon: ClipboardList }
-      : { key: "manual", label: "Sem XML (pelo pedido)", hint: "Itens a partir do saldo dos pedidos", icon: ClipboardList },
+    ...(canReceive
+      ? [
+          { key: "xml" as Mode, label: "Importar XML", hint: "Arquivo da NF-e recebido do fornecedor (recomendado)", icon: FileCode2 },
+          { key: "key" as Mode, label: "Ler chave de acesso", hint: "Busca o XML se houver integração capaz", icon: KeyRound },
+          noOrderEnabled
+            ? { key: "manual" as Mode, label: "Lançar nota sem XML", hint: "Pelo saldo do pedido ou nota avulsa sem pedido", icon: ClipboardList }
+            : { key: "manual" as Mode, label: "Sem XML (pelo pedido)", hint: "Itens a partir do saldo dos pedidos", icon: ClipboardList },
+        ]
+      : []),
+    ...(pendingInvoice ? [{ key: "pending" as Mode, label: "Nota a confirmar", hint: "A mercadoria chegou antes da nota fiscal", icon: FileClock }] : []),
   ];
   const ordersPicker = (name: string) =>
     supplierOrders.length > 0 && (
@@ -106,7 +119,7 @@ export function NewReceipt({
     );
   return (
     <div className="space-y-5">
-      <div role="tablist" className="grid gap-3 sm:grid-cols-3">
+      <div role="tablist" className={cn("grid gap-3", modes.length >= 4 ? "sm:grid-cols-2 lg:grid-cols-4" : modes.length === 1 ? "sm:grid-cols-1" : "sm:grid-cols-3")}>
         {modes.map((m) => {
           const Icon = m.icon;
           return (
@@ -169,6 +182,9 @@ export function NewReceipt({
             )}
           </ActionForm>
         )}
+        {mode === "pending" && pendingInvoice && (
+          <PendingInvoiceForm suppliers={suppliers} warehouses={warehouses} defaultWarehouseName={defaultWarehouseName} terms={terms} methods={methods} supplierTerms={supplierTerms} dueDays={pendingInvoice.dueDays} />
+        )}
         {mode === "manual" && (
           <ActionForm action={manualReceiptAction} className="space-y-4">
             {({ pending, error }) => (
@@ -228,8 +244,67 @@ export function NewReceipt({
   );
 }
 
+/** Data/hora local atual no formato do campo datetime-local (AAAA-MM-DDTHH:mm). */
+function nowLocal() {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * §40 — entrada com nota a confirmar: a mercadoria chegou antes da nota do fornecedor. Data/hora atual ou passada =
+ * entrada realizada agora (estoque e conta a pagar provisória); futura = entrada PREVISTA (a chegar).
+ */
+function PendingInvoiceForm({ suppliers, warehouses, defaultWarehouseName, terms, methods, supplierTerms, dueDays }: { suppliers: Opt[]; warehouses: Opt[]; defaultWarehouseName: string; terms: Opt[]; methods: Opt[]; supplierTerms: Record<string, string>; dueDays: number }) {
+  const [supplierId, setSupplierId] = useState("");
+  // relógio do navegador (fuso de quem lança): preenchido depois da montagem para não divergir da renderização no servidor
+  const [entryAt, setEntryAt] = useState("");
+  useEffect(() => setEntryAt(nowLocal()), []);
+  const future = Boolean(entryAt) && entryAt > nowLocal();
+  const entryDate = entryAt.slice(0, 10);
+  const due = entryDate ? new Date(Date.parse(`${entryDate}T12:00:00Z`) + dueDays * 86400000).toISOString().slice(0, 10) : "";
+  return (
+    <ActionForm action={pendingInvoiceEntryAction} className="space-y-4">
+      {({ pending, error }) => (
+        <>
+          <Notice tone="info" title="Mercadoria chegou antes da nota fiscal">
+            O estoque entra no depósito escolhido como uma entrada normal, marcada <strong>aguardando nota</strong>, com a conta a pagar <strong>provisória</strong> pelo custo previsto. As vendas continuam normais e sempre com NFC-e/NF-e. Quando a nota chegar, use “Confirmar com a nota” no recebimento: custo, quantidade e conta a pagar são corrigidos pela nota. Data/hora <strong>futura</strong> registra uma entrada <strong>prevista</strong> (a chegar), sem mexer no saldo nem no custo até a data.
+          </Notice>
+          <FormGrid cols={3}>
+            <Field label="Fornecedor" required>
+              <Select name="supplierId" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} options={suppliers} placeholder="Selecione…" />
+            </Field>
+            <Field label="Data e hora da entrada" required hint={future ? "Futura: entrada PREVISTA (a chegar) — realizada automaticamente na data." : "Agora ou no passado: entrada realizada ao salvar."}>
+              <Input name="entryAt" type="datetime-local" value={entryAt} onChange={(e) => setEntryAt(e.target.value)} required />
+            </Field>
+            <Field label="Depósito de destino" hint="Onde a mercadoria dá entrada.">
+              <Select name="warehouseId" defaultValue="" options={warehouses} placeholder={`Padrão — ${defaultWarehouseName || "depósito padrão da filial"}`} />
+            </Field>
+            <Field label="Número da nota (se já souber)">
+              <Input name="nfeNumber" inputMode="numeric" />
+            </Field>
+            <Field label="Série">
+              <Input name="nfeSeries" inputMode="numeric" />
+            </Field>
+            <Field label="Chave de acesso (se já souber)">
+              <Input name="nfeKey" inputMode="numeric" />
+            </Field>
+          </FormGrid>
+          <NoOrderItems key={supplierId} supplierId={supplierId} terms={terms} methods={methods} defaultTermId={supplierTerms[supplierId] ?? ""} costLabel="Custo previsto" termHint="Gera as parcelas provisórias a partir da data da entrada (corrigidas pela nota)." dueLabel="Valor previsto" termPlaceholder="À vista (vencimento na data da entrada)" />
+          <Field label="Observações">
+            <Textarea name="notes" rows={2} placeholder="Ex.: entregue pelo vendedor; nota prometida para a próxima semana." />
+          </Field>
+          <p className="text-sm text-slate-600">Prazo para a nota: <strong>{due ? due.split("-").reverse().join("/") : "—"}</strong> ({dueDays} dias após a entrada — parâmetro de Compras).</p>
+          {error && <p className="text-sm text-red-700">{error}</p>}
+          <div className="flex justify-end"><SubmitButton pending={pending} variant="accent">{future ? "Registrar entrada prevista" : "Lançar entrada aguardando nota"}</SubmitButton></div>
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
 /** Itens, encargos e condição de pagamento da nota lançada sem pedido. */
-function NoOrderItems({ supplierId, terms, methods, defaultTermId }: { supplierId: string; terms: Opt[]; methods: Opt[]; defaultTermId: string }) {
+function NoOrderItems({ supplierId, terms, methods, defaultTermId, costLabel = "Custo unit.", termHint = "Gera as parcelas do contas a pagar a partir da data de emissão.", dueLabel = "Valor devido", termPlaceholder = "À vista (vencimento na emissão)" }: { supplierId: string; terms: Opt[]; methods: Opt[]; defaultTermId: string; costLabel?: string; termHint?: string; dueLabel?: string; termPlaceholder?: string }) {
   const [rows, setRows] = useState<ManualRow[]>([]);
   const [seq, setSeq] = useState(1);
   const [freight, setFreight] = useState(0);
@@ -264,7 +339,7 @@ function NoOrderItems({ supplierId, terms, methods, defaultTermId }: { supplierI
           <div className="-mx-5 mt-3 overflow-x-auto">
             <table className="table-base w-full text-sm">
               <thead>
-                <tr><th>Produto</th><th className="w-28 text-right">Quantidade</th><th className="w-36 text-right">Custo unit.</th><th className="w-36 text-right">Desconto</th><th className="text-right">Total</th><th /></tr>
+                <tr><th>Produto</th><th className="w-28 text-right">Quantidade</th><th className="w-36 text-right">{costLabel}</th><th className="w-36 text-right">Desconto</th><th className="text-right">Total</th><th /></tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
@@ -284,8 +359,8 @@ function NoOrderItems({ supplierId, terms, methods, defaultTermId }: { supplierI
       </fieldset>
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <FormGrid cols={2}>
-          <Field label="Condição de pagamento" hint="Gera as parcelas do contas a pagar a partir da data de emissão.">
-            <Select name="paymentTermId" defaultValue={defaultTermId} options={terms} placeholder="À vista (vencimento na emissão)" />
+          <Field label="Condição de pagamento" hint={termHint}>
+            <Select name="paymentTermId" defaultValue={defaultTermId} options={terms} placeholder={termPlaceholder} />
           </Field>
           <Field label="Forma de pagamento">
             <Select name="paymentMethodId" defaultValue="" options={methods} placeholder="—" />
@@ -296,7 +371,7 @@ function NoOrderItems({ supplierId, terms, methods, defaultTermId }: { supplierI
           <div className="flex items-center justify-between gap-3"><dt>Frete</dt><dd className="w-32"><MoneyInput value={freight} onChange={setFreight} ariaLabel="Frete" /></dd></div>
           <div className="flex items-center justify-between gap-3"><dt title="Outras despesas, seguro, IPI e ST da nota">Outras despesas/IPI/ST</dt><dd className="w-32"><MoneyInput value={other} onChange={setOther} ariaLabel="Outras despesas" /></dd></div>
           <div className="flex items-center justify-between gap-3"><dt>Desconto da nota</dt><dd className="w-32"><MoneyInput value={discount} onChange={setDiscount} ariaLabel="Desconto da nota" /></dd></div>
-          <div className="flex justify-between border-t border-line pt-2 font-semibold"><dt>Valor devido</dt><dd className="tabular">{formatMoney(due)}</dd></div>
+          <div className="flex justify-between border-t border-line pt-2 font-semibold"><dt>{dueLabel}</dt><dd className="tabular">{formatMoney(due)}</dd></div>
         </dl>
       </div>
     </div>

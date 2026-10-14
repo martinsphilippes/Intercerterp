@@ -38,3 +38,13 @@ registerRoutine("purchases.followup", async (store, companyId) => {
   }
   return { unsent, late };
 });
+
+/**
+ * Entrada com nota a confirmar (§40): realiza as entradas previstas cuja data/hora chegou (idempotente) e, com o aviso
+ * ligado, avisa quem confirma notas sobre prazos vencendo/vencidos — uma ocorrência por recebimento, resolvida na
+ * confirmação da nota.
+ */
+registerRoutine("purchases.pending_invoice", async (store, companyId) => {
+  const { runPendingInvoiceRoutine } = await import("../pending-invoice");
+  return runPendingInvoiceRoutine(store, companyId);
+});

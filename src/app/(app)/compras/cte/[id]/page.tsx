@@ -99,7 +99,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </table>
         </div>
         <p className="border-t border-line px-4 py-2 text-xs text-slate-500">
-          Recebimento já concluído: a parte do frete das unidades ainda em estoque entra no custo médio (movimento “Ajuste de custo (frete CT-e)”, sem quantidade); a parte das unidades já vendidas ou baixadas fica registrada como não absorvida, para o ajuste contábil. O crédito de ICMS do frete não é descontado do custo.
+          Recebimento já concluído: a parte do frete das unidades ainda em estoque entra no custo médio (movimento “Ajuste de custo (frete CT-e / nota)”, sem quantidade); a parte das unidades já vendidas ou baixadas fica registrada como não absorvida, para o ajuste contábil. O crédito de ICMS do frete não é descontado do custo.
         </p>
       </Card>
       <div className="grid gap-4 lg:grid-cols-2">

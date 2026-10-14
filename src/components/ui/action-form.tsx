@@ -163,9 +163,9 @@ export function ActionButton({
   );
 }
 
-export function SubmitButton({ pending, children, variant = "primary", className, name, value, size = "md" }: { pending: boolean; children: React.ReactNode; variant?: "primary" | "accent" | "danger" | "secondary" | "ghost" | "outline"; className?: string; name?: string; value?: string; size?: "sm" | "md" | "lg" }) {
+export function SubmitButton({ pending, children, variant = "primary", className, name, value, size = "md", disabled }: { pending: boolean; children: React.ReactNode; variant?: "primary" | "accent" | "danger" | "secondary" | "ghost" | "outline"; className?: string; name?: string; value?: string; size?: "sm" | "md" | "lg"; disabled?: boolean }) {
   return (
-    <button type="submit" name={name} value={value} disabled={pending} aria-busy={pending || undefined} className={buttonClass(variant, size, className)}>
+    <button type="submit" name={name} value={value} disabled={pending || disabled} aria-busy={pending || undefined} className={buttonClass(variant, size, className)}>
       {pending && <Spinner />}
       {children}
     </button>

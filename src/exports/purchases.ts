@@ -6,6 +6,7 @@ import { queryReceipts } from "@/app/(app)/compras/recebimentos/queries";
 import { queryQuotations } from "@/app/(app)/compras/cotacoes/queries";
 import { queryRequests } from "@/app/(app)/compras/aprovacoes/queries";
 import { queryReplenishment } from "@/app/(app)/compras/reposicao/queries";
+import { queryPendingInvoices } from "@/app/(app)/compras/aguardando-nota/queries";
 
 defineExport("purchase_orders", {
   module: "purchases",
@@ -61,6 +62,31 @@ defineExport("receipts", {
     { key: "confirmedAt", label: "Confirmado em", type: "datetime" },
   ],
   rows: (s, params) => queryReceipts(s.ctx, parseList(params)),
+});
+
+/** §40 — compras aguardando nota (painel e relatório para o contador): mesma consulta da tela. */
+defineExport("purchase-pending-invoices", {
+  module: "purchases",
+  title: "Compras aguardando nota",
+  columns: [
+    { key: "number", label: "Recebimento", type: "number" },
+    { key: "stateLabel", label: "Situação" },
+    { key: "supplierName", label: "Fornecedor" },
+    { key: "supplierDoc", label: "CNPJ/CPF" },
+    { key: "branchName", label: "Filial" },
+    { key: "warehouseName", label: "Depósito" },
+    { key: "entryAt", label: "Data/hora da entrada", type: "datetime" },
+    { key: "invoiceDueAt", label: "Prazo da nota", type: "date" },
+    { key: "daysOpen", label: "Dias em aberto", type: "number" },
+    { key: "itemsCount", label: "Itens", type: "number" },
+    { key: "units", label: "Unidades", type: "qty" },
+    { key: "value", label: "Valor (previsto ou da nota)", type: "money" },
+    { key: "nfeNumber", label: "NF-e" },
+    { key: "nfeKey", label: "Chave de acesso" },
+    { key: "invoiceConfirmedAt", label: "Nota confirmada em", type: "datetime" },
+    { key: "previousValue", label: "Valor previsto antes da nota", type: "money" },
+  ],
+  rows: (s, params) => queryPendingInvoices(s.ctx, parseList(params)),
 });
 
 defineExport("quotations", {

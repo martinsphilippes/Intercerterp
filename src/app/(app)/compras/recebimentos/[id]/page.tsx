@@ -27,6 +27,9 @@ import { SupplierReturnsCard } from "./supplier-returns";
 import { isFeatureOn } from "@/lib/core/settings";
 import { ReceiptShortcuts } from "./receipt-shortcuts";
 import { receivesGoods, sortWarehouses, warehouseOptionLabel } from "@/domain/warehouse-rules";
+import { pendingInvoiceSettings, realizeEntry } from "@/domain/pending-invoice";
+import { MOVEMENT_LABEL } from "@/domain/stock";
+import { PendingInvoiceCard } from "./pending-invoice-card";
 
 export const metadata = { title: "Recebimento" };
 
@@ -50,13 +53,26 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const s = await requireSession("purchases");
   const { id } = await params;
   const store = s.ctx.store;
-  const r = await store.get("receipts", id);
+  let r = await store.get("receipts", id);
   if (!r || r.companyId !== s.ctx.companyId) notFound();
+  // §40: entrada com nota a confirmar — a abertura realiza a entrada prevista cuja data/hora chegou (e conclui uma
+  // realização interrompida); idempotente
+  const pendingDoc = r.documentStatus === "pending_invoice" || r.documentStatus === "confirmed";
+  let realizeError: string | null = null;
+  if (r.documentStatus === "pending_invoice" && ["scheduled", "draft", "confirming"].includes(r.status)) {
+    try {
+      r = (await realizeEntry(store, s.ctx.companyId, id)) ?? r;
+    } catch (e: any) {
+      realizeError = String(e?.message ?? e);
+      r = (await store.get("receipts", id)) ?? r;
+    }
+  }
   const supplier = await store.get("suppliers", r.supplierId);
   const items: ReceiptItem[] = r.items ?? [];
   const divergences = r.divergences ?? [];
   const linkedOrders = (await Promise.all((r.orderIds ?? []).map((oid: string) => store.get("purchase_orders", oid)))).filter((o) => o && o.companyId === s.ctx.companyId) as any[];
-  const draft = r.status === "draft";
+  // entrada com nota a confirmar não passa pela conferência (é realizada no lançamento ou na data prevista)
+  const draft = r.status === "draft" && !pendingDoc;
   const eff = effectsOf(r);
   const active = items.filter((i) => !i.ignore);
   const checked = active.filter((i) => i.checked).length;
@@ -87,12 +103,19 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // nota de entrada sem estoque (FIS-24): sem produtos — sem devolução, precificação nem etiquetas
   const noStock = r.entryKind === "no_stock";
   const canReturn = !noStock && confirmed && canDo(s.user, "fiscal.issue") && s.ctx.branchId === r.branchId && (await isFeatureOn(store, s.ctx.companyId, r.branchId, "devolucaoFornecedor", true));
-  const steps = [
+  const steps = pendingDoc
+    ? [
+        { label: "Entrada lançada", hint: `Nota a confirmar · ${formatDateTime(r.createdAt)}`, state: "done" as const },
+        { label: r.status === "scheduled" ? "Entrada prevista" : "Entrada realizada", hint: r.status === "scheduled" ? `A chegar em ${formatDateTime(r.entryAt)}` : `Estoque em ${formatDateTime(r.entryAt)}`, state: (r.status === "scheduled" ? "active" : "done") as "done" | "active" },
+        { label: "Nota do fornecedor", hint: r.documentStatus === "confirmed" ? `NF-e ${r.nfeNumber ?? ""} confirmada` : `Prazo ${formatDate(r.invoiceDueAt)}`, state: (r.documentStatus === "confirmed" ? "done" : r.status === "scheduled" ? "todo" : "active") as "done" | "active" | "todo" },
+        { label: "Custo e conta a pagar", hint: r.documentStatus === "confirmed" ? "Corrigidos pela nota" : "Provisórios (custo previsto)", state: (r.documentStatus === "confirmed" ? "done" : "todo") as "done" | "todo" },
+      ]
+    : [
     { label: r.xmlFileId ? "NF-e importada" : r.origin === "manual" && withoutOrder ? "Nota lançada" : "Documento informado", hint: r.xmlFileId ? "XML validado" : r.nfeKey ? "Chave informada (sem XML)" : "Sem XML", state: "done" as const },
     { label: withoutOrder ? "Entrada sem pedido" : "Pedido vinculado", hint: linkedOrders.length ? linkedOrders.map((o) => `nº ${o.number}`).join(", ") : "Compra sem pedido de compra", state: (linkedOrders.length || r.orderLink === "without_order" || !draft ? "done" : "active") as "done" | "active" },
     { label: "Conferência física", hint: confirmed ? `${active.length} de ${active.length} itens` : `${checked} de ${active.length} itens conferidos`, state: (confirmed ? "done" : draft && linkedOrders.length >= 0 ? "active" : "todo") as "done" | "active" | "todo" },
     { label: "Concluir entrada", hint: "Estoque e financeiro", state: (confirmed ? "done" : "todo") as "done" | "todo" },
-  ];
+      ];
   const stockUnits = active.filter((i) => i.skuId).reduce((a, i) => a + i.receivedQty, 0);
   const costProducts = new Set(active.filter((i) => i.skuId && i.receivedQty > 0).map((i) => i.skuId)).size;
   const installments: any[] = r.installments ?? [];
@@ -127,7 +150,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       blockers: confirmBlockers(r),
     };
   }
-  const movements = confirmed ? await receiptMovements(store, id) : [];
+  // §40: inclui os movimentos da confirmação da nota (ajuste de custo e de quantidade)
+  const movements = confirmed ? [...(await receiptMovements(store, id)), ...(pendingDoc ? await listAll(store, "stock_movements", { filters: [["eq", "originType", "receipt_invoice"], ["eq", "originId", id]] }) : [])] : [];
   // itens do XML sem vínculo: prévia do cadastro de produto (COM-04)
   const canNewProducts = draft && canReceive && Boolean(r.xmlFileId) && can(s.user, "products", "create");
   const newProducts = canNewProducts ? await planProductsFromReceipt(s.ctx, r) : [];
@@ -138,7 +162,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <PageHeader
         title={`Recebimento nº ${r.number}`}
         crumbs={[{ label: "Recebimentos", href: "/compras/recebimentos" }, { label: `nº ${r.number}` }]}
-        badges={<StatusBadge kind="receipt" status={r.status} />}
+        badges={
+          <>
+            <StatusBadge kind="receipt" status={r.status} />
+            {pendingDoc && <StatusBadge kind="receipt_document" status={r.documentStatus} />}
+          </>
+        }
         description={`${supplier ? supplierLabel(supplier) : r.emitter?.name ?? "—"} · ${wh?.name ?? ""} · aberto em ${formatDateTime(r.createdAt)} por ${users.get(r.createdBy) ?? "—"}${confirmed ? ` · confirmado em ${formatDateTime(r.confirmedAt)} por ${users.get(r.confirmedBy) ?? "—"}` : ""}`}
         actions={
           <>
@@ -151,6 +180,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         }
       />
       <Stepper steps={steps} />
+      {pendingDoc && (
+        <PendingInvoiceCard
+          r={r}
+          title={r.payableTitleId ? await store.get("titles", r.payableTitleId) : null}
+          leadDays={(await pendingInvoiceSettings(store, s.ctx.companyId, r.branchId)).leadDays}
+          canConfirm={canDo(s.user, "purchase.confirm_invoice") && s.ctx.branchId === r.branchId}
+          canCancel={canDo(s.user, "purchase.receive_pending_invoice") && s.ctx.branchId === r.branchId}
+          canReturn={canReturn}
+          users={users}
+          realizeError={realizeError}
+        />
+      )}
       <Card className="mb-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -160,6 +201,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               {r.nfeKey && <p className="tabular font-mono text-xs text-slate-600">{keyFmt}</p>}
               <div className="mt-1 flex flex-wrap gap-1">
                 {r.xmlFileId ? <Badge tone="good">XML validado (estrutura e chave)</Badge> : <Badge tone="warn">Sem XML</Badge>}
+                {r.documentStatus === "pending_invoice" && <Badge tone="warn" title="Mercadoria recebida antes da nota fiscal do fornecedor">Nota a confirmar</Badge>}
                 {noStock && <Badge tone="info" title="Escriturada no livro de entradas; não movimenta estoque nem custo">Nota de entrada sem estoque</Badge>}
                 {r.emitter?.environment === "homologacao" && <Badge tone="bad" title="NF-e emitida em ambiente de homologação (tpAmb = 2): não tem valor fiscal">Homologação – sem valor fiscal</Badge>}
                 {r.emitter?.authorized && r.emitter?.environment !== "homologacao" && <Badge tone="good">Autorizada · protocolo {r.emitter?.protocol}</Badge>}
@@ -259,7 +301,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               <DefinitionList
                 cols={1}
                 items={[
-                  { label: "Estoque", value: eff.updateStock ? <span>+{formatQty(stockUnits)} unidades em {wh?.name} ({movements.length} movimento(s))</span> : "Não atualizado (efeito desmarcado)" },
+                  { label: "Estoque", value: r.status === "scheduled" ? <span>Prevista: +{formatQty(stockUnits)} unidades em {wh?.name} (a chegar — ainda sem movimento)</span> : eff.updateStock ? <span>+{formatQty(stockUnits)} unidades em {wh?.name} ({movements.length} movimento(s))</span> : "Não atualizado (efeito desmarcado)" },
                   { label: "Custo", value: eff.updateCost ? `Custo de aquisição e médio atualizados em ${costProducts} produto(s)` : "Custo não atualizado" },
                   { label: "Contas a pagar", value: r.payableTitleId ? <Link className="text-brand-700 hover:underline" href={`/financeiro/pagar/${r.payableTitleId}`}>{installments.length} parcela(s) · {formatMoney(installments.reduce((a, x) => a + x.amount, 0))}</Link> : eff.createPayable ? "—" : "Não gerado (efeito desmarcado)" },
                   { label: "Vencimentos", value: installments.map((x) => formatDate(x.dueDate)).join(" e ") || "—" },
@@ -283,7 +325,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   {movements.map((m) => (
                     <tr key={m.id}>
                       <td>{m.productId ? <Link className="text-brand-700 hover:underline" href={`/produtos/${m.productId}?tab=estoque`}>{items.find((i) => i.skuId === m.skuId)?.description ?? m.skuId}</Link> : m.skuId}</td>
-                      <td className="tabular text-right">+{formatQty(m.qty)}</td>
+                      <td className="tabular text-right">{m.type === "cost_adjust" ? <span title={MOVEMENT_LABEL.cost_adjust}>custo {formatMoney(m.totalCost)}</span> : <>{m.qty > 0 ? "+" : ""}{formatQty(m.qty)}</>}</td>
                       <td className="tabular text-right">{formatQty(m.balanceBefore)} → {formatQty(m.balanceAfter)}</td>
                       <td className="tabular text-right">{formatMoney(m.unitCost)}</td>
                       <td className="tabular text-right">{formatMoney(m.avgCostAfter)}</td>

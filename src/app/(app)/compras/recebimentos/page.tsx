@@ -13,6 +13,7 @@ import { formatDate, formatDateTime, monthStart, today } from "@/lib/dates";
 import { canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
 import { queryReceipts } from "./queries";
+import { featureOn } from "@/lib/server/features";
 
 export const metadata = { title: "Recebimento de mercadorias" };
 
@@ -31,8 +32,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const month = today().slice(0, 7);
   const confirmedMonth = base.filter((r) => r.status === "confirmed" && (r.confirmedAt ?? "").slice(0, 7) === month);
   const withDiv = base.filter((r) => r.divergenceCount > 0);
+  // §40: card do painel "Compras aguardando nota"
+  const piOn = await featureOn(s, "notaAConfirmar");
+  const awaiting = base.filter((r) => r.documentStatus === "pending_invoice");
+  const awaitingOverdue = awaiting.filter((r) => r.status !== "scheduled" && r.invoiceDueAt && r.invoiceDueAt < today());
   const columns: Column<Row>[] = [
-    { key: "number", label: "Recebimento", sortable: true, fixed: true, cell: (r) => <span>nº {r.number}{r.entryKind === "no_stock" ? <span className="block text-xs font-normal text-slate-500">nota sem estoque</span> : !r.hasXml && <span className="block text-xs font-normal text-slate-500">{r.origin === "manual" && !r.orderNumbers.length ? "lançamento manual" : "sem XML"}</span>}</span> },
+    { key: "number", label: "Recebimento", sortable: true, fixed: true, cell: (r) => <span>nº {r.number}{r.documentStatus === "pending_invoice" ? <span className="block text-xs font-normal text-amber-700">{r.status === "scheduled" ? "entrada prevista · nota a confirmar" : "aguardando nota"}</span> : r.entryKind === "no_stock" ? <span className="block text-xs font-normal text-slate-500">nota sem estoque</span> : !r.hasXml && <span className="block text-xs font-normal text-slate-500">{r.origin === "manual" && !r.orderNumbers.length ? "lançamento manual" : "sem XML"}</span>}</span> },
     { key: "nfeNumber", label: "NF-e", cell: (r) => (r.nfeNumber ? <span>{r.nfeNumber}{r.nfeSeries ? ` / ${r.nfeSeries}` : ""}<span className="block text-xs text-slate-500">{formatDate(r.nfeIssueDate)}</span></span> : "—") },
     { key: "supplierName", label: "Fornecedor", sortable: true, cell: (r) => <Link className="hover:underline" href={`/fornecedores/${r.supplierId}`}>{r.supplierName}</Link> },
     { key: "orders", label: "Pedidos", cell: (r) => (r.orderNumbers.length ? r.orderNumbers.map((o: any) => <Link key={o.id} className="mr-1 text-brand-700 hover:underline" href={`/compras/pedidos/${o.id}`}>nº {o.number}</Link>) : <span className="text-slate-400">sem pedido</span>) },
@@ -49,20 +54,22 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         title="Recebimento de mercadorias"
         crumbs={[{ label: "Compras" }, { label: "Recebimentos" }]}
         description="Importe a NF-e (XML), confira produtos e quantidades e conclua a entrada física e financeira. A mesma chave nunca gera estoque ou contas a pagar em duplicidade."
-        actions={canDo(s.user, "purchase.receive") && s.ctx.branchId && <LinkButton href="/compras/recebimentos/novo" variant="accent"><FileUp className="size-4" /> Receber mercadorias</LinkButton>}
+        actions={(canDo(s.user, "purchase.receive") || (piOn && canDo(s.user, "purchase.receive_pending_invoice"))) && s.ctx.branchId && <LinkButton href="/compras/recebimentos/novo" variant="accent"><FileUp className="size-4" /> Receber mercadorias</LinkButton>}
       />
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className={`mb-4 grid grid-cols-2 gap-3 ${piOn ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         <Stat label="Em conferência" value={drafts.length} hint={formatMoney(sum(drafts, "invoicedTotal")) + " faturado"} href="/compras/recebimentos?status=draft" tone={drafts.length ? "warn" : "default"} />
         <Stat label="Entradas confirmadas no mês" value={formatMoney(sum(confirmedMonth, "dueTotal"))} hint={`${confirmedMonth.length} recebimento(s) desde ${formatDate(monthStart(today()))}`} href={`/compras/recebimentos?status=confirmed&from=${monthStart(today())}`} />
         <Stat label="Com divergência" value={withDiv.length} hint="Quantidade, custo, item fora do pedido ou valor" href="/compras/recebimentos?divergence=1" tone={withDiv.length ? "bad" : "default"} />
         <Stat label="Faturado × devido (recorte)" value={formatMoney(sum(base, "invoicedTotal") - sum(base, "dueTotal"))} hint="Diferença registrada como divergência" />
+        {piOn && <Stat label="Aguardando nota" value={awaiting.length} hint={awaitingOverdue.length ? `${awaitingOverdue.length} com prazo vencido` : `${formatMoney(sum(awaiting, "dueTotal"))} provisório`} href="/compras/aguardando-nota" tone={awaitingOverdue.length ? "bad" : awaiting.length ? "warn" : "default"} />}
       </div>
       <FilterBar
         basePath="/compras/recebimentos"
         values={params}
         filters={[
           { type: "search", placeholder: "Número, NF-e, chave de acesso ou fornecedor" },
-          { type: "select", name: "status", label: "Situação", options: [{ value: "draft", label: "Em conferência" }, { value: "confirmed", label: "Confirmado" }, { value: "cancelled", label: "Cancelado" }] },
+          { type: "select", name: "status", label: "Situação", options: [{ value: "draft", label: "Em conferência" }, { value: "confirmed", label: "Confirmado" }, { value: "scheduled", label: "Entrada prevista" }, { value: "cancelled", label: "Cancelado" }] },
+          { type: "select", name: "documento", label: "Nota", options: [{ value: "pending_invoice", label: "Aguardando nota" }, { value: "confirmed", label: "Nota confirmada depois da entrada" }] },
           { type: "select", name: "supplier", label: "Fornecedor", options: suppliers },
           { type: "select", name: "divergence", label: "Divergência", options: [{ value: "1", label: "Somente com divergência" }] },
           { type: "select", name: "order", label: "Pedido", options: [{ value: "with", label: "Com pedido" }, { value: "without", label: "Sem pedido" }] },

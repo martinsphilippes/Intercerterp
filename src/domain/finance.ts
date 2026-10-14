@@ -50,6 +50,10 @@ export interface CreateTitleInput {
   notes?: string | null;
   idemKey: string;
   branchId?: string | null;
+  /** §40: valor provisório até a nota do fornecedor (entrada com nota a confirmar) — gravado só quando verdadeiro */
+  provisional?: boolean;
+  /** §40: entrada ainda PREVISTA (data futura) — conta prevista: fluxo de caixa previsto, não pode ser baixada */
+  forecast?: boolean;
 }
 
 /**
@@ -135,6 +139,8 @@ export async function createTitle(ctx: Ctx, input: CreateTitleInput, tx?: Store)
         approvalStatus: input.kind === "payable" ? (input.approvalStatus ?? "pending") : null,
         notes: input.notes ?? null,
         idemKey: input.idemKey,
+        ...(input.provisional ? { provisional: true } : {}),
+        ...(input.forecast ? { forecast: true } : {}),
       },
       id,
     );
@@ -336,6 +342,8 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
     const title = await ctx.store.getOrThrow("titles", inst.titleId);
     assert(title.companyId === ctx.companyId && inst.companyId === ctx.companyId, "Título de outra empresa.");
     assert(title.status !== "cancelled", "Título cancelado não pode ser baixado.");
+    // §40: conta a pagar de entrada PREVISTA (mercadoria ainda não chegou) não é baixada antes da realização da entrada
+    assert(!title.forecast, `Título nº ${title.number} é PREVISTO (entrada de mercadoria com data futura, ainda não realizada): só pode ser baixado depois que a entrada for realizada.`, "title_forecast");
     // parcela quitada cai na regra de saldo (over_settlement) logo abaixo
     assert(
       inst.status !== "renegotiated" && inst.status !== "cancelled",

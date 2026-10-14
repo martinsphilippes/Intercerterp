@@ -63,6 +63,21 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           .
         </Notice>
       )}
+      {book.awaitingInvoice.length > 0 && !print && (
+        <Notice tone="info">
+          {book.awaitingInvoice.length} entrada(s) de mercadoria no período aguardando a nota do fornecedor (entram no livro ao confirmar a nota):{" "}
+          {book.awaitingInvoice.map((p, i) => (
+            <span key={p.id}>
+              {i > 0 && ", "}
+              <Link className="underline" href={`/compras/recebimentos/${p.id}`}>
+                nº {p.number}
+              </Link>{" "}
+              ({p.supplier})
+            </span>
+          ))}
+          .
+        </Notice>
+      )}
       <Card title="Resumo por CFOP de entrada" bodyClass="p-0" className="mb-4 break-inside-avoid">
         {book.byCfop.length === 0 ? (
           <p className="px-4 py-3 text-sm text-slate-500">Nenhuma entrada escriturada no período.</p>

@@ -2,7 +2,9 @@ import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Notice } from "@/components/ui/empty";
 import { listAll } from "@/lib/db";
-import { requireAction } from "@/lib/core/ctx";
+import { canDo } from "@/lib/permissions";
+import { featureOn } from "@/lib/server/features";
+import { pendingInvoiceSettings } from "@/domain/pending-invoice";
 import { supplierLabel } from "@/domain/suppliers";
 import { noOrderEntryOn } from "@/domain/receipts";
 import { receivesGoods, sortWarehouses, warehouseOptionLabel } from "@/domain/warehouse-rules";
@@ -10,17 +12,18 @@ import { NewReceipt } from "./new-receipt";
 
 export const metadata = { title: "Receber mercadorias" };
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ pedido?: string }> }) {
+export default async function Page({ searchParams }: { searchParams: Promise<{ pedido?: string; modo?: string }> }) {
   const s = await requireSession("purchases");
-  const { pedido } = await searchParams;
+  const { pedido, modo } = await searchParams;
   const crumbs = [{ label: "Recebimentos", href: "/compras/recebimentos" }, { label: "Receber" }];
-  try {
-    requireAction(s.ctx, "purchase.receive");
-  } catch {
+  // §40: quem só tem "Lançar entrada com nota a confirmar" (sem "Receber mercadorias") vê somente essa opção
+  const canReceive = canDo(s.user, "purchase.receive");
+  const canPending = canDo(s.user, "purchase.receive_pending_invoice") && (await featureOn(s, "notaAConfirmar"));
+  if (!canReceive && !canPending) {
     return (
       <>
         <PageHeader title="Receber mercadorias" crumbs={crumbs} />
-        <Notice tone="warn">Seu perfil não tem a permissão “Receber mercadorias”.</Notice>
+        <Notice tone="warn">Seu perfil não tem a permissão “Receber mercadorias” nem “Lançar entrada com nota a confirmar”.</Notice>
       </>
     );
   }
@@ -40,11 +43,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
     listAll(s.ctx.store, "warehouses", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "branchId", s.ctx.branchId]] }),
   ]);
   const defaultWh = warehouses.find((w) => w.id === s.branch?.defaultWarehouseId);
+  const piDueDays = canPending ? (await pendingInvoiceSettings(s.ctx.store, s.ctx.companyId, s.ctx.branchId)).dueDays : 0;
   return (
     <>
       <PageHeader title="Receber mercadorias" crumbs={crumbs} description={`Importe a NF-e, confira os produtos e conclua a entrada fiscal e física na filial ${s.branch?.name}.`} />
       <NewReceipt
         initialOrderId={pedido ?? null}
+        canReceive={canReceive}
+        pendingInvoice={canPending ? { dueDays: piDueDays } : null}
+        initialMode={modo === "nota-a-confirmar" && canPending ? "pending" : null}
         noOrderEnabled={noOrderEnabled}
         warehouses={sortWarehouses(warehouses.filter(receivesGoods)).map((w) => ({ value: w.id, label: warehouseOptionLabel(w) }))}
         defaultWarehouseName={defaultWh?.name ?? ""}

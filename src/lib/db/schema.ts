@@ -617,6 +617,9 @@ export const COLLECTIONS: CollectionDef[] = [
       approvalStatus: s(20), approvedBy: id(), approvedAt: dt, attachments: json, notes: txt, idemKey: s(120),
       // fechamento de comissão (originType "commission"): memória de cálculo por venda/devolução/recebimento
       commissionDetail: json,
+      // §40 — conta a pagar de entrada com nota a confirmar: provisional = valor provisório até a nota; forecast = entrada
+      // ainda PREVISTA (data futura): entra no fluxo de caixa previsto e não pode ser baixada
+      provisional: bool, forecast: bool,
     },
     indexes: [u("u_idem", "idemKey"), k("i_kind", "companyId", "kind"), k("i_origin", "originType", "originId"), k("i_party", "partyId")],
   },
@@ -781,6 +784,10 @@ export const COLLECTIONS: CollectionDef[] = [
       entryKind: s(20),
       // COM-10: frete de CT-e de entrada rateado no custo (total) e CT-e vinculados [{ cteId, key, number, amount, mode }]
       cteFreight: money, cteLinks: json,
+      // §40 — entrada com nota a confirmar: estado documental (ausente = recebimento comum; "pending_invoice" = aguardando
+      // a nota do fornecedor; "confirmed" = nota confirmada depois da entrada), data/hora da entrada (futura = prevista,
+      // status "scheduled"), prazo para a nota e confirmação (quem/quando e memória da comparação nota × entrada)
+      documentStatus: s(20), entryAt: dt, invoiceDueAt: date, invoiceConfirmedAt: dt, invoiceConfirmedBy: id(), invoiceConfirmation: json,
     },
     indexes: [u("u_scope", "scopeKey"), k("i_supplier", "supplierId")],
   },

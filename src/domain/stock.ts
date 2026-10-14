@@ -34,7 +34,10 @@ export type MovementType =
   | "supplier_return_cancel"
   | "assembly_out"
   | "assembly_in"
-  /** ajuste só de custo (quantidade 0): frete de CT-e de entrada lançado depois do recebimento concluído (COM-10) */
+  /**
+   * ajuste só de custo (quantidade 0): frete de CT-e de entrada lançado depois do recebimento concluído (COM-10) e
+   * diferença de custo da nota confirmada depois da entrada (§40 — entrada com nota a confirmar; pode ser negativa)
+   */
   | "cost_adjust";
 
 export const MOVEMENT_LABEL: Record<MovementType, string> = {
@@ -57,7 +60,7 @@ export const MOVEMENT_LABEL: Record<MovementType, string> = {
   supplier_return_cancel: "Estorno de devolução ao fornecedor",
   assembly_out: "Saída por montagem/desmembramento",
   assembly_in: "Entrada por montagem/desmembramento",
-  cost_adjust: "Ajuste de custo (frete CT-e)",
+  cost_adjust: "Ajuste de custo (frete CT-e / nota)",
 };
 
 export interface MovementInput {
@@ -103,6 +106,8 @@ export interface MovementInput {
    * inventário não usam esta regra.
    */
   respectReserved?: boolean;
+  /** `cost_adjust` com valor negativo (redução do custo médio — nota confirmada com custo menor, §40) */
+  allowCostReduction?: boolean;
 }
 
 export const balanceId = (warehouseId: string, skuId: string) => detId("bal", warehouseId, skuId);
@@ -138,6 +143,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   assembly: "Montagem/desmembramento",
   cart: "Pré-venda (reserva)",
   freight_cte: "CT-e de frete (compra)",
+  receipt_invoice: "Confirmação da nota (entrada com nota a confirmar)",
 };
 
 export function originHref(originType: string | null | undefined, originId: string | null | undefined): string | null {
@@ -151,6 +157,7 @@ export function originHref(originType: string | null | undefined, originId: stri
     case "receipt":
     case "purchase_receipt":
     case "purchase":
+    case "receipt_invoice":
       return `/compras/recebimentos/${originId}`;
     case "purchase_order":
       return `/compras/pedidos/${originId}`;
@@ -204,8 +211,9 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
   for (const m of inputs) {
     // quantidade 0 só no reenquadramento de lotes do inventário (o físico não muda)
     if (!Number.isInteger(m.qty) || (m.qty === 0 && !m.lotTarget && m.type !== "cost_adjust")) throw new BusinessError("Quantidade do movimento deve ser diferente de zero.");
-    // ajuste de custo (COM-10): só valor, sem quantidade
-    if (m.type === "cost_adjust" && (m.qty !== 0 || !(Number.isInteger(m.totalCost) && (m.totalCost as number) > 0))) throw new BusinessError("Ajuste de custo exige quantidade zero e valor positivo.");
+    // ajuste de custo (COM-10): só valor, sem quantidade. Valor negativo só quando explicitamente permitido (redução de
+    // custo da nota confirmada depois da entrada — §40); o frete de CT-e continua exigindo valor positivo.
+    if (m.type === "cost_adjust" && (m.qty !== 0 || !(Number.isInteger(m.totalCost) && ((m.totalCost as number) > 0 || (m.allowCostReduction && (m.totalCost as number) < 0))))) throw new BusinessError("Ajuste de custo exige quantidade zero e valor positivo.");
     await ensureBalance(store, ctx, m.warehouseId, m.skuId);
   }
   // controle de lote por produto (lido uma vez por chamada)
@@ -270,6 +278,8 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
         // valor acrescido ao estoque existente: novo custo médio = (saldo × médio + valor) ÷ saldo
         unitCost = 0;
         entryTotal = m.totalCost as number;
+        // redução de custo (§40) nunca deixa o valor do estoque negativo
+        if ((before as number) * avg + entryTotal * QTY < 0) throw new BusinessError("Ajuste de custo maior que o valor do estoque do item.", "cost_adjust_exceeds");
         avg = roundDiv((before as number) * avg + entryTotal * QTY, before as number);
       } else if (m.qty > 0 && m.unitCost != null && COST_ENTRY_TYPES.includes(m.type)) {
         unitCost = m.unitCost;

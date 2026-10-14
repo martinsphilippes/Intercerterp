@@ -28,6 +28,8 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   "finance.close_period",
   // cadastro de depósitos por filial (§39)
   "stock.warehouses",
+  // entrada com nota a confirmar (§40): lançar (Gerente e Estoquista) e confirmar com a nota (Gerente)
+  "purchase.receive_pending_invoice", "purchase.confirm_invoice",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);

@@ -17,6 +17,8 @@ import { commercialOverview } from "@/domain/reports";
 import { formatGoalValue, GOAL_METRICS, GOAL_STATUS_LABEL, goalsProgress, type GoalProgress } from "@/domain/goals";
 import { resolveReportParams, reportQs, commercialOpsHref, contextShowsScope, fiscalShowsScope, salesListHref } from "../relatorios/params";
 import { COMMON_DEFINITIONS, Delta, HowWeCalculate, marginText, ReportFilters, ScopeLine } from "../relatorios/_components/report-ui";
+import { listAll } from "@/lib/db";
+import { featureOn } from "@/lib/server/features";
 import { FISCAL_BUCKETS, certificateAlerts, financeSnapshot, fiscalSnapshot, latestSales, openCashSessions, stockAlerts, type FiscalBucket } from "./queries";
 
 export const metadata = { title: "Painel do gestor" };
@@ -116,6 +118,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     }
   }
   for (const c of certs) alertList.push({ key: `cert-${c.id}`, tone: c.daysLeft < 0 ? "bad" : "warn", icon: CalendarClock, title: c.daysLeft < 0 ? "Certificado digital vencido" : `Certificado vence em ${c.daysLeft} dia(s)`, text: `Validade ${formatDate(c.validTo)}${c.branchId ? ` · ${branchNames.get(c.branchId) ?? ""}` : ""}. Renovação recomendada.`, href: "/fiscal/configuracoes" });
+  // §40: compras aguardando a nota do fornecedor com o prazo vencido (entrada já realizada)
+  if (can(s.user, "purchases") && (await featureOn(s, "notaAConfirmar"))) {
+    const piOverdue = (await listAll(s.ctx.store, "receipts", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "documentStatus", "pending_invoice"], ["eq", "status", "confirmed"]] })).filter((r) => rp.branchIds.includes(r.branchId) && r.invoiceDueAt && r.invoiceDueAt < ref);
+    if (piOverdue.length) alertList.push({ key: "pending-invoice", tone: "bad", icon: FileWarning, title: `${piOverdue.length} compra(s) aguardando nota com prazo vencido`, text: `Mercadoria já em estoque sem a nota do fornecedor (${formatMoney(piOverdue.reduce((a, r) => a + (r.dueTotal ?? 0), 0))} provisório). Cobre a nota e confirme a entrada.`, href: "/compras/aguardando-nota?situacao=overdue" });
+  }
   for (const c of cash.filter((x) => x.stale)) alertList.push({ key: `cash-${c.id}`, tone: "warn", icon: Wallet, title: `Caixa aberto desde ${formatDate(c.openedAt)}`, text: `${c.terminal} · ${c.operator}. Feche o caixa do dia anterior.`, href: `/caixa` });
 
   const shortcuts = [
