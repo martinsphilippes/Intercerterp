@@ -355,7 +355,10 @@ export interface CompetenceFilter {
 export interface CompetenceRow {
   categoryId: string;
   type: "revenue" | "expense";
-  /** "abatement" = devoluções abatidas de títulos a receber (linha própria, reduz a receita da categoria do título) */
+  /**
+   * "abatement" = devoluções abatidas do título (linha própria): a receber reduz a receita da categoria do título;
+   * a pagar (devolução ao fornecedor) reduz a despesa da categoria do título
+   */
   source?: "abatement";
   months: Record<string, number>;
   total: number;
@@ -366,6 +369,7 @@ export interface CompetenceRow {
  * a pagar = despesa; lançamentos diretos sem título (vendas à vista, cancelamentos, devoluções, tarifas) pela data.
  * Devolução de venda a prazo abatida do título (baixa "abatimento", sem lançamento em conta): reduz a receita
  * pela data do abatimento, na categoria do título (linha "Devoluções (abatimento)"); título cancelado já não conta.
+ * Devolução ao fornecedor abatida do título a pagar: reduz a despesa da categoria do título pela data do abatimento.
  * Encargos de baixa (juros/multa/desconto) não entram (são financeiros, vistos no realizado).
  */
 export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
@@ -422,13 +426,14 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
   for (const s of abatements) {
     const t = atitles.get(s.titleId);
     // título cancelado (ex.: devolução integral sem recebimento) não compõe a receita: o abatimento também não
-    if (!t || t.kind !== "receivable" || t.status === "cancelled" || t.companyId !== ctx.companyId) continue;
+    if (!t || t.status === "cancelled" || t.companyId !== ctx.companyId) continue;
     if (f.branchId && t.branchId !== f.branchId) continue;
     const c = resolveCategory({ categoryId: t.categoryId, kind: "", originType: t.originType }, t, defaults);
     if (catFilter !== undefined && c !== catFilter) continue;
     if (f.costCenterId && t.costCenterId !== f.costCenterId) continue;
     abatementCount++;
-    add(c, "revenue", s.date.slice(0, 7), -(s.principal ?? 0), "abatement");
+    if (t.kind === "payable") add(c, "expense", s.date.slice(0, 7), s.principal ?? 0, "abatement");
+    else add(c, "revenue", s.date.slice(0, 7), -(s.principal ?? 0), "abatement");
   }
   const list = [...rows.values()].sort((a, b) => (a.type === b.type ? Math.abs(b.total) - Math.abs(a.total) : a.type === "revenue" ? -1 : 1));
   const byMonth = months.map((m) => {

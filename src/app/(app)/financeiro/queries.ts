@@ -22,6 +22,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   purchase_receipt: "Recebimento de compra",
   service: "Serviço",
   renegotiation: "Renegociação",
+  supplier_return: "Devolução a fornecedor (crédito)",
 };
 
 export const ENTRY_KIND_LABEL: Record<string, string> = {
@@ -37,6 +38,7 @@ export function originHref(t: { originType?: string | null; originId?: string | 
   if (t.originType === "receipt" || t.originType === "purchase_receipt") return `/compras/recebimentos/${t.originId}`;
   if (t.originType === "purchase" || t.originType === "purchase_order") return `/compras/pedidos/${t.originId}`;
   if (t.originType === "renegotiation") return `/financeiro/receber/${t.originId}`;
+  if (t.originType === "supplier_return") return `/fiscal/nfe/${t.originId}`;
   return null;
 }
 
@@ -61,7 +63,7 @@ async function titlesMap(ctx: Ctx, ids: string[]) {
 
 type Abatements = { total: number; items: Array<{ date: string; amount: number }> };
 
-/** Abatimentos de devolução ativos por parcela (a receber): valor total e cada abatimento (data e valor). */
+/** Abatimentos de devolução ativos por parcela (a receber: devolução de venda; a pagar: devolução ao fornecedor). */
 async function abatementsByInstallment(ctx: Ctx) {
   const map = new Map<string, Abatements>();
   const list = await listAll(ctx.store, "settlements", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "abatement"], ["eq", "status", "active"]] });
@@ -105,8 +107,9 @@ export async function queryInstallments(ctx: Ctx, kind: TitleKind, p: P) {
   if (p.f.method) filters.push(["eq", "methodKind", p.f.method]);
   if (p.f.title) filters.push(["eq", "titleId", p.f.title]);
   const allInsts = await listAll(ctx.store, "installments", { filters, orderBy: [{ field: "dueDate", dir: "asc" }] });
-  // abatimentos de devolução (a receber): baixa sem dinheiro — fica fora do "recebido" e dos descontos, em coluna própria
-  const abated = kind === "receivable" ? await abatementsByInstallment(ctx) : new Map<string, Abatements>();
+  // abatimentos de devolução (a receber: de venda; a pagar: ao fornecedor): baixa sem dinheiro — fica fora do
+  // "recebido/pago" e dos descontos, em coluna própria
+  const abated = await abatementsByInstallment(ctx);
   const abFrom = p.f.abFrom || "";
   const abTo = p.f.abTo || "";
   const abPeriod = abFrom || abTo;

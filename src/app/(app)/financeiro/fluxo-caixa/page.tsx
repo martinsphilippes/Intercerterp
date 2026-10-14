@@ -320,7 +320,7 @@ async function Competence({ s, from, to, branchId, categoryId, costCenterId, cat
                     {r.categoryId ? (catNames.get(r.categoryId) ?? "—") : "Sem categoria"}
                     <span className="ml-2 text-xs">
                       {r.source === "abatement" ? (
-                        <Link className="text-brand-700 hover:underline" href={`/financeiro/receber${qs({ abFrom: c.from, abTo: c.to, category: r.categoryId || "none", branch: branchId, costCenter: costCenterId, state: null })}`} title="Parcelas a receber abatidas por devolução no período">
+                        <Link className="text-brand-700 hover:underline" href={`/financeiro/${r.type === "expense" ? "pagar" : "receber"}${qs({ abFrom: c.from, abTo: c.to, category: r.categoryId || "none", branch: branchId, costCenter: costCenterId, state: null })}`} title={`Parcelas a ${r.type === "expense" ? "pagar" : "receber"} abatidas por devolução no período`}>
                           parcelas abatidas
                         </Link>
                       ) : (

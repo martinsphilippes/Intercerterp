@@ -64,6 +64,11 @@ export const PARAMS: ParamDef[] = [
     help: "Um par por linha no formato 5102=1102. A saída 5xxx corresponde à entrada 1xxx (interna) e a 6xxx à 2xxx (interestadual). A tabela padrão assume compra para comercialização; para uso e consumo (1556/2556) ou ativo (1551/2551), ajuste os pares ou o CFOP do item na conferência.",
     usedBy: "Compras (importação do XML)",
   },
+  {
+    key: "feature.devolucaoFornecedor", group: "Compras", label: "Devolução a fornecedor pelo recebimento", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra o atalho “Devolver ao fornecedor” no recebimento concluído e permite emitir a NF-e de devolução a partir dele (quantidade limitada ao recebido, valores da nota de entrada, chave referenciada). Na autorização a NF-e baixa o estoque e abate o valor do contas a pagar do recebimento; o cancelamento estorna. Desligado, a devolução continua possível pelo pedido de compra ou como NF-e avulsa.",
+    usedBy: "Compras (recebimentos) e Fiscal (NF-e de devolução)",
+  },
   { key: "purchase.monthlyBudget", group: "Compras", label: "Orçamento mensal de compras", help: "0 = sem orçamento. Usado nas aprovações para indicar consumo do orçamento.", type: "money", scopes: ["company", "branch"], default: 0, min: 0, usedBy: "Aprovação de compras" },
   { key: "users.inviteExpiryDays", group: "Usuários", label: "Validade do convite de primeiro acesso", help: "Depois deste prazo o link de convite deixa de funcionar e precisa ser reenviado.", type: "int", scopes: ["company"], default: 7, min: 1, max: 30, unit: "dias", usedBy: "Usuários e permissões (convites)" },
   {

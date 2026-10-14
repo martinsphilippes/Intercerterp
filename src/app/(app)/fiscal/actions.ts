@@ -20,7 +20,7 @@ import {
   DOC_STATUS_LABEL,
   type NfseInput,
 } from "@/domain/fiscal/service";
-import { buildNfe, refreshFromCatalog, saveNfe, type NfeInput } from "@/domain/fiscal/nfe";
+import { buildNfe, normalizeNfeInput, refreshFromCatalog, saveNfe, type NfeInput } from "@/domain/fiscal/nfe";
 import { saveIssuer, setNextNumber, uploadCertificate, saveTaxGroup, deleteTaxGroup, type TaxGroupInput } from "@/domain/fiscal/config";
 import { buildAccountingPackage, sendAccountingPackage, saveAccountingSchedule } from "@/domain/fiscal/export";
 import { completeObligation, deleteObligation, generateObligations, saveObligation, saveTemplates, setObligationStatus, type ObligationTemplate } from "@/domain/fiscal/obligations";
@@ -110,8 +110,10 @@ function parseNfe(fd: FormData): NfeInput {
 
 export async function previewNfeAction(fd: FormData) {
   return runAction({ module: "fiscal", op: "create" }, async (s) => {
-    const input = parseNfe(fd);
-    input.branchId = requireBranch(s.ctx);
+    const raw = parseNfe(fd);
+    raw.branchId = requireBranch(s.ctx);
+    // origem recebimento: valores e limites da devolução vêm do recebimento (o rascunho em edição não conta como já devolvido)
+    const { input } = await normalizeNfeInput(s.ctx, raw, fopt(fd, "draftId"));
     const r = await buildNfe(s.ctx, input);
     return { items: r.items, totals: r.totals, payments: r.payments, issues: r.issues, interstate: r.interstate };
   });

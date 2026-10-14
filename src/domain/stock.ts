@@ -28,7 +28,9 @@ export type MovementType =
   | "inventory"
   | "manual_in"
   | "manual_out"
-  | "damage_in";
+  | "damage_in"
+  | "supplier_return"
+  | "supplier_return_cancel";
 
 export const MOVEMENT_LABEL: Record<MovementType, string> = {
   initial: "Saldo inicial",
@@ -46,6 +48,8 @@ export const MOVEMENT_LABEL: Record<MovementType, string> = {
   manual_in: "Entrada manual",
   manual_out: "Saída manual",
   damage_in: "Entrada em depósito de avarias",
+  supplier_return: "Saída por devolução ao fornecedor",
+  supplier_return_cancel: "Estorno de devolução ao fornecedor",
 };
 
 export interface MovementInput {
@@ -86,7 +90,7 @@ export const balanceId = (warehouseId: string, skuId: string) => detId("bal", wa
 
 /** Entradas que trazem custo próprio e recalculam o custo médio ponderado do saldo. */
 /** Entradas que recompõem o custo médio. Estorno e devolução voltam pelo custo com que saíram (custo da venda). */
-export const COST_ENTRY_TYPES: MovementType[] = ["purchase", "initial", "manual_in", "adjust_in", "transfer_in", "transfer_return", "damage_in", "sale_cancel", "return"];
+export const COST_ENTRY_TYPES: MovementType[] = ["purchase", "initial", "manual_in", "adjust_in", "transfer_in", "transfer_return", "damage_in", "sale_cancel", "return", "supplier_return_cancel"];
 
 /** Tipos de ajuste manual (Tela 17) — exigem a permissão especial `stock.adjust` e motivo. */
 export const MANUAL_TYPES = ["adjust_in", "adjust_out", "loss", "manual_in", "manual_out"] as const;
@@ -101,6 +105,8 @@ export const ORIGIN_LABEL: Record<string, string> = {
   receipt: "Recebimento de compra",
   purchase_receipt: "Recebimento de compra",
   purchase_order: "Pedido de compra",
+  fiscal_document: "Documento fiscal",
+  fiscal_document_cancel: "Cancelamento de documento fiscal",
   transfer: "Transferência",
   inventory: "Inventário",
   manual: "Ajuste manual",
@@ -123,6 +129,9 @@ export function originHref(originType: string | null | undefined, originId: stri
       return `/compras/recebimentos/${originId}`;
     case "purchase_order":
       return `/compras/pedidos/${originId}`;
+    case "fiscal_document":
+    case "fiscal_document_cancel":
+      return `/fiscal/nfe/${originId}`;
     case "transfer":
       return `/estoque/transferencias/${originId}`;
     case "inventory":
