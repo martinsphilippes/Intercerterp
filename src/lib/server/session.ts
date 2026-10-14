@@ -35,7 +35,7 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   const authId = await getAuth().verify(secret);
   if (!authId) return null;
   const userDoc = await findUserByAuthId(store, authId);
-  if (!userDoc || userDoc.status !== "active") return null;
+  if (!userDoc || userDoc.status !== "active" || userDoc.loginDisabled) return null;
   const { companies, branches } = await accessibleUnits(store, userDoc);
   if (companies.length === 0) return null;
   const unit = jar.get(UNIT_COOKIE)?.value ?? "";

@@ -14,6 +14,7 @@ import { formatBps } from "@/lib/money";
 import { addMonths, formatMonth, today } from "@/lib/dates";
 import { qs, sp, type SearchParams } from "@/lib/list";
 import { formatGoalValue, GOAL_METRICS, GOAL_STATUS_LABEL, goalsScreen, hasAllBranches, type GoalMetric, type GoalProgress } from "@/domain/goals";
+import { listSellers } from "@/domain/sellers";
 import { commercialOpsHref, salesListHref } from "../../relatorios/params";
 import { GoalForm } from "./goal-form";
 import { copyGoalsAction, deleteGoalAction } from "./actions";
@@ -30,9 +31,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const accessible = [...s.branches].sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
   // mesma regra da exportação (goalsScreen): metas da empresa só para quem tem acesso a todas as filiais
   const fullAccess = hasAllBranches(s.user);
-  const view = await goalsScreen(s.ctx, mes, { accessibleBranchIds: accessible.map((b) => b.id), filial: sp(params, "filial") });
+  const view = await goalsScreen(s.ctx, mes, { accessibleBranchIds: accessible.map((b) => b.id), filial: sp(params, "filial"), vendedor: sp(params, "vendedor") });
   const filial = view.filial ?? "";
+  const vendedor = view.vendedor ?? "";
+  const sellers = await listSellers(s.ctx);
+  const sellerOpts = sellers.filter((v) => v.active || view.all.some((g) => g.sellerId === v.id)).map((v) => ({ value: v.id, label: `${v.name}${v.loginDisabled ? " (sem acesso)" : ""}` }));
   const { all, goals } = view;
+  const anySeller = goals.some((g) => g.sellerId);
   const editId = sp(params, "editar");
   const editing = editId ? (all.find((g) => g.goal.id === editId)?.goal ?? null) : null;
   const canCreate = can(s.user, "dashboard", "create");
@@ -52,10 +57,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       <PageHeader
         title="Metas comerciais"
         crumbs={[{ label: "Gestão" }, { label: "Painel", href: "/dashboard" }, { label: "Metas" }]}
-        description="Metas mensais por filial (ou da empresa) para receita líquida, número de vendas e ticket médio. O realizado usa o mesmo serviço de métricas do painel e dos relatórios gerenciais."
+        description="Metas mensais por filial (ou da empresa) e por vendedor para receita líquida, número de vendas e ticket médio. O realizado usa o mesmo serviço de métricas do painel e dos relatórios gerenciais; na meta do vendedor, só as vendas atribuídas a ele."
         actions={
           canDo(s.user, "data.export") && (
-            <a className={buttonClass("secondary")} href={`/api/export/reports-goals${qs({ mes, filial: filial || "todas" })}`}>
+            <a className={buttonClass("secondary")} href={`/api/export/reports-goals${qs({ mes, filial: filial || "todas", vendedor: vendedor || null })}`}>
               <Download className="size-4" aria-hidden /> Exportar CSV
             </a>
           )
@@ -85,6 +90,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 {accessible.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {sellerOpts.length > 0 && (
+            <label className="flex min-w-[200px] flex-col gap-1 text-xs font-medium text-slate-600">
+              Vendedor
+              <select name="vendedor" defaultValue={vendedor} className="focus-ring h-9 rounded-md border border-line bg-white px-3 text-sm">
+                <option value="">Todas as metas</option>
+                <option value="*">Somente metas de vendedor</option>
+                {sellerOpts.map((v) => (
+                  <option key={v.value} value={v.value}>
+                    {v.label}
                   </option>
                 ))}
               </select>
@@ -124,6 +143,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 <thead>
                   <tr>
                     <th>Filial</th>
+                    {anySeller && <th>Vendedor</th>}
                     <th>Métrica</th>
                     <th className="text-right">Meta</th>
                     <th className="text-right">Realizado</th>
@@ -137,10 +157,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                     const expectedBps = g.metric === "ticket" || !g.target ? null : Math.round(((g.expected ?? 0) * 10000) / g.target);
                     // vendas que compõem o realizado (mesmo período e filial da meta); fora do contexto, operações dos relatórios gerenciais
                     const gScope = { period: { from: g.from, to: g.to }, single: Boolean(g.goal.branchId), filial: g.goal.branchId ?? "todas" };
-                    const salesLink = salesListHref(s, gScope, { situacao: "completed" }) ?? commercialOpsHref(s, gScope, gScope.period);
+                    const salesLink = salesListHref(s, gScope, { situacao: "completed", vendedor: g.sellerId }) ?? commercialOpsHref(s, gScope, gScope.period);
                     return (
                       <tr key={g.goal.id} className={editId === g.goal.id ? "bg-brand-50/60" : undefined}>
                         <td>{g.branchName}</td>
+                        {anySeller && <td>{g.sellerName ?? <span className="text-slate-400">—</span>}</td>}
                         <td>
                           {GOAL_METRICS[g.metric]?.label ?? g.metric}
                           {g.goal.notes && <span className="block max-w-[220px] truncate text-xs text-slate-500" title={g.goal.notes}>{g.goal.notes}</span>}
@@ -157,6 +178,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                             formatGoalValue(g.metric, g.actual)
                           )}
                           {g.metric !== "ticket" && g.status !== "not_started" && <span className="block text-xs text-slate-500">esperado {formatGoalValue(g.metric, g.expected)}</span>}
+                          {g.metric !== "ticket" && g.projected != null && g.elapsedDays < g.monthDays && (
+                            <span className="block text-xs text-slate-500" title="Realizado ÷ dias decorridos × dias do mês">
+                              projeção {formatGoalValue(g.metric, g.projected)}
+                              {g.target ? ` (${formatBps(Math.round((g.projected * 10000) / g.target), 0)})` : ""}
+                            </span>
+                          )}
                         </td>
                         <td>
                           <div className="flex items-center gap-2">
@@ -172,7 +199,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                         <td className="no-print">
                           <div className="flex justify-end gap-1">
                             {canEdit && (
-                              <Link href={`/dashboard/metas${qs({ mes, filial: filial || null, editar: g.goal.id })}#form-meta`} className={buttonClass("ghost", "sm")} aria-label={`Editar meta de ${GOAL_METRICS[g.metric]?.label} — ${g.branchName}`}>
+                              <Link href={`/dashboard/metas${qs({ mes, filial: filial || null, vendedor: vendedor || null, editar: g.goal.id })}#form-meta`} className={buttonClass("ghost", "sm")} aria-label={`Editar meta de ${GOAL_METRICS[g.metric]?.label} — ${g.branchName}${g.sellerName ? ` — ${g.sellerName}` : ""}`}>
                                 <Pencil className="size-4" />
                               </Link>
                             )}
@@ -181,7 +208,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                                 action={deleteGoalAction.bind(null, g.goal.id)}
                                 label=""
                                 icon={<Trash2 className="size-4" aria-hidden />}
-                                askReason={`Excluir a meta de ${GOAL_METRICS[g.metric]?.label} (${g.branchName}, ${formatMonth(g.goal.period)})? Informe o motivo:`}
+                                askReason={`Excluir a meta de ${GOAL_METRICS[g.metric]?.label} (${g.branchName}${g.sellerName ? `, ${g.sellerName}` : ""}, ${formatMonth(g.goal.period)})? Informe o motivo:`}
                                 variant="ghost"
                                 size="sm"
                                 title="Excluir meta"
@@ -197,13 +224,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             </div>
           )}
           <p className="border-t border-line px-4 py-2 text-xs text-slate-500">
-            Realizado do 1º dia do mês até hoje (ou até o fim do mês, se encerrado). Ritmo esperado = meta × dias decorridos ÷ dias do mês (traço no medidor). Ticket médio compara diretamente com a meta.
+            Realizado do 1º dia do mês até hoje (ou até o fim do mês, se encerrado). Ritmo esperado = meta × dias decorridos ÷ dias do mês (traço no medidor); projeção = realizado ÷ dias decorridos × dias do mês. Ticket médio compara diretamente com a meta. Meta de vendedor: vendas com o vendedor informado (sem vendedor, o operador do caixa) e as devoluções delas.
           </p>
         </Card>
         <div id="form-meta" className="grid scroll-mt-20 gap-4 lg:grid-cols-2 2xl:block 2xl:space-y-4 [&>*]:min-w-0">
           {(canCreate || (editing && canEdit)) && (
-            <Card title={editing ? "Editar meta" : "Nova meta"} description="Uma meta por filial, mês e métrica.">
-              <GoalForm key={editing?.id ?? "new"} goal={editing} branches={branchOpts} metrics={metrics} defaultPeriod={mes} defaultBranch={filial || s.ctx.branchId || accessible[0]?.id || "*"} />
+            <Card title={editing ? "Editar meta" : "Nova meta"} description="Uma meta por filial (ou vendedor), mês e métrica.">
+              <GoalForm key={editing?.id ?? "new"} goal={editing} branches={branchOpts} sellers={sellerOpts} metrics={metrics} defaultPeriod={mes} defaultBranch={filial || s.ctx.branchId || accessible[0]?.id || "*"} defaultSeller={vendedor && vendedor !== "*" ? vendedor : ""} />
             </Card>
           )}
           <Card title="Histórico de alterações" description="Criações, alterações e exclusões de metas (auditoria).">

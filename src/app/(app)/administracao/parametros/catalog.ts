@@ -102,6 +102,16 @@ export const PARAMS: ParamDef[] = [
   { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
   { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },
   {
+    key: "feature.comissoes", group: "Recursos", label: "Comissões de vendedores", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Vendas › Comissões: apuração por período, filial e vendedor (prévia por venda, devoluções abatendo a comissão), fechamento que gera a conta a pagar ao vendedor no Financeiro, reabertura enquanto o título estiver em aberto, relatório imprimível e CSV. Desligado, a tela some e nada é apurado; títulos já gerados continuam no Financeiro.",
+    usedBy: "Vendas (comissões) e Financeiro (contas a pagar)",
+  },
+  {
+    key: "commission.base", group: "Vendas e PDV", label: "Base de cálculo da comissão", type: "select", scopes: ["company", "branch"], default: "invoiced",
+    help: "“Venda faturada”: a comissão nasce na data da venda concluída, sobre o valor líquido dos itens (após descontos, sem acréscimos), e devoluções no período abatem a comissão da venda devolvida na proporção da quantidade devolvida. “Valor recebido”: a comissão nasce quando o dinheiro entra — à vista na data da venda e, a prazo, conforme as parcelas recebidas no período; devoluções abatem a parte reembolsada ao cliente. Vendas canceladas nunca contam (se já estavam em um fechamento, a comissão é estornada no período do cancelamento). Troque o critério só na virada de um período já fechado.",
+    options: [{ value: "invoiced", label: "Venda faturada (líquida de descontos)" }, { value: "received", label: "Valor recebido" }], usedBy: "Vendas (comissões)",
+  },
+  {
     key: "finance.dueDateNonBusinessDay", group: "Financeiro", label: "Vencimento em dia não útil", type: "select", scopes: ["company", "branch"], default: "keep",
     help: "Ao gerar parcelas por condição de pagamento (venda a prazo no PDV e lançamento manual de títulos), o vencimento que cair em sábado, domingo ou feriado nacional de data fixa pode ser levado ao próximo dia útil. Feriados móveis (Carnaval, Sexta-feira Santa, Corpus Christi), estaduais e municipais não são considerados. Não altera parcelas já geradas.",
     options: [{ value: "keep", label: "Manter a data gerada" }, { value: "next", label: "Levar para o próximo dia útil" }], usedBy: "PDV (venda a prazo) e Financeiro (novo título)",

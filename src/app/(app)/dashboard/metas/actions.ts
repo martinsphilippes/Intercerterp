@@ -7,6 +7,7 @@ function parse(fd: FormData): GoalInput {
   const branch = fstr(fd, "branchId");
   return {
     branchId: branch === "*" || branch === "" ? null : branch,
+    sellerId: fopt(fd, "sellerId"),
     period: fstr(fd, "period"),
     metric: fstr(fd, "metric") as GoalMetric,
     target: fint(fd, "target"),

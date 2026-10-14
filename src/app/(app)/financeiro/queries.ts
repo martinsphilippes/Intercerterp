@@ -23,6 +23,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   service: "Serviço",
   renegotiation: "Renegociação",
   supplier_return: "Devolução a fornecedor (crédito)",
+  commission: "Comissão de vendedor",
 };
 
 export const ENTRY_KIND_LABEL: Record<string, string> = {
@@ -31,7 +32,7 @@ export const ENTRY_KIND_LABEL: Record<string, string> = {
 };
 
 /** Link para a operação de origem do título. */
-export function originHref(t: { originType?: string | null; originId?: string | null }) {
+export function originHref(t: { originType?: string | null; originId?: string | null; partyId?: string | null; commissionDetail?: Record<string, any> | null }) {
   if (!t.originId) return null;
   if (t.originType === "sale" || t.originType === "sale_card") return `/vendas/${t.originId}`;
   if (t.originType === "return") return `/vendas/devolucoes/${t.originId}`;
@@ -39,6 +40,7 @@ export function originHref(t: { originType?: string | null; originId?: string | 
   if (t.originType === "purchase" || t.originType === "purchase_order") return `/compras/pedidos/${t.originId}`;
   if (t.originType === "renegotiation") return `/financeiro/receber/${t.originId}`;
   if (t.originType === "supplier_return") return `/fiscal/nfe/${t.originId}`;
+  if (t.originType === "commission" && t.commissionDetail?.from) return `/vendas/comissoes?de=${t.commissionDetail.from}&ate=${t.commissionDetail.to}&vendedor=${t.partyId ?? ""}${t.commissionDetail.branchId ? `&filial=${t.commissionDetail.branchId}` : ""}`;
   return null;
 }
 

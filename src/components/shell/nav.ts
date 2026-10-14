@@ -24,6 +24,8 @@ export const NAV: NavGroup[] = [
       { href: "/pdv", label: "Frente de caixa (PDV)", module: "pdv", icon: "ScanBarcode" },
       { href: "/vendas", label: "Histórico de vendas", module: "sales", icon: "Receipt" },
       { href: "/vendas/devolucoes", label: "Trocas e devoluções", module: "sales", icon: "Undo2" },
+      { href: "/vendas/vendedores", label: "Vendedores", module: "sales", icon: "UserCheck" },
+      { href: "/vendas/comissoes", label: "Comissões", module: "sales", icon: "HandCoins", action: "sales.commissions", feature: "comissoes" },
       { href: "/caixa", label: "Caixa (abertura, movimentos, fechamento)", module: "cash", icon: "Wallet" },
     ],
   },

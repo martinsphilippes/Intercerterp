@@ -188,11 +188,13 @@ defineExport("reports-goals", {
   columns: [
     { key: "period", label: "Mês" },
     { key: "branchName", label: "Filial" },
+    { key: "sellerName", label: "Vendedor" },
     { key: "metricLabel", label: "Métrica" },
     { key: "targetText", label: "Meta" },
     { key: "actualText", label: "Realizado" },
     { key: "progressBps", label: "Atingimento (%)", type: "bps" },
     { key: "expectedText", label: "Esperado até a data" },
+    { key: "projectedText", label: "Projeção para o mês" },
     { key: "statusLabel", label: "Situação" },
     { key: "from", label: "Realizado de", type: "date" },
     { key: "to", label: "Realizado até", type: "date" },
@@ -202,12 +204,12 @@ defineExport("reports-goals", {
     // mesma regra da tela de metas (goalsScreen): filtro por filial só com id de filial acessível; vazio/"todas" = todas
     const mesParam = sp(params, "mes");
     const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(mesParam) ? mesParam : today().slice(0, 7);
-    const { goals } = await goalsScreen(s.ctx, mes, { accessibleBranchIds: s.branches.map((b) => b.id as string), filial: sp(params, "filial") });
+    const { goals } = await goalsScreen(s.ctx, mes, { accessibleBranchIds: s.branches.map((b) => b.id as string), filial: sp(params, "filial"), vendedor: sp(params, "vendedor") });
     const fmt = (m: string, v: number | null) => (v == null ? "" : GOAL_METRICS[m as keyof typeof GOAL_METRICS]?.unit === "count" ? String(v) : (v / 100).toFixed(2).replace(".", ","));
     return goals
       .map((g) => ({
-        period: g.goal.period, branchName: g.branchName, metricLabel: GOAL_METRICS[g.metric]?.label ?? g.metric, targetText: fmt(g.metric, g.target), actualText: fmt(g.metric, g.actual),
-        progressBps: g.progressBps, expectedText: fmt(g.metric, g.expected), statusLabel: GOAL_STATUS_LABEL[g.status], from: g.from, to: g.to, notes: g.goal.notes ?? "",
+        period: g.goal.period, branchName: g.branchName, sellerName: g.sellerName ?? "", metricLabel: GOAL_METRICS[g.metric]?.label ?? g.metric, targetText: fmt(g.metric, g.target), actualText: fmt(g.metric, g.actual),
+        progressBps: g.progressBps, expectedText: fmt(g.metric, g.expected), projectedText: fmt(g.metric, g.projected), statusLabel: GOAL_STATUS_LABEL[g.status], from: g.from, to: g.to, notes: g.goal.notes ?? "",
       }));
   },
 });

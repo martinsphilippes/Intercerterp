@@ -10,4 +10,5 @@ import "./purchases";
 import "./fiscal";
 import "./admin";
 import "./reports";
+import "./commissions";
 import "./accounting";

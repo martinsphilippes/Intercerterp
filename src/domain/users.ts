@@ -71,6 +71,13 @@ export function inviteState(u: { status?: string | null; inviteExpiresAt?: strin
   return u.inviteExpiresAt && u.inviteExpiresAt < nowIso() ? "expired" : "pending";
 }
 
+/** Vendedor cadastrado sem acesso ao sistema (CAD-05): gerido em Vendas › Vendedores, fora da tela de usuários. */
+export const isSellerOnly = (u: Record<string, any> | null | undefined) => Boolean(u?.loginDisabled);
+
+function assertNotSellerOnly(u: Doc) {
+  if (isSellerOnly(u)) throw new BusinessError(`${u.name} é vendedor sem acesso ao sistema: o cadastro é feito em Vendas › Vendedores.`, "seller_only");
+}
+
 /** Usuários com acesso à empresa (administradores enxergam todas). */
 export async function companyUsers(store: Store, companyId: string) {
   const all = await listAll(store, "users");
@@ -100,6 +107,7 @@ async function loadManagedUser(ctx: Ctx, id: string): Promise<Doc> {
   const u = await ctx.store.get("users", id);
   if (!u || !(u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId))) throw new NotFoundError("users", id);
   if (u.isAdmin && !ctx.user.isAdmin) throw new PermissionError("Somente administradores podem gerenciar o cadastro, a senha ou a situação de outro administrador.");
+  assertNotSellerOnly(u);
   return u;
 }
 
@@ -523,6 +531,8 @@ export async function acceptInvite(store: Store, token: string, password: string
 
 /** Motivo de bloqueio de login pela situação do cadastro (null = permitido). */
 export function loginBlockReason(u: { status?: string | null; suspendedReason?: string | null } & Record<string, any>): string | null {
+  // vendedor sem acesso (CAD-05): cadastro só para atribuir vendas, metas e comissões — nunca entra no sistema
+  if (u.loginDisabled) return "Cadastro de vendedor sem acesso ao sistema. Procure o administrador.";
   if (u.status === "suspended") return `Acesso suspenso${u.suspendedReason ? `: ${u.suspendedReason}` : ""}. Procure o administrador.`;
   if (u.status === "inactive") return "Usuário inativo. Procure o administrador.";
   if (u.status === "invited") return "Convite pendente: use o link de primeiro acesso enviado ao seu e-mail.";
@@ -556,7 +566,7 @@ export async function authenticate(store: Store, login: string, password: string
 
 /** Indicadores da tela de usuários. */
 export async function userStats(store: Store, companyId: string) {
-  const users = await companyUsers(store, companyId);
+  const users = (await companyUsers(store, companyId)).filter((u) => !isSellerOnly(u));
   return {
     total: users.length,
     active: users.filter((u) => u.status === "active").length,

@@ -100,6 +100,9 @@ export const COLLECTIONS: CollectionDef[] = [
       inviteSentAt: dt, inviteDelivery: s(300), invitedBy: id(), suspendedAt: dt,
       // perfil por empresa: { [companyId]: roleId } (roleId = perfil legado/da empresa de origem)
       roleByCompany: json,
+      // vendedores (CAD-05/VEN-05): sem acesso ao sistema (cadastro só para atribuir vendas; login sempre recusado),
+      // percentual de comissão (bps) e percentuais por categoria de produto { [categoryId]: bps } que substituem o geral
+      loginDisabled: bool, commissionBps: int, commissionByCategory: json,
     },
     indexes: [u("u_email", "email"), k("i_login", "login"), k("i_auth", "authId")],
   },
@@ -153,7 +156,8 @@ export const COLLECTIONS: CollectionDef[] = [
   {
     id: "goals",
     label: "Metas",
-    fields: { ...ctx, period: s(7, true), metric: s(30, true), target: int, notes: s(500) },
+    // sellerId (VEN-06, opcional): meta do vendedor; ausente = meta da filial/empresa
+    fields: { ...ctx, period: s(7, true), metric: s(30, true), target: int, notes: s(500), sellerId: id() },
     indexes: [k("i_period", "companyId", "period")],
   },
 
@@ -502,6 +506,8 @@ export const COLLECTIONS: CollectionDef[] = [
       documentNumber: s(60), originType: s(40), originId: id(), operationId: id(), issueDate: date, competenceDate: date,
       categoryId: id(), costCenterId: id(), total: money, balance: money, installmentsCount: int, status: s(20),
       approvalStatus: s(20), approvedBy: id(), approvedAt: dt, attachments: json, notes: txt, idemKey: s(120),
+      // fechamento de comissão (originType "commission"): memória de cálculo por venda/devolução/recebimento
+      commissionDetail: json,
     },
     indexes: [u("u_idem", "idemKey"), k("i_kind", "companyId", "kind"), k("i_origin", "originType", "originId"), k("i_party", "partyId")],
   },

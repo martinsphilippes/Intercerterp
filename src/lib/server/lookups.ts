@@ -29,6 +29,12 @@ export const lookups = {
   terminals: (ctx: Ctx, branchId?: string | null) => opts(ctx, "terminals", (t) => t.name, branchId ? [["eq", "branchId", branchId]] : []),
   roles: (ctx: Ctx) => opts(ctx, "roles", (r) => r.name),
   users: async (ctx: Ctx) => (await listAll(ctx.store, "users")).filter((u) => u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId)).map((u) => ({ value: u.id, label: u.name })).sort(byName),
+  /** Vendedores selecionáveis (PDV): usuários ativos da empresa e vendedores sem acesso ao sistema (CAD-05) ativos. */
+  sellers: async (ctx: Ctx, keepId?: string | null) =>
+    (await listAll(ctx.store, "users"))
+      .filter((u) => (u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId)) && (u.status === "active" || u.status === "invited" || u.id === keepId))
+      .map((u) => ({ value: u.id, label: u.loginDisabled ? `${u.name} (vendedor)` : u.name }))
+      .sort(byName),
 };
 
 /** Mapa id → nome para exibir referências em listagens. */

@@ -2,7 +2,7 @@ import "server-only";
 import { listAll } from "@/lib/db";
 import type { Ctx } from "@/lib/core/ctx";
 import { normalizeSearch, type ListParams } from "@/lib/list";
-import { companyUsers, inviteState } from "@/domain/users";
+import { companyUsers, inviteState, isSellerOnly } from "@/domain/users";
 import { unscoped } from "@/lib/db/scoped-store";
 import { resolveRoleId } from "@/lib/auth/users";
 import { listRoles, roleCoverage, usersByRole } from "@/domain/roles";
@@ -17,7 +17,8 @@ export async function queryUsers(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   ]);
   const roleMap = new Map(roles.map((r) => [r.id, r]));
   const branchMap = new Map(branches.map((b) => [b.id, b]));
-  let rows = users.map((u) => {
+  // vendedores sem acesso ao sistema (CAD-05) são geridos em Vendas › Vendedores
+  let rows = users.filter((u) => !isSellerOnly(u)).map((u) => {
     const inv = inviteState(u);
     const ownBranches = (u.branchIds ?? []).filter((b: string) => branchMap.has(b));
     const roleId = u.isAdmin ? null : resolveRoleId(u, ctx.companyId, roleMap, roles);

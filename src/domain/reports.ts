@@ -179,6 +179,8 @@ export interface Line {
   total: number;
   /** custo histórico (venda) ou custo revertido (devolução) */
   cost: number;
+  /** item de venda (venda: o próprio item; devolução: o item devolvido) — usado pela apuração de comissões */
+  saleItemId?: string | null;
 }
 
 export interface Facts {
@@ -232,6 +234,7 @@ export async function loadFacts(store: Store, scope: ReportScope): Promise<Facts
       surcharge: i.surcharge ?? 0,
       total: i.total ?? 0,
       cost: i.costTotal ?? 0,
+      saleItemId: i.id,
     };
   });
 
@@ -290,6 +293,7 @@ export async function loadFacts(store: Store, scope: ReportScope): Promise<Facts
       surcharge: 0,
       total: r.total ?? 0,
       cost: r.costTotal ?? 0,
+      saleItemId: r.saleItemId ?? null,
     });
   }
   return { scope, sales, cancelled, lines, returns, originSales };
