@@ -86,7 +86,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           { type: "date", name: "from", label: "De" },
           { type: "date", name: "to", label: "Até" },
           { type: "select", name: "purpose", label: "Finalidade", options: [{ value: "normal", label: "Normal" }, { value: "devolucao", label: "Devolução" }, { value: "complementar", label: "Complementar" }, { value: "ajuste", label: "Ajuste" }] },
-          { type: "select", name: "origin", label: "Origem", options: [{ value: "manual", label: "Avulsa" }, { value: "sale", label: "Venda" }, { value: "transfer", label: "Transferência" }, { value: "return", label: "Devolução de venda" }, { value: "purchase_order", label: "Devolução a fornecedor" }, { value: "disable", label: "Inutilização" }] },
+          { type: "select", name: "origin", label: "Origem", options: [{ value: "manual", label: "Avulsa" }, { value: "sale", label: "Venda" }, { value: "transfer", label: "Transferência" }, { value: "return", label: "Devolução de venda" }, { value: "purchase_order", label: "Devolução a fornecedor" }, { value: "receipt", label: "Devolução a fornecedor (recebimento)" }, { value: "disable", label: "Inutilização" }] },
           { type: "select", name: "sim", label: "Ambiente", options: [{ value: "0", label: "Somente reais" }, { value: "1", label: "Somente simulação" }] },
           ...(s.consolidated ? [{ type: "select" as const, name: "branch", label: "Filial", options: branches }] : []),
         ]}

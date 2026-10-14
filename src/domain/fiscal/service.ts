@@ -13,6 +13,7 @@ import { getSetting } from "@/lib/core/settings";
 import { isValidCnpj, isValidCpf, onlyDigits } from "@/lib/core/text";
 import { fiscalProviderFrom, TPAG, type FiscalModel, type FiscalProvider, type ProviderResult } from "./providers";
 import { cscRefProblem, fiscalTokenRefProblem, logIntegration } from "../integrations";
+import type { SupplierReturnPlan } from "../supplier-returns";
 
 /**
  * Documentos fiscais (Telas 30–35).
@@ -60,6 +61,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   sale: "Venda",
   transfer: "Transferência",
   purchase_order: "Pedido de compra (devolução a fornecedor)",
+  receipt: "Recebimento (devolução a fornecedor)",
   return: "Devolução de venda",
   manual: "Operação avulsa",
   service: "Serviço",
@@ -687,6 +689,8 @@ export interface DocEffects {
   movements?: number;
   titleId?: string | null;
   note?: string | null;
+  /** devolução a fornecedor pelo recebimento: linhas devolvidas e abatimento no pagar (resultado após a autorização) */
+  supplierReturn?: SupplierReturnPlan | null;
 }
 
 export interface CreateDocInput {
@@ -938,9 +942,11 @@ export async function createReturnDocumentDraft(ctx: Ctx, returnId: string) {
 
 async function applyDocumentEffects(ctx: Ctx, doc: Doc) {
   const eff: DocEffects = doc.effects ?? {};
-  if ((!eff.stock && !eff.financial) || eff.appliedAt) return;
+  if ((!eff.stock && !eff.financial && !eff.supplierReturn) || eff.appliedAt) return;
   const patch: DocEffects = { ...eff };
   const sign = doc.operationType === "entrada" ? 1 : -1;
+  // devolução a fornecedor pelo recebimento: saída própria ("supplier_return") pelo custo médio vigente
+  const supplierReturnOut = doc.originType === "receipt" && sign < 0;
   const label = `${MODEL_LABEL[doc.model]} nº ${doc.number ?? doc.rpsNumber ?? doc.ref}`;
   if (eff.stock && doc.model !== "nfse") {
     const { defaultWarehouse, postMovements } = await import("../stock");
@@ -952,7 +958,7 @@ async function applyDocumentEffects(ctx: Ctx, doc: Doc) {
         warehouseId: wid,
         skuId: i.skuId!,
         qty: sign * i.qty,
-        type: sign > 0 ? ("manual_in" as const) : ("manual_out" as const),
+        type: sign > 0 ? ("manual_in" as const) : supplierReturnOut ? ("supplier_return" as const) : ("manual_out" as const),
         unitCost: sign > 0 ? roundDiv(i.total * QTY, i.qty) : null,
         originType: "fiscal_document",
         originId: doc.id,
@@ -993,27 +999,50 @@ async function applyDocumentEffects(ctx: Ctx, doc: Doc) {
       await ctx.store.update("fiscal_documents", doc.id, { titleId: title.id });
     }
   }
+  let srNote = "";
+  if (eff.supplierReturn) {
+    // abatimento no título a pagar do recebimento / crédito com o fornecedor — uma única vez (marcador determinístico)
+    const { applySupplierReturnFinance } = await import("../supplier-returns");
+    const result = await applySupplierReturnFinance(ctx, doc);
+    patch.supplierReturn = { ...eff.supplierReturn, result };
+    if (result) srNote = [result.abated > 0 ? `Abatido ${formatMoney(result.abated)} do contas a pagar` : "", result.credited > 0 ? `crédito com o fornecedor ${formatMoney(result.credited)}` : "", result.unmatched > 0 ? `${formatMoney(result.unmatched)} sem compensação financeira` : ""].filter(Boolean).join(", ");
+  }
   patch.appliedAt = nowIso();
   await ctx.store.update("fiscal_documents", doc.id, { effects: patch });
-  await addEvent(ctx, doc.id, "effects", "authorized", [eff.stock && doc.model !== "nfse" ? `Estoque: ${patch.movements} movimento(s) de ${sign > 0 ? "entrada" : "saída"}` : "", eff.financial ? `Título ${doc.operationType === "entrada" ? "a pagar" : "a receber"} gerado` : ""].filter(Boolean).join(" · "));
+  await addEvent(ctx, doc.id, "effects", "authorized", [eff.stock && doc.model !== "nfse" ? `Estoque: ${patch.movements} movimento(s) de ${sign > 0 ? "entrada" : "saída"}` : "", eff.financial ? `Título ${doc.operationType === "entrada" ? "a pagar" : "a receber"} gerado` : "", srNote].filter(Boolean).join(" · ") || "Sem efeitos de estoque/financeiro");
   await audit(ctx, { module: "fiscal", action: "document.effects", entityType: "fiscal_document", entityId: doc.id, summary: `Efeitos da ${label} aplicados (estoque: ${eff.stock ? "sim" : "não"}, financeiro: ${eff.financial ? "sim" : "não"})`, related: patch.titleId ? [`title:${patch.titleId}`] : [], branchId: doc.branchId });
 }
 
 async function reverseDocumentEffects(ctx: Ctx, doc: Doc, reason: string) {
   const eff: DocEffects = doc.effects ?? {};
-  if (!eff.appliedAt || eff.reversedAt) return;
+  if (eff.reversedAt) return;
   const notes: string[] = [];
+  if (eff.supplierReturn) {
+    // pelo marcador do abatimento (independe de appliedAt): estorna baixas de abatimento e cancela o crédito
+    const { reverseSupplierReturnFinance } = await import("../supplier-returns");
+    const sr = await reverseSupplierReturnFinance(ctx, doc, reason);
+    if (sr) notes.push(...sr);
+  }
+  if (!eff.appliedAt) {
+    if (notes.length) await addEvent(ctx, doc.id, "effects_reversal", "cancelled", `Efeitos revertidos: ${notes.join(" · ")}`);
+    return;
+  }
   if (eff.stock && doc.model !== "nfse") {
     const { postMovements } = await import("../stock");
     const sign = doc.operationType === "entrada" ? -1 : 1;
     const items = (doc.items as DocItem[]).filter((i) => i.skuId);
+    // devolução a fornecedor: volta ao estoque pelo custo com que saiu (estorno próprio, recompõe o custo médio)
+    const supplierReturnBack = doc.originType === "receipt" && sign > 0;
+    const outCost = new Map<number, number | null>();
+    if (supplierReturnBack) for (const i of items) outCost.set(i.seq, (await ctx.store.get("stock_movements", detId("mov", `fiscaldoc:${doc.id}:${i.seq}`)))?.unitCost ?? null);
     await postMovements(
       ctx,
       items.map((i) => ({
         warehouseId: eff.warehouseId!,
         skuId: i.skuId!,
         qty: sign * i.qty,
-        type: sign > 0 ? ("manual_in" as const) : ("manual_out" as const),
+        type: supplierReturnBack ? ("supplier_return_cancel" as const) : sign > 0 ? ("manual_in" as const) : ("manual_out" as const),
+        ...(supplierReturnBack ? { unitCost: outCost.get(i.seq) ?? null } : {}),
         originType: "fiscal_document_cancel",
         originId: doc.id,
         operationId: doc.id,

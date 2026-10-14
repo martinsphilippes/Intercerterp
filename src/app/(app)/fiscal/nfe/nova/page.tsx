@@ -52,6 +52,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
   let warnings: string[] = [];
   let blockers: string[] = [];
   let loadError: string | null = null;
+  let returnable: Record<number, { received: number; returned: number; max: number }> | null = null;
   if (sp.rascunho) {
     const d = await s.ctx.store.get("fiscal_documents", sp.rascunho);
     if (!d || d.companyId !== s.ctx.companyId || d.model !== "nfe") loadError = "Rascunho não encontrado.";
@@ -67,13 +68,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
         if (o) {
           originLabel = o.label;
           originHref = o.href;
+          returnable = o.returnable ?? null;
         }
       }
     }
   } else if (sp.origem) {
     const [type, id] = sp.origem.split(":");
     try {
-      if (!["sale", "transfer", "purchase_order", "return"].includes(type) || !id) throw new BusinessError("Origem inválida.");
+      if (!["sale", "transfer", "purchase_order", "return", "receipt"].includes(type) || !id) throw new BusinessError("Origem inválida.");
       const o = await loadOrigin(s.ctx, type as NfeOriginType, id, branchId);
       if (o.existingDocId) {
         const ex = await s.ctx.store.get("fiscal_documents", o.existingDocId);
@@ -86,6 +88,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
       originHref = o.href;
       warnings = o.warnings;
       blockers = o.blockers;
+      returnable = o.returnable ?? null;
     } catch (e: any) {
       if (e?.digest?.startsWith?.("NEXT_REDIRECT")) throw e;
       loadError = e.message;
@@ -136,6 +139,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
         context={`Modelo 55 · Série ${cfg?.nfeSeries ?? 1} · ${env} · ${s.branch.name}`}
         natures={NATURES}
         skuNames={skuNames}
+        returnable={returnable}
       />
     </>
   );

@@ -24,7 +24,7 @@ Convenção: **[não alterar]** = regra de cálculo/estado que não pode mudar s
 2. **Recebimento** (`src/domain/receipts.ts`, `/compras/recebimentos/novo`): *Importar XML* (`importNfeXml`, parse 4.00 em `src/domain/nfe-xml.ts`, chave com DV, destinatário conferido, fornecedor criado automaticamente), *Ler chave* (busca XML na Focus — `fetchXmlByKey`, dependente) ou *Sem XML pelo pedido* (`createManualReceipt` — exige pedido).
 3. **Conferência** (`/compras/recebimentos/[id]`, `conference.tsx`): associação por código do fornecedor/GTIN/pedido (`supplier_products`), fator editável, quantidade recebida, custo, lote/validade, divergências tipificadas, alocação por pedido.
 4. **Conclusão** (`confirmReceipt`, idempotente com estado *confirmando*): movimentos de entrada (`postMovements`, custo médio §6), atualização de `skus.costAcquisition/costTotal` + `price_history`, vínculo/fator gravado em `supplier_products`, título a pagar (`finance.createTitle`) pelas duplicatas do XML ou condição, baixa do saldo do pedido.
-5. Devolução ao fornecedor: NF-e com origem `purchase_order` (`src/domain/fiscal/nfe.ts` `loadOrigin`), sem abatimento automático no pagar.
+5. Devolução ao fornecedor: NF-e com origem `purchase_order` (`src/domain/fiscal/nfe.ts` `loadOrigin`), sem abatimento automático no pagar; e, desde a Fase 3 (COM-11), com origem `receipt` (recebimento concluído): quantidade limitada ao recebido − devolvido, valores proporcionais à nota de entrada, chave referenciada, e na autorização baixa de estoque e abatimento no título a pagar do recebimento (crédito com o fornecedor se já pago), estornados no cancelamento (`src/domain/supplier-returns.ts`, regras em `docs/regras-assumidas.md` §23).
 
 ### 1.3 Diferenças
 | Ponto | GDoor | Intercert |

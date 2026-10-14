@@ -363,6 +363,27 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
               items={[
                 { label: "Estoque", value: model === "nfse" ? "Não se aplica (serviço)" : doc.effects?.stock ? (doc.effects.appliedAt ? `${doc.effects.movements ?? 0} movimento(s) aplicados em ${formatDateTime(doc.effects.appliedAt)}${doc.effects.reversedAt ? ` · revertidos em ${formatDateTime(doc.effects.reversedAt)}` : ""}` : "Será movimentado na autorização") : doc.originType === "sale" ? "Movimentado pela venda" : doc.originType === "transfer" ? "Movimentado pela transferência" : doc.originType === "return" ? "Movimentado pela devolução" : "Sem efeito (somente documento)" },
                 { label: "Financeiro", value: title ? <span><Link className="text-brand-700 hover:underline" href={`/financeiro/${title.kind === "payable" ? "pagar" : "receber"}/${title.id}`}>Título nº {title.number} — {formatMoney(title.total)}</Link> <StatusBadge kind="title" status={title.status} /></span> : doc.effects?.financial ? "Título gerado na autorização" : sale ? "Recebimentos registrados na venda" : "Sem título vinculado" },
+                doc.effects?.supplierReturn && {
+                  label: "Devolução ao fornecedor",
+                  value: (
+                    <span>
+                      <Link className="text-brand-700 hover:underline" href={`/compras/recebimentos/${doc.effects.supplierReturn.receiptId}`}>Recebimento nº {doc.effects.supplierReturn.receiptNumber}</Link>
+                      {" · "}
+                      {!doc.effects.supplierReturn.abate ? (
+                        "sem título a pagar (sem abatimento)"
+                      ) : doc.effects.supplierReturn.result ? (
+                        <>
+                          abatido {formatMoney(doc.effects.supplierReturn.result.abated)}
+                          {doc.effects.supplierReturn.titleId && <> do <Link className="text-brand-700 hover:underline" href={`/financeiro/pagar/${doc.effects.supplierReturn.titleId}`}>título a pagar</Link></>}
+                          {doc.effects.supplierReturn.result.credited > 0 && doc.effects.supplierReturn.result.creditTitleId && <> · crédito com o fornecedor <Link className="text-brand-700 hover:underline" href={`/financeiro/receber/${doc.effects.supplierReturn.result.creditTitleId}`}>{formatMoney(doc.effects.supplierReturn.result.credited)}</Link></>}
+                        </>
+                      ) : (
+                        `${formatMoney(doc.effects.supplierReturn.amount)} a abater do contas a pagar na autorização`
+                      )}
+                      {doc.effects.reversedAt && " · estornado no cancelamento"}
+                    </span>
+                  ),
+                },
                 doc.effects?.note && { label: "Observação", value: doc.effects.note },
               ]}
             />

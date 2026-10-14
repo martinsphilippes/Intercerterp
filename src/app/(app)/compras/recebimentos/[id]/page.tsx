@@ -1,6 +1,6 @@
 import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
-import { Check, Download, FileCheck2 } from "lucide-react";
+import { Check, Download, FileCheck2, Undo2 } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList } from "@/components/ui/card";
@@ -21,6 +21,8 @@ import { orderItems } from "@/domain/purchases";
 import { supplierLabel } from "@/domain/suppliers";
 import { cancelReceiptAction, resumeConfirmAction } from "../actions";
 import { Conference } from "./conference";
+import { SupplierReturnsCard } from "./supplier-returns";
+import { isFeatureOn } from "@/lib/core/settings";
 
 export const metadata = { title: "Recebimento" };
 
@@ -75,6 +77,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const wh = r.warehouseId ? await store.get("warehouses", r.warehouseId) : null;
   const confirmed = r.status === "confirmed";
   const canReceive = canDo(s.user, "purchase.receive") && s.ctx.branchId === r.branchId;
+  // devolução a fornecedor (COM-11): NF-e de devolução a partir do recebimento concluído, na filial do recebimento
+  const canReturn = confirmed && canDo(s.user, "fiscal.issue") && s.ctx.branchId === r.branchId && (await isFeatureOn(store, s.ctx.companyId, r.branchId, "devolucaoFornecedor", true));
   const steps = [
     { label: r.xmlFileId ? "NF-e importada" : "Documento informado", hint: r.xmlFileId ? "XML validado" : r.nfeKey ? "Chave informada (sem XML)" : "Sem XML", state: "done" as const },
     { label: "Pedido vinculado", hint: linkedOrders.length ? linkedOrders.map((o) => `nº ${o.number}`).join(", ") : "Sem pedido", state: (linkedOrders.length ? "done" : draft ? "active" : "done") as "done" | "active" },
@@ -123,6 +127,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         actions={
           <>
             {r.xmlFileId && <LinkButton href={`/api/files/${r.xmlFileId}`}><Download className="size-4" /> XML</LinkButton>}
+            {canReturn && <LinkButton href={`/fiscal/nfe/nova?origem=receipt:${id}`}><Undo2 className="size-4" /> Devolver ao fornecedor</LinkButton>}
             {r.status === "confirming" && canReceive && <ActionButton variant="primary" action={resumeConfirmAction.bind(null, id)} label="Concluir confirmação interrompida" />}
             {draft && canReceive && <ActionButton variant="danger" action={cancelReceiptAction.bind(null, id)} label="Cancelar recebimento" askReason="Motivo do cancelamento (a chave poderá ser importada novamente):" />}
           </>
@@ -249,6 +254,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               {divergences.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-red-800">{divergences.map((d: any, i: number) => <li key={i}>{d.message}</li>)}</ul> : <p className="text-sm text-emerald-700">Sem divergências.</p>}
             </Card>
           </div>
+          <SupplierReturnsCard store={store} companyId={s.ctx.companyId} receipt={r} />
           {movements.length > 0 && (
             <Card bodyClass="p-0" title="Movimentos de estoque gerados">
               <table className="table-base w-full text-sm">

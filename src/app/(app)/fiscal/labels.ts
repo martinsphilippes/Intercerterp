@@ -6,6 +6,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   sale: "Venda",
   transfer: "Transferência",
   purchase_order: "Devolução a fornecedor",
+  receipt: "Devolução a fornecedor (recebimento)",
   return: "Devolução de venda",
   manual: "Avulsa",
   service: "Serviço",
@@ -21,6 +22,8 @@ export function originHref(type?: string | null, id?: string | null): string | n
       return `/estoque/transferencias/${id}`;
     case "purchase_order":
       return `/compras/pedidos/${id}`;
+    case "receipt":
+      return `/compras/recebimentos/${id}`;
     case "return":
       return `/vendas/devolucoes/${id}`;
     case "service":

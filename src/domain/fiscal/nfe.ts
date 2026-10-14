@@ -6,6 +6,7 @@ import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { onlyDigits } from "@/lib/core/text";
+import type { SupplierReturnPlan } from "../supplier-returns";
 import {
   addEvent,
   assertDocScope,
@@ -28,9 +29,11 @@ import {
  * Origens (venda, transferência, devolução de venda, pedido de compra) não movimentam estoque/financeiro de novo:
  * os efeitos ficam com a operação de origem. Operação avulsa define os efeitos explicitamente (aplicados uma única
  * vez na autorização, por chaves de idempotência).
+ * Recebimento (devolução a fornecedor, COM-11): várias NF-e por recebimento (uma em andamento por vez), limitadas ao
+ * restante devolvível por item; efeitos na autorização — estoque e abatimento no pagar (ver src/domain/supplier-returns.ts).
  */
 
-export type NfeOriginType = "sale" | "transfer" | "purchase_order" | "return" | "manual";
+export type NfeOriginType = "sale" | "transfer" | "purchase_order" | "return" | "receipt" | "manual";
 
 export interface NfeRecipient {
   partyType: "customer" | "supplier" | "branch" | "other";
@@ -54,6 +57,8 @@ export interface NfeItemInput {
   taxGroupId?: string | null;
   cfop?: string | null;
   cstCsosn?: string | null;
+  /** origem recebimento: item (idx) do recebimento devolvido */
+  sourceIdx?: number | null;
 }
 
 export interface NfeInput {
@@ -89,12 +94,14 @@ export interface OriginPrefill {
   existingDocId?: string | null;
   /** quantidade de NF-e anteriores da operação já encerradas (canceladas, denegadas, inutilizadas, descartadas) */
   generation: number;
+  /** origem recebimento: restante devolvível por item (idx) */
+  returnable?: Record<number, { received: number; returned: number; max: number }>;
 }
 
 function operationKind(input: Pick<NfeInput, "origin" | "operationType" | "purpose">): OperationKind {
   if (input.origin.type === "transfer") return "transfer";
   if (input.origin.type === "return") return "sale_return";
-  if (input.origin.type === "purchase_order") return "supplier_return";
+  if (input.origin.type === "purchase_order" || input.origin.type === "receipt") return "supplier_return";
   if (input.purpose === "devolucao") return input.operationType === "entrada" ? "sale_return" : "supplier_return";
   return input.operationType === "entrada" ? "purchase" : "sale";
 }
@@ -169,12 +176,20 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
   const nfes = await listAll(ctx.store, "fiscal_documents", { filters: [["eq", "originType", type], ["eq", "originId", id], ["eq", "model", "nfe"]] });
   const mine = nfes.filter((d) => d.companyId === ctx.companyId);
   // somente documento ATIVO bloqueia/reaproveita; encerrados (cancelado, denegado, inutilizado, descartado) permitem nova emissão
-  const existing = mine.find((d) => !INACTIVE.includes(d.status));
-  const prior = mine.filter((d) => INACTIVE.includes(d.status));
+  // recebimento: devoluções parciais sucessivas — só a NF-e em andamento (não autorizada) é reaproveitada; as autorizadas
+  // contam no restante devolvível e, como as encerradas, avançam a geração (nova referência)
+  const multi = type === "receipt";
+  const existing = mine.find((d) => !INACTIVE.includes(d.status) && (!multi || d.status !== "authorized"));
+  const prior = mine.filter((d) => (multi ? d.id !== existing?.id : INACTIVE.includes(d.status)));
   const generation = prior.length;
   const lastCancelled = prior.filter((d) => d.status === "cancelled").sort((a, b) => String(a.cancelledAt ?? "").localeCompare(String(b.cancelledAt ?? ""))).pop();
-  if (!existing && lastCancelled) warnings.push(`NF-e anterior nº ${lastCancelled.number ?? "—"} desta operação foi cancelada: esta é uma nova emissão (nova referência e numeração).`);
+  if (!existing && lastCancelled && !multi) warnings.push(`NF-e anterior nº ${lastCancelled.number ?? "—"} desta operação foi cancelada: esta é uma nova emissão (nova referência e numeração).`);
   const base = blankInput(branchId);
+  if (type === "receipt") {
+    const { receiptReturnPrefill } = await import("../supplier-returns");
+    const pre = await receiptReturnPrefill(ctx, id, branchId, existing?.id ?? null, base);
+    return { input: pre.input, effectsLocked: false, label: pre.label, href: pre.href, warnings: [...warnings, ...pre.warnings], blockers: [...blockers, ...pre.blockers], existingDocId: existing?.id ?? null, generation, returnable: pre.returnable };
+  }
   if (type === "sale") {
     const sale = await ctx.store.getOrThrow("sales", id);
     assert(sale.companyId === ctx.companyId, "Venda de outra empresa.");
@@ -347,8 +362,11 @@ export async function buildNfe(ctx: Ctx, input: NfeInput) {
   return { items, totals, payments, interstate, kind, issues, warnings, checks };
 }
 
-function effectsFor(input: NfeInput, locked: boolean): DocEffects | null {
+function effectsFor(input: NfeInput, locked: boolean, supplierReturn?: SupplierReturnPlan | null): DocEffects | null {
   if (locked) return { stock: false, financial: false, note: "Efeitos tratados pela operação de origem." };
+  // devolução pelo recebimento: abatimento no pagar sempre acompanha o documento; estoque conforme marcado
+  if (supplierReturn)
+    return { stock: Boolean(input.effects.stock), financial: false, warehouseId: input.effects.warehouseId || null, dueDate: null, paymentTermId: null, supplierReturn, note: supplierReturn.abate ? "Abatimento no contas a pagar do recebimento na autorização." : "Recebimento sem título a pagar: sem abatimento." };
   if (!input.effects.stock && !input.effects.financial) return { stock: false, financial: false, note: "Somente documento (sem efeitos de estoque/financeiro)." };
   return {
     stock: input.effects.stock,
@@ -360,6 +378,17 @@ function effectsFor(input: NfeInput, locked: boolean): DocEffects | null {
 }
 
 const lockedOrigins = (t: NfeOriginType) => ["sale", "transfer", "return"].includes(t);
+
+/**
+ * Normaliza a entrada antes de calcular/gravar: origem recebimento tem quantidades limitadas ao restante devolvível e
+ * valores, destinatário e chave vindos do recebimento (o formulário escolhe só itens e quantidades). Demais origens: sem mudança.
+ */
+export async function normalizeNfeInput(ctx: Ctx, input: NfeInput, draftId?: string | null): Promise<{ input: NfeInput; supplierReturn: SupplierReturnPlan | null }> {
+  if (input.origin.type !== "receipt") return { input, supplierReturn: null };
+  const { prepareReceiptReturn } = await import("../supplier-returns");
+  const prep = await prepareReceiptReturn(ctx, input, { excludeDocId: draftId ?? null });
+  return { input: prep.input, supplierReturn: prep.plan };
+}
 
 /** Cria (ou atualiza o rascunho) da NF-e; com `transmit`, envia em seguida. Idempotente pela chave do formulário/origem. */
 export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string; draftId?: string | null; transmit: boolean }) {
@@ -380,6 +409,8 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
       opts = { ...opts, draftId: ex.id };
     }
   }
+  let supplierReturn: SupplierReturnPlan | null = null;
+  if (input.origin.type === "receipt") ({ input, supplierReturn } = await normalizeNfeInput(ctx, input, opts.draftId ?? null));
   const locked = lockedOrigins(input.origin.type);
   // depósito dos efeitos de estoque: sempre da filial emitente (nunca movimenta estoque de outra filial)
   if (!locked && input.effects?.stock && input.effects.warehouseId) {
@@ -387,7 +418,7 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
     assert(wh && wh.companyId === ctx.companyId && wh.branchId === input.branchId, "O depósito dos efeitos de estoque deve ser da filial emitente.", "branch_mismatch");
   }
   const built = await buildNfe(ctx, input);
-  const effects = effectsFor(input, locked);
+  const effects = effectsFor(input, locked, supplierReturn);
   const transport = { ...input.transport, mode: input.transport.mode ?? "9" };
   const common = {
     nature: input.nature.trim() || "Venda de mercadoria",
@@ -420,7 +451,7 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
   } else {
     const ref = nfeRefFor(input.origin, opts.idemKey, generation);
     const prev = await ctx.store.get("fiscal_documents", detId("fiscaldoc", ref));
-    if (prev && INACTIVE.includes(prev.status)) throw new BusinessError(`A referência ${ref} já pertence a um documento ${DOC_STATUS_LABEL[prev.status].toLowerCase()}. Atualize a página e emita novamente.`, "duplicate_origin");
+    if (prev && (INACTIVE.includes(prev.status) || (input.origin.type === "receipt" && prev.status === "authorized"))) throw new BusinessError(`A referência ${ref} já pertence a um documento ${DOC_STATUS_LABEL[prev.status].toLowerCase()}. Atualize a página e emita novamente.`, "duplicate_origin");
     doc = await createDocument(ctx, {
       model: "nfe",
       ref,
@@ -499,7 +530,7 @@ export function docToInput(doc: Doc): NfeInput {
     operationType: doc.operationType ?? "saida",
     presence: doc.presence ?? "1",
     recipient: { partyType: doc.partyType ?? doc.recipient?.partyType ?? "other", partyId: doc.partyId ?? null, name: doc.recipient?.name ?? "", doc: doc.recipient?.doc ?? "", ie: doc.recipient?.ie, ieIndicator: doc.recipient?.ieIndicator, email: doc.recipient?.email, finalConsumer: doc.recipient?.finalConsumer, address: doc.recipient?.address ?? {} },
-    items: items.filter((i) => i.skuId).map((i) => ({ skuId: i.skuId!, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount, description: i.description, taxGroupId: i.overrides?.taxGroupId ?? null, cfop: i.overrides?.cfop ?? null, cstCsosn: i.overrides?.cstCsosn ?? null })),
+    items: items.filter((i) => i.skuId).map((i, k) => ({ skuId: i.skuId!, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount, description: i.description, taxGroupId: i.overrides?.taxGroupId ?? null, cfop: i.overrides?.cfop ?? null, cstCsosn: i.overrides?.cstCsosn ?? null, ...(doc.effects?.supplierReturn?.lines?.[k] ? { sourceIdx: doc.effects.supplierReturn.lines[k].idx } : {}) })),
     freight: items.reduce((a, i) => a + i.freight, 0),
     insurance: items.reduce((a, i) => a + (i.insurance ?? 0), 0),
     other: items.reduce((a, i) => a + i.other, 0),
