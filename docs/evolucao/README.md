@@ -22,3 +22,5 @@ recursos novos atrás de parâmetro (`feature.*`, lido por `isFeatureOn`) e publ
 | Fase | Branch | Situação |
 |---|---|---|
 | 0 — base de segurança | `feat/fase-0-baseline` | 52 testes de caracterização dos cálculos (`tests/baseline-calculos.test.ts`), `isFeatureOn`, regra "venda em caixa de outro operador" (parâmetro `cash.operatorMismatch`), inventário fiscal |
+| Correções de cálculo | `fix/calculos-fase-0` | achados 1, 3, 4, 5 e 6 de `achados-fase-0.md` corrigidos, testes atualizados explicitamente |
+| 3 — compras e precificação | `feat/fase-3-compras` | entrada sem pedido, produto a partir do XML, conversor de CFOP, precificação pós-entrada (margem sobre o preço de venda, padrão 30%), alteração em massa, etiquetas (EAN-13/Code 128), devolução a fornecedor com abatimento no pagar. MD-e pendente (credenciais Focus, Fase 1) |

@@ -59,7 +59,7 @@ while (queue.length && results.length < maxPages) {
     continue;
   }
   const body = await page.locator("body").innerText().catch(() => "");
-  const errorScreen = /Application error|Unhandled Runtime Error|This page could not be found|Erro inesperado|404/.test(body.slice(0, 3000));
+  const errorScreen = /Application error|Unhandled Runtime Error|This page could not be found|Erro inesperado|(^|\n)\s*404\s*(\n|$)/.test(body.slice(0, 3000)); // "404" só isolado (não em valores como R$ 4.404,10)
   results.push({ path, pattern: pat, status, ms: Date.now() - t0, errorScreen, pageErrors: [...pageErrors], consoleErrors: [...new Set(consoleErrors)].slice(0, 5), final: new URL(page.url()).pathname });
   const hrefs = await page.$$eval("a[href]", (as) => as.map((a) => a.getAttribute("href")));
   for (const h of hrefs) {
