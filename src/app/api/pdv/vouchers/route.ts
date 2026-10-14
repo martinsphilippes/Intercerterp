@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
   if (!code) return NextResponse.json({ error: "Informe o código" }, { status: 400 });
   const res = await s.ctx.store.list("credit_vouchers", { filters: [["eq", "code", code], ["eq", "companyId", s.ctx.companyId]], limit: 1 });
   const v = res.items[0];
-  if (!v) return NextResponse.json({ error: "Vale-crédito não encontrado." }, { status: 404 });
+  // registro de pontos de fidelidade não é vale-crédito (resgate pela forma "Pontos de fidelidade")
+  if (!v || v.kind === "loyalty") return NextResponse.json({ error: "Vale-crédito não encontrado." }, { status: 404 });
   const customer = v.customerId ? await s.ctx.store.get("customers", v.customerId) : null;
   const expired = Boolean(v.expiresAt && v.expiresAt < today());
   return NextResponse.json({ id: v.id, code: v.code, balance: v.balance, originalAmount: v.originalAmount, status: v.status, expiresAt: v.expiresAt ?? null, expired, customerId: v.customerId ?? null, customerName: customer?.name ?? null, returnId: v.returnId ?? null });

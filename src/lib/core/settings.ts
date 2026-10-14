@@ -53,6 +53,10 @@ export const DEFAULT_SETTINGS = {
  * sem valor gravado, vale o padrão informado — recursos novos nascem desligados e são ligados por empresa/filial,
  * o que permite reverter uma fase sem reimplantar.
  */
+/** Recursos novos DESLIGADOS por padrão (os demais `feature.*` nascem ligados). */
+export const FEATURES_OFF_BY_DEFAULT = ["fidelidade"];
+export const featureDefault = (key: string) => !FEATURES_OFF_BY_DEFAULT.includes(key);
+
 export async function isFeatureOn(store: Store, companyId: string, branchId: string | null | undefined, key: string, fallback = false): Promise<boolean> {
   return Boolean(await getSetting(store, companyId, branchId, `feature.${key}`, fallback));
 }

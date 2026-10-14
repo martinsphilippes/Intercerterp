@@ -256,7 +256,7 @@ export async function sessionSummary(ctx: Ctx, sessionId: string): Promise<Sessi
     payments.push(...(await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", saleIds.slice(i, i + 100)]] })));
   }
   const byMethod: SessionSummary["byMethod"] = {};
-  const labels: Record<string, string> = { cash: "Dinheiro", debit: "Cartão de débito", credit: "Cartão de crédito", pix: "Pix", store_credit: "Vale-crédito", crediario: "Crediário", boleto: "Boleto", voucher: "Voucher", other: "Outros" };
+  const labels: Record<string, string> = { cash: "Dinheiro", debit: "Cartão de débito", credit: "Cartão de crédito", pix: "Pix", store_credit: "Vale-crédito", loyalty: "Pontos de fidelidade", crediario: "Crediário", boleto: "Boleto", voucher: "Voucher", other: "Outros" };
   for (const p of payments) {
     if (p.status === "cancelled" || p.status === "failed") continue;
     const k = p.methodKind;

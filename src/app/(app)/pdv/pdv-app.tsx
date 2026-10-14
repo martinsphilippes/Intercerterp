@@ -16,7 +16,7 @@ import { useToast } from "@/components/ui/toast";
 import { cn } from "@/components/ui/cn";
 import { formatMoney, formatQty, formatBps, QTY, pct } from "@/lib/money";
 import { formatDoc, formatPhone } from "@/lib/core/text";
-import { cartTotals, effectiveUnitPrice, tablePrice, type CartItem } from "@/domain/cart-calc";
+import { cartTotals, effectiveUnitPrice, tablePrice, type CartItem, type CartPromotions } from "@/domain/cart-calc";
 import { ProductSearch, type ProductHit, type ProductSearchHandle, type ScaleHit } from "./product-search";
 import { CustomerPicker, type CustomerInfo } from "./customer-picker";
 import { OverdueAlert } from "./overdue-alert";
@@ -49,6 +49,8 @@ export interface PdvProps {
   receivables: { methods: ReceiveMethod[]; canReverse: boolean } | null;
   /** orçamento/pedido (PDV-12): parâmetro feature.documentoComercial + acesso a Vendas; null = ação oculta */
   salesDocs?: { importId: string | null } | null;
+  /** promoções vigentes (CAD-15, parâmetro feature.promocoes); null = sem promoção */
+  promotions?: CartPromotions | null;
 }
 
 const TERMINAL_COOKIE = "ic_pdv_terminal";
@@ -84,7 +86,14 @@ export function PdvApp(props: PdvProps) {
   const cartRef = useRef(cart);
   cartRef.current = cart;
 
-  const totals = useMemo(() => cartTotals(cart), [cart]);
+  // relógio das promoções por dia/horário: recalcula a cada minuto (o servidor confere de novo na conclusão)
+  const [minute, setMinute] = useState(0);
+  useEffect(() => {
+    if (!props.promotions) return;
+    const t = setInterval(() => setMinute((m) => m + 1), 60000);
+    return () => clearInterval(t);
+  }, [props.promotions]);
+  const totals = useMemo(() => cartTotals(cart, cart.salesDocumentId ? null : props.promotions), [cart, props.promotions, minute]); // eslint-disable-line react-hooks/exhaustive-deps
   const items = cart.items as Line[];
 
   // Outro atendimento (retomada, nova venda) chega com outro id e remonta o componente (key);
@@ -214,6 +223,7 @@ export function PdvApp(props: PdvProps) {
           skuId: hit.skuId, qty, unitPrice: null, itemDiscount: 0, itemSurcharge: 0, sku: hit.sku, name: hit.name, unitCode: hit.unitCode, listPrice: hit.listPrice,
           wholesalePrice: hit.wholesalePrice, wholesaleMinQty: hit.wholesaleMinQty, available: hit.available, service: hit.service, maxDiscountBps: hit.maxDiscountBps, attributes: hit.attributes,
           ...(scale ? { scale: { barcode: scale.barcode, content: scale.content, labelValue: scale.labelValue } } : {}),
+          productId: hit.productId, categoryId: hit.categoryId,
         });
         setSelected(list.length - 1);
       }
@@ -261,7 +271,7 @@ export function PdvApp(props: PdvProps) {
       priceTableId,
       items: (c.items as Line[]).map((l) => {
         const h = map.get(l.skuId);
-        return h?.priced ? { ...l, listPrice: h.listPrice, wholesalePrice: h.wholesalePrice, wholesaleMinQty: h.wholesaleMinQty, maxDiscountBps: h.maxDiscountBps, available: h.available } : l;
+        return h?.priced ? { ...l, listPrice: h.listPrice, wholesalePrice: h.wholesalePrice, wholesaleMinQty: h.wholesaleMinQty, maxDiscountBps: h.maxDiscountBps, available: h.available, productId: h.productId, categoryId: h.categoryId } : l;
       }),
     }));
   };
@@ -386,7 +396,9 @@ export function PdvApp(props: PdvProps) {
     });
 
   const line = selected >= 0 ? items[selected] : null;
-  const discountBps = totals.subtotal > 0 ? Math.round((totals.discountTotal * 10000) / totals.subtotal) : 0;
+  // limite do operador: só o desconto manual (promoção fora), sobre o valor já promocional — mesma regra do servidor
+  const manualBase = totals.subtotal - totals.promoDiscount;
+  const discountBps = manualBase > 0 ? Math.round(((totals.discountTotal - totals.promoDiscount) * 10000) / manualBase) : 0;
   const overLimit = !props.operator.canOverLimit && discountBps > props.operator.discountLimitBps;
   const exchangeVoucher = props.exchange?.voucherBalance ?? 0;
 
@@ -538,6 +550,7 @@ export function PdvApp(props: PdvProps) {
                           <p className="font-mono text-xs text-slate-500">
                             {[l.sku, ...Object.values(l.attributes ?? {}), l.unitCode].filter(Boolean).join(" • ")}
                             {wholesale && <Badge tone="accent" className="ml-2">atacado</Badge>}
+                            {totals.promos[i]?.promoName && <Badge tone="good" className="ml-2" title={`Promoção: ${totals.promos[i].promoName}`}>{totals.promos[i].promoName}</Badge>}
                             {short && <Badge tone="warn" className="ml-2">sem saldo ({formatQty(l.available)})</Badge>}
                             {l.scale && <Badge tone="info" className="ml-2" title={`Etiqueta de balança ${l.scale.barcode}`}>balança</Badge>}
                           </p>
@@ -561,7 +574,8 @@ export function PdvApp(props: PdvProps) {
                           {l.unitPrice != null && l.unitPrice !== table && <span className="block text-xs text-slate-400 line-through">{formatMoney(table)}</span>}
                         </td>
                         <td className="tabular px-3 py-2 text-right text-xs">
-                          {calc && calc.itemDiscount + calc.globalDiscount > 0 && <span className="block text-red-700">−{formatMoney(calc.itemDiscount + calc.globalDiscount)}</span>}
+                          {calc && calc.promoDiscount > 0 && <span className="block text-emerald-700" title="Desconto de promoção">promo −{formatMoney(calc.promoDiscount)}</span>}
+                          {calc && calc.itemDiscount + calc.globalDiscount - calc.promoDiscount > 0 && <span className="block text-red-700">−{formatMoney(calc.itemDiscount + calc.globalDiscount - calc.promoDiscount)}</span>}
                           {calc && calc.surcharge > 0 && <span className="block text-emerald-700">+{formatMoney(calc.surcharge)}</span>}
                           {calc && calc.itemDiscount + calc.globalDiscount === 0 && calc.surcharge === 0 && <span className="text-slate-300">—</span>}
                         </td>
@@ -601,6 +615,12 @@ export function PdvApp(props: PdvProps) {
                 <p className="mt-1 font-semibold text-ink">{customer.name} {customer.vip && <Badge tone="accent">VIP</Badge>}</p>
                 <p className="text-xs text-slate-500">{[customer.doc ? formatDoc(customer.doc) : "sem documento", formatPhone(customer.mobile)].filter(Boolean).join(" · ")}</p>
                 {customer.creditLimit > 0 && <p className="text-xs text-slate-500">Crediário disponível: <b className="tabular">{formatMoney(customer.creditAvailable)}</b></p>}
+                {customer.loyalty && (
+                  <p className="text-xs text-emerald-800">
+                    Pontos de fidelidade: <b className="tabular">{customer.loyalty.points.toLocaleString("pt-BR")}</b> ({formatMoney(customer.loyalty.value)})
+                    {customer.loyalty.nextExpiry ? ` · ${customer.loyalty.nextExpiry.points.toLocaleString("pt-BR")} vencem em ${customer.loyalty.nextExpiry.date.split("-").reverse().join("/")}` : ""}
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -642,7 +662,7 @@ export function PdvApp(props: PdvProps) {
             <div className="rounded-lg border border-line bg-white p-3" aria-live="polite">
               <dl className="grid grid-cols-3 gap-2 text-xs text-slate-600">
                 <div><dt>Subtotal ({items.length} • {formatQty(items.reduce((a, l) => a + l.qty, 0))} un.)</dt><dd className="tabular text-sm text-ink">{formatMoney(totals.subtotal)}</dd></div>
-                <div><dt>Descontos{cart.globalDiscountBps ? ` (${formatBps(cart.globalDiscountBps)})` : ""}</dt><dd className="tabular text-sm text-red-700" title={`Itens ${formatMoney(totals.itemDiscounts)} + geral ${formatMoney(totals.globalDiscount)}`}>−{formatMoney(totals.discountTotal)}</dd></div>
+                <div><dt>Descontos{cart.globalDiscountBps ? ` (${formatBps(cart.globalDiscountBps)})` : ""}</dt><dd className="tabular text-sm text-red-700" title={`Itens ${formatMoney(totals.itemDiscounts - totals.promoDiscount)} + promoções ${formatMoney(totals.promoDiscount)} + geral ${formatMoney(totals.globalDiscount)}`}>−{formatMoney(totals.discountTotal)}</dd>{totals.promoDiscount > 0 && <dd className="tabular text-[11px] text-emerald-700">promoções −{formatMoney(totals.promoDiscount)}</dd>}</div>
                 <div><dt>Acréscimos</dt><dd className="tabular text-sm text-emerald-700">+{formatMoney(totals.surchargeTotal)}</dd></div>
               </dl>
               <div className="mt-2 flex items-end justify-between border-t border-line pt-2">
@@ -847,8 +867,10 @@ function DiscountDialog({ cart, totals, limitBps, canOverLimit, onClose, onSave 
   const bps = Math.round(Number(pctText.replace(",", ".") || 0) * 100);
   const net = totals.subtotal - totals.itemDiscounts;
   const global = mode === "pct" ? pct(net, bps) : Math.min(value, net);
-  const totalDisc = totals.itemDiscounts + global;
-  const effBps = totals.subtotal ? Math.round((totalDisc * 10000) / totals.subtotal) : 0;
+  // desconto manual (itens + geral); o de promoção fica fora do limite e da base (regra do servidor)
+  const totalDisc = totals.itemDiscounts - totals.promoDiscount + global;
+  const manualBase = totals.subtotal - totals.promoDiscount;
+  const effBps = manualBase > 0 ? Math.round((totalDisc * 10000) / manualBase) : 0;
   const save = () => onSave(mode === "pct" ? { globalDiscountBps: bps, globalDiscount: 0, surcharge: sur } : { globalDiscount: value, globalDiscountBps: 0, surcharge: sur });
   return (
     <Dialog open onClose={onClose} title="Desconto geral e acréscimo (F8)" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" onClick={save}>Aplicar</Button></>}>
@@ -866,7 +888,7 @@ function DiscountDialog({ cart, totals, limitBps, canOverLimit, onClose, onSave 
           <MoneyInput value={sur} onChange={setSur} ariaLabel="Acréscimo" />
         </Field>
         <div className="rounded-md bg-slate-50 px-3 py-2 text-sm">
-          <p>Desconto total: <b className="tabular">{formatMoney(totalDisc)}</b> ({formatBps(effBps)} do bruto) · Novo total: <b className="tabular">{formatMoney(net - global + totals.surchargeTotal - (cart.surcharge ?? 0) + sur)}</b></p>
+          <p>Desconto manual: <b className="tabular">{formatMoney(totalDisc)}</b> ({formatBps(effBps)} {totals.promoDiscount > 0 ? "do valor com promoções" : "do bruto"}){totals.promoDiscount > 0 ? <> · promoções <b className="tabular">{formatMoney(totals.promoDiscount)}</b> (fora do limite)</> : null} · Novo total: <b className="tabular">{formatMoney(net - global + totals.surchargeTotal - (cart.surcharge ?? 0) + sur)}</b></p>
           <p className={cn("mt-1 text-xs", !canOverLimit && effBps > limitBps ? "text-amber-800" : "text-slate-500")}>
             Seu limite de desconto: {canOverLimit ? "sem limite (aprovação de desconto)" : formatBps(limitBps)}.{!canOverLimit && effBps > limitBps ? " Acima do limite — a venda será recusada sem um usuário autorizado." : ""}
           </p>

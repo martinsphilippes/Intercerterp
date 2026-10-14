@@ -151,7 +151,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                       <td className="tabular text-right">{formatQty(i.qty, i.unitCode)}</td>
                       <td className="tabular text-right">{formatMoney(i.unitPrice)}</td>
                       <td className="tabular text-right text-xs">
-                        {i.itemDiscount ? <span className="block text-red-700">item −{formatMoney(i.itemDiscount)}</span> : null}
+                        {i.promoDiscount ? <span className="block text-emerald-700" title={`Promoção: ${i.promoName ?? ""}`}>promoção −{formatMoney(i.promoDiscount)}<span className="block text-[11px]">{i.promoName}</span></span> : null}
+                        {i.itemDiscount - (i.promoDiscount ?? 0) > 0 ? <span className="block text-red-700">item −{formatMoney(i.itemDiscount - (i.promoDiscount ?? 0))}</span> : null}
                         {i.globalDiscount ? <span className="block text-red-700">rateio −{formatMoney(i.globalDiscount)}</span> : null}
                         {i.surcharge ? <span className="block text-emerald-700">+{formatMoney(i.surcharge)}</span> : null}
                         {!i.itemDiscount && !i.globalDiscount && !i.surcharge ? "—" : null}
@@ -164,7 +165,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">Subtotal (bruto)</td><td className="tabular px-3 py-1.5 text-right">{formatMoney(sale.subtotal)}</td><td colSpan={2} /></tr>
-                  <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">Descontos (itens + rateio do desconto geral)</td><td className="tabular px-3 py-1.5 text-right text-red-700">−{formatMoney(sale.discountTotal)}</td><td colSpan={2} /></tr>
+                  <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">Descontos (itens{items.some((i) => i.promoDiscount) ? ", promoções" : ""} + rateio do desconto geral)</td><td className="tabular px-3 py-1.5 text-right text-red-700">−{formatMoney(sale.discountTotal)}</td><td colSpan={2} /></tr>
+                  {items.some((i) => i.promoDiscount) && <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">dos quais promoções (fora do limite de desconto do operador)</td><td className="tabular px-3 py-1.5 text-right text-emerald-700">−{formatMoney(items.reduce((a, i) => a + (i.promoDiscount ?? 0), 0))}</td><td colSpan={2} /></tr>}
                   {sale.surchargeTotal > 0 && <tr className="bg-slate-50 text-sm"><td colSpan={4} className="px-3 py-1.5 text-right text-slate-500">Acréscimos</td><td className="tabular px-3 py-1.5 text-right">+{formatMoney(sale.surchargeTotal)}</td><td colSpan={2} /></tr>}
                   <tr className="bg-slate-50 font-semibold"><td colSpan={4} className="px-3 py-2 text-right">Total</td><td className="tabular px-3 py-2 text-right text-brand-800">{formatMoney(sale.total)}</td><td className="tabular px-3 py-2 text-right text-slate-500">{formatMoney(sale.costTotal)}</td><td /></tr>
                 </tfoot>
@@ -186,6 +188,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   { label: "Filial", value: branches.get(sale.branchId) },
                   { label: "Sessão de caixa", value: d.session ? <Link className="text-brand-700 hover:underline" href={`/caixa/${d.session.id}`}>Caixa nº {d.session.number} ({formatDate(d.session.openedAt)})</Link> : "—" },
                   sale.discountApprovedBy && { label: "Desconto autorizado por", value: users.get(sale.discountApprovedBy) },
+                  sale.loyaltyPoints != null && { label: "Pontos de fidelidade", value: `${sale.loyaltyPoints.toLocaleString("pt-BR")} acumulado(s)${sale.loyaltyPointsReversed ? ` · ${sale.loyaltyPointsReversed.toLocaleString("pt-BR")} estornado(s)` : ""}` },
                   d.origin && { label: "Troca da devolução", value: <Link className="text-brand-700 hover:underline" href={`/vendas/devolucoes/${d.origin.id}`}>nº {d.origin.number}{d.originSale ? ` (venda nº ${d.originSale.number})` : ""}</Link> },
                   sale.notes && { label: "Observações", value: sale.notes },
                 ]}
@@ -210,7 +213,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   {payments.map((p) => (
                     <tr key={p.id}>
                       <td>{p.methodName}{p.manual && ["pix", "debit", "credit"].includes(p.methodKind) && <Badge className="ml-1">manual</Badge>}</td>
-                      <td className="text-xs text-slate-600">{[p.nsu && `NSU ${p.nsu}`, p.authCode && `Aut. ${p.authCode}`, p.cardBrand, p.providerRef && `Ref. ${p.providerRef}`, p.provider && `via ${p.provider}`].filter(Boolean).join(" · ") || "—"}</td>
+                      <td className="text-xs text-slate-600">{[p.loyaltyPoints && `${p.loyaltyPoints.toLocaleString("pt-BR")} pontos`, p.nsu && `NSU ${p.nsu}`, p.authCode && `Aut. ${p.authCode}`, p.cardBrand, p.providerRef && `Ref. ${p.providerRef}`, p.provider && `via ${p.provider}`].filter(Boolean).join(" · ") || "—"}</td>
                       <td className="tabular text-right">{p.installments ?? 1}</td>
                       <td className="tabular text-right">{formatMoney(p.received)}</td>
                       <td className="tabular text-right">{p.change ? formatMoney(p.change) : "—"}</td>

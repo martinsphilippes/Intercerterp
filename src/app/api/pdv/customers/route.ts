@@ -6,6 +6,7 @@ import { onlyDigits, searchable } from "@/lib/core/text";
 import { today } from "@/lib/dates";
 import { overdueParams } from "@/domain/delinquency";
 import { summarizeOverdue } from "@/domain/overdue";
+import { loyaltyBalance, loyaltyEnabled } from "@/domain/loyalty";
 
 /** Identificação do cliente no PDV (Tela 6): nome, CPF/CNPJ, telefone e e-mail — mesma base do CRM. */
 export async function GET(req: NextRequest) {
@@ -35,7 +36,11 @@ export async function GET(req: NextRequest) {
   }
   const ids = rows.map((r) => r.id);
   const open = ids.length ? await listAll(store, "installments", { filters: [["eq", "partyId", ids], ["eq", "kind", "receivable"], ["eq", "status", ["open", "partial"]]] }) : [];
-  const vouchers = ids.length ? await listAll(store, "credit_vouchers", { filters: [["eq", "customerId", ids], ["eq", "status", "active"]] }) : [];
+  const allVouchers = ids.length ? await listAll(store, "credit_vouchers", { filters: [["eq", "customerId", ids], ["eq", "status", "active"]] }) : [];
+  const vouchers = allVouchers.filter((v) => v.kind !== "loyalty");
+  // saldo de pontos (CAD-21) somente com o programa ligado
+  const loyalty = new Map<string, Awaited<ReturnType<typeof loyaltyBalance>>>();
+  if (ids.length && (await loyaltyEnabled(store, cid, s.ctx.branchId))) for (const id of ids) loyalty.set(id, await loyaltyBalance(store, cid, id));
   const tables = await listAll(store, "price_tables", { filters: [["eq", "companyId", cid]] });
   const tmap = new Map(tables.map((t) => [t.id, t.name]));
   const last = new Map<string, string>();
@@ -65,6 +70,7 @@ export async function GET(req: NextRequest) {
       lastPurchaseAt: last.get(c.id) ?? null,
       vouchers: vouchers.filter((v) => v.customerId === c.id).map((v) => ({ code: v.code, balance: v.balance, expiresAt: v.expiresAt })),
       overdue: summarizeOverdue(open.filter((i) => i.partyId === c.id), odParams, t0),
+      loyalty: loyalty.get(c.id) ?? null,
     };
   });
   return NextResponse.json({ items });

@@ -1,6 +1,6 @@
 import { detId, listAll, newId } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
-import { nowIso } from "@/lib/dates";
+import { DEFAULT_TZ, nowIso } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
@@ -8,6 +8,7 @@ import { getSetting } from "@/lib/core/settings";
 import { formatMoney } from "@/lib/money";
 import { cartTotals, type CartItem } from "./cart-calc";
 import { cancelIntentAtProvider, maybePayable } from "./payments/intents";
+import { livePromotionRules } from "./promotions";
 import type { FinalizeSaleInput, SalePaymentInput } from "./sales";
 
 export { cartTotals, effectiveUnitPrice, type CartItem } from "./cart-calc";
@@ -76,6 +77,9 @@ function clampItems(items: CartItem[]): CartItem[] {
       ...(i.scale && typeof i.scale === "object" && typeof i.scale.barcode === "string"
         ? { scale: { barcode: i.scale.barcode.slice(0, 20), content: i.scale.content === "value" ? ("value" as const) : ("weight" as const), labelValue: Number.isFinite(i.scale.labelValue) ? Math.round(i.scale.labelValue!) : null } }
         : {}),
+      // produto/categoria (casam as promoções por produto/categoria no PDV) — só quando informados
+      ...(typeof i.productId === "string" ? { productId: i.productId } : {}),
+      ...(typeof i.categoryId === "string" ? { categoryId: i.categoryId } : {}),
     }));
 }
 
@@ -163,7 +167,9 @@ export async function saveCart(ctx: Ctx, cartId: string, patch: CartPatch) {
     assert(u && (u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId)), "Vendedor inválido.");
   }
   const merged = { ...cart, ...data };
-  const totals = cartTotals(merged);
+  // total gravado com as promoções vigentes (o servidor reaplica tudo na conclusão); documento importado não tem promoção
+  const rules = merged.salesDocumentId ? [] : await livePromotionRules(ctx.store, ctx.companyId, cart.branchId);
+  const totals = cartTotals(merged, rules.length ? { rules, tz: DEFAULT_TZ, branchId: cart.branchId } : null);
   data.total = totals.total;
   data.itemsCount = (merged.items ?? []).length;
   return ctx.store.update("carts", cartId, data);

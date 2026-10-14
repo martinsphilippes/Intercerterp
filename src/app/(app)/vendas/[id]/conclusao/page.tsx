@@ -104,7 +104,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             <tbody>
               {items.map((i) => (
                 <tr key={i.id}>
-                  <td>{i.description}<span className="block font-mono text-xs text-slate-500">{i.sku}</span></td>
+                  <td>{i.description}<span className="block font-mono text-xs text-slate-500">{i.sku}</span>{i.promoName ? <span className="block text-xs text-emerald-700">Promoção: {i.promoName} (−{formatMoney(i.promoDiscount)})</span> : null}</td>
                   <td className="tabular text-right">{formatQty(i.qty, i.unitCode)} × {formatMoney(i.unitPrice)}</td>
                   <td className="tabular text-right">{i.itemDiscount + i.globalDiscount ? formatMoney(i.itemDiscount + i.globalDiscount) : "—"}</td>
                   <td className="tabular text-right">{formatMoney(i.total)}</td>
@@ -112,7 +112,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               ))}
             </tbody>
             <tfoot>
-              <tr className="font-semibold"><td colSpan={2} className="px-3 py-2">Bruto {formatMoney(sale.subtotal)} · descontos {formatMoney(sale.discountTotal)} · acréscimos {formatMoney(sale.surchargeTotal)}</td><td className="px-3 py-2 text-right">Total</td><td className="tabular px-3 py-2 text-right">{formatMoney(sale.total)}</td></tr>
+              <tr className="font-semibold"><td colSpan={2} className="px-3 py-2">Bruto {formatMoney(sale.subtotal)} · descontos {formatMoney(sale.discountTotal)}{items.some((i) => i.promoDiscount) ? ` (promoções ${formatMoney(items.reduce((a, i) => a + (i.promoDiscount ?? 0), 0))})` : ""}{sale.loyaltyPoints ? ` · ${sale.loyaltyPoints} ponto(s) de fidelidade` : ""} · acréscimos {formatMoney(sale.surchargeTotal)}</td><td className="px-3 py-2 text-right">Total</td><td className="tabular px-3 py-2 text-right">{formatMoney(sale.total)}</td></tr>
             </tfoot>
           </table>
           <table className="table-base w-full border-t border-line text-sm">

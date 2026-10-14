@@ -6,6 +6,7 @@ import { addDays, addMonths } from "@/lib/dates";
 import { adjustDueDate, type NonBusinessDayRule } from "@/lib/business-days";
 import { roundDiv, splitInstallments, QTY } from "@/lib/money";
 import { calcSale } from "./pricing-calc";
+import { applyPromotions, promoClock, type PromoClock, type PromoLineResult, type PromoRule } from "./promotions-calc";
 
 export interface CartItem {
   skuId: string;
@@ -27,6 +28,18 @@ export interface CartItem {
   attributes?: Record<string, string>;
   /** etiqueta de balança que lançou a linha (PDV-06; só exibição — linha não é somada a outras do mesmo SKU) */
   scale?: { barcode: string; content: "weight" | "value"; labelValue?: number | null } | null;
+  /** produto e categoria do item (para casar com as promoções por produto/categoria) */
+  productId?: string | null;
+  categoryId?: string | null;
+}
+
+/** Promoções vigentes enviadas ao PDV (regras + fuso da empresa) — o servidor reaplica tudo na conclusão. */
+export interface CartPromotions {
+  rules: PromoRule[];
+  tz?: string;
+  branchId?: string | null;
+  /** momento fixo (testes/prévia); padrão: agora */
+  clock?: PromoClock;
 }
 
 /** Preço de tabela efetivo da linha (atacado quando a quantidade atinge o mínimo). */
@@ -44,21 +57,32 @@ export function effectiveUnitPrice(i: CartItem): number {
  * Totais do atendimento com a MESMA regra do servidor (`prepareSale`):
  * preço digitado abaixo da tabela vira desconto do item; acima da tabela substitui o preço.
  */
-export function cartTotals(cart: { items?: CartItem[] | null; globalDiscount?: number | null; globalDiscountBps?: number | null; surcharge?: number | null }) {
+export function cartTotals(cart: { items?: CartItem[] | null; globalDiscount?: number | null; globalDiscountBps?: number | null; surcharge?: number | null }, promotions?: CartPromotions | null) {
   const items = cart.items ?? [];
-  return calcSale(
-    items.map((i) => {
-      const table = tablePrice(i);
-      let unitPrice = table;
-      let itemDiscount = i.itemDiscount ?? 0;
-      if (i.unitPrice != null && i.unitPrice !== table && table > 0) {
-        if (i.unitPrice > table) unitPrice = i.unitPrice;
-        else itemDiscount += roundDiv((table - i.unitPrice) * i.qty, QTY);
-      } else if (i.unitPrice != null && table === 0) unitPrice = i.unitPrice;
-      return { qty: i.qty, unitPrice, itemDiscount, itemSurcharge: i.itemSurcharge ?? 0 };
-    }),
+  const lines = items.map((i) => {
+    const table = tablePrice(i);
+    let unitPrice = table;
+    let itemDiscount = i.itemDiscount ?? 0;
+    if (i.unitPrice != null && i.unitPrice !== table && table > 0) {
+      if (i.unitPrice > table) unitPrice = i.unitPrice;
+      else itemDiscount += roundDiv((table - i.unitPrice) * i.qty, QTY);
+    } else if (i.unitPrice != null && table === 0) unitPrice = i.unitPrice;
+    return { qty: i.qty, unitPrice, itemDiscount, itemSurcharge: i.itemSurcharge ?? 0 };
+  });
+  // promoções (CAD-15): desconto explícito por item, mesma função do servidor (`priceSale`)
+  const promo: PromoLineResult[] | null = promotions?.rules?.length
+    ? applyPromotions(
+        items.map((i, k) => ({ skuId: i.skuId, productId: i.productId ?? null, categoryId: i.categoryId ?? null, qty: i.qty, unitPrice: lines[k].unitPrice })),
+        promotions.rules,
+        promotions.clock ?? promoClock(new Date(), promotions.tz),
+        promotions.branchId ?? null,
+      )
+    : null;
+  const calc = calcSale(
+    lines.map((l, k) => (promo?.[k]?.promoDiscount ? { ...l, promoDiscount: promo[k].promoDiscount } : l)),
     { globalDiscount: cart.globalDiscountBps ? undefined : (cart.globalDiscount ?? 0), globalDiscountBps: cart.globalDiscountBps ?? 0, surcharge: cart.surcharge ?? 0 },
   );
+  return { ...calc, promos: promo ?? items.map(() => ({ promoDiscount: 0, promoId: null, promoName: null })) };
 }
 
 /**

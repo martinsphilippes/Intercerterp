@@ -43,10 +43,17 @@ export const NAV: NavGroup[] = [
       { href: "/produtos/alteracao-em-massa", label: "Alteração em massa", module: "products", icon: "ListChecks", action: "products.bulk_edit", feature: "alteracaoMassa" },
       { href: "/produtos/etiquetas", label: "Etiquetas de produtos", module: "products", icon: "Tag", feature: "etiquetas" },
       { href: "/produtos/balanca", label: "Balança (carga e PLU)", module: "products", icon: "Weight", feature: "balanca" },
+      { href: "/produtos/promocoes", label: "Promoções", module: "products", icon: "Percent", feature: "promocoes" },
       { href: "/produtos/cadastros", label: "Cadastros auxiliares", module: "products", icon: "Tags" },
     ],
   },
-  { label: "Clientes", items: [{ href: "/clientes", label: "Gestão de clientes", module: "customers", icon: "Users" }] },
+  {
+    label: "Clientes",
+    items: [
+      { href: "/clientes", label: "Gestão de clientes", module: "customers", icon: "Users" },
+      { href: "/clientes/fidelidade", label: "Programa de fidelidade", module: "customers", icon: "Gift", feature: "fidelidade" },
+    ],
+  },
   {
     label: "Financeiro",
     items: [
