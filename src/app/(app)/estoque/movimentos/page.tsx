@@ -17,6 +17,7 @@ import { MOVEMENT_LABEL, ORIGIN_LABEL, balanceId } from "@/domain/stock";
 import { transferCode } from "@/domain/transfers";
 import { queryMovements, branchScope, branchOptions, canSeeBranch, warehouseOptions, type MovementRow } from "../queries";
 import { MovementForm } from "./movement-form";
+import { warehouseOptionLabel } from "@/domain/warehouse-rules";
 
 export const metadata = { title: "Movimentação de estoque" };
 
@@ -36,7 +37,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const branches = branchOptions(s.branches);
   const [warehouses, ownWhDocs] = await Promise.all([warehouseOptions(s.ctx, scope), s.ctx.branchId ? listAll(s.ctx.store, "warehouses", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "branchId", s.ctx.branchId]] }) : Promise.resolve([])]);
   // depósito de venda primeiro (avarias por último)
-  const ownWarehouses = [...ownWhDocs].sort((a, b) => Number(a.kind !== "available") - Number(b.kind !== "available") || a.name.localeCompare(b.name)).map((w) => ({ value: w.id, label: w.kind === "damaged" ? `${w.name} (avarias)` : w.name }));
+  const ownWarehouses = [...ownWhDocs].sort((a, b) => Number(a.kind !== "available") - Number(b.kind !== "available") || a.name.localeCompare(b.name)).map((w) => ({ value: w.id, label: warehouseOptionLabel(w) }));
   const canAdjust = Boolean(s.ctx.branchId) && canDo(s.user, "stock.adjust") && can(s.user, "stock", "create");
 
   // contexto do produto selecionado: saldos por local e trânsito — só SKU da empresa ativa (id de outra

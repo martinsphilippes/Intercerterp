@@ -29,7 +29,7 @@ export async function importXmlAction(fd: FormData) {
     const xml = await file.text();
     const withoutOrder = fbool(fd, "withoutOrder");
     const orderIds = withoutOrder ? [] : fd.getAll("orderIds").map(String).filter(Boolean);
-    return importOrRedirect(() => importNfeXml(s.ctx, { xml, fileName: file.name, orderIds: orderIds.length ? orderIds : null, withoutOrder }));
+    return importOrRedirect(() => importNfeXml(s.ctx, { xml, fileName: file.name, orderIds: orderIds.length ? orderIds : null, withoutOrder, warehouseId: fopt(fd, "warehouseId") }));
   });
 }
 
@@ -39,7 +39,7 @@ export async function fetchByKeyAction(fd: FormData) {
     const key = fstr(fd, "key");
     const r = await fetchXmlByKey(s.ctx, key);
     if (!r.ok) return { ok: false as const, error: r.message, code: "no_integration" };
-    return importOrRedirect(() => importNfeXml(s.ctx, { xml: r.xml, fileName: `NFe${key.replace(/\D/g, "")}.xml` }));
+    return importOrRedirect(() => importNfeXml(s.ctx, { xml: r.xml, fileName: `NFe${key.replace(/\D/g, "")}.xml`, warehouseId: fopt(fd, "warehouseId") }));
   });
 }
 
@@ -62,7 +62,7 @@ export async function manualReceiptAction(fd: FormData) {
       : {};
     if (!noOrder && !orderIds.length) return { ok: false as const, error: "Selecione ao menos um pedido ou escolha “Sem pedido”." };
     return importOrRedirect(() =>
-      createManualReceipt(s.ctx, { supplierId: fstr(fd, "supplierId"), orderIds: noOrder ? [] : orderIds, nfeKey: fopt(fd, "nfeKey"), nfeNumber: fopt(fd, "nfeNumber"), nfeSeries: fopt(fd, "nfeSeries"), issueDate: fopt(fd, "issueDate"), invoicedTotal: inv && inv !== "0" ? fint(fd, "invoicedTotal") : null, idemKey: fstr(fd, "_idem"), ...extra }),
+      createManualReceipt(s.ctx, { supplierId: fstr(fd, "supplierId"), orderIds: noOrder ? [] : orderIds, nfeKey: fopt(fd, "nfeKey"), nfeNumber: fopt(fd, "nfeNumber"), nfeSeries: fopt(fd, "nfeSeries"), issueDate: fopt(fd, "issueDate"), invoicedTotal: inv && inv !== "0" ? fint(fd, "invoicedTotal") : null, idemKey: fstr(fd, "_idem"), warehouseId: fopt(fd, "warehouseId"), ...extra }),
     );
   });
 }

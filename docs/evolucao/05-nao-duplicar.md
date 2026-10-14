@@ -54,6 +54,7 @@ Regra: **REUTILIZAR → AMPLIAR → INTEGRAR → CRIAR SOMENTE QUANDO NECESSÁRI
 - **Estruturas:** `warehouses`, `stock_balances`, `stock_movements` (`lot`, `lotExpiry`, `avgCostAfter`, `balanceAfter`, `seq`), `stock_reservations`, `inventories`, `inventory_counts`; `src/domain/stock.ts` (`postMovements`, `reserve`, `releaseReservations`, `applyOnce`, `adjustStock`), `inventory.ts`; `/estoque`, `/estoque/movimentos`, `/estoque/inventarios`.
 - **Ampliar:** saldo por lote derivado de `stock_movements` (consulta/visão por `skuId+lot`), propagação de `lot/lotExpiry` em `confirmReceipt`; relatório de inventário em data-base a partir de `balanceAfter/avgCostAfter`; reservas de pré-venda e de pedido de venda via `reserve()`; bipagem na tela de contagem existente.
 - **Não criar:** tabela de saldos por lote independente sem conciliação com movimentos; "balanço" alternativo ao inventário (EST-03 já é mais rigoroso); outra forma de reserva.
+- **Cadastro de depósitos (§39, feito):** ampliação aditiva de `warehouses` (`purpose` venda/almoxarifado/uso e consumo, `salePriority`, `notes`), divisão da baixa da venda em `sale_items.warehouseSplit` e transferência entre depósitos da mesma filial na própria coleção `transfers` (`kind = "warehouse"`) — sem coleção de "tipos de depósito" nem de "transferências internas".
 
 ### 2.5 Compras e entrada de mercadorias
 - **Absorve:** COM-01…COM-11, CAD-17 (etiquetas pós-entrada).

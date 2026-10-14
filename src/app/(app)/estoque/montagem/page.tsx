@@ -11,6 +11,7 @@ import { formatMoney, formatQty } from "@/lib/money";
 import { can, canDo } from "@/lib/permissions";
 import { ASSEMBLY_LABEL, componentsForSkus, listAssemblies } from "@/domain/product-components";
 import { AssemblyForm, type CompositeOption } from "./assembly-form";
+import { warehouseOptionLabel } from "@/domain/warehouse-rules";
 
 export const metadata = { title: "Montagem e desmembramento" };
 
@@ -66,7 +67,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
       ) : !canRun ? (
         <Notice tone="warn">Você pode consultar as montagens, mas registrar exige as permissões de estoque “criar” e “Ajustar estoque”.</Notice>
       ) : (
-        <AssemblyForm options={options} warehouses={warehouses.map((w) => ({ value: w.id, label: w.kind === "damaged" ? `${w.name} (avarias)` : w.name }))} balances={balances} costFallback={costFallback} initialSku={initialSku && options.some((o) => o.skuId === initialSku) ? initialSku : (options[0]?.skuId ?? "")} />
+        <AssemblyForm options={options} warehouses={warehouses.map((w) => ({ value: w.id, label: warehouseOptionLabel(w) }))} balances={balances} costFallback={costFallback} initialSku={initialSku && options.some((o) => o.skuId === initialSku) ? initialSku : (options[0]?.skuId ?? "")} />
       )}
       {branchId && (
         <Card className="mt-5" bodyClass="p-0" title="Montagens e desmembramentos recentes" description="Últimas 50 operações da filial. Cada uma gera movimentos de estoque com origem “Montagem/desmembramento”.">

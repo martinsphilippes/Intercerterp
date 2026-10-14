@@ -250,6 +250,7 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
   if (type === "transfer") {
     const t = await ctx.store.getOrThrow("transfers", id);
     assert(t.companyId === ctx.companyId, "Transferência de outra empresa.");
+    if (t.kind === "warehouse") blockers.push("Transferência entre depósitos da mesma filial não gera NF-e (é movimentação interna do mesmo estabelecimento).");
     if (t.status === "draft" || t.status === "cancelled") warnings.push(`Transferência nº ${t.number} está ${t.status === "draft" ? "em rascunho" : "cancelada"}.`);
     if (t.fromBranchId !== branchId) blockers.push("A NF-e de transferência deve ser emitida pela filial de origem: selecione a filial de origem no topo da tela.");
     // filial de destino validada no servidor: mesma empresa, ativa e diferente da origem

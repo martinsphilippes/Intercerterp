@@ -13,12 +13,14 @@ import { Timeline } from "@/components/ui/timeline";
 import { EmptyState, Notice } from "@/components/ui/empty";
 import { formatDoc, formatPhone } from "@/lib/core/text";
 import { formatDateTime } from "@/lib/dates";
-import { can } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
 import { UFS, branchKind, branchSituation, branchSummary } from "@/domain/companies";
 import { DEFAULT_TZ } from "@/lib/dates";
 import { branchView } from "../../access";
 import { setBranchStatusAction } from "../../actions";
 import { BranchForm } from "../../forms";
+import { SELECTABLE_TYPES, WAREHOUSE_TYPE_HINT, WAREHOUSE_TYPE_LABEL, canBeDefaultWarehouse, sortWarehouses, warehouseOptionLabel, warehouseStockSummary, warehouseType } from "@/domain/warehouses";
+import { WarehousesCard } from "./warehouses-card";
 
 export const metadata = { title: "Filial" };
 
@@ -44,6 +46,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const manager = b.managerUserId ? await bc.store.get("users", b.managerUserId) : null;
   const companyUsers = sum.users.filter((u) => u.status === "active").map((u) => ({ value: u.id, label: u.name }));
   const table = tables.find((t) => t.id === b.defaultPriceTableId);
+  // §39: cadastro de depósitos exige `stock.warehouses` no perfil da empresa da filial; saldo por depósito
+  const canManageWarehouses = canDo(bc.user, "stock.warehouses");
+  const stockByWh = tab === "operacao" ? await warehouseStockSummary(bc.store, id) : new Map();
   return (
     <>
       <PageHeader
@@ -119,28 +124,27 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             <p className="mt-3 text-xs text-slate-500">O fuso horário vale para toda a instalação (recortes de período, rotinas e agenda de backup) e é alterado pelo responsável técnico na variável APP_TIMEZONE do servidor.</p>
             <p className="mt-3 text-xs text-slate-500">Parâmetros comerciais por filial (venda sem saldo, pré-venda, alertas): <Link className="text-brand-700 hover:underline" href={`/administracao/parametros?escopo=${id}`}>Parâmetros da filial</Link>.</p>
           </Card>
-          <Card title="Depósitos" bodyClass="p-0">
-            <table className="table-base w-full text-sm">
-              <thead>
-                <tr><th>Código</th><th>Depósito</th><th>Tipo</th><th>Padrão</th><th>Situação</th></tr>
-              </thead>
-              <tbody>
-                {sum.warehouses.map((w) => (
-                  <tr key={w.id}>
-                    <td>{w.code}</td>
-                    <td>{w.name}</td>
-                    <td>{w.kind === "damaged" ? "Avarias" : w.kind === "available" ? "Disponível para venda" : w.kind}</td>
-                    <td>{w.id === b.defaultWarehouseId ? <Badge tone="brand">Padrão</Badge> : "—"}</td>
-                    <td><StatusBadge kind="generic" status={w.status ?? "active"} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          <WarehousesCard
+            branchId={id}
+            canManage={canManageWarehouses}
+            stockHref={b.companyId === s.ctx.companyId && can(s.user, "stock") ? `/estoque?filial=${id}` : null}
+            types={SELECTABLE_TYPES.map((t) => ({ value: t, label: WAREHOUSE_TYPE_LABEL[t] }))}
+            typeHints={WAREHOUSE_TYPE_HINT}
+            rows={sortWarehouses(sum.warehouses).map((w) => {
+              const st = stockByWh.get(w.id);
+              const type = warehouseType(w);
+              return {
+                id: w.id, code: w.code ?? "", name: w.name, type, typeLabel: WAREHOUSE_TYPE_LABEL[type], salePriority: w.salePriority ?? null, notes: w.notes ?? null, status: w.status ?? "active",
+                isBranchDefault: w.id === b.defaultWarehouseId, terminals: sum.terminals.filter((t) => t.defaultWarehouseId === w.id).map((t) => t.name),
+                items: st?.items ?? 0, physical: st?.physical ?? 0, reserved: st?.reserved ?? 0, value: st?.value ?? 0,
+              };
+            })}
+          />
           <Card bodyClass="p-0" actions={can(s.user, "admin", "create") && <LinkButton size="sm" href="/administracao/terminais/novo">Novo terminal</LinkButton>} title="Terminais do PDV">
             {sum.terminals.length === 0 ? (
               <EmptyState title="Nenhum terminal nesta filial" />
             ) : (
+              <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
                 <thead>
                   <tr><th>Código</th><th>Terminal</th><th>Série NFC-e</th><th>Caixa</th><th>Situação</th></tr>
@@ -160,6 +164,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </Card>
         </div>
@@ -187,7 +192,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <BranchForm
           branch={b}
           companyId={b.companyId}
-          warehouses={sum.warehouses.filter((w) => w.status !== "inactive").map((w) => ({ value: w.id, label: `${w.name} (${w.kind === "damaged" ? "avarias" : "disponível"})` }))}
+          warehouses={sortWarehouses(sum.warehouses.filter(canBeDefaultWarehouse)).map((w) => ({ value: w.id, label: warehouseOptionLabel(w) }))}
           priceTables={tables.filter((t) => t.active !== false).map((t) => ({ value: t.id, label: t.name }))}
           timezone={DEFAULT_TZ}
           ufs={UFS}

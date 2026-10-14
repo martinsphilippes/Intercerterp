@@ -42,6 +42,7 @@ export const SPECIAL_ACTIONS = [
   { key: "pdv.reverse_receipt", label: "Estornar recebimento de parcelas no PDV" },
   { key: "stock.adjust", label: "Ajustar estoque" },
   { key: "stock.inventory_close", label: "Concluir inventário" },
+  { key: "stock.warehouses", label: "Cadastrar, editar e desativar depósitos" },
   { key: "finance.settle", label: "Baixar títulos" },
   { key: "finance.reverse", label: "Estornar baixas" },
   { key: "finance.reconcile", label: "Conciliar extratos" },
@@ -105,7 +106,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
       dashboard: all(), pdv: all(), sales: all(), cash: all(), products: all(), stock: all(), customers: all(),
       suppliers: all(), finance: rw(), purchases: all(), fiscal: rw(), reports: all(), admin: ro(), support: rw(),
     },
-    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "finance.settle", "purchase.approve", "purchase.receive", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override", "sales.commissions", "sales_doc.quote", "sales_doc.order", "sales_doc.cancel"],
+    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "stock.warehouses", "finance.settle", "purchase.approve", "purchase.receive", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override", "sales.commissions", "sales_doc.quote", "sales_doc.order", "sales_doc.cancel"],
     discountLimitBps: 2000,
   },
   {

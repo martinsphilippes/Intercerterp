@@ -346,7 +346,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                         const own = b.branchId === ctx.branchId;
                         return (
                           <tr key={b.id}>
-                            <td className="whitespace-nowrap text-xs">{branchName.get(b.branchId)}{b.branchId === ctx.branchId && <Badge tone="brand" className="ml-1">atual</Badge>}<span className="block text-slate-500">{wh?.name}{wh?.kind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</span></td>
+                            <td className="whitespace-nowrap text-xs">{branchName.get(b.branchId)}{b.branchId === ctx.branchId && <Badge tone="brand" className="ml-1">atual</Badge>}<span className="block text-slate-500">{wh?.name}{wh?.kind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}{wh?.kind === "consumption" && <Badge className="ml-1">uso e consumo</Badge>}{wh?.purpose === "storage" && <Badge tone="info" className="ml-1">almoxarifado</Badge>}</span></td>
                             <td className="whitespace-nowrap font-mono text-xs">{skuById.get(b.skuId)?.sku}</td>
                             <td className="tabular text-right">{formatQty(b.physical)}</td>
                             <td className="tabular text-right">{formatQty(b.reserved)}</td>

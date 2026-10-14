@@ -2,6 +2,7 @@
 
 import { runAction, fstr, fopt } from "@/lib/server/action";
 import { createCompany, updateCompany, setCompanyStatus, createBranch, updateBranch, setBranchStatus, setCompanyUsers, type AddressInput } from "@/domain/companies";
+import { createWarehouse, setBranchDefaultWarehouse, setWarehouseStatus, updateWarehouse, type WarehouseType } from "@/domain/warehouses";
 
 function address(fd: FormData): AddressInput {
   return {
@@ -74,5 +75,36 @@ export async function setCompanyUsersAction(fd: FormData) {
       ? ` Atenção: ${noRole.join(", ")} ficou(aram) sem perfil nesta empresa (não há perfil equivalente) e não acessa(m) nenhum módulo nela até você definir o perfil — troque para esta empresa e edite o usuário em Administração → Usuários.`
       : "";
     return { ok: true as const, message: changes.length ? `Vínculos atualizados: ${changes.join(", ")}.${warn}` : "Nenhuma alteração nos vínculos." };
+  });
+}
+
+// ───────────────────────────── §39 — depósitos da filial (operação `stock.warehouses`, conferida no servidor)
+
+export async function saveWarehouseAction(fd: FormData) {
+  const id = fopt(fd, "id");
+  const branchId = fstr(fd, "branchId");
+  return runAction({ revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
+    const priority = fstr(fd, "salePriority");
+    const input = { name: fstr(fd, "name"), code: fstr(fd, "code"), type: fstr(fd, "type") as WarehouseType, salePriority: priority === "" ? null : Number(priority), notes: fopt(fd, "notes") };
+    if (id) {
+      const w = await updateWarehouse(s.ctx, id, input);
+      return { ok: true as const, message: `Depósito ${w.name} atualizado.` };
+    }
+    const w = await createWarehouse(s.ctx, branchId, input, { idemKey: fopt(fd, "_idem") });
+    return { ok: true as const, message: `Depósito ${w.name} cadastrado.` };
+  });
+}
+
+export async function setWarehouseStatusAction(id: string, branchId: string, status: "active" | "inactive", fd: FormData) {
+  return runAction({ revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
+    const w = await setWarehouseStatus(s.ctx, id, status, fopt(fd, "reason"));
+    return { ok: true as const, message: status === "inactive" ? `Depósito ${w.name} desativado.` : `Depósito ${w.name} reativado.` };
+  });
+}
+
+export async function setDefaultWarehouseAction(id: string, branchId: string) {
+  return runAction({ revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
+    const w = await setBranchDefaultWarehouse(s.ctx, id);
+    return { ok: true as const, message: `${w.name} é agora o depósito padrão da filial.` };
   });
 }

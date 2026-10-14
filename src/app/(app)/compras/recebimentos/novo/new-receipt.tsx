@@ -45,6 +45,8 @@ export function NewReceipt({
   terms = [],
   methods = [],
   supplierTerms = {},
+  warehouses = [],
+  defaultWarehouseName = "",
 }: {
   orders: OpenOrder[];
   suppliers: Opt[];
@@ -55,6 +57,9 @@ export function NewReceipt({
   methods?: Opt[];
   /** condição de pagamento padrão de cada fornecedor */
   supplierTerms?: Record<string, string>;
+  /** §39: depósitos ativos da filial que recebem mercadoria (venda, almoxarifado, uso e consumo) */
+  warehouses?: Opt[];
+  defaultWarehouseName?: string;
 }) {
   const initialOrder = orders.find((o) => o.id === initialOrderId) ?? null;
   const [mode, setMode] = useState<Mode>("xml");
@@ -63,6 +68,13 @@ export function NewReceipt({
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
   const [typedKey, setTypedKey] = useState("");
   const [xmlNoOrder, setXmlNoOrder] = useState(false);
+  const [warehouseId, setWarehouseId] = useState("");
+  // §39: depósito de destino (vazio = o do pedido vinculado ou, sem pedido, o padrão da filial); pode mudar na conferência
+  const warehouseField = warehouses.length > 1 && (
+    <Field label="Depósito de destino" hint="Onde a mercadoria dá entrada. Pode ser alterado na conferência.">
+      <Select name="warehouseId" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} options={warehouses} placeholder={`Padrão — ${defaultWarehouseName || "depósito padrão da filial"} (ou o do pedido)`} />
+    </Field>
+  );
   const [orderMode, setOrderMode] = useState<"order" | "none">(initialOrder || !noOrderEnabled ? "order" : "none");
   const supplierOrders = orders.filter((o) => o.supplierId === supplierId);
   const pickSupplier = (id: string) => {
@@ -130,6 +142,7 @@ export function NewReceipt({
                     {ordersPicker("orderIds")}
                   </>
                 )}
+                {warehouseField}
                 {error && <p className="text-sm text-red-700">{error}</p>}
                 <div className="flex justify-end"><SubmitButton pending={pending} variant="accent">Importar e conferir</SubmitButton></div>
               </>
@@ -143,6 +156,7 @@ export function NewReceipt({
                 <Field label="Chave de acesso (44 dígitos)" required hint="Leia com o leitor de código de barras do DANFE ou digite.">
                   <Input name="key" value={typedKey} onChange={(e) => setTypedKey(e.target.value)} inputMode="numeric" autoFocus placeholder="0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000" />
                 </Field>
+                {warehouseField}
                 {error && (
                   <Notice tone="warn" title="XML não obtido pela chave">
                     {error}{" "}
@@ -202,6 +216,7 @@ export function NewReceipt({
                   </>
                 )}
                 {orderMode === "none" && <NoOrderItems key={supplierId} supplierId={supplierId} terms={terms} methods={methods} defaultTermId={supplierTerms[supplierId] ?? ""} />}
+                {warehouseField}
                 {error && <p className="text-sm text-red-700">{error}</p>}
                 <div className="flex justify-end"><SubmitButton pending={pending} variant="accent">Abrir conferência</SubmitButton></div>
               </>
