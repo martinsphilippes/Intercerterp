@@ -15,6 +15,8 @@ import { cartIntents } from "@/domain/payments/intents";
 import { nameMap } from "@/lib/server/lookups";
 import { PaymentApp } from "./payment-app";
 import { getFiscalConfig } from "@/domain/fiscal/service";
+import { customerOverdueStatus } from "@/domain/delinquency";
+import { can, canDo } from "@/lib/permissions";
 
 export const metadata = { title: "Pagamento da venda" };
 export const dynamic = "force-dynamic";
@@ -80,6 +82,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     const open = await listAll(store, "installments", { filters: [["eq", "partyId", customer.id], ["eq", "kind", "receivable"], ["eq", "status", ["open", "partial"]]] });
     creditAvailable = Math.max(0, customer.creditLimit - open.reduce((a, i) => a + i.balance, 0));
   }
+  const overdue = customer ? await customerOverdueStatus(store, s.ctx.companyId, s.ctx.branchId, customer.id) : null;
   let exchangeVoucher: { code: string; balance: number; returnNumber: number } | null = null;
   if (cart.exchangeReturnId) {
     const ret = await store.get("returns", cart.exchangeReturnId);
@@ -114,6 +117,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       itemsCount={prep.lines.length}
       unitsCount={prep.lines.reduce((a, l) => a + l.input.qty, 0)}
       discountLimitBps={s.user.discountLimitBps ?? 0}
+      overdue={overdue}
+      canOverrideOverdue={canDo(s.user, "sale.overdue_override")}
+      canViewFinance={can(s.user, "finance")}
     />
   );
 }

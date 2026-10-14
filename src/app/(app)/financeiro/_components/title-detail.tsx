@@ -23,6 +23,9 @@ import { approvePayableAction, cancelTitleAction, reverseSettlementAction, revok
 import { RenegotiateDialog } from "./renegotiate-dialog";
 import { FormDialog } from "./form-dialog";
 import { SettleDialog } from "./settle-dialog";
+import { WhatsAppCollectButton } from "./whatsapp-collect";
+import { collectionContext, collectionDraft } from "@/domain/collection";
+import { isFeatureOn } from "@/lib/core/settings";
 
 const kb = (n: number | null | undefined) => (n == null ? "" : n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
@@ -66,6 +69,11 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
   const cardFeeTotal = [...d.cardFee.values()].reduce((a, b) => a + b, 0);
   const customer = rec && t.partyType === "customer" && t.partyId ? await s.ctx.store.get("customers", t.partyId) : null;
   const openInsts = d.installments.filter((i) => ["open", "partial"].includes(i.status));
+  // cobrança pelo WhatsApp (PLA-27): modelos e encargos carregados uma vez para todas as parcelas
+  const waContext =
+    rec && t.originType !== "sale_card" && openInsts.length && can(s.user, "finance", "edit") && (await isFeatureOn(s.ctx.store, s.ctx.companyId, t.branchId ?? s.ctx.branchId, "cobrancaWhatsapp", true))
+      ? await collectionContext(s.ctx.store, s.ctx.companyId, t.branchId ?? s.ctx.branchId, t0)
+      : null;
   const isCard = t.originType === "sale_card";
   const isReneg = t.originType === "renegotiation" && t.status !== "cancelled";
   const renegNested = d.installments.some((i) => i.status === "renegotiated");
@@ -305,6 +313,7 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                                     </Field>
                                   </FormDialog>
                                 )}
+                                {waContext && <WhatsAppCollectButton draft={collectionDraft(waContext, i, t, customer)} title={`Cobrar no WhatsApp — parcela ${i.number}/${t.installmentsCount}`} />}
                                 {can(s.user, "finance", "edit") && (
                                   <FormDialog label="Alterar" size="sm" variant="ghost" title={`Parcela ${i.number} — vencimento e nosso número`} action={updateInstallmentAction.bind(null, i.id)}>
                                     <FormGrid cols={2}>

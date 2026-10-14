@@ -2,8 +2,10 @@ import { listAll } from "@/lib/db";
 import type { Store } from "@/lib/db/types";
 import { formatDate, today } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
-import { notify, resolveOccurrence } from "@/lib/core/notify";
+import { notify, reopenOccurrence, resolveOccurrence } from "@/lib/core/notify";
 import { registerRoutine } from "../scheduler";
+import { overdueParams } from "../delinquency";
+import { OVERDUE_POLICIES, overdueReceiveHref, overdueText, summarizeOverdue } from "../overdue";
 
 /**
  * Rotinas diárias do Financeiro (idempotentes; cada ocorrência gera no máximo uma notificação por destinatário):
@@ -35,7 +37,8 @@ export async function notifyFinanceDue(store: Store, companyId: string, ref = to
   }
   // limpeza: ocorrências abertas cuja parcela não está mais pendente
   const openNotifs = await listAll(store, "notifications", { filters: [["eq", "companyId", companyId], ["eq", "type", ["receivable_overdue", "payable_due"]], ["eq", "occurrenceStatus", "open"]] });
-  const keys = [...new Set(openNotifs.map((n) => n.occurrenceKey).filter(Boolean) as string[])];
+  // (somente as ocorrências por parcela; as de cliente inadimplente são da rotina abaixo)
+  const keys = [...new Set(openNotifs.map((n) => n.occurrenceKey).filter((k): k is string => Boolean(k) && (k.startsWith("overdue:") || k.startsWith("payable_due:"))))];
   let resolved = 0;
   for (const k of keys) {
     const instId = k.split(":")[1];
@@ -48,3 +51,45 @@ export async function notifyFinanceDue(store: Store, companyId: string, ref = to
 }
 
 registerRoutine("finance.due", (store, companyId) => notifyFinanceDue(store, companyId));
+
+/**
+ * Clientes que ENTRARAM em inadimplência (VEN-07): uma ocorrência `delinquent:<cliente>` por cliente enquanto ele
+ * atender aos critérios da política da empresa (tolerância e valor mínimo); resolvida quando deixa de atender.
+ * Recurso desligado ou política "não verificar": nada é avisado e as ocorrências abertas são resolvidas.
+ */
+export async function notifyDelinquentCustomers(store: Store, companyId: string, ref = today()) {
+  const params = await overdueParams(store, companyId, null);
+  const open = params.policy === "none" ? [] : await listAll(store, "installments", { filters: [["eq", "companyId", companyId], ["eq", "kind", "receivable"], ["eq", "status", ["open", "partial"]], ["lt", "dueDate", ref]] });
+  const byCustomer = new Map<string, typeof open>();
+  for (const i of open) {
+    if (!i.partyId) continue;
+    const list = byCustomer.get(i.partyId) ?? [];
+    list.push(i);
+    byCustomer.set(i.partyId, list);
+  }
+  const delinquent = new Set<string>();
+  let notified = 0;
+  for (const [customerId, insts] of byCustomer) {
+    const st = summarizeOverdue(insts, params, ref);
+    if (!st.delinquent) continue;
+    const customer = await store.get("customers", customerId);
+    if (!customer || customer.companyId !== companyId) continue; // títulos de outras partes (ex.: fornecedor) não entram
+    delinquent.add(customerId);
+    // voltou a ficar inadimplente depois de regularizar: a ocorrência resolvida volta a ser pendência (não lida)
+    await reopenOccurrence(store, `delinquent:${customerId}`);
+    notified += await notify(store, {
+      companyId, type: "receivable_overdue", priority: st.maxDaysLate > 30 ? "high" : "normal",
+      title: `Cliente inadimplente: ${customer.name}`,
+      body: `${overdueText(st)} (tolerância de ${st.graceDays} dia(s)). Política na venda: ${OVERDUE_POLICIES.find((p) => p.value === st.policy)?.label ?? st.policy}.`,
+      link: overdueReceiveHref(customerId), originType: "customer", originId: customerId, occurrenceKey: `delinquent:${customerId}`, audience: { module: "finance" },
+    });
+  }
+  const openNotifs = await listAll(store, "notifications", { filters: [["eq", "companyId", companyId], ["eq", "type", "receivable_overdue"], ["eq", "occurrenceStatus", "open"]] });
+  let resolved = 0;
+  for (const k of new Set(openNotifs.map((n) => n.occurrenceKey).filter((x): x is string => Boolean(x) && x.startsWith("delinquent:")))) {
+    if (!delinquent.has(k.slice("delinquent:".length))) resolved += await resolveOccurrence(store, k);
+  }
+  return { delinquentCustomers: delinquent.size, notified, resolved };
+}
+
+registerRoutine("finance.delinquency", (store, companyId) => notifyDelinquentCustomers(store, companyId));

@@ -10,6 +10,9 @@ import { lookups, nameMap } from "@/lib/server/lookups";
 import { ensureOpenCart, listParkedCarts, saveCart } from "@/domain/carts";
 import { resolveTerminal } from "./terminal";
 import { getFiscalConfig } from "@/domain/fiscal/service";
+import { overdueParams } from "@/domain/delinquency";
+import { summarizeOverdue } from "@/domain/overdue";
+import { today } from "@/lib/dates";
 import { PdvApp } from "./pdv-app";
 import type { CustomerInfo } from "./customer-picker";
 import type { PlainCart } from "./actions";
@@ -17,13 +20,14 @@ import type { PlainCart } from "./actions";
 export const metadata = { title: "Frente de caixa (PDV)" };
 export const dynamic = "force-dynamic";
 
-async function customerInfo(store: any, id: string | null): Promise<CustomerInfo | null> {
+async function customerInfo(store: any, id: string | null, companyId: string, branchId: string | null): Promise<CustomerInfo | null> {
   if (!id) return null;
   const c = await store.get("customers", id);
   if (!c) return null;
   const open = await listAll(store, "installments", { filters: [["eq", "partyId", id], ["eq", "kind", "receivable"], ["eq", "status", ["open", "partial"]]] });
   const openBalance = open.reduce((a, i) => a + i.balance, 0);
-  return { id: c.id, name: c.name, tradeName: c.tradeName ?? null, personType: c.personType, doc: c.doc ?? null, email: c.email ?? null, mobile: c.mobile ?? c.phone ?? null, vip: Boolean(c.vip), status: c.status, creditLimit: c.creditLimit ?? 0, openBalance, creditAvailable: Math.max(0, (c.creditLimit ?? 0) - openBalance), priceTableId: c.priceTableId ?? null };
+  const overdue = summarizeOverdue(open, await overdueParams(store, companyId, branchId), today());
+  return { overdue, id: c.id, name: c.name, tradeName: c.tradeName ?? null, personType: c.personType, doc: c.doc ?? null, email: c.email ?? null, mobile: c.mobile ?? c.phone ?? null, vip: Boolean(c.vip), status: c.status, creditLimit: c.creditLimit ?? 0, openBalance, creditAvailable: Math.max(0, (c.creditLimit ?? 0) - openBalance), priceTableId: c.priceTableId ?? null };
 }
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -115,12 +119,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       key={cart.id}
       branch={{ id: s.branch.id, name: s.branch.name }}
       companyName={s.company.tradeName || s.company.name}
-      operator={{ id: s.user.id, name: s.user.name, discountLimitBps: s.user.discountLimitBps ?? 0, canOverLimit: canDo(s.user, "sale.discount_over_limit"), canCreateCustomer: can(s.user, "customers", "create") }}
+      operator={{ id: s.user.id, name: s.user.name, discountLimitBps: s.user.discountLimitBps ?? 0, canOverLimit: canDo(s.user, "sale.discount_over_limit"), canCreateCustomer: can(s.user, "customers", "create"), canViewFinance: can(s.user, "finance") }}
       terminal={{ id: terminal.id, name: terminal.name, code: terminal.code, printerMode: terminal.printerMode ?? null, scannerMode: terminal.scannerMode ?? null }}
       terminals={terminals.map((t) => ({ id: t.id, name: t.name, code: t.code, status: t.status }))}
       session={session ? { id: session.id, number: session.number, openedAt: session.openedAt, operatorName: users.get(session.operatorId) ?? "—", status: session.status, operatorMismatch: mismatchPolicy === "allow" ? null : (mismatchPolicy as "warn" | "block") } : null}
       cart={plain}
-      customer={await customerInfo(store, cart.customerId ?? null)}
+      customer={await customerInfo(store, cart.customerId ?? null, s.ctx.companyId, s.ctx.branchId)}
       priceTables={priceTables}
       categories={categories}
       brands={brands}

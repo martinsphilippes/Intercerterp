@@ -49,6 +49,7 @@ export const NAV: NavGroup[] = [
       { href: "/financeiro/fluxo-caixa", label: "Fluxo de caixa", module: "finance", icon: "LineChart" },
       { href: "/financeiro/conciliacao", label: "Conciliação bancária", module: "finance", icon: "Landmark" },
       { href: "/financeiro/cartoes", label: "Recebíveis de cartão", module: "finance", icon: "CreditCard" },
+      { href: "/financeiro/cobranca/modelos", label: "Modelos de cobrança", module: "finance", icon: "MessageCircle", feature: "cobrancaWhatsapp" },
       { href: "/financeiro/cadastros", label: "Cadastros financeiros", module: "finance", icon: "Settings2" },
     ],
   },

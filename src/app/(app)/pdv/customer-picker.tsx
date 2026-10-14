@@ -10,6 +10,7 @@ import { cn } from "@/components/ui/cn";
 import { formatMoney } from "@/lib/money";
 import { formatDoc, formatPhone, isValidCnpj, isValidCpf, onlyDigits } from "@/lib/core/text";
 import { quickCustomerAction } from "../clientes/actions";
+import type { OverdueStatus } from "@/domain/overdue";
 
 const newIdemKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
@@ -30,6 +31,8 @@ export interface CustomerInfo {
   priceTableName?: string | null;
   lastPurchaseAt?: string | null;
   vouchers?: Array<{ code: string; balance: number; expiresAt: string | null }>;
+  /** inadimplência segundo a política da filial (VEN-07) */
+  overdue?: OverdueStatus | null;
 }
 
 const initials = (name: string) =>
@@ -202,6 +205,7 @@ export function CustomerPicker({
                   <span className="min-w-0 flex-1">
                     <span className="font-medium text-ink">{c.name}</span>
                     {c.vip && <Badge tone="accent" className="ml-2">VIP</Badge>}
+                    {c.overdue?.delinquent && <Badge tone="bad" className="ml-2">Inadimplente</Badge>}
                     <span className="block text-xs text-slate-500">{[c.doc ? `${c.personType === "PJ" ? "CNPJ" : "CPF"} ${formatDoc(c.doc)}` : "sem documento", formatPhone(c.mobile), c.email].filter(Boolean).join(" • ")}</span>
                   </span>
                   <span className="text-right text-xs text-slate-500">

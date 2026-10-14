@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
 import { refreshFiscalAction, sendReceiptAction } from "./actions";
 import { MODEL_NAME } from "./labels";
+import { whatsappUrl } from "@/lib/whatsapp";
 
 const FISCAL_TEXT: Record<string, string> = {
   not_required: "Venda sem documento fiscal.",
@@ -110,11 +111,10 @@ export function FiscalStatus({ saleId, model, initial, auto }: { saleId: string;
 
 /** Envio pelo WhatsApp do próprio operador (wa.me): abre a conversa com o resumo; não há integração automática. */
 export function WhatsAppLink({ phone, text }: { phone: string | null; text: string }) {
-  const digits = (phone ?? "").replace(/\D/g, "");
-  if (digits.length < 10) return <p className="text-xs text-slate-500">WhatsApp: cliente sem celular cadastrado.</p>;
-  const full = digits.length <= 11 ? `55${digits}` : digits;
+  const url = whatsappUrl(phone, text);
+  if (!url) return <p className="text-xs text-slate-500">WhatsApp: cliente sem celular cadastrado.</p>;
   return (
-    <a className={buttonClass("secondary", "sm")} href={`https://wa.me/${full}?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" title="Abre o WhatsApp com a mensagem pronta; o envio é feito pelo operador">
+    <a className={buttonClass("secondary", "sm")} href={url} target="_blank" rel="noopener noreferrer" title="Abre o WhatsApp com a mensagem pronta; o envio é feito pelo operador">
       <MessageCircle className="size-4" /> Abrir no WhatsApp
     </a>
   );
