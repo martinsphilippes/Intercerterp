@@ -7,7 +7,7 @@ import { audit } from "@/lib/core/audit";
 import { nextNumber, peekNumber } from "@/lib/core/numbering";
 import { resolveOccurrence } from "@/lib/core/notify";
 import { nowIso } from "@/lib/dates";
-import { QTY, roundDiv } from "@/lib/money";
+import { QTY, formatMoney, roundDiv } from "@/lib/money";
 import { adjustInTransit, applyOnce, balanceId, damageWarehouse, defaultWarehouse, postMovements, releaseReservations, reserve, type MovementInput } from "./stock";
 
 /**
@@ -73,6 +73,8 @@ export const TRANSFER_STATUS_LABEL: Record<string, string> = {
 async function loadTransfer(ctx: Ctx, id: string) {
   const t = await ctx.store.getOrThrow("transfers", id);
   assert(t.companyId === ctx.companyId, "Transferência de outra empresa.");
+  // §39: a transferência entre depósitos é concluída na hora — não há etapas a executar sobre ela
+  assert(t.kind !== "warehouse", "Transferência entre depósitos da mesma filial é concluída na hora: não há separação, expedição, recebimento nem cancelamento. Para desfazer, faça a transferência inversa.");
   return t;
 }
 
@@ -631,4 +633,133 @@ export async function setTransferDocument(ctx: Ctx, id: string, ref: string | nu
 /** Documentos fiscais emitidos pela frente fiscal com origem nesta transferência. */
 export async function transferDocuments(ctx: Ctx, id: string): Promise<Doc[]> {
   return listAll(ctx.store, "fiscal_documents", { filters: [["eq", "originType", "transfer"], ["eq", "originId", id]] });
+}
+
+// ───────────────────────────── §39 — transferência entre depósitos da mesma filial
+
+/** Linhas por transferência entre depósitos (cada linha grava 6 operações na transação única). */
+export const MAX_WAREHOUSE_TRANSFER_LINES = 15;
+
+export interface WarehouseTransferInput {
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  /** lote opcional (produto com controle de lote): sai desse lote; sem lote = FEFO */
+  items: Array<{ skuId: string; qty: number; lot?: string | null }>;
+  reason: string;
+  notes?: string | null;
+}
+
+/**
+ * Transferência imediata entre depósitos da MESMA filial (sem trânsito): saída `transfer_out` na origem pelo custo
+ * médio vigente (sem consumir o reservado) e entrada `transfer_in` no destino pelo mesmo custo (recompõe o custo
+ * médio do destino), nos mesmos lotes que saíram (lote escolhido ou FEFO). Tudo numa única transação: ou todos os
+ * itens passam, ou nenhum. Idempotente pela chave do formulário; auditada. Fica registrada em `transfers` com
+ * `kind: "warehouse"`, já "recebida".
+ */
+export async function transferBetweenWarehouses(ctx: Ctx, input: WarehouseTransferInput, opts: { idemKey: string }) {
+  requirePerm(ctx, "stock", "create");
+  const branchId = requireBranch(ctx);
+  assert(opts.idemKey?.trim(), "Chave da operação ausente.");
+  const id = detId("transfer", ctx.companyId, "warehouse", opts.idemKey);
+  const existing = await ctx.store.get("transfers", id);
+  if (existing) return existing; // reenvio do mesmo formulário
+  const reason = input.reason?.trim();
+  assert(reason, "Informe o motivo da transferência (fica registrado no histórico).");
+  assert(reason.length <= 500, "Motivo com mais de 500 caracteres.");
+  assert(input.fromWarehouseId && input.toWarehouseId, "Escolha os depósitos de origem e de destino.");
+  assert(input.fromWarehouseId !== input.toWarehouseId, "Escolha depósitos de origem e destino diferentes.");
+  const from = await ctx.store.getOrThrow("warehouses", input.fromWarehouseId);
+  const to = await ctx.store.getOrThrow("warehouses", input.toWarehouseId);
+  for (const w of [from, to]) {
+    assert(w.companyId === ctx.companyId && w.branchId === branchId, "Os dois depósitos precisam ser da filial selecionada.");
+    assert(w.status !== "inactive", `O depósito ${w.name} está desativado.`);
+  }
+  // linhas: SKU + lote (mesmo SKU em lotes diferentes = linhas diferentes)
+  const merged = new Map<string, { skuId: string; lot: string | null; qty: number }>();
+  for (const l of input.items ?? []) {
+    if (!l.skuId) continue;
+    assert(Number.isInteger(l.qty) && l.qty > 0, "Quantidades devem ser maiores que zero.");
+    const lot = l.lot?.trim() || null;
+    const k = `${l.skuId}|${lot ?? ""}`;
+    const cur = merged.get(k) ?? { skuId: l.skuId, lot, qty: 0 };
+    cur.qty += l.qty;
+    merged.set(k, cur);
+  }
+  const lines = [...merged.values()];
+  assert(lines.length > 0, "Inclua ao menos um item.");
+  assert(lines.length <= MAX_WAREHOUSE_TRANSFER_LINES, `Máximo de ${MAX_WAREHOUSE_TRANSFER_LINES} linhas por transferência entre depósitos — divida em mais de uma.`);
+  // conferência antes de gravar: disponível da origem (físico − reservado) e saldo do lote escolhido
+  const need = new Map<string, number>();
+  const info = new Map<string, { sku: Doc; product: Doc }>();
+  for (const l of lines) {
+    const sku = await ctx.store.getOrThrow("skus", l.skuId);
+    assert(sku.companyId === ctx.companyId, "SKU de outra empresa.");
+    const product = await ctx.store.getOrThrow("products", sku.productId);
+    assert(product.type !== "service", `${sku.name}: serviços não têm estoque.`);
+    assert(product.composition !== "kit", `${sku.name}: kit não tem estoque próprio — transfira os componentes.`);
+    info.set(l.skuId, { sku, product });
+    need.set(l.skuId, (need.get(l.skuId) ?? 0) + l.qty);
+    if (l.lot && product.lotControl) {
+      const bal = await ctx.store.get("stock_balances", balanceId(from.id, l.skuId));
+      const entry = ((bal?.lots ?? []) as Array<{ lot: string | null; qty: number }>).find((x) => x.lot === l.lot);
+      if (!entry || entry.qty < l.qty) throw new BusinessError(`${sku.sku}: lote ${l.lot} com saldo ${(entry?.qty ?? 0) / QTY} em ${from.name}, a transferir ${l.qty / QTY}.`, "lot_insufficient");
+    }
+  }
+  for (const [skuId, q] of need) {
+    const bal = await ctx.store.get("stock_balances", balanceId(from.id, skuId));
+    const available = ((bal?.physical as number) ?? 0) - ((bal?.reserved as number) ?? 0);
+    if (available < q) {
+      const sku = info.get(skuId)!.sku;
+      throw new BusinessError(`Disponível insuficiente de ${sku.sku} em ${from.name}: físico ${((bal?.physical as number) ?? 0) / QTY}, reservado ${((bal?.reserved as number) ?? 0) / QTY}, a transferir ${q / QTY}. O reservado pertence a pedidos, pré-vendas ou transferências e não é transferido.`, "insufficient_stock", { skuId });
+    }
+  }
+  const number = await nextNumber(ctx.store, `transfer:${ctx.companyId}`);
+  const now = nowIso();
+  const why = `Transferência ${transferCode(number)} entre depósitos (${from.name} → ${to.name}): ${reason}`;
+  let items: Array<TransferItem & { lot: string | null }> = [];
+  await applyOnce(ctx, `wtransfer:${id}`, { entityType: "transfer", entityId: id }, async (tx) => {
+    // saídas numa única chamada (o mesmo saldo de origem em lotes diferentes compartilha a leitura)
+    const outs = await postMovements(
+      ctx,
+      lines.map((l, idx) => ({ warehouseId: from.id, skuId: l.skuId, qty: -l.qty, type: "transfer_out" as const, originType: "transfer", originId: id, operationId: id, reason: why, idemKey: `wtransfer:${id}:out:${idx + 1}`, respectReserved: true, lot: l.lot, occurredAt: now })),
+      tx,
+    );
+    const outByKey = new Map(outs.map((m) => [m.idemKey as string, m]));
+    // entradas pelo custo com que saíram, nos mesmos lotes (rastro preservado)
+    await postMovements(
+      ctx,
+      lines.map((l, idx) => {
+        const out = outByKey.get(`wtransfer:${id}:out:${idx + 1}`)!;
+        const parts = (out.lots ?? null) as Array<{ lot: string | null; expiry: string | null; mfg?: string | null; qty: number }> | null;
+        return {
+          warehouseId: to.id, skuId: l.skuId, qty: l.qty, type: "transfer_in" as const, unitCost: out.unitCost, totalCost: out.totalCost, originType: "transfer", originId: id, operationId: id, reason: why,
+          idemKey: `wtransfer:${id}:in:${idx + 1}`, occurredAt: now, lot: out.lot ?? null, lotExpiry: out.lotExpiry ?? null, lotSplit: parts?.length ? parts.map((p) => ({ ...p, qty: -p.qty })) : null,
+        };
+      }),
+      tx,
+    );
+    items = lines.map((l, idx) => {
+      const out = outByKey.get(`wtransfer:${id}:out:${idx + 1}`)!;
+      const { sku, product } = info.get(l.skuId)!;
+      return { skuId: l.skuId, productId: sku.productId, sku: sku.sku, name: sku.name, unitCode: sku.unitCode ?? product.unitCode, qty: l.qty, shippedQty: l.qty, unitCost: out.unitCost, receivedQty: l.qty, damagedQty: 0, returnedQty: 0, lostQty: 0, lot: out.lot ?? l.lot ?? null };
+    });
+    await tx.create(
+      "transfers",
+      {
+        companyId: ctx.companyId, branchId, createdBy: ctx.user.id, number, kind: "warehouse", fromBranchId: branchId, toBranchId: branchId, fromWarehouseId: from.id, toWarehouseId: to.id,
+        status: "received", items, responsibleId: ctx.user.id, notes: input.notes?.trim() || null, reason, divergences: [], receipts: [], shippedAt: now, receivedAt: now, shippedBy: ctx.user.id, receivedBy: ctx.user.id,
+        totalCost: lines.reduce((a, l, idx) => a + ((outByKey.get(`wtransfer:${id}:out:${idx + 1}`)!.totalCost as number) ?? 0), 0),
+      },
+      id,
+    );
+  });
+  const t = await ctx.store.getOrThrow("transfers", id);
+  if (items.length) {
+    await audit(ctx, {
+      module: "stock", action: "transfer.warehouse", entityType: "transfer", entityId: id,
+      summary: `Transferência ${transferCode(number)} entre depósitos: ${from.name} → ${to.name} (${items.length} linha(s), custo ${formatMoney(t.totalCost ?? 0)})`,
+      reason, after: { items: items.map((i) => [i.sku, i.qty, i.lot]) }, related: [`warehouse:${from.id}`, `warehouse:${to.id}`, `branch:${branchId}`, ...items.map((i) => `sku:${i.skuId}`)],
+    });
+  }
+  return t;
 }

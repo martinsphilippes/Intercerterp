@@ -5,6 +5,7 @@ import { listAll } from "@/lib/db";
 import { requireAction } from "@/lib/core/ctx";
 import { supplierLabel } from "@/domain/suppliers";
 import { noOrderEntryOn } from "@/domain/receipts";
+import { receivesGoods, sortWarehouses, warehouseOptionLabel } from "@/domain/warehouse-rules";
 import { NewReceipt } from "./new-receipt";
 
 export const metadata = { title: "Receber mercadorias" };
@@ -32,17 +33,21 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
     );
   const orders = await listAll(s.ctx.store, "purchase_orders", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "branchId", s.ctx.branchId], ["eq", "status", ["approved", "sent", "partial"]]], orderBy: [{ field: "number" }] });
   const suppliers = await listAll(s.ctx.store, "suppliers", { filters: [["eq", "companyId", s.ctx.companyId], ["ne", "status", "inactive"]] });
-  const [noOrderEnabled, terms, methods] = await Promise.all([
+  const [noOrderEnabled, terms, methods, warehouses] = await Promise.all([
     noOrderEntryOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId),
     listAll(s.ctx.store, "payment_terms", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "active", true]] }),
     listAll(s.ctx.store, "payment_methods", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "active", true]] }),
+    listAll(s.ctx.store, "warehouses", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "branchId", s.ctx.branchId]] }),
   ]);
+  const defaultWh = warehouses.find((w) => w.id === s.branch?.defaultWarehouseId);
   return (
     <>
       <PageHeader title="Receber mercadorias" crumbs={crumbs} description={`Importe a NF-e, confira os produtos e conclua a entrada fiscal e física na filial ${s.branch?.name}.`} />
       <NewReceipt
         initialOrderId={pedido ?? null}
         noOrderEnabled={noOrderEnabled}
+        warehouses={sortWarehouses(warehouses.filter(receivesGoods)).map((w) => ({ value: w.id, label: warehouseOptionLabel(w) }))}
+        defaultWarehouseName={defaultWh?.name ?? ""}
         terms={terms.map((t) => ({ value: t.id, label: t.name }))}
         methods={methods.filter((m) => !["crediario", "store_credit"].includes(m.kind)).map((m) => ({ value: m.id, label: m.name }))}
         supplierTerms={Object.fromEntries(suppliers.filter((x) => x.paymentTermId).map((x) => [x.id, x.paymentTermId as string]))}

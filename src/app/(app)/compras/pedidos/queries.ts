@@ -7,6 +7,7 @@ import { branchFilter } from "@/lib/server/lookups";
 import { supplierLabel, supplierPerformance } from "@/domain/suppliers";
 import { policyPreview } from "@/domain/approvals";
 import { purchaseBudget } from "@/domain/purchases";
+import { receivesGoods, warehouseOptionLabel } from "@/domain/warehouse-rules";
 
 export const ORDER_STATUS_GROUPS: Record<string, string[]> = {
   pending: ["draft", "in_review", "adjust"],
@@ -95,7 +96,8 @@ export async function orderFormData(ctx: Ctx) {
     policy,
     budget,
     buyers: users.filter((u) => u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId)).map((u) => ({ value: u.id, label: u.name })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR")),
-    warehouses: warehouses.sort((a, b) => Number(b.isDefault) - Number(a.isDefault)).map((w) => ({ value: w.id, label: `${w.name}${w.kind === "damaged" ? " (avarias)" : ""}` })),
+    // §39: destino da compra = depósitos que recebem mercadoria (venda, almoxarifado, uso e consumo)
+    warehouses: warehouses.filter(receivesGoods).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)).map((w) => ({ value: w.id, label: warehouseOptionLabel(w) })),
     terms: terms.map((t) => ({ value: t.id, label: t.name, installments: t.installments ?? 1, firstDueDays: t.firstDueDays ?? 0, intervalDays: t.intervalDays ?? 30 })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR")),
   };
 }

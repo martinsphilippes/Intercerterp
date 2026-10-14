@@ -6,7 +6,8 @@ import { normalizeSearch } from "@/lib/list";
 import { BusinessError } from "@/lib/core/errors";
 import { DEFAULT_TZ } from "@/lib/dates";
 import { adjustStock, balanceId, localDateTimeToIso, type ManualType } from "@/domain/stock";
-import { transferCode, createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, type TransferReceiptLine } from "@/domain/transfers";
+import { transferCode, createTransfer, updateTransferDraft, separateTransfer, shipTransfer, receiveTransfer, resolveTransferPending, cancelTransfer, setTransferDocument, transferBetweenWarehouses, type TransferReceiptLine } from "@/domain/transfers";
+import { balanceLots } from "@/domain/lots";
 import { createInventory, saveCounts, concludeInventory, cancelInventory, addInventoryItem, resumeInventoryOpening, type CountEntry } from "@/domain/inventory";
 import type { Ctx } from "@/lib/core/ctx";
 import { skuForScaleBarcode } from "@/domain/scale";
@@ -131,6 +132,31 @@ export async function saveTransferAction(fd: FormData) {
       return { ok: true as const, message: `Transferência ${transferCode(t.number)} enviada — em trânsito até o recebimento no destino.`, redirect: `${T}/${t.id}` };
     }
     return { ok: true as const, message: id ? "Rascunho atualizado." : `Transferência ${transferCode(t.number)} salva como rascunho.`, redirect: `${T}/${t.id}` };
+  });
+}
+
+/** §39 — transferência imediata entre depósitos da mesma filial. */
+export async function warehouseTransferAction(fd: FormData) {
+  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: [T, "/estoque"] }, async (s) => {
+    const t = await transferBetweenWarehouses(
+      s.ctx,
+      { fromWarehouseId: fstr(fd, "fromWarehouseId"), toWarehouseId: fstr(fd, "toWarehouseId"), items: fjson<Array<{ skuId: string; qty: number; lot?: string | null }>>(fd, "items", []), reason: fstr(fd, "reason"), notes: fopt(fd, "notes") },
+      { idemKey: fstr(fd, "_idem") },
+    );
+    return { ok: true as const, message: `Transferência ${transferCode(t.number)} concluída: saldo movido entre os depósitos.`, redirect: `${T}/${t.id}` };
+  });
+}
+
+/** Lotes com saldo de um SKU num depósito (seleção do lote na transferência entre depósitos). */
+export async function skuLotsAction(skuId: string, warehouseId: string) {
+  return runAction({ module: "stock" }, async (s) => {
+    const sku = await s.ctx.store.get("skus", skuId);
+    const wh = await visibleWarehouse(s.ctx, warehouseId);
+    if (!sku || sku.companyId !== s.ctx.companyId || !wh) return [];
+    const product = await s.ctx.store.get("products", sku.productId);
+    if (!product?.lotControl) return [];
+    const { lots } = await balanceLots(s.ctx.store, wh.id, skuId);
+    return lots.filter((l) => l.qty > 0 && l.lot).map((l) => ({ lot: l.lot as string, expiry: (l.expiry ?? null) as string | null, qty: l.qty }));
   });
 }
 

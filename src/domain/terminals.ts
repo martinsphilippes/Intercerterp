@@ -83,6 +83,11 @@ async function validate(ctx: Ctx, input: TerminalInput, selfId?: string) {
   if (input.defaultWarehouseId) {
     const wh = await ctx.store.get("warehouses", input.defaultWarehouseId);
     assert(wh && wh.branchId === input.branchId, "O depósito padrão deve pertencer à filial do terminal.");
+    // §39: o terminal baixa a venda do depósito padrão — de venda ou almoxarifado, ativo
+    if (!selfId || (await ctx.store.get("terminals", selfId))?.defaultWarehouseId !== input.defaultWarehouseId) {
+      assert(wh.status !== "inactive", `O depósito ${wh.name} está desativado.`);
+      assert(wh.kind === "available", "O depósito padrão do terminal precisa ser de venda ou almoxarifado (avarias e uso e consumo não entram no disponível para venda).");
+    }
   }
   const code = input.code.trim().toUpperCase();
   const all = await listAll(ctx.store, "terminals", { filters: [["eq", "companyId", ctx.companyId]] });

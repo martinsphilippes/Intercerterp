@@ -46,6 +46,72 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     can(s.user, "fiscal") ? transferDocuments(ctx, id) : Promise.resolve([]),
     listAll(ctx.store, "stock_movements", { filters: [["eq", "originType", "transfer"], ["eq", "originId", id]] }),
   ]);
+  // §39: transferência entre depósitos da mesma filial — concluída na hora, sem etapas
+  if (t.kind === "warehouse") {
+    const code = transferCode(t.number);
+    const rows = (t.items ?? []) as Array<TransferItem & { lot?: string | null }>;
+    return (
+      <>
+        <PageHeader
+          title={`Transferência ${code}`}
+          crumbs={[{ label: "Transferências", href: "/estoque/transferencias?tipo=depositos" }, { label: code }]}
+          badges={<><Badge tone="info">Entre depósitos</Badge><StatusBadge kind="transfer" status={t.status} /></>}
+          description={`${branches.get(t.fromBranchId)} · ${warehouses.get(t.fromWarehouseId) ?? "—"} → ${warehouses.get(t.toWarehouseId) ?? "—"} · ${formatDateTime(t.createdAt)} por ${users.get(t.createdBy) ?? "—"}`}
+          actions={
+            <>
+              <PrintButton auto={print === "1"} />
+              <LinkButton href={`/estoque/movimentos?origem=transfer:${id}&filial=all`}>Movimentos</LinkButton>
+            </>
+          }
+        />
+        <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat label="Origem" value={warehouses.get(t.fromWarehouseId) ?? "—"} />
+          <Stat label="Destino" value={warehouses.get(t.toWarehouseId) ?? "—"} />
+          <Stat label="Linhas · unidades" value={`${rows.length} · ${formatQty(rows.reduce((a, i) => a + i.qty, 0))}`} />
+          <Stat label="Valor de custo" value={formatMoney(t.totalCost ?? 0)} hint="Custo médio da origem no momento" />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 space-y-4">
+            <Card title="Itens" bodyClass="p-0">
+              <div className="overflow-x-auto">
+                <table className="table-base w-full text-sm">
+                  <thead>
+                    <tr><th>Produto</th><th>Lote</th><th className="text-right">Quantidade</th><th className="text-right">Custo unit.</th><th className="text-right">Total</th></tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((i, k) => (
+                      <tr key={`${i.skuId}-${k}`}>
+                        <td className="min-w-48"><Link className="text-brand-700 hover:underline" href={`/produtos/${i.productId}?tab=estoque`}>{i.name}</Link><span className="block font-mono text-xs text-slate-500">{i.sku}</span></td>
+                        <td className="text-xs">{(movements.find((m) => m.type === "transfer_out" && m.skuId === i.skuId && m.idemKey?.endsWith(`:out:${k + 1}`))?.lots ?? []).map((p: { lot: string | null; qty: number }) => `${p.lot ?? "sem lote"} (${formatQty(-p.qty)})`).join(", ") || i.lot || "—"}</td>
+                        <td className="tabular text-right">{formatQty(i.qty)} <span className="text-xs text-slate-400">{i.unitCode}</span></td>
+                        <td className="tabular text-right">{formatMoney(i.unitCost)}</td>
+                        <td className="tabular text-right">{formatMoney(roundDiv(i.qty * i.unitCost, QTY))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+            <Card title="Histórico">
+              <Timeline store={ctx.store} refs={[`transfer:${id}`]} />
+            </Card>
+          </div>
+          <Card title="Dados">
+            <DefinitionList
+              cols={1}
+              items={[
+                { label: "Motivo", value: t.reason ?? "—" },
+                { label: "Observações", value: t.notes ?? "—" },
+                { label: "Responsável", value: users.get(t.responsibleId) ?? "—" },
+                { label: "Concluída em", value: formatDateTime(t.receivedAt ?? t.createdAt) },
+              ]}
+            />
+            <p className="mt-3 text-xs text-slate-500">Transferência imediata entre depósitos da mesma filial: não há separação, trânsito, recebimento nem cancelamento. Para desfazer, faça a transferência inversa.</p>
+          </Card>
+        </div>
+      </>
+    );
+  }
   const items: TransferItem[] = ["draft", "separated", "shipping", "cancelled"].includes(t.status) && !movements.length ? t.items : await transferItemsFromMovements(ctx, t);
   const code = transferCode(t.number);
   const canEdit = can(s.user, "stock", "edit");

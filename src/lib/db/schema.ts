@@ -305,7 +305,12 @@ export const COLLECTIONS: CollectionDef[] = [
   {
     id: "warehouses",
     label: "Depósitos",
-    fields: { ...ctx, code: s(20), name: s(120, true), kind: s(20), isDefault: bool, status: s(20) },
+    fields: {
+      ...ctx, code: s(20), name: s(120, true), kind: s(20), isDefault: bool, status: s(20),
+      // §39: finalidade (sale | storage | consumption; ausente = venda nos "available" e avarias nos "damaged"),
+      // ordem de baixa da venda com complemento (menor primeiro) e observações
+      purpose: s(20), salePriority: int, notes: s(500),
+    },
     indexes: [k("i_branch", "branchId")],
   },
   {
@@ -348,6 +353,8 @@ export const COLLECTIONS: CollectionDef[] = [
       cancelledAt: dt, divergences: json, documentRef: s(200),
       receipts: json, returnedAt: dt, shippedBy: id(), receivedBy: id(), totalCost: money, cancelReason: s(500),
       expectedAt: date,
+      // §39: "warehouse" = transferência imediata entre depósitos da mesma filial (ausente = entre filiais)
+      kind: s(20), reason: s(500),
     },
     indexes: [k("i_from", "fromBranchId"), k("i_to", "toBranchId")],
   },
@@ -476,6 +483,8 @@ export const COLLECTIONS: CollectionDef[] = [
       promoDiscount: money, promoId: id(), promoName: s(120),
       // lote escolhido no PDV (produto com controle de lote); ausente = FEFO automático
       lot: s(60),
+      // §39: divisão da baixa por depósito [{ warehouseId, qty }] — só quando saiu de outro depósito além do terminal
+      warehouseSplit: json,
     },
     indexes: [k("i_sale", "saleId"), k("i_sku", "skuId"), k("i_branch_date", "branchId", "completedAt")],
   },

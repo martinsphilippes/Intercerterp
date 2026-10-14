@@ -315,6 +315,8 @@ export async function updateBranch(ctx: Ctx, id: string, input: BranchInput) {
     const wh = await c.store.get("warehouses", input.defaultWarehouseId);
     assert(wh && wh.branchId === id, "O depósito padrão deve pertencer à filial.");
     assert(wh.status !== "inactive", "Depósito padrão inativo.");
+    // §39: padrão da filial = depósito de venda ou almoxarifado (entra no disponível)
+    if (input.defaultWarehouseId !== before.defaultWarehouseId) assert(wh.kind === "available", "O depósito padrão da filial precisa ser de venda ou almoxarifado.");
   }
   if (input.managerUserId) {
     const m = await c.store.get("users", input.managerUserId);

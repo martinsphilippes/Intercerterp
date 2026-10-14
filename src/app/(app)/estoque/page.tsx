@@ -26,7 +26,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const [warehouses, categories] = await Promise.all([warehouseOptions(s.ctx, scope), lookups.categories(s.ctx)]);
   const columns: Column<BalanceRow>[] = [
     { key: "productName", label: "Produto / SKU", sortable: true, fixed: true, cell: (r) => <span className="block min-w-48">{r.skuName}{!r.productActive && <Badge className="ml-2">Inativo</Badge>}<span className="block font-mono text-xs font-normal text-slate-500">{r.skuCode}</span></span> },
-    { key: "warehouseName", label: "Filial · depósito", sortable: true, cell: (r) => <span className="block whitespace-nowrap text-xs">{r.branchName}<span className="block text-slate-500">{r.warehouseName}{r.warehouseKind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</span></span> },
+    { key: "warehouseName", label: "Filial · depósito", sortable: true, cell: (r) => <span className="block whitespace-nowrap text-xs">{r.branchName}<span className="block text-slate-500">{r.warehouseName}{r.warehouseKind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}{r.warehouseKind === "consumption" && <Badge className="ml-1">uso e consumo</Badge>}</span></span> },
     { key: "location", label: "Local", hidden: true, cell: (r) => r.location ?? "—" },
     { key: "physical", label: "Físico", align: "right", sortable: true, cell: (r) => <span className={`whitespace-nowrap ${r.physical < 0 ? "text-red-700" : ""}`}>{formatQty(r.physical)} <span className="text-xs text-slate-400">{r.unitCode}</span></span> },
     { key: "reserved", label: "Reservado", align: "right", sortable: true, cell: (r) => (r.reserved ? formatQty(r.reserved) : "—") },
@@ -73,7 +73,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           { type: "select", name: "deposito", label: "Depósito", options: warehouses },
           { type: "select", name: "categoria", label: "Categoria", options: categories },
           { type: "select", name: "situacao", label: "Situação", options: [{ value: "positive", label: "Com saldo" }, { value: "zero", label: "Sem saldo" }, { value: "negative", label: "Negativo" }, { value: "below_min", label: "Abaixo do mínimo" }, { value: "reserved", label: "Com reserva" }, { value: "transit", label: "Em trânsito" }] },
-          { type: "select", name: "tipoDeposito", label: "Tipo de depósito", options: [{ value: "available", label: "Disponível para venda" }, { value: "damaged", label: "Avarias" }] },
+          { type: "select", name: "tipoDeposito", label: "Tipo de depósito", options: [{ value: "available", label: "Disponível para venda (venda e almoxarifado)" }, { value: "consumption", label: "Uso e consumo" }, { value: "damaged", label: "Avarias" }] },
         ]}
       />
       <DataTable

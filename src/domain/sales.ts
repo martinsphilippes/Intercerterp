@@ -14,6 +14,7 @@ import { DEFERRED_KINDS, PAYMENT_KIND_LABEL } from "./pricing-calc";
 import { availableMap, defaultWarehouse, postMovements, damageWarehouse, releaseReservations, reservedForOrigin, type MovementInput } from "./stock";
 import { componentsCost, kitComponentMovements, kitLineCost, loadSaleKits, scaleQty } from "./product-components";
 import { checkSaleLots } from "./lots";
+import { canBeDefaultWarehouse, lifoReturnParts, partIdem, reservedByWarehouse, saleSplitPlanner, type WhPart } from "./warehouse-rules";
 import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, nonBusinessDayRule, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
 import { cashAccountFor, currentSession } from "./cash";
 import { priceSale } from "./sale-pricing";
@@ -157,10 +158,94 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   // lote escolhido no PDV (EST-02): conferido no depósito da venda; sem escolha = FEFO na baixa
   const lotByLine = await checkSaleLots(ctx, { branchId, warehouseId: warehouse.id, allowNegative, lines: lines.map((l) => ({ skuId: l.sku.id, skuCode: l.sku.sku, product: l.product, qty: l.input.qty, lot: l.input.lot })) });
 
+  // venda com complemento (§39): o que o depósito do terminal não cobre sai dos demais depósitos de venda/almoxarifado
+  const splitByLine = await planSaleSplit(ctx, { branchId, primaryId: warehouse.id, lines, kits, physicalSkus, cartId: input.cartId ?? null, salesDocumentId: input.salesDocumentId ?? null });
+
   const customer = input.customerId ? await ctx.store.getOrThrow("customers", input.customerId) : null;
   if (customer) assert(customer.companyId === ctx.companyId, "Cliente de outra empresa.");
-  return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative, kits, lotByLine };
+  return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative, kits, lotByLine, splitByLine };
 }
+
+/** Divisão da baixa de uma linha: item simples (`parts`) ou componentes do kit (`components`, por SKU). */
+export type LineSplit = { parts?: WhPart[]; components?: Record<string, WhPart[]> } | null;
+
+/**
+ * Divisão da baixa por depósito (§39). Linha que cabe no depósito do terminal (ou filial sem outro depósito de
+ * venda/almoxarifado ativo) não recebe divisão — grava e baixa exatamente como antes. As linhas são atendidas na
+ * ordem da venda, consumindo o disponível de cada depósito (físico − reservado, mais a reserva do próprio
+ * atendimento/pedido no depósito em que foi feita).
+ */
+async function planSaleSplit(
+  ctx: Ctx,
+  p: { branchId: string; primaryId: string; lines: Array<{ sku: Doc; product: Doc; input: SaleItemInput }>; kits: Map<string, Array<{ skuId: string; qty: number }>>; physicalSkus: string[]; cartId: string | null; salesDocumentId: string | null },
+): Promise<LineSplit[]> {
+  const out: LineSplit[] = p.lines.map(() => null);
+  const planner = await saleSplitPlanner(ctx.store, {
+    branchId: p.branchId,
+    primaryId: p.primaryId,
+    skuIds: p.physicalSkus,
+    own: async () => [
+      ...(p.cartId ? await reservedByWarehouse(ctx.store, "cart", p.cartId, p.branchId) : []),
+      ...(p.salesDocumentId ? await reservedByWarehouse(ctx.store, "sales_document", p.salesDocumentId, p.branchId) : []),
+    ],
+  });
+  if (!planner) return out;
+  p.lines.forEach((l, idx) => {
+    if (l.product.type === "service") return;
+    const comps = p.kits.get(l.sku.id);
+    if (comps) {
+      const rec: Record<string, WhPart[]> = {};
+      for (const c of comps) {
+        const q = scaleQty(l.input.qty, c.qty);
+        if (q <= 0) continue;
+        const parts = planner.take(c.skuId, q);
+        if (parts) rec[c.skuId] = parts;
+      }
+      if (Object.keys(rec).length) out[idx] = { components: rec };
+      return;
+    }
+    const parts = planner.take(l.sku.id, l.input.qty);
+    if (parts) out[idx] = { parts };
+  });
+  return out;
+}
+
+/** Saída da venda dividida por depósito: a parte do depósito do terminal mantém a chave (e o lote escolhido). */
+function splitSaleExit(m: MovementInput, parts: WhPart[] | null | undefined, primaryId: string): MovementInput[] {
+  if (!parts?.length) return [m];
+  return parts.filter((p) => p.qty > 0).map((p) => ({ ...m, warehouseId: p.warehouseId, qty: -p.qty, idemKey: partIdem(m.idemKey, primaryId, p.warehouseId), lot: p.warehouseId === primaryId ? (m.lot ?? null) : null }));
+}
+
+/** Parte que volta ao estoque: depósito de destino, depósito de onde a venda tirou e quantidade. */
+export interface BackPart {
+  warehouseId: string;
+  fromWarehouseId: string;
+  qty: number;
+}
+
+/**
+ * Entrada que desfaz partes da venda (cancelamento/devolução): cada parte entra no depósito de destino, com a chave
+ * e a origem de lotes (`sourceMovementId`) da parte correspondente da saída.
+ */
+function splitBack(m: MovementInput, parts: BackPart[], primaryId: string, saleIdem: string): MovementInput[] {
+  return parts.filter((p) => p.qty > 0).map((p) => ({ ...m, warehouseId: p.warehouseId, qty: p.qty, idemKey: partIdem(m.idemKey, primaryId, p.fromWarehouseId), sourceMovementId: detId("mov", partIdem(saleIdem, primaryId, p.fromWarehouseId)) }));
+}
+
+/**
+ * Destino do que volta ao estoque bom (cancelamento/devolução): o próprio depósito de origem, se ainda for de
+ * venda/almoxarifado ativo; senão o depósito padrão da filial.
+ */
+async function goodStockDestination(store: Store, branchId: string) {
+  const whs = new Map((await listAll(store, "warehouses", { filters: [["eq", "branchId", branchId]] })).map((w) => [w.id, w]));
+  let fallback: string | null = null;
+  return async (warehouseId: string | null | undefined): Promise<string> => {
+    if (warehouseId && canBeDefaultWarehouse(whs.get(warehouseId))) return warehouseId;
+    fallback ??= (await defaultWarehouse(store, branchId)).id;
+    return fallback;
+  };
+}
+
+const hasSplit = (i: Doc) => Boolean(i.warehouseSplit?.length || i.components?.some((c: { warehouseSplit?: WhPart[] }) => c.warehouseSplit?.length));
 
 type PreparedPay = SalePaymentInput & { method: Doc; change: number; intent?: Doc | null; voucher?: Doc | null; term?: Doc | null; status: string; manual: boolean; loyalty?: { points: number; plan: Array<{ voucher: Doc; take: number }> } | null; cardRule?: CardFeeRule | null };
 
@@ -376,7 +461,10 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
   const base = { companyId: ctx.companyId, branchId, createdBy: ctx.user.id };
   const itemRows = lines.map((l, idx) => {
     const it = calc.items[idx];
-    const { unitCost, costTotal: lineCostTotal, components } = costs[idx];
+    const { unitCost, costTotal: lineCostTotal, components: comps0 } = costs[idx];
+    // divisão da baixa por depósito (§39): só quando algo sai de outro depósito além do terminal
+    const split = prep.splitByLine[idx];
+    const components = comps0 && split?.components ? comps0.map((c) => (split.components![c.skuId] ? { ...c, warehouseSplit: split.components![c.skuId] } : c)) : comps0;
     return {
       id: detId("saleitem", saleId, idx + 1),
       data: {
@@ -407,6 +495,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         // promoção aplicada (CAD-15) — somente quando houver: venda sem promoção grava exatamente o que gravava
         ...(it.promoDiscount > 0 ? { promoDiscount: it.promoDiscount, promoId: l.promoId, promoName: l.promoName } : {}),
         ...(prep.lotByLine[idx] ? { lot: prep.lotByLine[idx] } : {}),
+        ...(split?.parts ? { warehouseSplit: split.parts } : {}),
       },
     };
   });
@@ -733,12 +822,19 @@ export async function applySaleEffects(ctx: Ctx, saleId: string, emitFiscal: boo
     .filter((i) => i.warehouseId)
     .flatMap((i) =>
       // kit: baixa os componentes (custo do retrato gravado no item), nunca o próprio kit
+      // divisão por depósito (§39): cada parte sai do seu depósito (FEFO dentro de cada um); sem divisão, como sempre
       i.components?.length
-        ? kitComponentMovements(i.components, i.qty, { warehouseId: i.warehouseId, type: "sale", originType: "sale", originId: saleId, operationId: saleId, reason: `Venda nº ${sale.number} — kit ${i.sku}`, allowNegative: true, occurredAt: sale.completedAt, sign: -1, idemKey: `sale:${saleId}:${i.seq}` })
-        : [{
-            warehouseId: i.warehouseId, skuId: i.skuId, qty: -i.qty, type: "sale" as const, unitCost: i.unitCost, originType: "sale", originId: saleId, operationId: saleId,
-            reason: `Venda nº ${sale.number}`, idemKey: `sale:${saleId}:${i.seq}`, allowNegative: true, occurredAt: sale.completedAt, lot: i.lot ?? null,
-          }],
+        ? kitComponentMovements(i.components, i.qty, { warehouseId: i.warehouseId, type: "sale", originType: "sale", originId: saleId, operationId: saleId, reason: `Venda nº ${sale.number} — kit ${i.sku}`, allowNegative: true, occurredAt: sale.completedAt, sign: -1, idemKey: `sale:${saleId}:${i.seq}` }).flatMap((m) =>
+            splitSaleExit(m, i.components.find((c: { skuId: string }) => c.skuId === m.skuId)?.warehouseSplit, i.warehouseId),
+          )
+        : splitSaleExit(
+            {
+              warehouseId: i.warehouseId, skuId: i.skuId, qty: -i.qty, type: "sale" as const, unitCost: i.unitCost, originType: "sale", originId: saleId, operationId: saleId,
+              reason: `Venda nº ${sale.number}`, idemKey: `sale:${saleId}:${i.seq}`, allowNegative: true, occurredAt: sale.completedAt, lot: i.lot ?? null,
+            },
+            i.warehouseSplit,
+            i.warehouseId,
+          ),
     );
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   if (sale.status === "cancelled") {
@@ -1038,14 +1134,22 @@ export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
   // a saída de estoque da venda precisa existir antes do retorno (venda cancelada antes dos efeitos)
   if (sale.effectsStatus !== "done") await applySaleEffects(ctx, saleId, false);
   const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", saleId]], orderBy: [{ field: "seq" }] });
-  const movements: MovementInput[] = items
-    .filter((i) => i.warehouseId)
-    .flatMap((i) =>
+  // divisão por depósito (§39): cada parte volta ao depósito de onde saiu (inativo/fora da venda: padrão da filial)
+  const dest = items.some(hasSplit) ? await goodStockDestination(ctx.store, sale.branchId) : null;
+  const back = async (m: MovementInput, parts: WhPart[] | null | undefined, primaryId: string, saleIdem: string): Promise<MovementInput[]> =>
+    parts?.length && dest ? splitBack(m, await Promise.all(parts.map(async (p) => ({ warehouseId: await dest(p.warehouseId), fromWarehouseId: p.warehouseId, qty: p.qty }))), primaryId, saleIdem) : [m];
+  const movements: MovementInput[] = [];
+  for (const i of items.filter((x) => x.warehouseId)) {
+    if (i.components?.length) {
       // kit: os componentes voltam pelo custo com que saíram (recompõe o custo médio)
-      i.components?.length
-        ? kitComponentMovements(i.components, i.qty, { warehouseId: i.warehouseId, type: "sale_cancel", originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number} — kit ${i.sku}`, sign: 1, idemKey: `sale-cancel:${saleId}:${i.seq}` })
-        : [{ warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel" as const, unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}`, sourceMovementId: detId("mov", `sale:${saleId}:${i.seq}`) }],
-    );
+      for (const m of kitComponentMovements(i.components, i.qty, { warehouseId: i.warehouseId, type: "sale_cancel", originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number} — kit ${i.sku}`, sign: 1, idemKey: `sale-cancel:${saleId}:${i.seq}` })) {
+        movements.push(...(await back(m, i.components.find((c: { skuId: string }) => c.skuId === m.skuId)?.warehouseSplit, i.warehouseId, `sale:${saleId}:${i.seq}:${m.skuId}`)));
+      }
+      continue;
+    }
+    const m: MovementInput = { warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel", unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}`, sourceMovementId: detId("mov", `sale:${saleId}:${i.seq}`) };
+    movements.push(...(await back(m, i.warehouseSplit, i.warehouseId, `sale:${saleId}:${i.seq}`)));
+  }
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   const pendingTitles = await cancelSaleTitles(ctx, sale, why);
   // documento comercial faturado por esta venda: as quantidades voltam ao saldo a faturar (idempotente)
@@ -1145,6 +1249,10 @@ interface ReturnLine {
   unitCost: number;
   costTotal: number;
   reason: string | null;
+  /** §39 — item vendido com divisão por depósito: partes devolvidas (destino, depósito de onde a venda tirou, quantidade) */
+  parts?: BackPart[];
+  /** §39 — kit com componente dividido por depósito: partes por SKU do componente */
+  componentParts?: Record<string, BackPart[]>;
 }
 
 /**
@@ -1244,6 +1352,23 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
   }
   const available = await defaultWarehouse(ctx.store, branchId);
   const damaged = wanted.some((l) => l.condition === "damaged") ? await damageWarehouse(ctx, branchId) : null;
+  // §39: o estoque bom volta ao depósito de origem da venda (se ainda de venda/almoxarifado ativo; senão o padrão)
+  const dest = await goodStockDestination(ctx.store, branchId);
+  const destByItem = new Map<string, string>();
+  for (const i of wanted) {
+    const it = byId.get(i.saleItemId);
+    if (it?.warehouseId) destByItem.set(it.id, await dest(it.warehouseId));
+  }
+  const splitDest = new Map<string, string>();
+  for (const it of items.filter(hasSplit)) {
+    for (const p of [...(it.warehouseSplit ?? []), ...(it.components ?? []).flatMap((c: { warehouseSplit?: WhPart[] }) => c.warehouseSplit ?? [])] as WhPart[]) splitDest.set(p.warehouseId, await dest(p.warehouseId));
+  }
+  /**
+   * Partes devolvidas de um item dividido (regra §39): primeiro aos depósitos complementares na ordem inversa da baixa,
+   * por último ao depósito do terminal; avaria vai inteira para o depósito de avarias (com a origem de cada parte).
+   */
+  const backParts = (parts: WhPart[], already: number, qty: number, condition: string): BackPart[] =>
+    lifoReturnParts(parts, already, qty).map((p) => ({ warehouseId: condition === "damaged" ? damaged!.id : (splitDest.get(p.warehouseId) ?? available.id), fromWarehouseId: p.warehouseId, qty: p.qty }));
 
   /** Monta as linhas a partir do que já foi devolvido (relido a cada tentativa: devoluções concorrentes). */
   const build = async (concurrent: boolean) => {
@@ -1266,9 +1391,17 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
       // valor proporcional ao líquido pago no item; ao devolver o restante, fecha os centavos exatamente
       const total = i.qty === returnable ? it.total - done.total : roundDiv(it.total * i.qty, it.qty);
       const condition = i.condition === "damaged" ? "damaged" : "resellable";
+      const already = Math.max(it.returnedQty ?? 0, done.qty);
+      const parts = it.warehouseSplit?.length ? backParts(it.warehouseSplit, already, i.qty, condition) : null;
+      const componentParts: Record<string, BackPart[]> = {};
+      for (const c of (it.components ?? []) as Array<{ skuId: string; qty: number; warehouseSplit?: WhPart[] }>) {
+        if (c.warehouseSplit?.length) componentParts[c.skuId] = backParts(c.warehouseSplit, scaleQty(already, c.qty), scaleQty(i.qty, c.qty), condition);
+      }
       return {
-        saleItemId: it.id, skuId: it.skuId, qty: i.qty, condition, warehouseId: condition === "damaged" ? damaged!.id : available.id, unitPrice: it.unitPrice, total,
+        saleItemId: it.id, skuId: it.skuId, qty: i.qty, condition, warehouseId: condition === "damaged" ? damaged!.id : (destByItem.get(it.id) ?? available.id), unitPrice: it.unitPrice, total,
         unitCost: it.unitCost, costTotal: it.components?.length ? componentsCost(it.components, i.qty) : roundDiv(it.unitCost * i.qty, QTY), reason: i.reason?.trim() || null,
+        ...(parts ? { parts } : {}),
+        ...(Object.keys(componentParts).length ? { componentParts } : {}),
       };
     });
     const itemsTotal = lines.reduce((a, l) => a + l.total, 0);
@@ -1452,13 +1585,18 @@ export async function applyReturnEffects(ctx: Ctx, returnId: string) {
   const saleItemsAll = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", sale.id]] });
   const kitItems = new Map(saleItemsAll.filter((i) => i.components?.length).map((i) => [i.id, i]));
   const saleSeq = new Map(saleItemsAll.map((i) => [i.id, i.seq]));
+  const saleWh = new Map(saleItemsAll.map((i) => [i.id, i.warehouseId as string]));
   const movements: MovementInput[] = lines.flatMap((l) => {
     const m = {
       warehouseId: l.warehouseId, skuId: l.skuId, qty: l.qty, type: l.condition === "damaged" ? ("damage_in" as const) : ("return" as const),
       unitCost: l.unitCost, originType: "return", originId: returnId, operationId: sale.id, reason: `Devolução nº ${ret.number}: ${ret.reason}`, idemKey: `return:${returnId}:${l.saleItemId}`,
     };
     const kit = kitItems.get(l.saleItemId);
-    return kit ? kitComponentMovements(kit.components, l.qty, { ...m, sign: 1 }) : [{ ...m, sourceMovementId: saleSeq.has(l.saleItemId) ? detId("mov", `sale:${sale.id}:${saleSeq.get(l.saleItemId)}`) : null }];
+    const saleIdem = `sale:${sale.id}:${saleSeq.get(l.saleItemId)}`;
+    // §39: item vendido com divisão por depósito — cada parte com a chave e os lotes da parte de origem
+    if (kit) return kitComponentMovements(kit.components, l.qty, { ...m, sign: 1 }).flatMap((cm) => (l.componentParts?.[cm.skuId]?.length ? splitBack(cm, l.componentParts[cm.skuId], saleWh.get(l.saleItemId)!, `${saleIdem}:${cm.skuId}`) : [cm]));
+    if (l.parts?.length) return splitBack(m, l.parts, saleWh.get(l.saleItemId)!, saleIdem);
+    return [{ ...m, sourceMovementId: saleSeq.has(l.saleItemId) ? detId("mov", saleIdem) : null }];
   });
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   // fidelidade (CAD-21): estorno proporcional dos pontos acumulados pela venda (idempotente por devolução)

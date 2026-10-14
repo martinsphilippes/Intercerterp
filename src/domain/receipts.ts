@@ -13,6 +13,7 @@ import { buildSchedule, createTitle } from "./finance";
 import { assertPeriodOpen } from "./period-close";
 import { defaultWarehouse, postMovements } from "./stock";
 import { receiptLotBlockers, receiptLotSplit } from "./lots";
+import { WAREHOUSE_TYPE_LABEL, receivesGoods, warehouseType } from "./warehouse-rules";
 import { parseNfeXml, nfeKeyIsValid, type NfeItemTax, type ParsedNfe } from "./nfe-xml";
 import { CONFIRMED, ORDER_STATUS_LABEL, netUnitCost } from "./purchase-calc";
 import { orderItems, refreshOrderReceipts, remainingQty } from "./purchases";
@@ -589,6 +590,7 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
   // só mantém pedidos que compartilham algum produto com a nota
   const skuSet = new Set(items.map((i) => i.skuId).filter(Boolean));
   const relevant = orderIds.filter((id) => lines.some((l) => l.order.id === id && skuSet.has(l.skuId)));
+  if (input.warehouseId) await assertReceiptWarehouse(ctx.store, input.warehouseId, branchId);
   const warehouseId = input.warehouseId || (relevant[0] ? lines.find((l) => l.order.id === relevant[0])?.order.warehouseId : null) || (await defaultWarehouse(ctx.store, branchId)).id;
   const firstOrder = relevant[0] ? lines.find((l) => l.order.id === relevant[0])?.order : null;
   const number = await nextNumber(ctx.store, `receipt:${ctx.companyId}`);
@@ -713,10 +715,7 @@ async function createNoOrderReceipt(ctx: Ctx, supplier: Doc<any>, input: ManualR
   assert((input.items ?? []).length <= 300, "Nota com itens demais para o lançamento manual (máximo 300) — importe o XML.");
   const items = await manualItems(ctx, supplier.id, input.items ?? [], 1);
   for (const [k, v] of [["Frete", input.freight], ["Outras despesas", input.otherExpenses], ["Desconto", input.discount]] as const) assert(v == null || (Number.isInteger(v) && v >= 0), `${k} inválido.`);
-  if (input.warehouseId) {
-    const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
-    assert(wh.branchId === branchId, "Depósito de outra filial.");
-  }
+  if (input.warehouseId) await assertReceiptWarehouse(ctx.store, input.warehouseId, branchId);
   // condição: a informada (vazia = à vista, vencimento na emissão); sem o campo, a do fornecedor
   const termId = input.paymentTermId !== undefined ? input.paymentTermId || null : (supplier.paymentTermId ?? null);
   if (input.paymentTermId) {
@@ -789,6 +788,7 @@ export async function createManualReceipt(ctx: Ctx, input: ManualReceiptInput) {
     assert(CONFIRMED.includes(o.status), `Pedido nº ${o.number} não está aprovado/enviado (situação atual: ${o.status}).`);
     assert(o.branchId === branchId, `Pedido nº ${o.number} é de outra filial.`);
   }
+  if (input.warehouseId) await assertReceiptWarehouse(ctx.store, input.warehouseId, branchId);
   const lines = await orderLines(ctx.store, orderIds, ctx.companyId);
   const bySku = new Map<string, { qty: number; value: number; netUnit: number; description: string; unitCode: string; sku: string | null; supplierCode: string | null }>();
   for (const l of lines) {
@@ -970,10 +970,7 @@ export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) 
     const linked = (r.orderIds ?? []).includes(oid);
     assert((linked ? LINKABLE : CONFIRMED).includes(o.status), `Pedido nº ${o.number} está ${ORDER_STATUS_LABEL[o.status as keyof typeof ORDER_STATUS_LABEL] ?? o.status} — ${linked ? "desmarque-o em “Pedidos relacionados” ou aguarde a nova aprovação" : "somente pedidos aprovados/enviados podem ser vinculados"}.`);
   }
-  if (input.warehouseId) {
-    const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
-    assert(wh.branchId === r.branchId, "Depósito de outra filial.");
-  }
+  if (input.warehouseId && input.warehouseId !== r.warehouseId) await assertReceiptWarehouse(ctx.store, input.warehouseId, r.branchId);
   for (const [k, v] of [["Frete", input.freight], ["Outras despesas", input.otherExpenses], ["Desconto", input.discount]] as const) assert(v == null || (Number.isInteger(v) && v >= 0), `${k} inválido.`);
   // sem XML: ao alterar frete/despesas/desconto, os encargos deixam de ser calculados pelo pedido (valores informados).
   // "Alterar" = diferente do que o formulário exibia ao ser carregado (não do gravado: a gravação pode ter
@@ -1234,6 +1231,18 @@ async function startConfirming(ctx: Ctx, id: string) {
  * após falha conclui sem duplicar. Durante os efeitos o documento fica "confirmando" (não editável).
  */
 
+/**
+ * Depósito de destino escolhido para o recebimento (§39): da filial, ativo e que recebe mercadoria (venda,
+ * almoxarifado ou uso e consumo — avarias não recebe compra).
+ */
+async function assertReceiptWarehouse(store: Store, warehouseId: string, branchId: string) {
+  const wh = await store.getOrThrow("warehouses", warehouseId);
+  assert(wh.branchId === branchId, "Depósito de outra filial.");
+  assert(wh.status !== "inactive", `O depósito ${wh.name} está desativado.`);
+  assert(receivesGoods(wh), `O depósito ${wh.name} é de avarias e não recebe mercadoria de compra: escolha um depósito de venda, almoxarifado ou uso e consumo.`);
+  return wh;
+}
+
 export async function confirmReceipt(ctx: Ctx, id: string) {
   requireReceive(ctx);
   let r = await getReceiptForWrite(ctx, id);
@@ -1244,6 +1253,11 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
     const calc = await recompute(ctx, r);
     r = await ctx.store.update("receipts", id, omit(calc, "payable"));
     const blockers = confirmBlockers(r);
+    // §39: o depósito de destino precisa estar ativo e receber mercadoria (venda, almoxarifado ou uso e consumo)
+    if (effectsOf(r).updateStock) {
+      const wh = r.warehouseId ? await ctx.store.get("warehouses", r.warehouseId) : null;
+      if (!receivesGoods(wh)) blockers.push(wh ? `O depósito de destino ${wh.name} ${wh.status === "inactive" ? "está desativado" : `é de ${WAREHOUSE_TYPE_LABEL[warehouseType(wh)].toLowerCase()}`}: escolha outro depósito de destino na conferência.` : "Escolha o depósito de destino na conferência.");
+    }
     // lote obrigatório para produto com controle de lote (EST-02, recurso feature.lotes)
     blockers.push(...(await receiptLotBlockers(ctx, r)));
     if (blockers.length) throw new BusinessError(blockers.join(" "), "receipt_blocked");

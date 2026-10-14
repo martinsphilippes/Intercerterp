@@ -60,7 +60,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "ncm", label: "NCM", sortable: true, cell: (r) => <span className="font-mono text-xs">{r.ncm || "—"}</span> },
     { key: "productName", label: "Produto / SKU", sortable: true, fixed: true, cell: (r) => <span className="block min-w-48">{r.skuName}<span className="block font-mono text-xs font-normal text-slate-500">{r.skuCode}</span></span> },
     { key: "categoryName", label: "Categoria", sortable: true, hidden: true, cell: (r) => <span className="text-xs">{r.categoryName}</span> },
-    { key: "warehouseName", label: "Filial · depósito", sortable: true, cell: (r) => <span className="block whitespace-nowrap text-xs">{r.branchName}<span className="block text-slate-500">{r.warehouseName}{r.warehouseKind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}</span></span> },
+    { key: "warehouseName", label: "Filial · depósito", sortable: true, cell: (r) => <span className="block whitespace-nowrap text-xs">{r.branchName}<span className="block text-slate-500">{r.warehouseName}{r.warehouseKind === "damaged" && <Badge tone="warn" className="ml-1">avarias</Badge>}{r.warehouseKind === "consumption" && <Badge className="ml-1">uso e consumo</Badge>}</span></span> },
     { key: "qty", label: "Quantidade", align: "right", sortable: true, cell: (r) => <span className={`whitespace-nowrap ${r.negative ? "text-red-700" : ""}`}>{formatQty(r.qty)} <span className="text-xs text-slate-400">{r.unitCode}</span></span> },
     { key: "avgCost", label: "Custo médio na data", align: "right", sortable: true, cell: (r) => <span className="whitespace-nowrap">{formatMoney(r.avgCost)}</span> },
     { key: "value", label: "Valor", align: "right", sortable: true, cell: (r) => (r.negative ? <Badge tone="bad">Negativo — não valorizado</Badge> : <span className="whitespace-nowrap">{formatMoney(r.value)}</span>) },
@@ -105,7 +105,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           { type: "search", placeholder: "Produto, código, SKU ou GTIN" },
           { type: "select", name: "filial", label: "Filial", options: [{ value: "all", label: "Todas (consolidado)" }, ...branches], all: s.branch ? `Atual (${s.branch.name})` : "Todas" },
           { type: "select", name: "deposito", label: "Depósito", options: warehouses },
-          { type: "select", name: "tipoDeposito", label: "Tipo de depósito", options: [{ value: "available", label: "Disponível para venda" }, { value: "damaged", label: "Avarias" }] },
+          { type: "select", name: "tipoDeposito", label: "Tipo de depósito", options: [{ value: "available", label: "Disponível para venda (venda e almoxarifado)" }, { value: "consumption", label: "Uso e consumo" }, { value: "damaged", label: "Avarias" }] },
           { type: "select", name: "categoria", label: "Categoria", options: categories },
           { type: "text", name: "ncm", label: "NCM (ou início)", placeholder: "ex.: 4820" },
         ]}
@@ -275,7 +275,7 @@ function NcmBlock({ ncm, list }: { ncm: string; list: FiscalInventoryRow[] }) {
         <tr key={r.id} className="align-top">
           <td className="py-0.5 pr-2 font-mono">{i === 0 ? ncm || "Sem NCM" : ""}</td>
           <td className="py-0.5 pr-2">
-            {r.skuName} <span className="text-[10px]">({r.skuCode}{r.warehouseKind === "damaged" ? " · avarias" : ""} · {r.branchName})</span>
+            {r.skuName} <span className="text-[10px]">({r.skuCode}{r.warehouseKind === "damaged" ? " · avarias" : r.warehouseKind === "consumption" ? " · uso e consumo" : ""} · {r.branchName})</span>
           </td>
           <td className="py-0.5 pr-2 text-right">{formatQty(r.qty)}</td>
           <td className="py-0.5 pr-2">{r.unitCode}</td>

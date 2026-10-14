@@ -294,7 +294,8 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                     {ENTRY_CFOPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </datalist>
                 </Field>
-                <Field label="Local de estoque" required>
+                <Field label="Depósito de destino" required hint="Venda, almoxarifado ou uso e consumo (avarias não recebe compra).">
+
                   <Select name="warehouseId" defaultValue={r.warehouseId} options={warehouses} onChange={() => setDirty(true)} />
                 </Field>
                 <Field label="Plano de contas">

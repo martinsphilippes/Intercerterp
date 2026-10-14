@@ -26,6 +26,7 @@ import { defaultMarginBps, planProductsFromReceipt } from "@/domain/receipt-prod
 import { SupplierReturnsCard } from "./supplier-returns";
 import { isFeatureOn } from "@/lib/core/settings";
 import { ReceiptShortcuts } from "./receipt-shortcuts";
+import { receivesGoods, sortWarehouses, warehouseOptionLabel } from "@/domain/warehouse-rules";
 
 export const metadata = { title: "Recebimento" };
 
@@ -117,7 +118,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       items: items.map((i) => ({ idx: i.idx, cProd: i.cProd ?? null, xProd: i.xProd ?? null, uCom: i.uCom ?? null, invoicedQtySupplier: i.invoicedQtySupplier ?? null, conversionFactor: i.conversionFactor ?? 1000, invoicedQty: i.invoicedQty, invoicedValue: i.invoicedValue, invoiceUnitCost: i.invoiceUnitCost, skuId: i.skuId, sku: i.sku ?? null, description: i.description, unitCode: i.unitCode ?? null, mapping: i.mapping ?? null, expectedQty: i.expectedQty ?? 0, orderUnitCost: i.orderUnitCost ?? null, receivedQty: i.receivedQty, unitCost: i.unitCost, ignore: Boolean(i.ignore), divergence: i.divergence ?? null, checked: Boolean(i.checked), lot: i.lot ?? null, expiry: i.expiry ?? null, status: receiptItemStatus(i, divergences), lineValue: i.lineValue ?? null, cfop: i.cfop ?? null, entryCfop: i.entryCfop ?? null, added: Boolean(i.added) })),
       orders: orders.map((o) => ({ id: o.id, number: o.number, status: o.status, expectedDate: o.expectedDate ?? null })),
       orderSkus: [...skuOpts.entries()].map(([skuId, label]) => ({ skuId, label })),
-      warehouses: warehouses.map((w) => ({ value: w.id, label: w.name })),
+      // §39: destino entre os depósitos ativos que recebem mercadoria (o atual aparece mesmo se deixou de valer — a conclusão avisa)
+      warehouses: sortWarehouses(warehouses.filter((w) => receivesGoods(w) || w.id === r.warehouseId)).map((w) => ({ value: w.id, label: `${warehouseOptionLabel(w)}${receivesGoods(w) ? "" : w.status === "inactive" ? " — desativado" : " — não recebe compra"}` })),
       terms: termsL.map((t) => ({ value: t.id, label: t.name })),
       methods: methodsL.filter((m) => !["crediario", "store_credit"].includes(m.kind)).map((m) => ({ value: m.id, label: m.name })),
       categories: cats.map((c) => ({ value: c.id, label: c.name })),

@@ -258,12 +258,16 @@ export async function queryTransfers(ctx: Ctx, p: P) {
     .filter((t) => (p.f.ate ? String(t.createdAt) < dayRange(p.f.ate, p.f.ate).end : true))
     .filter((t) => (q ? String(t.number) === q.replace(/\D/g, "") || (t.items as TransferItem[]).some((i) => skuMatches(q, m.sku.get(i.skuId), m.product.get(i.productId))) : true))
     .filter((t) => (p.f.divergencia === "1" ? (t.divergences ?? []).length > 0 : true))
+    // §39: tipo — entre filiais (padrão de sempre) ou entre depósitos da mesma filial
+    .filter((t) => (p.f.tipo === "depositos" ? t.kind === "warehouse" : p.f.tipo === "filiais" ? t.kind !== "warehouse" : true))
     .map((t) => {
       const items = t.items as TransferItem[];
+      const internal = t.kind === "warehouse";
       return {
         ...t,
-        fromName: m.branch.get(t.fromBranchId)?.name ?? "—",
-        toName: m.branch.get(t.toBranchId)?.name ?? "—",
+        internal,
+        fromName: internal ? `${m.branch.get(t.fromBranchId)?.name ?? "—"} · ${m.warehouse.get(t.fromWarehouseId)?.name ?? "—"}` : (m.branch.get(t.fromBranchId)?.name ?? "—"),
+        toName: internal ? (m.warehouse.get(t.toWarehouseId)?.name ?? "—") : (m.branch.get(t.toBranchId)?.name ?? "—"),
         itemsCount: items.length,
         qtyTotal: items.reduce((a, i) => a + i.qty, 0),
         pendingTotal: items.reduce((a, i) => a + pendingQty(i), 0),

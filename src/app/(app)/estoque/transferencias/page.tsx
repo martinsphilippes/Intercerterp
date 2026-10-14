@@ -1,5 +1,5 @@
 import Link from "@/components/ui/link";
-import { Eye, Plus, Printer } from "lucide-react";
+import { ArrowLeftRight, Eye, Plus, Printer } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -14,7 +14,7 @@ import { can } from "@/lib/permissions";
 import { transferCode } from "@/domain/transfers";
 import { queryTransfers, branchOptions, type TransferRow } from "../queries";
 
-export const metadata = { title: "Transferências entre filiais" };
+export const metadata = { title: "Transferências" };
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const s = await requireSession("stock");
@@ -27,7 +27,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const columns: Column<TransferRow>[] = [
     { key: "number", label: "Código", sortable: true, fixed: true, cell: (r) => <span className="font-mono">{transferCode(r.number)}</span> },
     { key: "createdAt", label: "Data", sortable: true, cell: (r) => <span className="whitespace-nowrap">{formatDateTime(r.createdAt)}</span> },
-    { key: "fromName", label: "Origem → destino", cell: (r) => <span className="block whitespace-nowrap text-sm">{r.fromName}<span className="block text-slate-500">→ {r.toName}</span></span> },
+    { key: "fromName", label: "Origem → destino", cell: (r) => <span className="block whitespace-nowrap text-sm">{r.fromName}<span className="block text-slate-500">→ {r.toName}</span>{r.internal && <Badge tone="info" className="mt-0.5">Entre depósitos</Badge>}</span> },
     { key: "itemsCount", label: "Itens", align: "right", sortable: true, cell: (r) => <span className="block whitespace-nowrap">{r.itemsCount} produto{r.itemsCount === 1 ? "" : "s"}<span className="block text-xs text-slate-500">{formatQty(r.qtyTotal)} unidades</span></span> },
     { key: "costTotal", label: "Valor de custo", align: "right", sortable: true, cell: (r) => formatMoney(r.costTotal) },
     { key: "responsibleName", label: "Responsável", sortable: true, cell: (r) => <span className="text-xs">{r.responsibleName}</span> },
@@ -54,10 +54,18 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   return (
     <>
       <PageHeader
-        title="Transferências entre filiais"
+        title="Transferências"
         crumbs={[{ label: "Produtos e estoque" }, { label: "Transferências" }]}
-        description="Saída da origem e recebimento no destino são momentos distintos: o que foi expedido fica em trânsito (não disponível em nenhuma filial) até ser recebido, devolvido ou baixado."
-        actions={can(s.user, "stock", "create") && here && <LinkButton href="/estoque/transferencias/novo" variant="accent"><Plus className="size-4" /> Nova transferência</LinkButton>}
+        description="Entre filiais, saída da origem e recebimento no destino são momentos distintos: o que foi expedido fica em trânsito (não disponível em nenhuma filial) até ser recebido, devolvido ou baixado. Entre depósitos da mesma filial, a transferência é imediata."
+        actions={
+          can(s.user, "stock", "create") &&
+          here && (
+            <>
+              <LinkButton href="/estoque/transferencias/depositos"><ArrowLeftRight className="size-4" /> Entre depósitos</LinkButton>
+              <LinkButton href="/estoque/transferencias/novo" variant="accent"><Plus className="size-4" /> Nova transferência entre filiais</LinkButton>
+            </>
+          )
+        }
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Em trânsito" value={inTransit.length} hint={`${formatQty(inTransit.reduce((a, t) => a + t.pendingTotal, 0))} unidades pendentes`} href="/estoque/transferencias?status=in_transit,partial&filial=all" tone={inTransit.length ? "warn" : "default"} />
@@ -70,6 +78,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         values={params}
         filters={[
           { type: "search", placeholder: "Número, produto ou SKU" },
+          { type: "select", name: "tipo", label: "Tipo", all: "Todos os tipos", options: [{ value: "filiais", label: "Entre filiais" }, { value: "depositos", label: "Entre depósitos" }] },
           {
             type: "select",
             name: "status",

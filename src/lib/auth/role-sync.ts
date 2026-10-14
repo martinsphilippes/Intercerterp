@@ -26,6 +26,8 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   "sales_doc.quote", "sales_doc.order", "sales_doc.cancel",
   // Fase 7: fechamento e reabertura de período financeiro (FIN-21)
   "finance.close_period",
+  // cadastro de depósitos por filial (§39)
+  "stock.warehouses",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);
