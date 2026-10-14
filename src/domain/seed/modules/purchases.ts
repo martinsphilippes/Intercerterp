@@ -5,7 +5,7 @@ import type { DemoRefs } from "../base";
 import { activePolicy, decideRequest, policyId, savePolicy, submitForApproval } from "../../approvals";
 import { createOrder, registerOrderSent } from "../../purchases";
 import { applySuggestion, createQuotation, quotationProposals, saveProposal } from "../../quotations";
-import { confirmReceipt, importNfeXml, updateReceipt } from "../../receipts";
+import { confirmReceipt, createManualReceipt, importNfeXml, updateReceipt } from "../../receipts";
 import { buildSampleNfeXml } from "../../nfe-xml";
 
 /**
@@ -14,7 +14,9 @@ import { buildSampleNfeXml } from "../../nfe-xml";
  *  - cotação de acessórios com 3 fornecedores (frete, mínimo, validade; uma proposta vencida) e sugestão aplicada;
  *  - pedido VoltTech em análise acima de R$ 5.000, com a etapa do gestor já aprovada;
  *  - pedido Papel & Cia aprovado e enviado (registro manual identificado);
- *  - pedido Têxtil parcialmente recebido, com recebimento por XML confirmado (estoque + contas a pagar).
+ *  - pedido Têxtil parcialmente recebido, com recebimento por XML confirmado (estoque + contas a pagar);
+ *  - entrada SEM PEDIDO lançada manualmente e concluída (Atacadão Acessórios: itens, frete e condição 30/60);
+ *  - XML SEM PEDIDO em conferência com item de produto novo (cadastrar a partir do XML) e CFOP 5405 → 1403.
  */
 export async function seed(refs: DemoRefs): Promise<unknown> {
   const store = refs.seeder.store;
@@ -175,5 +177,38 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
     await confirmReceipt(stockist, r.id);
   }
   out.partial = (await store.getOrThrow("purchase_orders", textil.id)).status;
+
+  // 7) Entrada sem pedido (compra do dia a dia) lançada manualmente e concluída — idempotente pelo idemKey
+  const stockist = await refs.ctxFor("stockist", "matriz");
+  const avulsa = await createManualReceipt(stockist, {
+    supplierId: acess.id, orderIds: [], nfeNumber: "88012", nfeSeries: "1", issueDate: addDays(today(), -2), idemKey: "demo-receipt-sem-pedido",
+    items: [{ skuId: refs.skus["bone-u"].id, qty: 12000, unitCost: 1300 }, { skuId: refs.skus["meia-u"].id, qty: 24000, unitCost: 900, discount: 1200 }],
+    freight: 2500, otherExpenses: 0, discount: 0, paymentTermId: refs.terms["30-60"].id, paymentMethodId: refs.methods.boleto.id,
+  });
+  if (avulsa.status === "draft") {
+    await updateReceipt(stockist, avulsa.id, { checkAll: true });
+    await confirmReceipt(stockist, avulsa.id);
+  } else if (avulsa.status === "confirming") await confirmReceipt(stockist, avulsa.id);
+  out.noOrder = (await store.getOrThrow("receipts", avulsa.id)).status;
+
+  // 8) XML sem pedido em conferência: um item já vinculado pelo código do fornecedor (CFOP 5405 → 1403) e dois
+  //    produtos novos para demonstrar "Cadastrar produto" a partir do XML (um com GTIN, outro sem)
+  const pending = (await listAll(store, "receipts", { filters: [["eq", "companyId", companyId], ["eq", "supplierId", acess.id], ["eq", "nfeNumber", "88047"]] })).filter((x) => x.status !== "cancelled");
+  if (!pending.length) {
+    const issue = addDays(today(), -1);
+    const xml = buildSampleNfeXml({
+      number: 88047, issueDate: issue,
+      emitter: { cnpj: acess.doc, name: acess.name, tradeName: acess.tradeName, ie: "110042491111" },
+      recipient: { cnpj: refs.branches.matriz.cnpj, name: refs.company.name, ie: refs.branches.matriz.ie },
+      items: [
+        { cProd: "AA-BONE", xProd: "BONE ABA CURVA", ncm: "65050090", cfop: "5405", qCom: 6000, vUnCom: 1300 },
+        { cProd: "AA-GARRAFA", cEAN: "7891000900017", xProd: "GARRAFA TERMICA INOX 500ML", ncm: "96170010", cest: "2105700", cfop: "5102", qCom: 12000, vUnCom: 2450 },
+        { cProd: "AA-CHAVEIRO", xProd: "CHAVEIRO EMBORRACHADO SORTIDO", ncm: "73269090", cfop: "5102", uCom: "PC", qCom: 50000, vUnCom: 180 },
+      ],
+      freight: 1800,
+      duplicatas: [{ dVenc: addDays(issue, 28) }],
+    });
+    await importNfeXml(stockist, { xml, fileName: "NFe-88047-atacadao-acessorios.xml", withoutOrder: true });
+  }
   return out;
 }

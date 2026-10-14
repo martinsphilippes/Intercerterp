@@ -4,7 +4,7 @@ import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { nextNumber } from "@/lib/core/numbering";
-import { getSetting } from "@/lib/core/settings";
+import { getSetting, isFeatureOn } from "@/lib/core/settings";
 import { saveFile } from "@/lib/core/files";
 import { onlyDigits, searchable } from "@/lib/core/text";
 import { addDays, nowIso, toLocalDate, today } from "@/lib/dates";
@@ -16,6 +16,7 @@ import { CONFIRMED, ORDER_STATUS_LABEL, netUnitCost } from "./purchase-calc";
 import { orderItems, refreshOrderReceipts, remainingQty } from "./purchases";
 import { occupyDecisionSlots } from "./approvals";
 import { createSupplier, findSupplierByDoc, supplierLabel } from "./suppliers";
+import { CFOP_FEATURE, CFOP_PAIRS_KEY, DEFAULT_CFOP_PAIRS, convertCfop, isEntryCfop, normalizePairs } from "./cfop-entry";
 
 /**
  * Recebimento de mercadorias (Tela 29).
@@ -39,7 +40,29 @@ import { createSupplier, findSupplierByDoc, supplierLabel } from "./suppliers";
  *    título a pagar com as parcelas (duplicatas do XML ou condição de pagamento).
  *  - Valor devido = Σ (recebido × custo) − desconto + frete + outras despesas. Os títulos nunca excedem
  *    o devido, salvo divergência registrada com a decisão "pagar o valor faturado" e justificativa.
+ *  - Entrada sem pedido (COM-03, parâmetro `feature.entradaSemPedido`, padrão ligado): XML importado com
+ *    "sem pedido" (não vincula pedidos em aberto) ou lançamento manual com itens, frete/despesas/desconto e condição
+ *    de pagamento. Sem pedido não há saldo previsto nem divergência "fora do pedido"; a conclusão é a mesma
+ *    (confirmReceipt): estoque, custo médio e título pelo devido (§14). Origem gravada em `origin` (xml | manual)
+ *    e `orderLink` (with_order | without_order).
+ *  - CFOP de entrada por item (COM-09): convertido do CFOP do fornecedor pela tabela de pares (`cfop-entry.ts`);
+ *    item sem par usa o CFOP do recebimento (1102/2102).
  */
+
+/** Recurso "entrada sem pedido" (padrão ligado: é aditivo). */
+export const NO_ORDER_FEATURE = "entradaSemPedido";
+
+export async function noOrderEntryOn(store: Store, companyId: string, branchId: string | null | undefined) {
+  return isFeatureOn(store, companyId, branchId, NO_ORDER_FEATURE, true);
+}
+
+/** Tabela de pares de CFOP vigente (filial → empresa → padrão) ou `null` quando o conversor está desligado. */
+export async function cfopPairsFor(store: Store, companyId: string, branchId: string | null | undefined): Promise<Record<string, string> | null> {
+  if (!(await isFeatureOn(store, companyId, branchId, CFOP_FEATURE, true))) return null;
+  return normalizePairs(await getSetting<unknown>(store, companyId, branchId, CFOP_PAIRS_KEY, DEFAULT_CFOP_PAIRS));
+}
+
+const orderLinkOf = (orderIds: string[] | null | undefined) => ((orderIds ?? []).length ? "with_order" : "without_order");
 
 export interface ReceiptItem {
   idx: number;
@@ -49,7 +72,14 @@ export interface ReceiptItem {
   xProd?: string | null;
   uCom?: string | null;
   ncm?: string | null;
+  /** CEST do item no XML */
+  cest?: string | null;
+  /** CFOP de saída informado pelo fornecedor no XML */
   cfop?: string | null;
+  /** CFOP de entrada do item (conversor de CFOP ou conferência); vazio = CFOP do recebimento */
+  entryCfop?: string | null;
+  /** item incluído manualmente (entrada sem pedido): pode ser removido na conferência */
+  added?: boolean;
   /** quantidade faturada na unidade do fornecedor (milésimos) */
   invoicedQtySupplier?: number | null;
   /** milésimos da unidade interna por unidade do fornecedor (1000 = 1:1) */
@@ -61,7 +91,8 @@ export interface ReceiptItem {
   sku?: string | null;
   description: string;
   unitCode?: string | null;
-  mapping?: "supplier_code" | "barcode" | "order" | "manual" | null;
+  /** created = produto cadastrado a partir do item do XML na conferência */
+  mapping?: "supplier_code" | "barcode" | "order" | "manual" | "created" | null;
   expectedQty: number;
   orderUnitCost?: number | null;
   receivedQty: number;
@@ -437,9 +468,13 @@ async function companyCnpjs(store: Store, companyId: string) {
 }
 
 /** Importa XML de NF-e: cria o recebimento em conferência (ou devolve o existente para a mesma chave). */
-export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: string | null; warehouseId?: string | null; orderIds?: string[] | null; createSupplier?: boolean; allowHomologation?: boolean }) {
+export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: string | null; warehouseId?: string | null; orderIds?: string[] | null; createSupplier?: boolean; allowHomologation?: boolean; withoutOrder?: boolean }) {
   requireReceive(ctx);
   const branchId = requireBranch(ctx);
+  if (input.withoutOrder) {
+    assert(!input.orderIds?.length, "Entrada sem pedido: não selecione pedidos.");
+    if (!(await noOrderEntryOn(ctx.store, ctx.companyId, branchId))) throw new BusinessError("Entrada sem pedido desativada (Administração → Parâmetros → Compras). Importe o XML vinculando os pedidos do fornecedor.", "no_order_disabled");
+  }
   const nfe = parseNfeXml(input.xml);
   const protocolInfo = nfe.protocolStatus ? `cStat ${nfe.protocolStatus}${nfe.protocolMessage ? ` – ${nfe.protocolMessage}` : ""}` : null;
   if (nfe.denied) throw new BusinessError(`NF-e ${nfe.number} com uso DENEGADO pela SEFAZ (${protocolInfo}). Ela não pode ser recebida — solicite ao fornecedor a regularização.`, "nfe_denied");
@@ -477,7 +512,8 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
   }
   assert(supplier.status !== "inactive", `Fornecedor ${supplierLabel(supplier)} está inativo — reative antes de receber.`);
   let orderIds: string[];
-  if (input.orderIds?.length) {
+  if (input.withoutOrder) orderIds = [];
+  else if (input.orderIds?.length) {
     // pedidos escolhidos no formulário: mesmas regras do recebimento sem XML (empresa, emitente, filial e situação)
     orderIds = [...new Set(input.orderIds.filter(Boolean))];
     for (const oid of orderIds) {
@@ -489,6 +525,7 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
     }
   } else orderIds = (await openOrdersFor(ctx.store, ctx.companyId, supplier.id, branchId)).map((o) => o.id);
   const lines = await orderLines(ctx.store, orderIds, ctx.companyId);
+  const pairs = await cfopPairsFor(ctx.store, ctx.companyId, branchId);
   const items: ReceiptItem[] = [];
   for (const [i, it] of nfe.items.entries()) {
     const m = await mapXmlItem(ctx.store, ctx.companyId, supplier.id, it, lines);
@@ -497,7 +534,7 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
     const sku = m.skuId ? await ctx.store.get("skus", m.skuId) : null;
     const unit = invoicedQty > 0 ? roundDiv(net * QTY, invoicedQty) : 0;
     items.push({
-      idx: i + 1, nItem: it.nItem, cProd: it.cProd, cEAN: it.cEAN, xProd: it.xProd, uCom: it.uCom, ncm: it.ncm, cfop: it.cfop, invoicedQtySupplier: it.qCom, conversionFactor: m.conversionFactor,
+      idx: i + 1, nItem: it.nItem, cProd: it.cProd, cEAN: it.cEAN, xProd: it.xProd, uCom: it.uCom, ncm: it.ncm, cest: it.cest, cfop: it.cfop, entryCfop: convertCfop(it.cfop, pairs), invoicedQtySupplier: it.qCom, conversionFactor: m.conversionFactor,
       invoicedQty, invoicedValue: net, invoiceUnitCost: unit, skuId: m.skuId, sku: sku?.sku ?? null, description: sku?.name ?? it.xProd, unitCode: sku?.unitCode ?? it.uCom, mapping: m.mapping,
       expectedQty: 0, receivedQty: invoicedQty, unitCost: unit, ignore: false, divergence: null,
     });
@@ -510,13 +547,18 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
   const number = await nextNumber(ctx.store, `receipt:${ctx.companyId}`);
   const hash = sha256(Buffer.from(input.xml));
   const otherExpenses = nfe.totals.vOutro + nfe.totals.vIPI + nfe.totals.vST + nfe.totals.vSeg;
+  const defaults = await financialDefaults(ctx, firstOrder ?? null, nfe.emitter.address?.uf ?? null);
+  // CFOP do recebimento: o convertido, quando todos os itens convergem para o mesmo par; senão o padrão 1102/2102
+  const converted = [...new Set(items.map((x) => x.entryCfop))];
+  if (converted.length === 1 && converted[0]) defaults.entryCfop = converted[0];
   const base = {
     companyId: ctx.companyId, branchId, createdBy: ctx.user.id, number, warehouseId, supplierId: supplier.id, orderIds: relevant, nfeKey: nfe.key, nfeNumber: nfe.number, nfeSeries: nfe.series,
     nfeIssueDate: nfe.issueDate ? new Date(nfe.issueDate).toISOString() : null, xmlHash: hash, status: "draft", items, freight: nfe.totals.vFrete, otherExpenses, discount: 0, invoicedTotal: nfe.totals.vNF,
     paymentTermId: firstOrder?.paymentTermId ?? supplier.paymentTermId ?? null,
     emitter: { ...nfe.emitter, duplicatas: nfe.duplicatas, protocol: nfe.protocol, authorized: nfe.authorized, environment: nfe.environment, protocolStatus: nfe.protocolStatus, protocolMessage: nfe.protocolMessage, homologationAccepted, nature: nfe.nature, totals: nfe.totals },
     differenceAction: "adjust_to_due", notes: null, scopeKey: scopeFor(ctx.companyId, nfe.key), searchText: searchable(String(number), nfe.number, nfe.key, supplier.name, supplier.tradeName),
-    ...(await financialDefaults(ctx, firstOrder ?? null, nfe.emitter.address?.uf ?? null)),
+    origin: "xml", orderLink: orderLinkOf(relevant),
+    ...defaults,
   };
   const draft = { ...base, xmlFileId: "pending" } as any;
   const calc = await recompute(ctx, draft);
@@ -536,7 +578,7 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
   r = await ctx.store.update("receipts", r.id, { xmlFileId: file.id });
   await audit(ctx, {
     module: "purchases", action: "receipt.import_xml", entityType: "receipt", entityId: r.id,
-    summary: `Recebimento nº ${number}: XML da NF-e ${nfe.number}/${nfe.series} de ${supplierLabel(supplier)} importado (${items.length} itens, ${formatMoney(nfe.totals.vNF)}); ${items.filter((i) => !i.skuId).length} item(ns) sem associação${nfe.environment === "homologacao" ? " — ambiente de HOMOLOGAÇÃO (sem valor fiscal)" : ""}${nfe.authorized ? "" : ` — sem protocolo de autorização${protocolInfo ? ` (${protocolInfo})` : ""}`}`,
+    summary: `Recebimento nº ${number}: XML da NF-e ${nfe.number}/${nfe.series} de ${supplierLabel(supplier)} importado ${relevant.length ? "" : input.withoutOrder ? "SEM PEDIDO (escolhido na importação) " : "sem pedido vinculado "}(${items.length} itens, ${formatMoney(nfe.totals.vNF)}); ${items.filter((i) => !i.skuId).length} item(ns) sem associação${pairs && items.some((i) => i.entryCfop) ? `; CFOP de entrada convertido em ${items.filter((i) => i.entryCfop).length} item(ns)` : ""}${nfe.environment === "homologacao" ? " — ambiente de HOMOLOGAÇÃO (sem valor fiscal)" : ""}${nfe.authorized ? "" : ` — sem protocolo de autorização${protocolInfo ? ` (${protocolInfo})` : ""}`}`,
     related: [`supplier:${supplier.id}`, ...relevant.map((o) => `purchase_order:${o}`)],
   });
   return r;
@@ -547,7 +589,7 @@ async function financialDefaults(ctx: Ctx, order: Doc | null, emitterUf: string 
   const branch = ctx.branchId ? await ctx.store.get("branches", ctx.branchId) : null;
   const interstate = emitterUf && branch?.uf && emitterUf !== branch.uf;
   return {
-    entryCfop: interstate ? "2102" : "1102",
+    entryCfop: (interstate ? "2102" : "1102") as string,
     categoryId: (await getSetting<string | null>(ctx.store, ctx.companyId, null, "finance.category.purchases", null)) ?? null,
     costCenterId: order?.costCenterId ?? null,
     paymentMethodId: order?.paymentMethodId ?? null,
@@ -561,8 +603,122 @@ function omit<T extends Record<string, any>>(o: T, ...keys: string[]) {
   return out;
 }
 
-/** Recebimento sem XML (chave/nota informadas manualmente, itens a partir do saldo dos pedidos). */
-export async function createManualReceipt(ctx: Ctx, input: { supplierId: string; orderIds: string[]; nfeKey?: string | null; nfeNumber?: string | null; nfeSeries?: string | null; issueDate?: string | null; warehouseId?: string | null; invoicedTotal?: number | null; idemKey: string }) {
+/** Item da nota lançada manualmente (entrada sem pedido): quantidade em milésimos, custo e desconto da linha em centavos. */
+export interface ManualReceiptItemInput {
+  skuId: string;
+  qty: number;
+  unitCost: number;
+  /** desconto da linha (centavos) */
+  discount?: number | null;
+}
+
+export interface ManualReceiptInput {
+  supplierId: string;
+  orderIds: string[];
+  nfeKey?: string | null;
+  nfeNumber?: string | null;
+  nfeSeries?: string | null;
+  issueDate?: string | null;
+  warehouseId?: string | null;
+  invoicedTotal?: number | null;
+  idemKey: string;
+  /** entrada sem pedido: itens da nota (ignorados quando há pedidos — os itens vêm do saldo) */
+  items?: ManualReceiptItemInput[] | null;
+  /** entrada sem pedido: frete, outras despesas (inclui IPI/ST/seguro) e desconto da nota */
+  freight?: number | null;
+  otherExpenses?: number | null;
+  discount?: number | null;
+  /** condição de pagamento; `null` = à vista (vencimento na emissão); omitida = condição do fornecedor */
+  paymentTermId?: string | null;
+  paymentMethodId?: string | null;
+}
+
+/** Monta os itens de uma nota lançada manualmente (sem pedido), validando produto, quantidade, custo e desconto. */
+async function manualItems(ctx: Ctx, supplierId: string, input: ManualReceiptItemInput[], firstIdx: number): Promise<ReceiptItem[]> {
+  const out: ReceiptItem[] = [];
+  for (const [n, it] of input.entries()) {
+    const sku = it.skuId ? await ctx.store.get("skus", it.skuId) : null;
+    assert(sku && sku.companyId === ctx.companyId, `Item ${n + 1}: produto inválido.`);
+    assert(Number.isInteger(it.qty) && it.qty > 0, `${sku.name}: informe a quantidade.`);
+    assert(Number.isInteger(it.unitCost) && it.unitCost >= 0, `${sku.name}: custo unitário inválido.`);
+    const gross = lineTotal(it.unitCost, it.qty);
+    const disc = it.discount ?? 0;
+    assert(Number.isInteger(disc) && disc >= 0 && disc <= gross, `${sku.name}: desconto inválido (entre zero e o valor da linha).`);
+    const value = gross - disc;
+    const unit = roundDiv(value * QTY, it.qty);
+    const sp = await findOne(ctx.store, "supplier_products", [["eq", "supplierId", supplierId], ["eq", "skuId", sku.id]]);
+    out.push({
+      idx: firstIdx + n, cProd: sp?.supplierCode ?? null, conversionFactor: QTY, invoicedQty: it.qty, invoicedValue: value, invoiceUnitCost: unit, skuId: sku.id, sku: sku.sku ?? null, description: sku.name, unitCode: sku.unitCode ?? null,
+      mapping: "manual", expectedQty: 0, receivedQty: it.qty, unitCost: unit, ignore: false, divergence: null, added: true,
+    });
+  }
+  return out;
+}
+
+/**
+ * Entrada sem pedido, lançada manualmente (COM-03): itens, frete/outras despesas/desconto e condição de pagamento
+ * informados pelo usuário. Sem encargos de pedido (orderCharges nulo): os valores informados valem como na nota.
+ */
+async function createNoOrderReceipt(ctx: Ctx, supplier: Doc<any>, input: ManualReceiptInput, key: string, scopeKey: string, branchId: string) {
+  if (!(await noOrderEntryOn(ctx.store, ctx.companyId, branchId))) throw new BusinessError("Selecione ao menos um pedido de compra: a entrada sem pedido está desativada (Administração → Parâmetros → Compras).", "no_order_disabled");
+  assert(supplier.status !== "inactive", `Fornecedor ${supplierLabel(supplier)} está inativo — reative antes de receber.`);
+  assert((input.items ?? []).length, "Informe ao menos um item da nota (produto, quantidade e custo).");
+  assert((input.items ?? []).length <= 300, "Nota com itens demais para o lançamento manual (máximo 300) — importe o XML.");
+  const items = await manualItems(ctx, supplier.id, input.items ?? [], 1);
+  for (const [k, v] of [["Frete", input.freight], ["Outras despesas", input.otherExpenses], ["Desconto", input.discount]] as const) assert(v == null || (Number.isInteger(v) && v >= 0), `${k} inválido.`);
+  if (input.warehouseId) {
+    const wh = await ctx.store.getOrThrow("warehouses", input.warehouseId);
+    assert(wh.branchId === branchId, "Depósito de outra filial.");
+  }
+  // condição: a informada (vazia = à vista, vencimento na emissão); sem o campo, a do fornecedor
+  const termId = input.paymentTermId !== undefined ? input.paymentTermId || null : (supplier.paymentTermId ?? null);
+  if (input.paymentTermId) {
+    const t = await ctx.store.get("payment_terms", input.paymentTermId);
+    assert(t && t.companyId === ctx.companyId, "Condição de pagamento inválida.");
+  }
+  if (input.paymentMethodId) {
+    const m = await ctx.store.get("payment_methods", input.paymentMethodId);
+    assert(m && m.companyId === ctx.companyId, "Forma de pagamento inválida.");
+  }
+  if (input.issueDate) assert(/^\d{4}-\d{2}-\d{2}$/.test(input.issueDate) && input.issueDate <= today(), "Data de emissão inválida (não pode ser futura).");
+  const number = await nextNumber(ctx.store, `receipt:${ctx.companyId}`);
+  const defaults = await financialDefaults(ctx, null, supplier.addresses?.[0]?.uf ?? null);
+  const base = {
+    companyId: ctx.companyId, branchId, createdBy: ctx.user.id, number, warehouseId: input.warehouseId || (await defaultWarehouse(ctx.store, branchId)).id, supplierId: supplier.id,
+    orderIds: [], nfeKey: key || null, nfeNumber: input.nfeNumber || (key ? String(Number(key.slice(25, 34))) : null), nfeSeries: input.nfeSeries || (key ? String(Number(key.slice(22, 25))) : null),
+    nfeIssueDate: input.issueDate ? `${input.issueDate}T12:00:00.000Z` : null, xmlFileId: null, xmlHash: null, status: "draft", items,
+    freight: input.freight ?? 0, otherExpenses: input.otherExpenses ?? 0, discount: input.discount ?? 0, orderCharges: null,
+    invoicedTotal: input.invoicedTotal ?? null, paymentTermId: termId, emitter: { cnpj: supplier.doc, name: supplier.name, tradeName: supplier.tradeName, duplicatas: [] },
+    differenceAction: "adjust_to_due", notes: null, scopeKey, searchText: searchable(String(number), input.nfeNumber, key, supplier.name, supplier.tradeName),
+    origin: "manual", orderLink: "without_order",
+    ...defaults,
+    ...(input.paymentMethodId ? { paymentMethodId: input.paymentMethodId } : {}),
+  };
+  const calc = await recompute(ctx, base as any);
+  let r: Doc;
+  try {
+    r = await ctx.store.create("receipts", { ...base, ...omit(calc, "payable") }, detId("receipt", ctx.companyId, String(number)));
+  } catch (e) {
+    if (isConflict(e)) {
+      const ex = await findOne(ctx.store, "receipts", [["eq", "scopeKey", scopeKey]]);
+      if (ex && !key) return ex;
+      throw new BusinessError(`Chave já registrada${ex ? ` no recebimento nº ${ex.number}` : ""}.`, "duplicate", { id: ex?.id });
+    }
+    throw e;
+  }
+  await audit(ctx, {
+    module: "purchases", action: "receipt.create", entityType: "receipt", entityId: r.id,
+    summary: `Recebimento nº ${number} lançado manualmente SEM PEDIDO${key ? ` (chave ${key})` : input.nfeNumber ? ` (NF ${input.nfeNumber})` : ""} — ${supplierLabel(supplier)}, ${items.length} item(ns), devido ${formatMoney(r.dueTotal)}${r.installments?.length ? ` em ${r.installments.length} parcela(s)` : ""}`,
+    related: [`supplier:${supplier.id}`],
+  });
+  return r;
+}
+
+/**
+ * Recebimento sem XML (chave/nota informadas manualmente): itens a partir do saldo dos pedidos ou, sem pedido
+ * (entrada sem pedido, COM-03), itens informados.
+ */
+export async function createManualReceipt(ctx: Ctx, input: ManualReceiptInput) {
   requireReceive(ctx);
   const branchId = requireBranch(ctx);
   const supplier = await ctx.store.getOrThrow("suppliers", input.supplierId);
@@ -578,6 +734,7 @@ export async function createManualReceipt(ctx: Ctx, input: { supplierId: string;
   const existing = await findOne(ctx.store, "receipts", [["eq", "scopeKey", scopeKey]]);
   if (existing) return existing;
   const orderIds = [...new Set((input.orderIds ?? []).filter(Boolean))];
+  if (!orderIds.length) return createNoOrderReceipt(ctx, supplier, input, key, scopeKey, branchId);
   const orders = await Promise.all(orderIds.map((id) => ctx.store.getOrThrow("purchase_orders", id)));
   for (const o of orders) {
     assert(o.companyId === ctx.companyId, "Pedido de outra empresa.");
@@ -617,6 +774,7 @@ export async function createManualReceipt(ctx: Ctx, input: { supplierId: string;
     orderCharges: { auto: true, claimed },
     invoicedTotal: input.invoicedTotal ?? null, paymentTermId: orders[0]?.paymentTermId ?? supplier.paymentTermId ?? null, emitter: { cnpj: supplier.doc, name: supplier.name, tradeName: supplier.tradeName, duplicatas: [] },
     differenceAction: "adjust_to_due", notes: null, scopeKey, searchText: searchable(String(number), input.nfeNumber, key, supplier.name, supplier.tradeName),
+    origin: "manual", orderLink: "with_order",
     ...(await financialDefaults(ctx, orders[0] ?? null, supplier.addresses?.[0]?.uf ?? null)),
   };
   const calc = await recompute(ctx, base as any);
@@ -665,7 +823,11 @@ export async function fetchXmlByKey(ctx: Ctx, key: string): Promise<{ ok: true; 
 // ───────────────────────────── Conferência
 
 export interface ReceiptUpdate {
-  items?: Array<{ idx: number; skuId?: string | null; receivedQty?: number; unitCost?: number; conversionFactor?: number; divergence?: string | null; ignore?: boolean; checked?: boolean; lot?: string | null; expiry?: string | null }>;
+  items?: Array<{ idx: number; skuId?: string | null; receivedQty?: number; unitCost?: number; conversionFactor?: number; divergence?: string | null; ignore?: boolean; checked?: boolean; lot?: string | null; expiry?: string | null; entryCfop?: string | null }>;
+  /** sem XML: inclui itens na nota lançada manualmente (entrada sem pedido) */
+  addItems?: ManualReceiptItemInput[];
+  /** sem XML: remove itens incluídos manualmente (idx) */
+  removeItems?: number[];
   /** marca todos os itens como conferidos */
   checkAll?: boolean;
   entryCfop?: string | null;
@@ -733,6 +895,22 @@ export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) 
     if (u.checked !== undefined) it.checked = Boolean(u.checked);
     if (u.lot !== undefined) it.lot = u.lot?.trim() || null;
     if (u.expiry !== undefined) it.expiry = u.expiry || null;
+    if (u.entryCfop !== undefined) {
+      const c = onlyDigits(u.entryCfop);
+      assert(!c || isEntryCfop(c), `${it.description}: CFOP de entrada ${u.entryCfop} inválido (4 dígitos começando por 1, 2 ou 3).`);
+      it.entryCfop = c || null;
+    }
+  }
+  if (input.removeItems?.length || input.addItems?.length) assert(!r.xmlFileId, "Itens de NF-e importada por XML não podem ser incluídos nem removidos — marque “não estocar” no item.");
+  for (const idx of input.removeItems ?? []) {
+    const i = items.findIndex((x) => x.idx === idx);
+    if (i < 0) continue;
+    assert(items[i].added, `${items[i].description}: somente itens incluídos manualmente podem ser removidos.`);
+    items.splice(i, 1);
+  }
+  if (input.addItems?.length) {
+    assert(items.length + input.addItems.length <= 300, "Nota com itens demais para o lançamento manual (máximo 300).");
+    items.push(...(await manualItems(ctx, r.supplierId, input.addItems, Math.max(0, ...items.map((x) => x.idx)) + 1)));
   }
   if (input.checkAll) for (const it of items) if (!it.ignore) it.checked = true;
   const orderIds: string[] = [...new Set<string>((input.orderIds ?? r.orderIds ?? []).filter(Boolean))];
@@ -775,6 +953,7 @@ export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) 
     ...(orderCharges ? { orderCharges } : {}),
     items,
     orderIds,
+    orderLink: orderLinkOf(orderIds),
     ...(input.warehouseId ? { warehouseId: input.warehouseId } : {}),
     ...(keepCharges && input.freight != null ? { freight: input.freight } : {}),
     ...(keepCharges && input.otherExpenses != null ? { otherExpenses: input.otherExpenses } : {}),
@@ -796,6 +975,26 @@ export async function updateReceipt(ctx: Ctx, id: string, input: ReceiptUpdate) 
   for (const oid of unlinked) await releaseChargesMarker(ctx.store, oid, id);
   await audit(ctx, { module: "purchases", action: "receipt.update", entityType: "receipt", entityId: id, summary: `Recebimento nº ${r.number}: conferência atualizada (devido ${formatMoney(calc.dueTotal)}, ${calc.divergences.length} divergência(s))` });
   return u;
+}
+
+/**
+ * Associa itens do recebimento em conferência a SKUs (usado pelo cadastro de produto a partir do item do XML):
+ * grava o vínculo e a forma de associação e recalcula previsto, divergências e parcelas.
+ */
+export async function linkReceiptItems(ctx: Ctx, id: string, links: Array<{ idx: number; skuId: string; mapping: NonNullable<ReceiptItem["mapping"]> }>) {
+  requireReceive(ctx);
+  const r = await getReceiptForWrite(ctx, id);
+  assert(r.status === "draft", "Recebimento já confirmado não pode ser alterado.");
+  const items: ReceiptItem[] = (r.items ?? []).map((x: ReceiptItem) => ({ ...x }));
+  for (const l of links) {
+    const it = items.find((x) => x.idx === l.idx);
+    if (!it) continue;
+    const sku = await ctx.store.get("skus", l.skuId);
+    assert(sku && sku.companyId === ctx.companyId, "Produto inválido.");
+    Object.assign(it, { skuId: sku.id, sku: sku.sku ?? null, description: sku.name, unitCode: sku.unitCode ?? it.uCom ?? it.unitCode, mapping: l.mapping });
+  }
+  const calc = await recompute(ctx, r, { items });
+  return ctx.store.update("receipts", id, { items, ...omit(calc, "payable") });
 }
 
 export async function cancelReceipt(ctx: Ctx, id: string, reason: string) {

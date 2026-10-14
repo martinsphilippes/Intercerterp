@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { FileCode2, KeyRound, ClipboardList } from "lucide-react";
+import { FileCode2, KeyRound, ClipboardList, Trash2 } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
-import { Field, Input, Select, FormGrid } from "@/components/ui/form";
-import { MoneyInput } from "@/components/ui/money-input";
+import { Field, Input, Select, FormGrid, Checkbox } from "@/components/ui/form";
+import { MoneyInput, QtyInput } from "@/components/ui/money-input";
+import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
 import { cn } from "@/components/ui/cn";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatQty, lineTotal } from "@/lib/money";
 import { formatDate, today } from "@/lib/dates";
+import { SkuPicker } from "../../_shared/sku-picker";
 import { importXmlAction, fetchByKeyAction, manualReceiptAction } from "../actions";
 
 export interface OpenOrder {
@@ -22,19 +24,59 @@ export interface OpenOrder {
 }
 
 type Mode = "xml" | "key" | "manual";
+type Opt = { value: string; label: string };
 
-export function NewReceipt({ orders, suppliers, initialOrderId }: { orders: OpenOrder[]; suppliers: Array<{ value: string; label: string }>; initialOrderId?: string | null }) {
+interface ManualRow {
+  key: number;
+  skuId: string;
+  sku: string;
+  name: string;
+  unitCode: string;
+  qty: number;
+  unitCost: number;
+  discount: number;
+}
+
+export function NewReceipt({
+  orders,
+  suppliers,
+  initialOrderId,
+  noOrderEnabled = false,
+  terms = [],
+  methods = [],
+  supplierTerms = {},
+}: {
+  orders: OpenOrder[];
+  suppliers: Opt[];
+  initialOrderId?: string | null;
+  /** parâmetro feature.entradaSemPedido */
+  noOrderEnabled?: boolean;
+  terms?: Opt[];
+  methods?: Opt[];
+  /** condição de pagamento padrão de cada fornecedor */
+  supplierTerms?: Record<string, string>;
+}) {
   const initialOrder = orders.find((o) => o.id === initialOrderId) ?? null;
-  const [mode, setMode] = useState<Mode>(initialOrder ? "xml" : "xml");
+  const [mode, setMode] = useState<Mode>("xml");
   const [supplierId, setSupplierId] = useState<string>(initialOrder?.supplierId ?? "");
   const [selected, setSelected] = useState<string[]>(initialOrder ? [initialOrder.id] : []);
   const [keyMessage, setKeyMessage] = useState<string | null>(null);
   const [typedKey, setTypedKey] = useState("");
+  const [xmlNoOrder, setXmlNoOrder] = useState(false);
+  const [orderMode, setOrderMode] = useState<"order" | "none">(initialOrder || !noOrderEnabled ? "order" : "none");
   const supplierOrders = orders.filter((o) => o.supplierId === supplierId);
+  const pickSupplier = (id: string) => {
+    setSupplierId(id);
+    setSelected([]);
+    // fornecedor sem pedido em aberto: o lançamento manual passa a ser sem pedido
+    if (noOrderEnabled && id && !orders.some((o) => o.supplierId === id)) setOrderMode("none");
+  };
   const modes: Array<{ key: Mode; label: string; hint: string; icon: any }> = [
     { key: "xml", label: "Importar XML", hint: "Arquivo da NF-e recebido do fornecedor (recomendado)", icon: FileCode2 },
     { key: "key", label: "Ler chave de acesso", hint: "Busca o XML se houver integração capaz", icon: KeyRound },
-    { key: "manual", label: "Sem XML (pelo pedido)", hint: "Itens a partir do saldo dos pedidos", icon: ClipboardList },
+    noOrderEnabled
+      ? { key: "manual", label: "Lançar nota sem XML", hint: "Pelo saldo do pedido ou nota avulsa sem pedido", icon: ClipboardList }
+      : { key: "manual", label: "Sem XML (pelo pedido)", hint: "Itens a partir do saldo dos pedidos", icon: ClipboardList },
   ];
   const ordersPicker = (name: string) =>
     supplierOrders.length > 0 && (
@@ -74,10 +116,20 @@ export function NewReceipt({ orders, suppliers, initialOrderId }: { orders: Open
                 <Field label="Arquivo XML da NF-e (modelo 55)" required hint="O XML é validado (estrutura, chave e dígito verificador). Emitente identifica o fornecedor pelo CNPJ; itens são associados pelo código do fornecedor ou código de barras.">
                   <input type="file" name="xml" accept=".xml,application/xml,text/xml" required className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-800" />
                 </Field>
-                <Field label="Fornecedor (opcional — para escolher pedidos manualmente)">
-                  <Select value={supplierId} onChange={(e) => { setSupplierId(e.target.value); setSelected([]); }} options={suppliers} placeholder="Vincular automaticamente pelos pedidos em aberto" />
-                </Field>
-                {ordersPicker("orderIds")}
+                {noOrderEnabled && (
+                  <div>
+                    <Checkbox name="withoutOrder" value="1" checked={xmlNoOrder} onChange={(e) => setXmlNoOrder(e.target.checked)} label="Entrada sem pedido (compra do dia a dia — não vincular pedidos em aberto)" />
+                    <p className="mt-1 pl-6 text-xs text-slate-500">Estoque, custo médio e contas a pagar seguem as mesmas regras; os itens não baixam saldo de pedido.</p>
+                  </div>
+                )}
+                {!xmlNoOrder && (
+                  <>
+                    <Field label="Fornecedor (opcional — para escolher pedidos manualmente)">
+                      <Select value={supplierId} onChange={(e) => pickSupplier(e.target.value)} options={suppliers} placeholder="Vincular automaticamente pelos pedidos em aberto" />
+                    </Field>
+                    {ordersPicker("orderIds")}
+                  </>
+                )}
                 {error && <p className="text-sm text-red-700">{error}</p>}
                 <div className="flex justify-end"><SubmitButton pending={pending} variant="accent">Importar e conferir</SubmitButton></div>
               </>
@@ -107,10 +159,25 @@ export function NewReceipt({ orders, suppliers, initialOrderId }: { orders: Open
           <ActionForm action={manualReceiptAction} className="space-y-4">
             {({ pending, error }) => (
               <>
-                <Notice tone="info">Sem XML, os itens vêm do saldo dos pedidos selecionados e o valor faturado é informado manualmente. Prefira importar o XML para conferir quantidades e duplicatas.</Notice>
+                <input type="hidden" name="orderMode" value={orderMode} />
+                {noOrderEnabled && (
+                  <div role="radiogroup" aria-label="Vínculo com pedido" className="flex flex-wrap gap-2">
+                    {([["order", "Pelo pedido de compra", "Itens a partir do saldo dos pedidos aprovados"], ["none", "Sem pedido", "Nota avulsa: informe itens, frete e condição"]] as const).map(([k, label, hint]) => (
+                      <button key={k} type="button" role="radio" aria-checked={orderMode === k} onClick={() => setOrderMode(k)} className={cn("focus-ring rounded-md border px-3 py-2 text-left text-sm", orderMode === k ? "border-accent-500 bg-accent-50 ring-1 ring-accent-500" : "border-line hover:border-brand-300")}>
+                        <span className="block font-medium">{label}</span>
+                        <span className="block text-xs text-slate-500">{hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <Notice tone="info">
+                  {orderMode === "none"
+                    ? "Lance os itens como estão na nota do fornecedor. Na conclusão, o estoque, o custo médio e o contas a pagar são gerados pelas mesmas regras do recebimento com pedido."
+                    : "Sem XML, os itens vêm do saldo dos pedidos selecionados e o valor faturado é informado manualmente. Prefira importar o XML para conferir quantidades e duplicatas."}
+                </Notice>
                 <FormGrid cols={2}>
                   <Field label="Fornecedor" required>
-                    <Select name="supplierId" value={supplierId} onChange={(e) => { setSupplierId(e.target.value); setSelected([]); }} options={suppliers} placeholder="Selecione…" />
+                    <Select name="supplierId" value={supplierId} onChange={(e) => pickSupplier(e.target.value)} options={suppliers} placeholder="Selecione…" />
                   </Field>
                   <Field label="Chave de acesso (opcional)">
                     <Input name="nfeKey" defaultValue={keyMessage ?? ""} inputMode="numeric" />
@@ -121,15 +188,20 @@ export function NewReceipt({ orders, suppliers, initialOrderId }: { orders: Open
                   <Field label="Série">
                     <Input name="nfeSeries" inputMode="numeric" />
                   </Field>
-                  <Field label="Data de emissão">
-                    <Input name="issueDate" type="date" max={today()} />
+                  <Field label="Data de emissão" hint={orderMode === "none" ? "Base dos vencimentos da condição de pagamento." : undefined}>
+                    <Input key={orderMode} name="issueDate" type="date" max={today()} defaultValue={orderMode === "none" ? today() : undefined} />
                   </Field>
-                  <Field label="Valor total da NF-e (faturado)">
+                  <Field label="Valor total da NF-e (faturado)" hint={orderMode === "none" ? "Opcional: diferença para o valor devido exige justificativa na conferência." : undefined}>
                     <MoneyInput name="invoicedTotal" />
                   </Field>
                 </FormGrid>
-                {supplierId && !supplierOrders.length && <p className="text-sm text-amber-700">Este fornecedor não tem pedidos aprovados/enviados com saldo nesta filial.</p>}
-                {ordersPicker("orderIds")}
+                {orderMode === "order" && (
+                  <>
+                    {supplierId && !supplierOrders.length && <p className="text-sm text-amber-700">Este fornecedor não tem pedidos aprovados/enviados com saldo nesta filial.{noOrderEnabled ? " Use “Sem pedido” para lançar a nota avulsa." : ""}</p>}
+                    {ordersPicker("orderIds")}
+                  </>
+                )}
+                {orderMode === "none" && <NoOrderItems key={supplierId} supplierId={supplierId} terms={terms} methods={methods} defaultTermId={supplierTerms[supplierId] ?? ""} />}
                 {error && <p className="text-sm text-red-700">{error}</p>}
                 <div className="flex justify-end"><SubmitButton pending={pending} variant="accent">Abrir conferência</SubmitButton></div>
               </>
@@ -137,6 +209,81 @@ export function NewReceipt({ orders, suppliers, initialOrderId }: { orders: Open
           </ActionForm>
         )}
       </section>
+    </div>
+  );
+}
+
+/** Itens, encargos e condição de pagamento da nota lançada sem pedido. */
+function NoOrderItems({ supplierId, terms, methods, defaultTermId }: { supplierId: string; terms: Opt[]; methods: Opt[]; defaultTermId: string }) {
+  const [rows, setRows] = useState<ManualRow[]>([]);
+  const [seq, setSeq] = useState(1);
+  const [freight, setFreight] = useState(0);
+  const [other, setOther] = useState(0);
+  const [discount, setDiscount] = useState(0);
+  const set = (key: number, patch: Partial<ManualRow>) => setRows((a) => a.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const lineValue = (r: ManualRow) => Math.max(0, lineTotal(r.unitCost, r.qty) - r.discount);
+  const products = rows.reduce((a, r) => a + lineValue(r), 0);
+  const due = products - Math.min(discount, products) + freight + other;
+  const payload = JSON.stringify(rows.map((r) => ({ skuId: r.skuId, qty: r.qty, unitCost: r.unitCost, discount: r.discount })));
+  if (!supplierId) return <p className="text-sm text-slate-500">Selecione o fornecedor para lançar os itens.</p>;
+  return (
+    <div className="space-y-4">
+      <input type="hidden" name="itemsJson" value={payload} />
+      <input type="hidden" name="freight" value={freight} />
+      <input type="hidden" name="otherExpenses" value={other} />
+      <input type="hidden" name="discount" value={discount} />
+      <fieldset>
+        <legend className="text-sm font-semibold text-ink">Itens da nota</legend>
+        <SkuPicker
+          className="mt-2"
+          supplierId={supplierId}
+          placeholder="Adicionar produto: nome, SKU, código de barras ou código do fornecedor"
+          onPick={(h) => {
+            setRows((a) => [...a, { key: seq, skuId: h.id, sku: h.sku, name: h.name, unitCode: h.unitCode, qty: 1000, unitCost: h.lastCost ?? h.costAcquisition ?? 0, discount: 0 }]);
+            setSeq((n) => n + 1);
+          }}
+        />
+        {rows.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">Nenhum item lançado. Pesquise o produto acima; se ele ainda não existe, cadastre em Produtos ou importe o XML (que permite cadastrar a partir da nota).</p>
+        ) : (
+          <div className="-mx-5 mt-3 overflow-x-auto">
+            <table className="table-base w-full text-sm">
+              <thead>
+                <tr><th>Produto</th><th className="w-28 text-right">Quantidade</th><th className="w-36 text-right">Custo unit.</th><th className="w-36 text-right">Desconto</th><th className="text-right">Total</th><th /></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.key}>
+                    <td className="min-w-[200px]"><span className="font-medium">{r.name}</span><span className="block text-xs text-slate-500">{r.sku} · {r.unitCode}</span></td>
+                    <td><QtyInput value={r.qty} onChange={(v) => set(r.key, { qty: v })} ariaLabel={`Quantidade de ${r.name}`} min={0} /></td>
+                    <td><MoneyInput value={r.unitCost} onChange={(v) => set(r.key, { unitCost: v })} ariaLabel={`Custo de ${r.name}`} /></td>
+                    <td><MoneyInput value={r.discount} onChange={(v) => set(r.key, { discount: v })} ariaLabel={`Desconto de ${r.name}`} /></td>
+                    <td className="tabular text-right">{formatMoney(lineValue(r))}</td>
+                    <td><Button type="button" size="sm" variant="ghost" aria-label={`Remover ${r.name}`} onClick={() => setRows((a) => a.filter((x) => x.key !== r.key))}><Trash2 className="size-4" /></Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </fieldset>
+      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+        <FormGrid cols={2}>
+          <Field label="Condição de pagamento" hint="Gera as parcelas do contas a pagar a partir da data de emissão.">
+            <Select name="paymentTermId" defaultValue={defaultTermId} options={terms} placeholder="À vista (vencimento na emissão)" />
+          </Field>
+          <Field label="Forma de pagamento">
+            <Select name="paymentMethodId" defaultValue="" options={methods} placeholder="—" />
+          </Field>
+        </FormGrid>
+        <dl className="space-y-2 rounded-md border border-line p-3 text-sm">
+          <div className="flex justify-between"><dt>Produtos ({rows.length} item(ns), {formatQty(rows.reduce((a, r) => a + r.qty, 0))} un.)</dt><dd className="tabular">{formatMoney(products)}</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt>Frete</dt><dd className="w-32"><MoneyInput value={freight} onChange={setFreight} ariaLabel="Frete" /></dd></div>
+          <div className="flex items-center justify-between gap-3"><dt title="Outras despesas, seguro, IPI e ST da nota">Outras despesas/IPI/ST</dt><dd className="w-32"><MoneyInput value={other} onChange={setOther} ariaLabel="Outras despesas" /></dd></div>
+          <div className="flex items-center justify-between gap-3"><dt>Desconto da nota</dt><dd className="w-32"><MoneyInput value={discount} onChange={setDiscount} ariaLabel="Desconto da nota" /></dd></div>
+          <div className="flex justify-between border-t border-line pt-2 font-semibold"><dt>Valor devido</dt><dd className="tabular">{formatMoney(due)}</dd></div>
+        </dl>
+      </div>
     </div>
   );
 }

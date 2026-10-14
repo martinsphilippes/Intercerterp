@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCheck, MessageSquare } from "lucide-react";
+import { CheckCheck, MessageSquare, PackagePlus, Trash2 } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, Input, Select, Textarea, Checkbox, FormGrid, FormSection } from "@/components/ui/form";
 import { MoneyInput, QtyInput } from "@/components/ui/money-input";
@@ -43,7 +43,34 @@ export interface ConfItem {
   status: string;
   /** valor da linha calculado no servidor na última gravação (valor exato da linha do pedido, sem arredondar pelo custo unitário) */
   lineValue?: number | null;
+  /** CFOP de saída do fornecedor (XML) e CFOP de entrada do item (vazio = CFOP padrão do recebimento) */
+  cfop?: string | null;
+  entryCfop?: string | null;
+  /** item incluído manualmente (nota sem pedido): pode ser removido */
+  added?: boolean;
 }
+
+interface AddRow {
+  key: number;
+  skuId: string;
+  sku: string;
+  name: string;
+  qty: number;
+  unitCost: number;
+}
+
+const ENTRY_CFOPS = [
+  ["1102", "Compra para comercialização (interna)"],
+  ["2102", "Compra para comercialização (interestadual)"],
+  ["1403", "Compra com ST (interna)"],
+  ["2403", "Compra com ST (interestadual)"],
+  ["1556", "Material de uso e consumo (interna)"],
+  ["2556", "Material de uso e consumo (interestadual)"],
+  ["1551", "Ativo imobilizado (interna)"],
+  ["1910", "Bonificação/brinde (interna)"],
+  ["2910", "Bonificação/brinde (interestadual)"],
+  ["1949", "Outra entrada (interna)"],
+];
 
 export interface ConfProps {
   receipt: {
@@ -70,7 +97,13 @@ export interface ConfProps {
     notes: string | null;
     effects: { updateStock: boolean; updateCost: boolean; createPayable: boolean };
     hasDuplicatas: boolean;
+    /** entrada sem pedido (nenhum pedido vinculado) */
+    withoutOrder?: boolean;
   };
+  /** sem XML: permite incluir/remover itens (nota lançada manualmente) */
+  canEditItems?: boolean;
+  /** perfil pode cadastrar produtos (atalho "Cadastrar produto" nos itens sem vínculo) */
+  canCreateProducts?: boolean;
   items: ConfItem[];
   orders: Array<{ id: string; number: number; status: string; expectedDate: string | null }>;
   orderSkus: Array<{ skuId: string; label: string }>;
@@ -82,7 +115,7 @@ export interface ConfProps {
   blockers: string[];
 }
 
-export function Conference({ receipt: r, items: initial, orders, orderSkus, warehouses, terms, methods, categories, costCenters, blockers }: ConfProps) {
+export function Conference({ receipt: r, items: initial, orders, orderSkus, warehouses, terms, methods, categories, costCenters, blockers, canEditItems = false, canCreateProducts = false }: ConfProps) {
   const [items, setItems] = useState<ConfItem[]>(initial);
   const [orderIds, setOrderIds] = useState<string[]>(r.orderIds);
   const [freight, setFreight] = useState(r.freight);
@@ -92,6 +125,13 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
   const [effects, setEffects] = useState(r.effects);
   const [openNote, setOpenNote] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [adds, setAdds] = useState<AddRow[]>([]);
+  const [removed, setRemoved] = useState<number[]>([]);
+  const [seq, setSeq] = useState(1);
+  const setAdd = (key: number, patch: Partial<AddRow>) => {
+    setDirty(true);
+    setAdds((a) => a.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+  };
   const set = (idx: number, patch: Partial<ConfItem>) => {
     setDirty(true);
     setItems((a) => a.map((x) => (x.idx === idx ? { ...x, ...patch } : x)));
@@ -104,18 +144,20 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
     if (s0 && s0.lineValue != null && !s0.ignore && s0.skuId === it.skuId && s0.receivedQty === it.receivedQty && s0.unitCost === it.unitCost) return s0.lineValue;
     return it.receivedQty === it.invoicedQty && it.unitCost === it.invoiceUnitCost && it.invoicedValue > 0 ? it.invoicedValue : lineTotal(it.unitCost, it.receivedQty);
   };
-  const products = items.reduce((a, it) => a + lineValue(it), 0);
+  const products = items.filter((it) => !removed.includes(it.idx)).reduce((a, it) => a + lineValue(it), 0) + adds.reduce((a, x) => a + lineTotal(x.unitCost, x.qty), 0);
   const due = products - Math.min(discount, products) + freight + other;
   const active = items.filter((i) => !i.ignore);
   const checked = active.filter((i) => i.checked).length;
   const units = active.reduce((a, i) => a + i.receivedQty, 0);
-  const payload = JSON.stringify(items.map((i) => ({ idx: i.idx, skuId: i.skuId, receivedQty: i.receivedQty, unitCost: i.unitCost, conversionFactor: i.conversionFactor, divergence: i.divergence ?? "", ignore: i.ignore, checked: i.checked, lot: i.lot ?? "", expiry: i.expiry ?? "" })));
+  const payload = JSON.stringify(items.filter((i) => !removed.includes(i.idx)).map((i) => ({ idx: i.idx, skuId: i.skuId, receivedQty: i.receivedQty, unitCost: i.unitCost, conversionFactor: i.conversionFactor, divergence: i.divergence ?? "", ignore: i.ignore, checked: i.checked, lot: i.lot ?? "", expiry: i.expiry ?? "", entryCfop: i.entryCfop ?? "" })));
   return (
     <ActionForm action={saveReceiptAction} onSuccess={() => setDirty(false)} className="space-y-5">
       {({ pending, error }) => (
         <>
           <input type="hidden" name="id" value={r.id} />
           <input type="hidden" name="items" value={payload} />
+          {canEditItems && <input type="hidden" name="addItems" value={JSON.stringify(adds.map((x) => ({ skuId: x.skuId, qty: x.qty, unitCost: x.unitCost })))} />}
+          {canEditItems && <input type="hidden" name="removeItems" value={JSON.stringify(removed)} />}
           <input type="hidden" name="orderIdsJson" value={JSON.stringify(orderIds)} />
           <input type="hidden" name="freight" value={freight} />
           <input type="hidden" name="otherExpenses" value={other} />
@@ -147,7 +189,7 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((it) => {
+                  {items.filter((it) => !removed.includes(it.idx)).map((it) => {
                     const diff = it.receivedQty - it.invoicedQty;
                     return (
                       <tr key={it.idx} className={cn(it.ignore && "opacity-60")}>
@@ -157,7 +199,7 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                             <span className="flex items-center gap-2">
                               <span className="font-medium">{it.description}</span>
                               <span className="text-xs text-slate-500">{it.sku}</span>
-                              {it.mapping && <Badge tone={it.mapping === "manual" ? "warn" : "neutral"} title="Como o item foi associado">{it.mapping === "supplier_code" ? "cód. fornecedor" : it.mapping === "barcode" ? "cód. barras" : it.mapping === "order" ? "pedido" : "manual"}</Badge>}
+                              {it.mapping && <Badge tone={it.mapping === "manual" ? "warn" : "neutral"} title="Como o item foi associado">{it.mapping === "supplier_code" ? "cód. fornecedor" : it.mapping === "barcode" ? "cód. barras" : it.mapping === "order" ? "pedido" : it.mapping === "created" ? "produto novo" : "manual"}</Badge>}
                               <button type="button" className="text-xs text-brand-700 underline" onClick={() => set(it.idx, { skuId: null, sku: null, mapping: null })}>trocar</button>
                             </span>
                           ) : (
@@ -166,8 +208,17 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                                 <Select aria-label="Associar a produto do pedido" value="" onChange={(e) => { const o = orderSkus.find((x) => x.skuId === e.target.value); if (o) set(it.idx, { skuId: o.skuId, sku: null, description: o.label, mapping: "manual" }); }} options={orderSkus.map((o) => ({ value: o.skuId, label: o.label }))} placeholder="Associar a item do pedido…" />
                               )}
                               <SkuPicker supplierId={r.supplierId} placeholder="…ou pesquisar produto interno" onPick={(h) => set(it.idx, { skuId: h.id, sku: h.sku, description: h.name, unitCode: h.unitCode, mapping: "manual" })} />
+                              {canCreateProducts && r.hasXml && (
+                                <a href={`#novo-produto-${it.idx}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 underline">
+                                  <PackagePlus className="size-3.5" aria-hidden /> Cadastrar produto com os dados do XML
+                                </a>
+                              )}
                             </div>
                           )}
+                          <label className="mt-1 flex items-center gap-1 text-xs text-slate-500" title="CFOP de entrada do item (vazio = CFOP padrão do recebimento)">
+                            {it.cfop ? <>CFOP {it.cfop} →</> : <>CFOP de entrada</>}
+                            <Input aria-label={`CFOP de entrada de ${it.description}`} value={it.entryCfop ?? ""} onChange={(e) => set(it.idx, { entryCfop: e.target.value.replace(/\D/g, "").slice(0, 4) })} list="cfops" inputMode="numeric" placeholder={r.entryCfop ?? "padrão"} className="h-7 w-20 text-xs" />
+                          </label>
                           {r.hasXml && it.invoicedQtySupplier != null && (
                             <label className="mt-1 flex items-center gap-1 text-xs text-slate-500">
                               Conversão 1 {it.uCom} =
@@ -189,6 +240,11 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                           <StatusBadge kind="receipt_item" status={it.status} />
                           <label className="mt-1 flex items-center gap-1 text-xs"><input type="checkbox" className="accent-brand-700" checked={it.checked} onChange={(e) => set(it.idx, { checked: e.target.checked })} /> conferido</label>
                           <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" className="accent-brand-700" checked={it.ignore} onChange={(e) => set(it.idx, { ignore: e.target.checked })} /> não estocar</label>
+                          {canEditItems && it.added && (
+                            <button type="button" className="mt-1 flex items-center gap-1 text-xs text-red-700 underline" onClick={() => { setDirty(true); setRemoved((x) => [...x, it.idx]); }}>
+                              <Trash2 className="size-3.5" aria-hidden /> remover item
+                            </button>
+                          )}
                         </td>
                         <td>
                           <Button type="button" size="sm" variant="ghost" aria-label="Observação do item" title={it.divergence ?? "Registrar observação/divergência do item"} onClick={() => setOpenNote(openNote === it.idx ? null : it.idx)} className={it.divergence ? "text-accent-700" : undefined}>
@@ -199,18 +255,43 @@ export function Conference({ receipt: r, items: initial, orders, orderSkus, ware
                       </tr>
                     );
                   })}
+                  {adds.map((x) => (
+                    <tr key={`add-${x.key}`} className="bg-accent-50/40">
+                      <td className="min-w-[260px]"><span className="font-medium">{x.name}</span> <span className="text-xs text-slate-500">{x.sku}</span> <Badge tone="accent">novo item — salve para incluir</Badge></td>
+                      <td className="text-right text-slate-400">—</td>
+                      <td className="text-right text-slate-400">—</td>
+                      <td><QtyInput value={x.qty} onChange={(v) => setAdd(x.key, { qty: v })} ariaLabel={`Quantidade de ${x.name}`} min={0} /></td>
+                      <td />
+                      <td><MoneyInput value={x.unitCost} onChange={(v) => setAdd(x.key, { unitCost: v })} ariaLabel={`Custo de ${x.name}`} /></td>
+                      <td colSpan={2} />
+                      <td><Button type="button" size="sm" variant="ghost" aria-label={`Desfazer inclusão de ${x.name}`} onClick={() => setAdds((a) => a.filter((y) => y.key !== x.key))}><Trash2 className="size-4" /></Button></td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
+            {canEditItems && (
+              <div className="mt-3 max-w-xl">
+                <SkuPicker
+                  supplierId={r.supplierId}
+                  placeholder="Incluir item na nota: pesquisar produto"
+                  onPick={(h) => {
+                    setDirty(true);
+                    setAdds((a) => [...a, { key: seq, skuId: h.id, sku: h.sku, name: h.name, qty: 1000, unitCost: h.lastCost ?? h.costAcquisition ?? 0 }]);
+                    setSeq((n) => n + 1);
+                  }}
+                />
+              </div>
+            )}
           </FormSection>
 
           <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
             <FormSection title="Dados fiscais e financeiros">
               <FormGrid cols={3}>
-                <Field label="CFOP de entrada">
+                <Field label="CFOP de entrada padrão" hint="Vale para os itens sem CFOP próprio.">
                   <Input name="entryCfop" defaultValue={r.entryCfop ?? ""} list="cfops" onChange={() => setDirty(true)} />
                   <datalist id="cfops">
-                    {[["1102", "Compra para comercialização (interna)"], ["2102", "Compra para comercialização (interestadual)"], ["1403", "Compra com ST (interna)"], ["2403", "Compra com ST (interestadual)"], ["1556", "Material de uso e consumo"], ["1910", "Bonificação/brinde"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    {ENTRY_CFOPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </datalist>
                 </Field>
                 <Field label="Local de estoque" required>

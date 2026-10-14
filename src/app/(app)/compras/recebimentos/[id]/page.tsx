@@ -14,13 +14,15 @@ import { listAll } from "@/lib/db";
 import { formatMoney, formatQty } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatDoc } from "@/lib/core/text";
-import { canDo } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { confirmBlockers, effectsOf, orderMatchRate, receiptItemStatus, receiptMovements, type ReceiptItem } from "@/domain/receipts";
 import { orderItems } from "@/domain/purchases";
 import { supplierLabel } from "@/domain/suppliers";
 import { cancelReceiptAction, resumeConfirmAction } from "../actions";
 import { Conference } from "./conference";
+import { NewProducts } from "./new-products";
+import { defaultMarginBps, planProductsFromReceipt } from "@/domain/receipt-products";
 
 export const metadata = { title: "Recebimento" };
 
@@ -75,9 +77,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const wh = r.warehouseId ? await store.get("warehouses", r.warehouseId) : null;
   const confirmed = r.status === "confirmed";
   const canReceive = canDo(s.user, "purchase.receive") && s.ctx.branchId === r.branchId;
+  // entrada sem pedido (COM-03): registrada em orderLink; recebimentos anteriores ao campo seguem pelos pedidos vinculados
+  const withoutOrder = !linkedOrders.length;
   const steps = [
-    { label: r.xmlFileId ? "NF-e importada" : "Documento informado", hint: r.xmlFileId ? "XML validado" : r.nfeKey ? "Chave informada (sem XML)" : "Sem XML", state: "done" as const },
-    { label: "Pedido vinculado", hint: linkedOrders.length ? linkedOrders.map((o) => `nº ${o.number}`).join(", ") : "Sem pedido", state: (linkedOrders.length ? "done" : draft ? "active" : "done") as "done" | "active" },
+    { label: r.xmlFileId ? "NF-e importada" : r.origin === "manual" && withoutOrder ? "Nota lançada" : "Documento informado", hint: r.xmlFileId ? "XML validado" : r.nfeKey ? "Chave informada (sem XML)" : "Sem XML", state: "done" as const },
+    { label: withoutOrder ? "Entrada sem pedido" : "Pedido vinculado", hint: linkedOrders.length ? linkedOrders.map((o) => `nº ${o.number}`).join(", ") : "Compra sem pedido de compra", state: (linkedOrders.length || r.orderLink === "without_order" || !draft ? "done" : "active") as "done" | "active" },
     { label: "Conferência física", hint: confirmed ? `${active.length} de ${active.length} itens` : `${checked} de ${active.length} itens conferidos`, state: (confirmed ? "done" : draft && linkedOrders.length >= 0 ? "active" : "todo") as "done" | "active" | "todo" },
     { label: "Concluir entrada", hint: "Estoque e financeiro", state: (confirmed ? "done" : "todo") as "done" | "todo" },
   ];
@@ -100,8 +104,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       listAll(store, "cost_centers", { filters: [["eq", "companyId", s.ctx.companyId]] }),
     ]);
     conf = {
-      receipt: { id, hasXml: Boolean(r.xmlFileId), chargesAuto: !r.xmlFileId && r.orderCharges ? r.orderCharges.auto !== false : null, chargesLost: !r.xmlFileId ? (r.orderCharges?.lost ?? []).map((l: any) => ({ orderNumber: l.number ?? null, receiptNumber: l.receiptNumber ?? null })) : [], chargesLostAck: Boolean(r.orderCharges?.lostAck), supplierId: r.supplierId, warehouseId: r.warehouseId, orderIds: r.orderIds ?? [], freight: r.freight ?? 0, otherExpenses: r.otherExpenses ?? 0, discount: r.discount ?? 0, invoicedTotal: r.invoicedTotal ?? null, paymentTermId: r.paymentTermId ?? null, paymentMethodId: r.paymentMethodId ?? null, entryCfop: r.entryCfop ?? null, categoryId: r.categoryId ?? null, costCenterId: r.costCenterId ?? null, differenceAction: r.differenceAction ?? "adjust_to_due", notes: r.notes ?? null, effects: eff, hasDuplicatas: (r.emitter?.duplicatas ?? []).length > 0 },
-      items: items.map((i) => ({ idx: i.idx, cProd: i.cProd ?? null, xProd: i.xProd ?? null, uCom: i.uCom ?? null, invoicedQtySupplier: i.invoicedQtySupplier ?? null, conversionFactor: i.conversionFactor ?? 1000, invoicedQty: i.invoicedQty, invoicedValue: i.invoicedValue, invoiceUnitCost: i.invoiceUnitCost, skuId: i.skuId, sku: i.sku ?? null, description: i.description, unitCode: i.unitCode ?? null, mapping: i.mapping ?? null, expectedQty: i.expectedQty ?? 0, orderUnitCost: i.orderUnitCost ?? null, receivedQty: i.receivedQty, unitCost: i.unitCost, ignore: Boolean(i.ignore), divergence: i.divergence ?? null, checked: Boolean(i.checked), lot: i.lot ?? null, expiry: i.expiry ?? null, status: receiptItemStatus(i, divergences), lineValue: i.lineValue ?? null })),
+      canEditItems: !r.xmlFileId,
+      canCreateProducts: can(s.user, "products", "create"),
+      receipt: { id, hasXml: Boolean(r.xmlFileId), withoutOrder, chargesAuto: !r.xmlFileId && r.orderCharges ? r.orderCharges.auto !== false : null, chargesLost: !r.xmlFileId ? (r.orderCharges?.lost ?? []).map((l: any) => ({ orderNumber: l.number ?? null, receiptNumber: l.receiptNumber ?? null })) : [], chargesLostAck: Boolean(r.orderCharges?.lostAck), supplierId: r.supplierId, warehouseId: r.warehouseId, orderIds: r.orderIds ?? [], freight: r.freight ?? 0, otherExpenses: r.otherExpenses ?? 0, discount: r.discount ?? 0, invoicedTotal: r.invoicedTotal ?? null, paymentTermId: r.paymentTermId ?? null, paymentMethodId: r.paymentMethodId ?? null, entryCfop: r.entryCfop ?? null, categoryId: r.categoryId ?? null, costCenterId: r.costCenterId ?? null, differenceAction: r.differenceAction ?? "adjust_to_due", notes: r.notes ?? null, effects: eff, hasDuplicatas: (r.emitter?.duplicatas ?? []).length > 0 },
+      items: items.map((i) => ({ idx: i.idx, cProd: i.cProd ?? null, xProd: i.xProd ?? null, uCom: i.uCom ?? null, invoicedQtySupplier: i.invoicedQtySupplier ?? null, conversionFactor: i.conversionFactor ?? 1000, invoicedQty: i.invoicedQty, invoicedValue: i.invoicedValue, invoiceUnitCost: i.invoiceUnitCost, skuId: i.skuId, sku: i.sku ?? null, description: i.description, unitCode: i.unitCode ?? null, mapping: i.mapping ?? null, expectedQty: i.expectedQty ?? 0, orderUnitCost: i.orderUnitCost ?? null, receivedQty: i.receivedQty, unitCost: i.unitCost, ignore: Boolean(i.ignore), divergence: i.divergence ?? null, checked: Boolean(i.checked), lot: i.lot ?? null, expiry: i.expiry ?? null, status: receiptItemStatus(i, divergences), lineValue: i.lineValue ?? null, cfop: i.cfop ?? null, entryCfop: i.entryCfop ?? null, added: Boolean(i.added) })),
       orders: orders.map((o) => ({ id: o.id, number: o.number, status: o.status, expectedDate: o.expectedDate ?? null })),
       orderSkus: [...skuOpts.entries()].map(([skuId, label]) => ({ skuId, label })),
       warehouses: warehouses.map((w) => ({ value: w.id, label: w.name })),
@@ -113,6 +119,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     };
   }
   const movements = confirmed ? await receiptMovements(store, id) : [];
+  // itens do XML sem vínculo: prévia do cadastro de produto (COM-04)
+  const canNewProducts = draft && canReceive && Boolean(r.xmlFileId) && can(s.user, "products", "create");
+  const newProducts = canNewProducts ? await planProductsFromReceipt(s.ctx, r) : [];
+  const unitOpts = newProducts.length ? (await listAll(store, "units", { filters: [["eq", "companyId", s.ctx.companyId]] })).filter((u) => u.status !== "inactive").map((u) => ({ value: u.code, label: `${u.code} — ${u.name}` })) : [];
+  const margin = newProducts.length ? await defaultMarginBps(store, s.ctx.companyId, r.branchId) : 0;
   return (
     <>
       <PageHeader
@@ -161,7 +172,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               Pedido(s) {linkedOrders.map((o, i) => <span key={o.id}>{i > 0 && ", "}<Link className="font-medium underline" href={`/compras/pedidos/${o.id}`}>nº {o.number}</Link></span>)} vinculado(s) · {match}% de correspondência (produto, quantidade dentro do saldo e custo)
             </>
           ) : (
-            "Nenhum pedido vinculado — itens serão registrados como fora de pedido (divergência)."
+            `Entrada sem pedido${r.origin === "manual" ? " (nota lançada manualmente)" : r.xmlFileId ? " (XML)" : ""} — não há saldo de pedido a conferir; estoque, custo médio e contas a pagar seguem as mesmas regras do recebimento com pedido.`
           )}
         </div>
       </Card>
@@ -189,6 +200,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </Card>
         </div>
       )}
+      {newProducts.length > 0 && <NewProducts key={`np-${r.updatedAt}`} receiptId={id} items={newProducts.map((p) => ({ idx: p.idx, cProd: p.cProd, xProd: p.xProd, name: p.name, gtin: p.gtin, invalidGtin: p.invalidGtin, existing: p.existing ? { skuId: p.existing.skuId, sku: p.existing.sku, name: p.existing.name } : null, ncm: p.ncm, cest: p.cest, unitCode: p.unitCode, uCom: p.uCom, cost: p.cost, price: p.price }))} units={unitOpts} marginBps={margin} canPrice={can(s.user, "products", "edit")} />}
       {draft && conf && canReceive && <Conference key={r.updatedAt} {...conf} />}
       {draft && !canReceive && <Notice tone="warn">Somente usuários com “Receber mercadorias” na filial do recebimento podem conferir e concluir.</Notice>}
 
@@ -198,7 +210,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
                 <thead>
-                  <tr><th>Produto</th><th className="text-right">Pedido</th><th className="text-right">NF-e</th><th className="text-right">Recebido</th><th className="text-right">Diferença</th><th className="text-right">Custo unit.</th><th className="text-right">Frete/desp. rateados</th><th className="text-right">Custo de entrada</th><th>Lote / validade</th><th>Situação</th></tr>
+                  <tr><th>Produto</th><th className="text-right">Pedido</th><th className="text-right">NF-e</th><th className="text-right">Recebido</th><th className="text-right">Diferença</th><th className="text-right">Custo unit.</th><th className="text-right">Frete/desp. rateados</th><th className="text-right">Custo de entrada</th><th>CFOP entrada</th><th>Lote / validade</th><th>Situação</th></tr>
                 </thead>
                 <tbody>
                   {items.map((i) => (
@@ -211,6 +223,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                       <td className="tabular text-right">{formatMoney(i.unitCost)}</td>
                       <td className="tabular text-right">{formatMoney((i.freightShare ?? 0) + (i.otherShare ?? 0) - (i.discountShare ?? 0))}</td>
                       <td className="tabular text-right">{formatMoney(i.landedUnitCost ?? i.unitCost)}</td>
+                      <td className="tabular text-xs" title={i.cfop ? `CFOP do fornecedor ${i.cfop}` : undefined}>{i.entryCfop ?? r.entryCfop ?? "—"}{i.cfop ? <span className="block text-slate-500">forn. {i.cfop}</span> : null}</td>
                       <td className="text-xs">{[i.lot, i.expiry ? `val. ${formatDate(i.expiry)}` : null].filter(Boolean).join(" · ") || "—"}</td>
                       <td><StatusBadge kind="receipt_item" status={receiptItemStatus(i, divergences, confirmed)} /></td>
                     </tr>

@@ -1,6 +1,9 @@
+import { DEFAULT_CFOP_PAIRS } from "@/domain/cfop-entry";
+
 /** Catálogo de parâmetros editáveis (empresa e filial). Valores padrão vêm de DEFAULT_SETTINGS quando existem. */
 
-export type ParamType = "bool" | "int" | "bps" | "money" | "select" | "timezone";
+/** `cfopPairs`: tabela de pares CFOP de saída → entrada (objeto { "5102": "1102" }), editada como texto "5102=1102" por linha. */
+export type ParamType = "bool" | "int" | "bps" | "money" | "select" | "timezone" | "cfopPairs";
 
 export interface ParamDef {
   key: string;
@@ -45,6 +48,21 @@ export const PARAMS: ParamDef[] = [
     key: "purchase.receiptValueTolerance", group: "Compras", label: "Tolerância de valor no recebimento", type: "money", scopes: ["company", "branch"], default: 0, min: 0,
     help: "Diferença máxima aceita, sem registrar divergência, entre o total faturado informado na nota do fornecedor e o valor devido calculado no recebimento. Acima dela, a divergência de valor é registrada e exige justificativa. 0 = qualquer diferença é divergência.",
     usedBy: "Compras (recebimento de mercadorias)",
+  },
+  {
+    key: "feature.entradaSemPedido", group: "Compras", label: "Entrada de nota sem pedido de compra", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Permite lançar a nota de compra manualmente com itens, frete e condição de pagamento sem pedido, e importar o XML marcando “sem pedido” (não vincula pedidos em aberto). Estoque, custo médio e contas a pagar seguem as mesmas regras do recebimento com pedido. Desligado, o lançamento manual exige pedido.",
+    usedBy: "Compras (receber mercadorias)",
+  },
+  {
+    key: "feature.conversorCfop", group: "Compras", label: "Converter CFOP do fornecedor em CFOP de entrada", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Na importação do XML, cada item recebe o CFOP de entrada pela tabela de pares abaixo (ex.: 5405 → 1403). Item sem par usa o padrão do recebimento (1102 interna / 2102 interestadual). O CFOP do item pode ser alterado na conferência.",
+    usedBy: "Compras (importação do XML e conferência)",
+  },
+  {
+    key: "purchase.cfopPairs", group: "Compras", label: "Pares de CFOP (saída do fornecedor → entrada)", type: "cfopPairs", scopes: ["company", "branch"], default: DEFAULT_CFOP_PAIRS,
+    help: "Um par por linha no formato 5102=1102. A saída 5xxx corresponde à entrada 1xxx (interna) e a 6xxx à 2xxx (interestadual). A tabela padrão assume compra para comercialização; para uso e consumo (1556/2556) ou ativo (1551/2551), ajuste os pares ou o CFOP do item na conferência.",
+    usedBy: "Compras (importação do XML)",
   },
   { key: "purchase.monthlyBudget", group: "Compras", label: "Orçamento mensal de compras", help: "0 = sem orçamento. Usado nas aprovações para indicar consumo do orçamento.", type: "money", scopes: ["company", "branch"], default: 0, min: 0, usedBy: "Aprovação de compras" },
   { key: "users.inviteExpiryDays", group: "Usuários", label: "Validade do convite de primeiro acesso", help: "Depois deste prazo o link de convite deixa de funcionar e precisa ser reenviado.", type: "int", scopes: ["company"], default: 7, min: 1, max: 30, unit: "dias", usedBy: "Usuários e permissões (convites)" },

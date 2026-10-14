@@ -32,7 +32,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const confirmedMonth = base.filter((r) => r.status === "confirmed" && (r.confirmedAt ?? "").slice(0, 7) === month);
   const withDiv = base.filter((r) => r.divergenceCount > 0);
   const columns: Column<Row>[] = [
-    { key: "number", label: "Recebimento", sortable: true, fixed: true, cell: (r) => <span>nº {r.number}{!r.hasXml && <span className="block text-xs font-normal text-slate-500">sem XML</span>}</span> },
+    { key: "number", label: "Recebimento", sortable: true, fixed: true, cell: (r) => <span>nº {r.number}{!r.hasXml && <span className="block text-xs font-normal text-slate-500">{r.origin === "manual" && !r.orderNumbers.length ? "lançamento manual" : "sem XML"}</span>}</span> },
     { key: "nfeNumber", label: "NF-e", cell: (r) => (r.nfeNumber ? <span>{r.nfeNumber}{r.nfeSeries ? ` / ${r.nfeSeries}` : ""}<span className="block text-xs text-slate-500">{formatDate(r.nfeIssueDate)}</span></span> : "—") },
     { key: "supplierName", label: "Fornecedor", sortable: true, cell: (r) => <Link className="hover:underline" href={`/fornecedores/${r.supplierId}`}>{r.supplierName}</Link> },
     { key: "orders", label: "Pedidos", cell: (r) => (r.orderNumbers.length ? r.orderNumbers.map((o: any) => <Link key={o.id} className="mr-1 text-brand-700 hover:underline" href={`/compras/pedidos/${o.id}`}>nº {o.number}</Link>) : <span className="text-slate-400">sem pedido</span>) },
@@ -65,6 +65,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           { type: "select", name: "status", label: "Situação", options: [{ value: "draft", label: "Em conferência" }, { value: "confirmed", label: "Confirmado" }, { value: "cancelled", label: "Cancelado" }] },
           { type: "select", name: "supplier", label: "Fornecedor", options: suppliers },
           { type: "select", name: "divergence", label: "Divergência", options: [{ value: "1", label: "Somente com divergência" }] },
+          { type: "select", name: "order", label: "Pedido", options: [{ value: "with", label: "Com pedido" }, { value: "without", label: "Sem pedido" }] },
           { type: "date", name: "from", label: "De" },
           { type: "date", name: "to", label: "Até" },
         ]}
