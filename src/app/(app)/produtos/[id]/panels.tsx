@@ -8,8 +8,14 @@ import { MoneyInput, QtyInput } from "@/components/ui/money-input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/empty";
-import { formatBps, formatMoney, marginBps, markupBps } from "@/lib/money";
+import { formatBps, formatMoney, formatQty, marginBps, markupBps } from "@/lib/money";
+import { Badge } from "@/components/ui/badge";
+import { SkuPicker, type SkuHit } from "../../estoque/sku-picker";
 import {
+  setCompositionAction,
+  saveComponentAction,
+  removeComponentAction,
+  searchComponentSkusAction,
   uploadImageAction,
   removeImageAction,
   saveConversionAction,
@@ -331,5 +337,224 @@ export function InitialBalanceForm({ productId, skus, warehouses }: { productId:
         </>
       )}
     </ActionForm>
+  );
+}
+
+// ───────────────────────────── Componentes (kits e compostos — CAD-12/13)
+
+export interface ComponentRow {
+  id: string;
+  skuId: string;
+  sku: string;
+  name: string;
+  unitCode: string;
+  qty: number;
+  parentSkuId: string | null;
+  parentSku: string | null;
+  unitCost: number;
+  available: number | null;
+  notes: string | null;
+}
+
+export interface CompositionSummary {
+  skuId: string;
+  sku: string;
+  count: number;
+  unitCost: number;
+  /** kit: disponível (unidades inteiras); composto: quanto dá para montar com o disponível dos componentes */
+  fromComponents: number | null;
+  /** composto: disponível do próprio produto (estoque montado) */
+  own: number | null;
+}
+
+const COMPOSITION_TEXT: Record<"kit" | "composite", { title: string; text: string }> = {
+  kit: { title: "Kit", text: "Vendido como um item, com preço próprio da tabela de preços. Não tem estoque: a venda baixa os componentes pelo custo médio, e o cancelamento ou a devolução os devolvem." },
+  composite: { title: "Composto (montagem)", text: "Tem estoque próprio. Monte ou desmembre unidades em Estoque › Montagem e desmembramento; a montagem baixa os componentes e o composto entra pelo custo somado." },
+};
+
+export function ComponentsPanel({
+  productId, unitCode, composition, canEdit, parentSkus, rows, summary, branchSelected,
+}: {
+  productId: string; unitCode: string; composition: "kit" | "composite" | null; canEdit: boolean; parentSkus: Array<{ id: string; sku: string }>;
+  rows: ComponentRow[]; summary: CompositionSummary[]; branchSelected: boolean;
+}) {
+  const [picked, setPicked] = useState<SkuHit | null>(null);
+  const [qty, setQty] = useState(1000);
+  const multi = parentSkus.length > 1;
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-line bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 max-w-2xl">
+            <h2 className="text-sm font-semibold">Tipo de composição</h2>
+            {composition ? (
+              <p className="mt-1 text-sm text-slate-600"><Badge tone="brand" className="mr-1">{COMPOSITION_TEXT[composition].title}</Badge>{COMPOSITION_TEXT[composition].text}</p>
+            ) : (
+              <p className="mt-1 text-sm text-slate-600">Produto comum: vendido e movimentado pelo próprio estoque. Transforme em <strong>kit</strong> (cesta, combo ou kit promocional vendido sem estoque próprio) ou em <strong>composto</strong> (item montado com estoque próprio) para cadastrar componentes.</p>
+            )}
+          </div>
+          {canEdit && (
+            <div className="flex flex-wrap gap-2">
+              {composition !== "kit" && <ActionButton size="sm" action={setCompositionAction.bind(null, productId, "kit")} label="Tornar kit" confirm="Transformar o produto em kit? O kit não tem estoque próprio: o saldo dele precisa estar zerado e a venda passa a baixar os componentes." />}
+              {composition !== "composite" && <ActionButton size="sm" action={setCompositionAction.bind(null, productId, "composite")} label="Tornar composto" confirm="Transformar o produto em composto? Ele mantém estoque próprio, que passa a ser montado ou desmembrado a partir dos componentes." />}
+              {composition && <ActionButton size="sm" variant="ghost" action={setCompositionAction.bind(null, productId, "")} label="Remover composição" confirm="Voltar a ser um produto comum? Vendas e montagens já feitas não mudam; os componentes cadastrados ficam guardados, mas deixam de ser usados." />}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {composition && (
+        <>
+          {summary.length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {summary.map((x) => (
+                <div key={x.skuId} className="rounded-lg border border-line bg-white p-3">
+                  <p className="font-mono text-xs text-slate-500">{x.sku}</p>
+                  <p className="mt-1 text-sm">
+                    Custo calculado: <span className="tabular font-semibold">{formatMoney(x.unitCost)}</span>{" "}
+                    <span className="text-xs text-slate-500">por {unitCode} ({x.count} componente{x.count === 1 ? "" : "s"})</span>
+                  </p>
+                  {!branchSelected ? (
+                    <p className="mt-1 text-xs text-slate-500">Selecione uma filial para ver a disponibilidade.</p>
+                  ) : composition === "kit" ? (
+                    <p className="mt-1 text-sm">Disponível para venda: <span className={`tabular font-semibold ${x.fromComponents ? "" : "text-red-700"}`}>{formatQty(x.fromComponents ?? 0, unitCode)}</span></p>
+                  ) : (
+                    <p className="mt-1 text-sm">
+                      Estoque montado: <span className="tabular font-semibold">{formatQty(x.own ?? 0, unitCode)}</span> · pode montar <span className="tabular font-semibold">{formatQty(x.fromComponents ?? 0, unitCode)}</span>
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <section className="rounded-lg border border-line bg-white">
+            <header className="border-b border-line px-4 py-3">
+              <h2 className="text-sm font-semibold">Componentes</h2>
+              <p className="text-xs text-slate-500">
+                Quantidade de cada componente por 1 {unitCode}. Custo pelo custo médio da filial (sem estoque, pelo custo do cadastro).{" "}
+                {composition === "kit" ? "Disponível do kit = menor (disponível do componente ÷ quantidade)." : "Montagem e desmembramento em Estoque › Montagem e desmembramento."}
+              </p>
+            </header>
+            {rows.length === 0 ? (
+              <p className="p-4 text-sm text-slate-500">Nenhum componente cadastrado. {composition === "kit" ? "Kit sem componentes não pode ser vendido." : "Composto sem componentes não pode ser montado."}</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table-base w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th>Componente</th>
+                      {multi && <th>Variação</th>}
+                      <th className="text-right">Qtd. por {unitCode}</th>
+                      <th className="text-right">Custo médio</th>
+                      <th className="text-right">Custo na composição</th>
+                      <th className="text-right">Disponível</th>
+                      <th className="text-right">Rende</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.id}>
+                        <td>
+                          <span className="block">{r.name}</span>
+                          <span className="font-mono text-xs text-slate-500">{r.sku}</span>
+                          {r.notes && <span className="block text-xs text-slate-500">{r.notes}</span>}
+                        </td>
+                        {multi && <td className="text-xs">{r.parentSku ?? "Todas"}</td>}
+                        <td className="tabular text-right">{formatQty(r.qty, r.unitCode)}</td>
+                        <td className="tabular text-right">{formatMoney(r.unitCost)}</td>
+                        <td className="tabular text-right font-semibold">{formatMoney(Math.round((r.qty * r.unitCost) / 1000))}</td>
+                        <td className="tabular text-right">{r.available == null ? "—" : formatQty(r.available, r.unitCode)}</td>
+                        <td className="tabular text-right">{r.available == null ? "—" : formatQty(Math.floor(Math.max(0, r.available) / r.qty) * 1000, unitCode)}</td>
+                        <td className="whitespace-nowrap text-right">
+                          {canEdit && (
+                            <>
+                              <ComponentQtyButton productId={productId} row={r} />
+                              <ActionButton size="sm" variant="ghost" action={removeComponentAction.bind(null, productId, r.id)} label="" title="Remover componente" icon={<Trash2 className="size-4" />} confirm={`Remover ${r.sku} da composição? Vendas e montagens já feitas não mudam.`} />
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {canEdit && (
+              <ActionForm
+                action={saveComponentAction}
+                onSuccess={() => {
+                  setPicked(null);
+                  setQty(1000);
+                }}
+                className="grid items-end gap-3 border-t border-line p-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_140px_minmax(0,1fr)_auto]"
+              >
+                {({ pending }) => (
+                  <>
+                    <input type="hidden" name="productId" value={productId} />
+                    <input type="hidden" name="componentSkuId" value={picked?.id ?? ""} />
+                    <Field label="Componente">
+                      <SkuPicker value={picked} onChange={setPicked} search={searchComponentSkusAction} scope={productId} />
+                    </Field>
+                    {multi ? (
+                      <Field label="Vale para">
+                        <Select name="parentSkuId" defaultValue="" options={[{ value: "", label: "Todas as variações" }, ...parentSkus.map((p) => ({ value: p.id, label: p.sku }))]} />
+                      </Field>
+                    ) : (
+                      <input type="hidden" name="parentSkuId" value="" />
+                    )}
+                    <Field label={`Qtd. por ${unitCode}`}>
+                      <QtyInput name="qty" value={qty} onChange={setQty} min={0} />
+                    </Field>
+                    <Field label="Observação">
+                      <Input name="notes" maxLength={300} placeholder="Opcional" />
+                    </Field>
+                    <SubmitButton pending={pending} variant="secondary">
+                      <Plus className="size-4" /> Adicionar
+                    </SubmitButton>
+                  </>
+                )}
+              </ActionForm>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ComponentQtyButton({ productId, row }: { productId: string; row: ComponentRow }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(true)} title="Alterar quantidade">
+        <Pencil className="size-4" />
+      </Button>
+      <Dialog open={open} onClose={() => setOpen(false)} title={`Componente — ${row.sku}`}>
+        <ActionForm action={saveComponentAction} onSuccess={() => setOpen(false)} className="space-y-4">
+          {({ pending, error }) => (
+            <>
+              <input type="hidden" name="productId" value={productId} />
+              <input type="hidden" name="componentSkuId" value={row.skuId} />
+              <input type="hidden" name="parentSkuId" value={row.parentSkuId ?? ""} />
+              <FormGrid cols={2}>
+                <Field label={`Quantidade (${row.unitCode})`}>
+                  <QtyInput name="qty" defaultValue={row.qty} />
+                </Field>
+                <Field label="Observação">
+                  <Input name="notes" defaultValue={row.notes ?? ""} maxLength={300} />
+                </Field>
+              </FormGrid>
+              <p className="text-xs text-slate-500">A alteração vale para as próximas vendas e montagens; o que já foi vendido ou montado mantém os componentes da época.</p>
+              {error && <Notice tone="bad">{error}</Notice>}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
+                <SubmitButton pending={pending}>Salvar</SubmitButton>
+              </div>
+            </>
+          )}
+        </ActionForm>
+      </Dialog>
+    </>
   );
 }

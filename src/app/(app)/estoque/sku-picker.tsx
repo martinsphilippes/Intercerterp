@@ -21,8 +21,17 @@ export interface SkuHit {
 
 const fmt = (m: number) => (m / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 
-/** Seletor de SKU com pesquisa (nome, SKU ou código de barras/leitor). Mostra o disponível no depósito informado. */
-export function SkuPicker({ value, onChange, warehouseId, placeholder = "Produto, SKU ou código de barras", autoFocus, clearOnSelect }: { value?: SkuHit | null; onChange: (s: SkuHit | null) => void; warehouseId?: string | null; placeholder?: string; autoFocus?: boolean; clearOnSelect?: boolean }) {
+/**
+ * Seletor de SKU com pesquisa (nome, SKU ou código de barras/leitor). Mostra o disponível no depósito informado.
+ * `search`/`scope` trocam a pesquisa padrão do estoque por outra ação (ex.: componentes de um produto); passe uma
+ * função estável (ação de servidor importada), não uma criada a cada renderização.
+ */
+export function SkuPicker({
+  value, onChange, warehouseId, placeholder = "Produto, SKU ou código de barras", autoFocus, clearOnSelect, search, scope,
+}: {
+  value?: SkuHit | null; onChange: (s: SkuHit | null) => void; warehouseId?: string | null; placeholder?: string; autoFocus?: boolean; clearOnSelect?: boolean;
+  search?: (q: string, scope: string) => Promise<{ ok: boolean; data?: unknown }>; scope?: string;
+}) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SkuHit[]>([]);
   const [open, setOpen] = useState(false);
@@ -38,7 +47,7 @@ export function SkuPicker({ value, onChange, warehouseId, placeholder = "Produto
     const my = ++seq.current;
     setLoading(true);
     const t = setTimeout(async () => {
-      const r = await searchSkusAction(q, warehouseId ?? null);
+      const r = search ? await search(q, scope ?? "") : await searchSkusAction(q, warehouseId ?? null);
       if (my !== seq.current) return;
       setLoading(false);
       setHits(r.ok ? ((r.data as SkuHit[]) ?? []) : []);
@@ -46,7 +55,7 @@ export function SkuPicker({ value, onChange, warehouseId, placeholder = "Produto
       setOpen(true);
     }, 250);
     return () => clearTimeout(t);
-  }, [q, warehouseId]);
+  }, [q, warehouseId, search, scope]);
   const pick = (h: SkuHit) => {
     onChange(h);
     setOpen(false);

@@ -12,6 +12,7 @@ import { getSetting } from "@/lib/core/settings";
 import { notify, resolveOccurrence } from "@/lib/core/notify";
 import { DEFERRED_KINDS, PAYMENT_KIND_LABEL } from "./pricing-calc";
 import { availableMap, defaultWarehouse, postMovements, damageWarehouse, type MovementInput } from "./stock";
+import { componentsCost, kitComponentMovements, kitLineCost, loadSaleKits, scaleQty } from "./product-components";
 import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, nonBusinessDayRule, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
 import { cashAccountFor, currentSession } from "./cash";
 import { priceSale } from "./sale-pricing";
@@ -112,17 +113,25 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
 
   // Estoque (produtos físicos)
   const allowNegative = Boolean(terminal.allowNegativeStock) || (await getSetting(ctx.store, ctx.companyId, branchId, "sales.allowNegativeStock", false));
-  const physicalSkus = lines.filter((l) => l.product.type !== "service").map((l) => l.sku.id);
+  // kits (CAD-12): sem estoque próprio — a conferência (e depois a baixa) é dos componentes
+  const kits = await loadSaleKits(ctx, lines);
+  const kitCodes = new Map([...kits.values()].flat().map((c) => [c.skuId, `${c.sku} (componente de kit)`]));
+  const physicalSkus = [...new Set([...lines.filter((l) => l.product.type !== "service" && !kits.has(l.sku.id)).map((l) => l.sku.id), ...kitCodes.keys()])];
   const avail = await availableMap(ctx.store, branchId, physicalSkus);
   const needed = new Map<string, number>();
-  for (const l of lines) if (l.product.type !== "service") needed.set(l.sku.id, (needed.get(l.sku.id) ?? 0) + l.input.qty);
+  for (const l of lines) {
+    if (l.product.type === "service") continue;
+    const comps = kits.get(l.sku.id);
+    if (comps) for (const c of comps) needed.set(c.skuId, (needed.get(c.skuId) ?? 0) + scaleQty(l.input.qty, c.qty));
+    else needed.set(l.sku.id, (needed.get(l.sku.id) ?? 0) + l.input.qty);
+  }
   const stockWarnings: string[] = [];
   // pedido de venda importado (PDV-12): a reserva do próprio pedido não impede faturá-lo
   const ownReserved = input.salesDocumentId ? await (await import("./sales-documents")).reservedForDocument(ctx.store, input.salesDocumentId, branchId) : null;
   for (const [skuId, q] of needed) {
     const a = (avail.get(skuId)?.available ?? 0) + (ownReserved?.get(skuId) ?? 0);
     if (a < q) {
-      const msg = `${skus.get(skuId)!.sku}: disponível ${a / QTY}, vendido ${q / QTY}`;
+      const msg = `${skus.get(skuId)?.sku ?? kitCodes.get(skuId) ?? skuId}: disponível ${a / QTY}, vendido ${q / QTY}`;
       if (!allowNegative) throw new BusinessError(`Estoque insuficiente — ${msg}. A configuração comercial não permite venda sem saldo.`, "insufficient_stock");
       stockWarnings.push(msg);
     }
@@ -130,7 +139,7 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
 
   const customer = input.customerId ? await ctx.store.getOrThrow("customers", input.customerId) : null;
   if (customer) assert(customer.companyId === ctx.companyId, "Cliente de outra empresa.");
-  return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative };
+  return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative, kits };
 }
 
 type PreparedPay = SalePaymentInput & { method: Doc; change: number; intent?: Doc | null; voucher?: Doc | null; term?: Doc | null; status: string; manual: boolean };
@@ -317,16 +326,21 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
     : cpf
       ? { id: null, name: "Consumidor final", doc: cpf, personType: cpf.length === 14 ? "PJ" : "PF", email: null, phone: null, address: null, ie: null, cpfOnly: true }
       : null;
-  const costTotal = lines.reduce((a, l) => {
-    if (l.product.type === "service") return a;
+  // custo do item: médio vigente; kit = soma dos custos médios dos componentes consumidos (retrato no item)
+  const lineCost = (l: (typeof lines)[number]) => {
+    if (l.product.type === "service") return { unitCost: 0, costTotal: 0, components: null };
+    const comps = prep.kits.get(l.sku.id);
+    if (comps) return kitLineCost(comps, l.input.qty, (id) => prep.avail.get(id)?.avgCost);
     const unitCost = prep.avail.get(l.sku.id)?.avgCost ?? l.sku.costTotal ?? 0;
-    return a + roundDiv(unitCost * l.input.qty, QTY);
-  }, 0);
+    return { unitCost, costTotal: roundDiv(unitCost * l.input.qty, QTY), components: null };
+  };
+  const costs = lines.map(lineCost);
+  const costTotal = costs.reduce((a, c) => a + c.costTotal, 0);
   const deferred = deferredPaysAll.length > 0;
   const base = { companyId: ctx.companyId, branchId, createdBy: ctx.user.id };
   const itemRows = lines.map((l, idx) => {
     const it = calc.items[idx];
-    const unitCost = l.product.type === "service" ? 0 : (prep.avail.get(l.sku.id)?.avgCost ?? l.sku.costTotal ?? 0);
+    const { unitCost, costTotal: lineCostTotal, components } = costs[idx];
     return {
       id: detId("saleitem", saleId, idx + 1),
       data: {
@@ -346,13 +360,14 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         surcharge: it.surcharge,
         total: it.total,
         unitCost,
-        costTotal: roundDiv(unitCost * l.input.qty, QTY),
+        costTotal: lineCostTotal,
         returnedQty: 0,
         warehouseId: l.product.type === "service" ? null : warehouse.id,
         ncm: l.product.ncm ?? null,
         cfop: l.product.cfop ?? null,
         categoryId: l.product.categoryId ?? null,
         completedAt,
+        ...(components ? { components } : {}),
       },
     };
   });
@@ -641,10 +656,15 @@ export async function applySaleEffects(ctx: Ctx, saleId: string, emitFiscal: boo
   if (items.length < (sale.itemsCount ?? 0)) throw new Error(`Itens da venda nº ${sale.number} incompletos (${items.length} de ${sale.itemsCount}).`);
   const movements: MovementInput[] = items
     .filter((i) => i.warehouseId)
-    .map((i) => ({
-      warehouseId: i.warehouseId, skuId: i.skuId, qty: -i.qty, type: "sale" as const, unitCost: i.unitCost, originType: "sale", originId: saleId, operationId: saleId,
-      reason: `Venda nº ${sale.number}`, idemKey: `sale:${saleId}:${i.seq}`, allowNegative: true, occurredAt: sale.completedAt,
-    }));
+    .flatMap((i) =>
+      // kit: baixa os componentes (custo do retrato gravado no item), nunca o próprio kit
+      i.components?.length
+        ? kitComponentMovements(i.components, i.qty, { warehouseId: i.warehouseId, type: "sale", originType: "sale", originId: saleId, operationId: saleId, reason: `Venda nº ${sale.number} — kit ${i.sku}`, allowNegative: true, occurredAt: sale.completedAt, sign: -1, idemKey: `sale:${saleId}:${i.seq}` })
+        : [{
+            warehouseId: i.warehouseId, skuId: i.skuId, qty: -i.qty, type: "sale" as const, unitCost: i.unitCost, originType: "sale", originId: saleId, operationId: saleId,
+            reason: `Venda nº ${sale.number}`, idemKey: `sale:${saleId}:${i.seq}`, allowNegative: true, occurredAt: sale.completedAt,
+          }],
+    );
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   if (sale.status === "cancelled") {
     // cancelada antes dos efeitos: a saída é lançada (o cancelamento devolve) e não há NFC-e a emitir
@@ -659,7 +679,7 @@ export async function applySaleEffects(ctx: Ctx, saleId: string, emitFiscal: boo
     }
   }
   await ctx.store.update("sales", saleId, { effectsStatus: "done" });
-  await checkStockMinimum(ctx, sale.branchId, items.map((i) => i.skuId));
+  await checkStockMinimum(ctx, sale.branchId, items.flatMap((i) => (i.components?.length ? i.components.map((c: { skuId: string }) => c.skuId) : [i.skuId])));
   return ctx.store.getOrThrow("sales", saleId);
 }
 
@@ -944,7 +964,12 @@ export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
   const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", saleId]], orderBy: [{ field: "seq" }] });
   const movements: MovementInput[] = items
     .filter((i) => i.warehouseId)
-    .map((i) => ({ warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel" as const, unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}` }));
+    .flatMap((i) =>
+      // kit: os componentes voltam pelo custo com que saíram (recompõe o custo médio)
+      i.components?.length
+        ? kitComponentMovements(i.components, i.qty, { warehouseId: i.warehouseId, type: "sale_cancel", originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number} — kit ${i.sku}`, sign: 1, idemKey: `sale-cancel:${saleId}:${i.seq}` })
+        : [{ warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel" as const, unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}` }],
+    );
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   const pendingTitles = await cancelSaleTitles(ctx, sale, why);
   // documento comercial faturado por esta venda: as quantidades voltam ao saldo a faturar (idempotente)
@@ -1165,7 +1190,7 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
       const condition = i.condition === "damaged" ? "damaged" : "resellable";
       return {
         saleItemId: it.id, skuId: it.skuId, qty: i.qty, condition, warehouseId: condition === "damaged" ? damaged!.id : available.id, unitPrice: it.unitPrice, total,
-        unitCost: it.unitCost, costTotal: roundDiv(it.unitCost * i.qty, QTY), reason: i.reason?.trim() || null,
+        unitCost: it.unitCost, costTotal: it.components?.length ? componentsCost(it.components, i.qty) : roundDiv(it.unitCost * i.qty, QTY), reason: i.reason?.trim() || null,
       };
     });
     const itemsTotal = lines.reduce((a, l) => a + l.total, 0);
@@ -1344,10 +1369,16 @@ export async function applyReturnEffects(ctx: Ctx, returnId: string) {
       installments: [{ dueDate: toLocalDate(ret.createdAt ?? nowIso()), amount: compensated }], idemKey: `return:${returnId}:card`, approvalStatus: "approved", branchId: ret.branchId,
     });
   }
-  const movements: MovementInput[] = lines.map((l) => ({
-    warehouseId: l.warehouseId, skuId: l.skuId, qty: l.qty, type: l.condition === "damaged" ? ("damage_in" as const) : ("return" as const),
-    unitCost: l.unitCost, originType: "return", originId: returnId, operationId: sale.id, reason: `Devolução nº ${ret.number}: ${ret.reason}`, idemKey: `return:${returnId}:${l.saleItemId}`,
-  }));
+  // kit: devolve os componentes (custo do retrato da venda), nunca o próprio kit
+  const kitItems = new Map((await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", ret.saleId]] })).filter((i) => i.components?.length).map((i) => [i.id, i]));
+  const movements: MovementInput[] = lines.flatMap((l) => {
+    const m = {
+      warehouseId: l.warehouseId, skuId: l.skuId, qty: l.qty, type: l.condition === "damaged" ? ("damage_in" as const) : ("return" as const),
+      unitCost: l.unitCost, originType: "return", originId: returnId, operationId: sale.id, reason: `Devolução nº ${ret.number}: ${ret.reason}`, idemKey: `return:${returnId}:${l.saleItemId}`,
+    };
+    const kit = kitItems.get(l.saleItemId);
+    return kit ? kitComponentMovements(kit.components, l.qty, { ...m, sign: 1 }) : [m];
+  });
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   // Documento fiscal de devolução (NF-e de entrada referenciando a NFC-e/NF-e original) — rascunho para revisão fiscal
   if (!ret.fiscalDocumentId) {

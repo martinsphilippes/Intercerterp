@@ -206,8 +206,22 @@ export const COLLECTIONS: CollectionDef[] = [
       availableEcommerce: bool, hasVariants: bool, variantAxes: json, ncm: s(10), cest: s(10), origin: s(2),
       taxGroupId: id(), cfop: s(10), cstCsosn: s(5), serviceListItem: s(10), municipalServiceCode: s(30),
       issRateBps: int, cnaeService: s(20), weightGrams: int, searchText: s(1000), status: s(20),
+      // composição (CAD-12/13): ausente = produto comum; "kit" = vendido como um item com baixa dos componentes;
+      // "composite" = composto com estoque próprio (montagem/desmembramento em /estoque/montagem)
+      composition: s(20),
     },
     indexes: [k("i_company", "companyId"), u("u_code", "companyId", "code"), k("i_category", "categoryId")],
+  },
+  {
+    id: "product_components",
+    label: "Componentes de kits e compostos",
+    fields: {
+      // produto pai (kit ou composto); parentSkuId ausente = vale para todas as variações do pai
+      ...ctx, productId: id(true), parentSkuId: id(), componentSkuId: id(true), componentProductId: id(),
+      // quantidade do componente por 1 unidade do pai (milésimos) e ordem de exibição
+      qty: qty, seq: int, notes: s(300),
+    },
+    indexes: [k("i_product", "productId"), k("i_component", "componentSkuId")],
   },
   {
     id: "skus",
@@ -426,6 +440,8 @@ export const COLLECTIONS: CollectionDef[] = [
       qty: qty, unitPrice: money, grossTotal: money, itemDiscount: money, globalDiscount: money, surcharge: money,
       total: money, unitCost: money, costTotal: money, returnedQty: qty, warehouseId: id(), ncm: s(10), cfop: s(10),
       categoryId: id(), completedAt: dt,
+      // kit (CAD-12): componentes baixados no lugar do kit [{ skuId, productId, sku, qty por unidade, unitCost }]
+      components: json,
     },
     indexes: [k("i_sale", "saleId"), k("i_sku", "skuId"), k("i_branch_date", "branchId", "completedAt")],
   },
