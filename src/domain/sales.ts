@@ -223,6 +223,12 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
   const { branchId, terminal, warehouse, lines, calc, customer } = prep;
   const session = await currentSession(ctx, terminal.id);
   assert(session, "Abra o caixa deste terminal antes de vender.", "cash_closed");
+  // a venda entra na gaveta de quem abriu o caixa: outro operador vendendo nela é bloqueado ou registrado (parâmetro)
+  const operatorMismatch = session.operatorId !== ctx.user.id && !canDo(ctx.user, "cash.reopen");
+  const mismatchPolicy = operatorMismatch ? await getSetting<string>(ctx.store, ctx.companyId, branchId, "cash.operatorMismatch", "warn") : "allow";
+  if (operatorMismatch && mismatchPolicy === "block") {
+    throw new BusinessError("O caixa deste terminal foi aberto por outro operador. Venda em um terminal com o seu próprio caixa aberto (Caixa → Abertura) ou peça a um supervisor.", "cash_operator_mismatch");
+  }
   const methods = await loadMethods(ctx.store, ctx.companyId);
 
   // ── Troca: a devolução de origem precisa existir e não estar vinculada a outra venda
@@ -576,6 +582,21 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         summary: `Troca nº ${exchangeRet.number} concluída na venda nº ${number} — diferença ${diff >= 0 ? "paga pelo cliente" : "mantida em vale"} ${formatMoney(Math.abs(diff))}`,
         related: [`sale:${saleId}`, `sale:${exchangeRet.saleId}`],
       });
+    }
+    if (operatorMismatch && mismatchPolicy === "warn") {
+      await audit(ctx, {
+        module: "cash", action: "sale.operator_mismatch", entityType: "cash_session", entityId: session!.id,
+        summary: `Venda nº ${number} registrada por ${ctx.user.name} no caixa nº ${session!.number ?? "—"}, aberto por outro operador`,
+        related: [`sale:${saleId}`],
+      });
+      // um aviso por sessão e operador: a central resolve todos juntos
+      await notify(ctx.store, {
+        companyId: ctx.companyId, branchId, type: "cash", priority: "high",
+        title: `${ctx.user.name} está vendendo no caixa nº ${session!.number ?? "—"}, aberto por outro operador`,
+        body: "As vendas entram na gaveta de quem abriu o caixa. Confira o fechamento ou peça para cada operador abrir o próprio caixa (parâmetro em Administração → Parâmetros → Caixa).",
+        link: `/caixa/${session!.id}`, originType: "cash_session", originId: session!.id, occurrenceKey: `cash-operator:${session!.id}:${ctx.user.id}`,
+        audience: { action: "cash.reopen" },
+      }).catch(() => 0);
     }
   }
   return sale;

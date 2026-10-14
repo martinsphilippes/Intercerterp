@@ -24,6 +24,10 @@ export interface ParamDef {
 export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Notificações", "Usuários", "Regional"];
 
 export const PARAMS: ParamDef[] = [
+  {
+    key: "cash.operatorMismatch", group: "Caixa", label: "Venda em caixa aberto por outro operador", help: "O que fazer quando quem vende não é o operador que abriu o caixa do terminal. “Avisar” registra no histórico e notifica quem pode reabrir caixas; “Bloquear” exige que o vendedor use um terminal com o próprio caixa aberto (supervisores continuam liberados).", type: "select", scopes: ["company", "branch"], default: "warn",
+    options: [{ value: "warn", label: "Permitir e avisar" }, { value: "block", label: "Bloquear" }, { value: "allow", label: "Permitir sem aviso" }], usedBy: "PDV (conclusão da venda)",
+  },
   { key: "sales.allowNegativeStock", group: "Vendas e PDV", label: "Permitir venda sem saldo", help: "Quando desligado, o PDV bloqueia itens sem estoque disponível. O terminal também pode liberar individualmente.", type: "bool", scopes: ["company", "branch"], default: false, usedBy: "PDV (conclusão da venda)" },
   { key: "sales.consumerFinalAllowed", group: "Vendas e PDV", label: "Permitir venda a consumidor final (sem identificar cliente)", help: "Desligado, o PDV deve exigir cliente identificado em toda venda.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "PDV (identificação do cliente)" },
   { key: "sales.presaleExpiryHours", group: "Vendas e PDV", label: "Validade da pré-venda", help: "Atendimentos/pré-vendas não concluídos expiram após este prazo e liberam as reservas.", type: "int", scopes: ["company", "branch"], default: 72, min: 1, max: 720, unit: "horas", usedBy: "PDV (pré-vendas e reservas)" },

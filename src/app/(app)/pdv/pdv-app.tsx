@@ -29,7 +29,7 @@ export interface PdvProps {
   operator: { id: string; name: string; discountLimitBps: number; canOverLimit: boolean; canCreateCustomer: boolean };
   terminal: { id: string; name: string; code: string; printerMode: string | null; scannerMode: string | null };
   terminals: Array<{ id: string; name: string; code: string; status: string }>;
-  session: { id: string; number: number; openedAt: string; operatorName: string; status: string } | null;
+  session: { id: string; number: number; openedAt: string; operatorName: string; status: string; operatorMismatch?: "warn" | "block" | null } | null;
   cart: PlainCart;
   customer: CustomerInfo | null;
   priceTables: Array<{ value: string; label: string }>;
@@ -417,6 +417,15 @@ export function PdvApp(props: PdvProps) {
         <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900" role="alert">
           <AlertTriangle className="size-4" /> Não há caixa aberto no terminal {props.terminal.name}. Você pode montar o atendimento, mas o pagamento exige caixa aberto.
           <LinkButton href={`/caixa/abertura?terminal=${props.terminal.id}`} size="sm" variant="primary">Abrir caixa</LinkButton>
+        </div>
+      )}
+      {props.session?.operatorMismatch && (
+        <div className={`flex flex-wrap items-center gap-3 border-b px-4 py-2 text-sm ${props.session.operatorMismatch === "block" ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900"}`} role="alert">
+          <AlertTriangle className="size-4" />
+          {props.session.operatorMismatch === "block"
+            ? `O caixa deste terminal foi aberto por ${props.session.operatorName}. Para vender, use um terminal com o seu próprio caixa aberto ou peça a um supervisor.`
+            : `O caixa deste terminal foi aberto por ${props.session.operatorName}: suas vendas entram na gaveta dele e o supervisor será avisado.`}
+          <LinkButton href="/caixa/abertura" size="sm" variant={props.session.operatorMismatch === "block" ? "primary" : "secondary"}>Abrir caixa em outro terminal</LinkButton>
         </div>
       )}
       {props.pendingExchange && (

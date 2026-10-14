@@ -102,6 +102,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         ? { label: "Ambiente de produção", tone: "good" }
         : { label: "Ambiente de homologação", tone: "warn" };
   const allowNegative = Boolean(terminal.allowNegativeStock) || Boolean(await getSetting(store, s.ctx.companyId, s.ctx.branchId, "sales.allowNegativeStock", false));
+  // caixa aberto por outro operador: o parâmetro decide se o PDV bloqueia ou só avisa (a regra é aplicada de novo na conclusão)
+  const mismatchPolicy = session && session.operatorId !== s.user.id && !canDo(s.user, "cash.reopen") ? await getSetting<string>(store, s.ctx.companyId, s.ctx.branchId, "cash.operatorMismatch", "warn") : "allow";
   const plain: PlainCart = {
     id: cart.id, status: cart.status, terminalId: cart.terminalId, customerId: cart.customerId ?? null, customerName: cart.customerName ?? null, cpfOnInvoice: cart.cpfOnInvoice ?? null,
     priceTableId: cart.priceTableId ?? null, items: cart.items ?? [], globalDiscount: cart.globalDiscount ?? 0, globalDiscountBps: cart.globalDiscountBps ?? 0, surcharge: cart.surcharge ?? 0,
@@ -116,7 +118,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       operator={{ id: s.user.id, name: s.user.name, discountLimitBps: s.user.discountLimitBps ?? 0, canOverLimit: canDo(s.user, "sale.discount_over_limit"), canCreateCustomer: can(s.user, "customers", "create") }}
       terminal={{ id: terminal.id, name: terminal.name, code: terminal.code, printerMode: terminal.printerMode ?? null, scannerMode: terminal.scannerMode ?? null }}
       terminals={terminals.map((t) => ({ id: t.id, name: t.name, code: t.code, status: t.status }))}
-      session={session ? { id: session.id, number: session.number, openedAt: session.openedAt, operatorName: users.get(session.operatorId) ?? "—", status: session.status } : null}
+      session={session ? { id: session.id, number: session.number, openedAt: session.openedAt, operatorName: users.get(session.operatorId) ?? "—", status: session.status, operatorMismatch: mismatchPolicy === "allow" ? null : (mismatchPolicy as "warn" | "block") } : null}
       cart={plain}
       customer={await customerInfo(store, cart.customerId ?? null)}
       priceTables={priceTables}

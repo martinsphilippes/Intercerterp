@@ -34,6 +34,8 @@ export const DEFAULT_SETTINGS = {
   "cash.requireJustificationAbove": 0,
   "cash.withdrawalApprovalAbove": 0,
   "cash.blindClose": false,
+  /** venda em caixa aberto por outro operador: "warn" (padrão), "block" ou "allow" */
+  "cash.operatorMismatch": "warn",
   "abc.limitA": 8000,
   "abc.limitB": 9500,
   "replenishment.coverageDays": 14,
@@ -45,3 +47,13 @@ export const DEFAULT_SETTINGS = {
   "notifications.stockMin": true,
   "timezone": "America/Sao_Paulo",
 } as const;
+
+/**
+ * Chave de liga/desliga de recursos novos (evolução por fases). Lê o parâmetro `feature.<key>` (filial → empresa);
+ * sem valor gravado, vale o padrão informado — recursos novos nascem desligados e são ligados por empresa/filial,
+ * o que permite reverter uma fase sem reimplantar.
+ */
+export async function isFeatureOn(store: Store, companyId: string, branchId: string | null | undefined, key: string, fallback = false): Promise<boolean> {
+  return Boolean(await getSetting(store, companyId, branchId, `feature.${key}`, fallback));
+}
+
