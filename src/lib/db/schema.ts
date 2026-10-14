@@ -182,6 +182,8 @@ export const COLLECTIONS: CollectionDef[] = [
       phone: s(40), ie: s(30), im: s(30), addresses: json, contacts: json, paymentTermId: id(), paymentTermsText: s(200),
       leadTimeDays: int, minOrderValue: money, freightPolicy: s(200), notes: txt, status: s(20), searchText: s(1000),
       category: s(60), statusReason: s(300),
+      // transportadora (CAD-03): fornecedor marcado como transportador aparece no passo Transporte da NF-e
+      isCarrier: bool, rntrc: s(20),
     },
     indexes: [k("i_company", "companyId"), u("u_doc", "companyId", "doc")],
   },
@@ -364,6 +366,8 @@ export const COLLECTIONS: CollectionDef[] = [
       items: json, globalDiscount: money, globalDiscountBps: int, surcharge: money, notes: s(500), saleId: id(), expiresAt: dt,
       payments: json, exchangeReturnId: id(), cpfOnInvoice: s(20), sellerId: id(), parkedAt: dt, cancelReason: s(300),
       customerName: s(200), total: money, itemsCount: int, revision: int, emitFiscal: bool,
+      // orçamento/pedido importado no PDV (PDV-12): a venda concluída fatura o documento
+      salesDocumentId: id(), salesDocumentLabel: s(120),
     },
     indexes: [k("i_terminal", "terminalId", "status"), k("i_branch_status", "branchId", "status")],
   },
@@ -380,8 +384,39 @@ export const COLLECTIONS: CollectionDef[] = [
       cancelEffectsStatus: s(20),
       // pendências do cancelamento repassadas ao Financeiro (títulos com baixa mantidos): [{ titleId, number, message }]
       cancelPending: json,
+      // documento comercial (orçamento/pedido) faturado por esta venda (PDV-12) — ausente = venda direta
+      salesDocumentId: id(),
     },
-    indexes: [u("u_idem", "idemKey"), k("i_branch_date", "branchId", "completedAt"), k("i_customer", "customerId"), k("i_session", "cashSessionId"), k("i_number", "companyId", "number")],
+    indexes: [u("u_idem", "idemKey"), k("i_branch_date", "branchId", "completedAt"), k("i_customer", "customerId"), k("i_session", "cashSessionId"), k("i_number", "companyId", "number"), k("i_sales_doc", "salesDocumentId")],
+  },
+  {
+    // Documento comercial de venda (VEN-01/VEN-02): orçamento (type "quote") e pedido (type "order"). Não movimenta
+    // estoque nem financeiro — a venda do PDV ou a NF-e que o fatura é que movimentam (ver src/domain/sales-documents.ts).
+    id: "sales_documents",
+    label: "Orçamentos e pedidos de venda",
+    fields: {
+      ...ctx, scopeKey: s(200, true), type: s(10, true), number: int, status: s(20), customerId: id(), customerSnapshot: json,
+      sellerId: id(), priceTableId: id(), validUntil: date, deliveryDate: date, paymentTermId: id(), paymentNotes: s(300),
+      notes: txt, internalNotes: txt, itemsCount: int, qtyTotal: qty, invoicedQtyTotal: qty, subtotal: money, itemDiscounts: money,
+      globalDiscount: money, globalDiscountBps: int, discountTotal: money, surcharge: money, surchargeTotal: money, total: money,
+      discountApprovedBy: id(), idemKey: s(120), searchText: s(1000), revision: int, shareToken: s(64),
+      sourceQuoteId: id(), convertedOrderId: id(), convertedSaleId: id(), duplicatedFrom: id(),
+      sentAt: dt, sentVia: s(20), approvedAt: dt, rejectedAt: dt, rejectReason: s(500), expiredAt: dt,
+      cancelledAt: dt, cancelledBy: id(), cancelReason: s(500), invoicedAt: dt, lastBilledAt: dt,
+      // reserva de estoque do pedido: "active" | "expired" | "released" | "none"; reserveUntil = fim da reserva
+      warehouseId: id(), reservationStatus: s(20), reserveUntil: date, reservationShortage: json,
+    },
+    indexes: [u("u_scope", "scopeKey"), u("u_idem", "idemKey"), u("u_share", "shareToken"), k("i_status", "companyId", "type", "status"), k("i_customer", "customerId"), k("i_branch", "branchId", "type")],
+  },
+  {
+    id: "sales_document_items",
+    label: "Itens de orçamentos e pedidos de venda",
+    fields: {
+      ...ctx, documentId: id(true), seq: int, skuId: id(true), productId: id(), sku: s(60), description: s(250), unitCode: s(10),
+      qty: qty, listPrice: money, unitPrice: money, grossTotal: money, itemDiscount: money, itemSurcharge: money, globalDiscount: money,
+      surcharge: money, total: money, invoicedQty: qty, service: bool, maxDiscountBps: int, wholesale: bool,
+    },
+    indexes: [k("i_document", "documentId"), k("i_sku", "skuId")],
   },
   {
     id: "sale_items",

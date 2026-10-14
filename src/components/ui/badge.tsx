@@ -24,6 +24,9 @@ export function Badge({ tone = "neutral", children, className, title }: { tone?:
 /** Dicionário central de estados → rótulo e tom (consistência entre telas). */
 export const STATUS: Record<string, Record<string, [string, Tone]>> = {
   sale: { completed: ["Concluída", "good"], cancelled: ["Cancelada", "bad"], draft: ["Rascunho", "neutral"], presale: ["Pré-venda", "info"] },
+  sales_quote: { draft: ["Rascunho", "neutral"], sent: ["Enviado", "brand"], approved: ["Aprovado", "good"], rejected: ["Recusado", "bad"], expired: ["Expirado", "warn"], converted: ["Convertido", "info"] },
+  sales_order: { open: ["Aberto", "info"], partial: ["Parcialmente faturado", "warn"], invoiced: ["Faturado", "good"], cancelled: ["Cancelado", "neutral"] },
+  reservation: { active: ["Estoque reservado", "good"], expired: ["Reserva expirada", "warn"], released: ["Reserva liberada", "neutral"], none: ["Sem reserva", "neutral"] },
   payment: { paid: ["Pago", "good"], pending: ["A receber", "warn"], partial: ["Parcial", "warn"], refunded: ["Estornado", "bad"], confirmed: ["Confirmado", "good"], failed: ["Falhou", "bad"], cancelled: ["Cancelado", "bad"], unknown: ["Indeterminado", "warn"], expired: ["Expirado", "neutral"], refund_pending: ["Estorno pendente no provedor", "warn"], refund_manual: ["Devolver ao cliente (manual)", "warn"] },
   fiscal: {
     not_required: ["Sem documento", "neutral"], pending: ["Pendente", "warn"], queued: ["Na fila", "info"], processing: ["Processando", "info"], authorized: ["Autorizado", "good"], rejected: ["Rejeitado", "bad"],

@@ -19,7 +19,12 @@ import { nowIso } from "../dates";
  * recebem só estas (as demais operações do modelo já existiam quando o perfil foi criado; se faltam, foi o
  * administrador quem as retirou).
  */
-export const ACTIONS_ADDED_TO_TEMPLATES: string[] = ["customer.credit_limit"];
+export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
+  "customer.credit_limit",
+  // evolução por fases (Fases 3 a 5): compras/precificação, crediário no PDV, inadimplência, comissões e documento comercial
+  "purchase.pricing", "products.bulk_edit", "pdv.receive_installments", "pdv.reverse_receipt", "sale.overdue_override", "sales.commissions",
+  "sales_doc.quote", "sales_doc.order", "sales_doc.cancel",
+];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);
 const rank = (a: string) => (ORDER.indexOf(a) === -1 ? ORDER.length : ORDER.indexOf(a));

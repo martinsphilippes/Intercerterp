@@ -70,6 +70,8 @@ export interface WizardProps {
   skuNames: Record<string, { sku: string; name: string; unit: string; ncm: string }>;
   /** origem recebimento (devolução a fornecedor): restante devolvível por item do recebimento */
   returnable?: Record<number, { received: number; returned: number; max: number }> | null;
+  /** transportadoras cadastradas (fornecedores marcados como transportador — CAD-03) */
+  carriers?: Array<{ id: string; name: string; doc: string; uf: string }>;
 }
 
 export function NfeWizard(props: WizardProps) {
@@ -93,6 +95,9 @@ export function NfeWizard(props: WizardProps) {
   const isManual = input.origin.type === "manual";
   // devolução a fornecedor pelo recebimento: só itens e quantidades são editáveis (valores vêm da nota de entrada)
   const isReceipt = input.origin.type === "receipt";
+  // pedido de venda (FIS-05): só itens e quantidades (até o saldo); preço, desconto, acréscimo e xPed/nItemPed vêm do pedido
+  const isSalesDoc = input.origin.type === "sales_document";
+  const valuesFromOrigin = isReceipt || isSalesDoc;
 
   const recalc = useCallback(() => {
     if (!input.items.length) {
@@ -259,6 +264,11 @@ export function NfeWizard(props: WizardProps) {
         {STEPS[step].key === "produtos" && (
           <div className="space-y-4">
             {(isManual || input.origin.type === "purchase_order") && <SkuSearch onPick={(h) => { setSkuNames((m) => ({ ...m, [h.skuId]: { sku: h.sku, name: h.name, unit: h.unit, ncm: h.ncm } })); set({ items: [...input.items, { skuId: h.skuId, qty: 1000, unitPrice: h.price, discount: 0 }] }); }} />}
+            {isSalesDoc && (
+              <Notice tone="info" title="Faturamento do pedido de venda">
+                Ajuste a quantidade de cada item (até o saldo a faturar do pedido) ou remova os que ficam para depois. Preço, desconto e acréscimo são os do pedido, proporcionais à quantidade; cada item leva o número do pedido (xPed) e o item (nItemPed).
+              </Notice>
+            )}
             {isReceipt && (
               <Notice tone="info" title="Devolução pelo recebimento">
                 Ajuste a quantidade a devolver de cada item (até o restante devolvível) ou remova os que não serão devolvidos. Preço, desconto, frete e outras despesas são proporcionais à nota de entrada e calculados no servidor.
@@ -273,23 +283,23 @@ export function NfeWizard(props: WizardProps) {
                   <tbody>
                     {input.items.map((it, idx) => {
                       const info = skuNames[it.skuId];
-                      const line = isReceipt ? (preview?.items?.[idx]?.total ?? null) : Math.round((it.unitPrice * it.qty) / 1000) - it.discount;
+                      const line = valuesFromOrigin ? (preview?.items?.[idx]?.total ?? null) : Math.round((it.unitPrice * it.qty) / 1000) - it.discount;
                       const lim = isReceipt && it.sourceIdx != null ? props.returnable?.[it.sourceIdx] : undefined;
                       return (
                         <tr key={idx}>
                           <td>
                             <span className="font-medium">{it.description || info?.name || it.skuId}</span>
-                            <span className="block text-xs text-slate-500">{info?.sku} · {info?.unit} · NCM {info?.ncm || <span className="text-red-700">ausente</span>}</span>
+                            <span className="block text-xs text-slate-500">{info?.sku} · {info?.unit} · NCM {info?.ncm || <span className="text-red-700">ausente</span>}{it.xPed ? ` · pedido ${it.xPed} item ${it.nItemPed ?? "—"}` : ""}</span>
                           </td>
                           <td>
                             <QtyInput ariaLabel="Quantidade" value={it.qty} onChange={(v) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, qty: v } : x)) })} />
                             {lim && <span className={cn("mt-1 block text-right text-xs", it.qty > lim.max ? "text-red-700" : "text-slate-500")}>máx. {(lim.max / 1000).toLocaleString("pt-BR")} de {(lim.received / 1000).toLocaleString("pt-BR")}</span>}
                           </td>
-                          <td><MoneyInput ariaLabel="Preço unitário" value={isReceipt ? (preview?.items?.[idx]?.unitPrice ?? it.unitPrice) : it.unitPrice} disabled={isReceipt} onChange={(v) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, unitPrice: v } : x)) })} /></td>
-                          <td><MoneyInput ariaLabel="Desconto" value={isReceipt ? (preview?.items?.[idx]?.discount ?? it.discount) : it.discount} disabled={isReceipt} onChange={(v) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, discount: v } : x)) })} /></td>
+                          <td><MoneyInput ariaLabel="Preço unitário" value={valuesFromOrigin ? (preview?.items?.[idx]?.unitPrice ?? it.unitPrice) : it.unitPrice} disabled={valuesFromOrigin} onChange={(v) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, unitPrice: v } : x)) })} /></td>
+                          <td><MoneyInput ariaLabel="Desconto" value={valuesFromOrigin ? (preview?.items?.[idx]?.discount ?? it.discount) : it.discount} disabled={valuesFromOrigin} onChange={(v) => set({ items: input.items.map((x, j) => (j === idx ? { ...x, discount: v } : x)) })} /></td>
                           <td className="tabular text-right">{line == null ? "—" : money(line)}</td>
                           <td>
-                            {(isManual || input.origin.type === "purchase_order" || isReceipt) && (
+                            {(isManual || input.origin.type === "purchase_order" || isReceipt || isSalesDoc) && (
                               <Button type="button" variant="ghost" size="sm" aria-label="Remover item" onClick={() => set({ items: input.items.filter((_, j) => j !== idx) })}>
                                 <Trash2 className="size-4" />
                               </Button>
@@ -305,7 +315,7 @@ export function NfeWizard(props: WizardProps) {
             <FormGrid cols={3}>
               <Field label="Frete (rateado nos itens)"><MoneyInput value={isReceipt ? (totals?.freight ?? input.freight) : input.freight} disabled={isReceipt} onChange={(v) => set({ freight: v })} /></Field>
               <Field label="Seguro (rateado)"><MoneyInput value={isReceipt ? (totals?.insurance ?? 0) : input.insurance} disabled={isReceipt} onChange={(v) => set({ insurance: v })} /></Field>
-              <Field label="Outras despesas/acréscimos (rateado)" hint={isReceipt ? "Proporcionais à nota de entrada (IPI, ST, seguro e outras despesas)." : undefined}><MoneyInput value={isReceipt ? (totals?.other ?? input.other) : input.other} disabled={isReceipt} onChange={(v) => set({ other: v })} /></Field>
+              <Field label="Outras despesas/acréscimos (rateado)" hint={isReceipt ? "Proporcionais à nota de entrada (IPI, ST, seguro e outras despesas)." : isSalesDoc ? "Acréscimo do pedido, proporcional às quantidades." : undefined}><MoneyInput value={valuesFromOrigin ? (totals?.other ?? input.other) : input.other} disabled={valuesFromOrigin} onChange={(v) => set({ other: v })} /></Field>
             </FormGrid>
           </div>
         )}
@@ -347,6 +357,20 @@ export function NfeWizard(props: WizardProps) {
             </Field>
             {String(input.transport.mode) !== "9" && (
               <>
+                {(props.carriers ?? []).length > 0 && (
+                  <Field label="Transportadora cadastrada" className="sm:col-span-3" hint="Fornecedores marcados como transportador (Fornecedores › cadastro). Preenche nome, CPF/CNPJ e UF.">
+                    <Select
+                      value=""
+                      placeholder="Selecionar transportadora…"
+                      options={(props.carriers ?? []).map((c) => ({ value: c.id, label: `${c.name}${c.doc ? ` — ${c.doc}` : ""}` }))}
+                      onChange={(e) => {
+                        const c = (props.carriers ?? []).find((x) => x.id === e.target.value);
+                        if (c) setT({ carrierName: c.name, carrierDoc: c.doc, carrierUf: c.uf });
+                      }}
+                      aria-label="Transportadora cadastrada"
+                    />
+                  </Field>
+                )}
                 <Field label="Transportador (nome)"><Input value={input.transport.carrierName ?? ""} onChange={(e) => setT({ carrierName: e.target.value })} /></Field>
                 <Field label="CPF/CNPJ do transportador"><Input value={input.transport.carrierDoc ?? ""} onChange={(e) => setT({ carrierDoc: e.target.value })} /></Field>
                 <Field label="UF do transportador"><Input maxLength={2} value={input.transport.carrierUf ?? ""} onChange={(e) => setT({ carrierUf: e.target.value.toUpperCase() })} /></Field>
@@ -387,7 +411,7 @@ export function NfeWizard(props: WizardProps) {
                   <div className="flex flex-wrap gap-5">
                     <Checkbox label="Somente documento" checked={!input.effects.stock && !input.effects.financial} onChange={(e) => e.target.checked && set({ effects: { ...input.effects, stock: false, financial: false } })} />
                     <Checkbox label={input.operationType === "entrada" ? "Dar entrada no estoque" : "Baixar estoque"} checked={input.effects.stock} onChange={(e) => set({ effects: { ...input.effects, stock: e.target.checked } })} />
-                    {isManual && <Checkbox label={input.operationType === "entrada" ? "Gerar conta a pagar" : "Gerar conta a receber"} checked={input.effects.financial} onChange={(e) => set({ effects: { ...input.effects, financial: e.target.checked } })} />}
+                    {(isManual || isSalesDoc) && <Checkbox label={input.operationType === "entrada" ? "Gerar conta a pagar" : "Gerar conta a receber"} checked={input.effects.financial} onChange={(e) => set({ effects: { ...input.effects, financial: e.target.checked } })} />}
                   </div>
                   {(input.effects.stock || input.effects.financial) && (
                     <FormGrid cols={3}>

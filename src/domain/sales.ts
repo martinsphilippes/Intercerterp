@@ -10,11 +10,11 @@ import { nextNumber } from "@/lib/core/numbering";
 import { registerJob } from "@/lib/core/jobs";
 import { getSetting } from "@/lib/core/settings";
 import { notify, resolveOccurrence } from "@/lib/core/notify";
-import { calcSale, DEFERRED_KINDS, PAYMENT_KIND_LABEL } from "./pricing-calc";
+import { DEFERRED_KINDS, PAYMENT_KIND_LABEL } from "./pricing-calc";
 import { availableMap, defaultWarehouse, postMovements, damageWarehouse, type MovementInput } from "./stock";
 import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, nonBusinessDayRule, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
 import { cashAccountFor, currentSession } from "./cash";
-import { resolvePrices } from "./pricing";
+import { priceSale } from "./sale-pricing";
 import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
 import { auditSaleOverdue, checkSaleOverdue, type OverdueRelease } from "./delinquency";
 import { refundIntentAtProvider } from "./payments/intents";
@@ -73,6 +73,8 @@ export interface FinalizeSaleInput {
   overdueRelease?: OverdueRelease | null;
   /** somente carga de demonstração/importação histórica: instante da venda */
   occurredAt?: string;
+  /** orçamento/pedido de venda importado no PDV (PDV-12): a venda concluída fatura as quantidades do documento */
+  salesDocumentId?: string | null;
 }
 
 /** Máximo de linhas por venda (o que não cabe na transação principal é gravado pela tarefa durável de efeitos). */
@@ -103,60 +105,10 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   const terminal = await ctx.store.getOrThrow("terminals", input.terminalId);
   assert(terminal.branchId === branchId, "Terminal de outra filial.");
   const warehouse = terminal.defaultWarehouseId ? await ctx.store.getOrThrow("warehouses", terminal.defaultWarehouseId) : await defaultWarehouse(ctx.store, branchId);
-  const skuIds = [...new Set(input.items.map((i) => i.skuId))];
-  const skus = new Map<string, Doc>();
-  const products = new Map<string, Doc>();
-  for (const id of skuIds) {
-    const sku = await ctx.store.getOrThrow("skus", id);
-    assert(sku.companyId === ctx.companyId, "Produto de outra empresa.");
-    assert(sku.active !== false, `Variação ${sku.sku} inativa no cadastro e não pode ser vendida.`, "sku_inactive");
-    skus.set(id, sku);
-    if (!products.has(sku.productId)) {
-      const p = await ctx.store.getOrThrow("products", sku.productId);
-      assert(p.active !== false && p.status !== "inactive", `${p.name} está inativo no cadastro e não pode ser vendido.`, "product_inactive");
-      assert(p.status !== "draft", `${p.name} ainda é um rascunho no cadastro (complete e ative o produto antes de vender).`, "product_draft");
-      assert(p.availablePdv !== false || p.type === "service", `${p.name} não está disponível no PDV.`);
-      products.set(p.id, p);
-    }
-  }
   const branch = await ctx.store.getOrThrow("branches", branchId);
   const priceTableId = input.priceTableId ?? branch.defaultPriceTableId ?? null;
-  const prices = await resolvePrices(ctx.store, { companyId: ctx.companyId, branchId, priceTableId, items: input.items.map((i) => ({ skuId: i.skuId, qty: i.qty })) });
-
-  const lines = input.items.map((i, idx) => {
-    assert(i.qty > 0, "Quantidade deve ser positiva.");
-    const sku = skus.get(i.skuId)!;
-    const product = products.get(sku.productId)!;
-    const p = prices[idx];
-    assert(p && p.price > 0, `Produto ${sku.sku} sem preço vigente na tabela selecionada.`);
-    const listPrice = p.price;
-    let unitPrice = listPrice;
-    let itemDiscount = i.itemDiscount ?? 0;
-    if (i.unitPrice != null && i.unitPrice !== listPrice) {
-      if (i.unitPrice > listPrice) unitPrice = i.unitPrice;
-      else itemDiscount += roundDiv((listPrice - i.unitPrice) * i.qty, QTY);
-    }
-    return { input: i, sku, product, unitPrice, itemDiscount, maxDiscountBps: p.maxDiscountBps, wholesale: p.wholesale };
-  });
-  const calc = calcSale(
-    lines.map((l) => ({ qty: l.input.qty, unitPrice: l.unitPrice, itemDiscount: l.itemDiscount, itemSurcharge: l.input.itemSurcharge ?? 0 })),
-    { globalDiscount: input.globalDiscount, globalDiscountBps: input.globalDiscountBps, surcharge: input.surcharge },
-  );
-  assert(calc.total > 0, "Total da venda deve ser positivo.");
-
-  // Limites de desconto: por item (tabela) e global (perfil do usuário)
-  const overLimit = !canDo(ctx.user, "sale.discount_over_limit") && !(opts.approver && canDo(opts.approver, "sale.discount_over_limit"));
-  for (const [idx, l] of lines.entries()) {
-    const it = calc.items[idx];
-    const disc = it.itemDiscount + it.globalDiscount;
-    if (l.maxDiscountBps != null && l.maxDiscountBps > 0 && it.grossTotal > 0 && roundDiv(disc * 10000, it.grossTotal) > l.maxDiscountBps && overLimit) {
-      throw new BusinessError(`Desconto em ${l.sku.sku} acima do máximo da tabela (${l.maxDiscountBps / 100}%). Exige autorização de um usuário com permissão.`, "discount_limit");
-    }
-  }
-  const discBps = calc.subtotal > 0 ? roundDiv(calc.discountTotal * 10000, calc.subtotal) : 0;
-  if (overLimit && discBps > (ctx.user.discountLimitBps ?? 0)) {
-    throw new BusinessError(`Desconto de ${(discBps / 100).toFixed(2).replace(".", ",")}% acima do seu limite (${((ctx.user.discountLimitBps ?? 0) / 100).toFixed(2).replace(".", ",")}%). Solicite a autorização de um usuário com permissão.`, "discount_limit");
-  }
+  // cadastro, preço, totais e limites de desconto: regra única compartilhada com orçamentos/pedidos (sale-pricing.ts)
+  const { skus, lines, calc } = await priceSale(ctx, { branchId, priceTableId, items: input.items, globalDiscount: input.globalDiscount, globalDiscountBps: input.globalDiscountBps, surcharge: input.surcharge }, { approver: opts.approver });
 
   // Estoque (produtos físicos)
   const allowNegative = Boolean(terminal.allowNegativeStock) || (await getSetting(ctx.store, ctx.companyId, branchId, "sales.allowNegativeStock", false));
@@ -165,8 +117,10 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   const needed = new Map<string, number>();
   for (const l of lines) if (l.product.type !== "service") needed.set(l.sku.id, (needed.get(l.sku.id) ?? 0) + l.input.qty);
   const stockWarnings: string[] = [];
+  // pedido de venda importado (PDV-12): a reserva do próprio pedido não impede faturá-lo
+  const ownReserved = input.salesDocumentId ? await (await import("./sales-documents")).reservedForDocument(ctx.store, input.salesDocumentId, branchId) : null;
   for (const [skuId, q] of needed) {
-    const a = avail.get(skuId)?.available ?? 0;
+    const a = (avail.get(skuId)?.available ?? 0) + (ownReserved?.get(skuId) ?? 0);
     if (a < q) {
       const msg = `${skus.get(skuId)!.sku}: disponível ${a / QTY}, vendido ${q / QTY}`;
       if (!allowNegative) throw new BusinessError(`Estoque insuficiente — ${msg}. A configuração comercial não permite venda sem saldo.`, "insufficient_stock");
@@ -224,6 +178,8 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
     throw new BusinessError("Esta filial exige identificar o cliente em todas as vendas (parâmetro “consumidor final” desativado).", "customer_required");
   }
   const { branchId, terminal, warehouse, lines, calc, customer } = prep;
+  // orçamento/pedido importado (PDV-12): documento faturável e quantidades dentro do saldo (sem efeito no documento aqui)
+  if (input.salesDocumentId) await (await import("./sales-documents")).checkSaleAgainstDocument(ctx, input.salesDocumentId, { branchId, customerId: customer?.id ?? null, lines: lines.map((l) => ({ skuId: l.sku.id, qty: l.input.qty })) });
   const session = await currentSession(ctx, terminal.id);
   assert(session, "Abra o caixa deste terminal antes de vender.", "cash_closed");
   // a venda entra na gaveta de quem abriu o caixa: outro operador vendendo nela é bloqueado ou registrado (parâmetro)
@@ -479,6 +435,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
           operationId,
           effectsStatus: "pending",
           discountApprovedBy: approver?.id ?? null,
+          ...(input.salesDocumentId ? { salesDocumentId: input.salesDocumentId } : {}),
         },
         saleId,
       );
@@ -631,7 +588,21 @@ export async function completeSalePostCommit(ctx: Ctx, sale: Doc) {
     const ret = await ctx.store.get("returns", sale.exchangeReturnId);
     if (ret && !ret.exchangeSaleId) await linkExchangeSale(sctx, ret.id, sale.id);
   }
+  if (sale.salesDocumentId) await billSalesDocumentFromSale(sctx, sale);
   return ctx.store.getOrThrow("sales", sale.id);
+}
+
+/**
+ * Gancho pós-commit do documento comercial (PDV-12): marca no orçamento/pedido as quantidades faturadas por esta venda.
+ * Idempotente (marcador por venda); falha não desfaz a venda — repetir a conclusão ou a tarefa de efeitos completa.
+ */
+async function billSalesDocumentFromSale(ctx: Ctx, sale: Doc) {
+  try {
+    const { billFromSale } = await import("./sales-documents");
+    await billFromSale(ctx, sale.id);
+  } catch (e: any) {
+    await audit(ctx, { module: "sales", action: "sale.document_link", entityType: "sale", entityId: sale.id, summary: `Faturamento do documento comercial pela venda nº ${sale.number} pendente: ${String(e?.message ?? e).slice(0, 300)}`, result: "failure" });
+  }
 }
 
 /** Grava os itens da venda que não couberam na transação principal (guardados na tarefa durável). Idempotente. */
@@ -697,6 +668,7 @@ registerJob("sale.effects", async (ctx, payload) => {
   if (!sale) return { skipped: "sale not found" };
   ctx.branchId = sale.branchId;
   await applySaleEffects(ctx, payload.saleId, payload.emitFiscal);
+  if (sale.salesDocumentId) await billSalesDocumentFromSale(ctx, sale);
   return { ok: true };
 });
 
@@ -975,6 +947,8 @@ export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
     .map((i) => ({ warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel" as const, unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}` }));
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   const pendingTitles = await cancelSaleTitles(ctx, sale, why);
+  // documento comercial faturado por esta venda: as quantidades voltam ao saldo a faturar (idempotente)
+  if (sale.salesDocumentId) await (await import("./sales-documents")).unbillFromSale(ctx, saleId);
   // Pix integrado: só vira "estornado" com a confirmação do provedor
   const pays = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", saleId]] });
   const stillPending: Doc[] = [];

@@ -12,6 +12,9 @@ import { NfeWizard } from "./nfe-wizard";
 
 export const metadata = { title: "Emitir NF-e" };
 
+/** Transportadora (CAD-03) = fornecedor marcado como transportador ou com a categoria "Transportadora". */
+const isCarrier = (c: Record<string, any>) => Boolean(c.isCarrier) || /transportad/i.test(String(c.category ?? ""));
+
 const NATURES = ["Venda de mercadoria", "Venda de mercadoria adquirida de terceiros", "Devolução de venda", "Devolução de mercadoria ao fornecedor", "Transferência de mercadoria entre filiais", "Remessa para conserto", "Remessa em bonificação", "Entrada de mercadoria", "Outras saídas"];
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ origem?: string; rascunho?: string }> }) {
@@ -75,7 +78,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
   } else if (sp.origem) {
     const [type, id] = sp.origem.split(":");
     try {
-      if (!["sale", "transfer", "purchase_order", "return", "receipt"].includes(type) || !id) throw new BusinessError("Origem inválida.");
+      if (!["sale", "transfer", "purchase_order", "return", "receipt", "sales_document"].includes(type) || !id) throw new BusinessError("Origem inválida.");
       const o = await loadOrigin(s.ctx, type as NfeOriginType, id, branchId);
       if (o.existingDocId) {
         const ex = await s.ctx.store.get("fiscal_documents", o.existingDocId);
@@ -132,6 +135,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
         blockers={blockers}
         customers={customersRaw.map((c) => ({ id: c.id, name: `${c.name}${c.doc ? ` — ${c.doc}` : ""}`, recipient: partyRecipient(c, "customer") }))}
         suppliers={suppliersRaw.map((c) => ({ id: c.id, name: `${c.tradeName || c.name}${c.doc ? ` — ${c.doc}` : ""}`, recipient: partyRecipient(c, "supplier") }))}
+        carriers={suppliersRaw.filter(isCarrier).map((c) => ({ id: c.id, name: c.tradeName || c.name, doc: c.doc ?? "", uf: c.addresses?.[0]?.uf ?? "" }))}
         taxGroups={taxGroups}
         warehouses={warehouses}
         terms={terms}

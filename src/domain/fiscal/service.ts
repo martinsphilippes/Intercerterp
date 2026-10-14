@@ -62,6 +62,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   transfer: "Transferência",
   purchase_order: "Pedido de compra (devolução a fornecedor)",
   receipt: "Recebimento (devolução a fornecedor)",
+  sales_document: "Pedido de venda",
   return: "Devolução de venda",
   manual: "Operação avulsa",
   service: "Serviço",
@@ -315,6 +316,9 @@ export interface DocItem {
   approxTax?: number;
   /** valores sobrepostos manualmente no formulário (preservados ao atualizar do cadastro) */
   overrides?: { cfop?: string; cstCsosn?: string; taxGroupId?: string };
+  /** pedido do cliente (FIS-05, origem documento comercial): número do pedido (xPed) e item do pedido (nItemPed) */
+  xPed?: string | null;
+  nItemPed?: number | null;
 }
 
 export function computeTotals(items: DocItem[], extra: { freight?: number; insurance?: number; other?: number } = {}) {
@@ -348,6 +352,9 @@ export interface ItemLine {
   cfopOverride?: string;
   cstOverride?: string;
   taxGroupId?: string | null;
+  /** pedido do cliente (xPed/nItemPed) — somente quando a NF-e fatura um pedido de venda */
+  xPed?: string | null;
+  nItemPed?: number | null;
 }
 
 /** Constrói itens fiscais a partir de linhas (venda, pedido ou formulário). Frete/seguro/outras despesas rateados (maior resto). */
@@ -418,6 +425,7 @@ export async function buildItems(
       taxGroupIssue: tax.groupIssue,
       approxTax: tax.approxTaxBps ? pct(net, tax.approxTaxBps) : 0,
       overrides,
+      ...(l.xPed ? { xPed: String(l.xPed).slice(0, 15), nItemPed: l.nItemPed ?? null } : {}),
     });
   }
   return out;
@@ -626,6 +634,8 @@ export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cf
       ...contribFields("cofins", i),
       valor_total_tributos: i.approxTax ? money(i.approxTax) : undefined,
       inclui_no_total: 1,
+      // xPed / nItemPed (pedido de venda do cliente — FIS-05)
+      ...(i.xPed ? { pedido_compra: i.xPed, ...(i.nItemPed ? { numero_item_pedido_compra: i.nItemPed } : {}) } : {}),
     })),
     formas_pagamento: (doc.payments ?? []).map((p: any) => ({ forma_pagamento: TPAG[p.kind] ?? "99", valor_pagamento: p.kind === "none" ? 0 : money(p.amount) })),
   };
@@ -856,6 +866,13 @@ async function syncOrigin(ctx: Ctx, doc: Doc) {
   }
   if (doc.originType === "return" && doc.originId) {
     await ctx.store.update("returns", doc.originId, { fiscalDocumentId: doc.id }).catch(() => undefined);
+  }
+  // pedido de venda (FIS-05): autorização fatura as quantidades do pedido; cancelamento as devolve ao saldo (idempotente)
+  if (doc.originType === "sales_document" && doc.originId && doc.model === "nfe") {
+    const { syncBillingFromNfe } = await import("../sales-documents");
+    await syncBillingFromNfe(ctx, doc.id).catch(async (e: any) => {
+      await addEvent(ctx, doc.id, "sales_document", doc.status, `Falha ao atualizar o pedido de venda: ${e?.message ?? e}`);
+    });
   }
 }
 
@@ -1140,7 +1157,7 @@ async function applyResult(ctx: Ctx, doc: Doc, r: ProviderResult, eventType: str
 
 function simulatedXml(doc: Doc) {
   const esc = (s: any) => String(s ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!);
-  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}">${esc(i.description)}</item>`).join("\n");
+  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}</item>`).join("\n");
   const s = doc.service;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!-- SIMULAÇÃO INTERCERT — DOCUMENTO SEM VALIDADE FISCAL. Não substitui o XML autorizado pela SEFAZ/prefeitura. -->

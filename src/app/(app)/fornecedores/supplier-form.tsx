@@ -4,7 +4,7 @@ import { formatDateTimeSeconds } from "@/lib/dates";
 import { useState, useTransition } from "react";
 import { Plus, Trash2, Search } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
-import { Field, Input, Select, Textarea, FormGrid, FormSection } from "@/components/ui/form";
+import { Checkbox, Field, Input, Select, Textarea, FormGrid, FormSection } from "@/components/ui/form";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
@@ -12,7 +12,7 @@ import { useToast } from "@/components/ui/toast";
 import { saveSupplierAction, lookupSupplierCnpjAction } from "./actions";
 import type { SupplierAddress, SupplierContact } from "@/domain/suppliers";
 
-const CATEGORIES = ["Mercadorias", "Logística / fretes", "Serviços", "Tecnologia", "Materiais de uso e consumo", "Embalagens"];
+const CATEGORIES = ["Mercadorias", "Logística / fretes", "Transportadora", "Serviços", "Tecnologia", "Materiais de uso e consumo", "Embalagens"];
 
 type Opt = { value: string; label: string };
 
@@ -84,6 +84,12 @@ export function SupplierForm({ supplier, terms }: { supplier?: Record<string, an
               </Field>
               <Field label="Categoria">
                 <Select name="category" defaultValue={c.category ?? ""} options={CATEGORIES.map((x) => ({ value: x, label: x }))} placeholder="—" />
+              </Field>
+              <Field label="Transportadora" hint="Aparece no passo Transporte da NF-e (preenche nome, CPF/CNPJ e UF).">
+                <Checkbox name="isCarrier" label="É transportador" defaultChecked={Boolean(c.isCarrier) || c.category === "Transportadora"} />
+              </Field>
+              <Field label="RNTRC (ANTT)">
+                <Input name="rntrc" defaultValue={c.rntrc ?? ""} maxLength={20} />
               </Field>
               <Field label="E-mail (pedidos)">
                 <Input name="email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />

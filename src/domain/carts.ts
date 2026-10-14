@@ -39,6 +39,9 @@ export interface CartPatch {
   payments?: CartPaymentDraft[];
   exchangeReturnId?: string | null;
   emitFiscal?: boolean;
+  /** orçamento/pedido importado (PDV-12) — gravado só pela importação (`importDocumentToCart`) */
+  salesDocumentId?: string | null;
+  salesDocumentLabel?: string | null;
 }
 
 export const cartIdemKey = (cartId: string) => `cart:${cartId}`;
@@ -148,6 +151,10 @@ export async function saveCart(ctx: Ctx, cartId: string, patch: CartPatch) {
   if (patch.payments !== undefined) data.payments = (patch.payments ?? []).slice(0, 20);
   if (patch.exchangeReturnId !== undefined) data.exchangeReturnId = patch.exchangeReturnId;
   if (patch.emitFiscal !== undefined) data.emitFiscal = Boolean(patch.emitFiscal);
+  if (patch.salesDocumentId !== undefined) {
+    data.salesDocumentId = patch.salesDocumentId;
+    data.salesDocumentLabel = patch.salesDocumentId ? (patch.salesDocumentLabel ?? null) : null;
+  }
   if (patch.sellerId) {
     const u = await ctx.store.get("users", patch.sellerId);
     assert(u && (u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId)), "Vendedor inválido.");
@@ -258,5 +265,6 @@ export function cartToSaleInput(cart: Doc, payments: SalePaymentInput[]): Finali
     notes: cart.notes ?? null,
     exchangeReturnId: cart.exchangeReturnId ?? null,
     emitFiscal: cart.emitFiscal !== false,
+    ...(cart.salesDocumentId ? { salesDocumentId: cart.salesDocumentId } : {}),
   };
 }

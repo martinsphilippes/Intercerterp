@@ -24,6 +24,8 @@ function parse(fd: FormData): SupplierInput {
     minOrderValue: fint(fd, "minOrderValue"),
     freightPolicy: fopt(fd, "freightPolicy"),
     category: fopt(fd, "category"),
+    isCarrier: fbool(fd, "isCarrier"),
+    rntrc: fopt(fd, "rntrc"),
     notes: fopt(fd, "notes"),
     status: (fstr(fd, "status") as any) || "active",
   };

@@ -27,6 +27,8 @@ function plainCart(c: Record<string, any>) {
     exchangeReturnId: (c.exchangeReturnId ?? null) as string | null,
     sellerId: (c.sellerId ?? null) as string | null,
     emitFiscal: c.emitFiscal !== false,
+    salesDocumentId: (c.salesDocumentId ?? null) as string | null,
+    salesDocumentLabel: (c.salesDocumentLabel ?? null) as string | null,
     revision: (c.revision ?? 0) as number,
     total: (c.total ?? 0) as number,
     updatedAt: c.updatedAt as string,
@@ -185,5 +187,41 @@ export async function pdvReverseReceiptAction(receiptId: string, reason: string,
     const op = await reverseReceipt(s.ctx, { receiptId, reason, approval: approval?.login ? approval : null });
     const v = receiptView(op);
     return { ok: true as const, message: `Recebimento nº ${v.number} estornado: parcelas reabertas e ${formatMoney(v.total)} lançado como saída ${v.methodKind === "cash" ? "do dinheiro do caixa" : `em ${v.methodName}`}.`, data: v };
+  });
+}
+
+// ───────────────────────────── Orçamento/pedido importado no PDV (PDV-12)
+
+/** Orçamentos válidos e pedidos com saldo da filial (busca por nº ou cliente). */
+export async function billableDocumentsAction(q: string) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+    const { listBillableDocuments } = await import("@/domain/sales-documents");
+    return listBillableDocuments(s.ctx, q);
+  });
+}
+
+/** Itens do documento com o saldo faturável (para escolher as quantidades do faturamento parcial). */
+export async function documentLinesAction(documentId: string) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+    const { billableByItem, documentItems, docLabel } = await import("@/domain/sales-documents");
+    const doc = await s.ctx.store.getOrThrow("sales_documents", documentId);
+    if (doc.companyId !== s.ctx.companyId) throw new BusinessError("Documento de outra empresa.");
+    const items = await documentItems(s.ctx.store, documentId);
+    const billable = doc.type === "order" ? await billableByItem(s.ctx, doc, items) : new Map(items.map((i) => [i.id, i.qty]));
+    return {
+      label: docLabel(doc),
+      customerName: (doc.customerSnapshot?.name ?? null) as string | null,
+      type: doc.type as "quote" | "order",
+      lines: items.map((i) => ({ id: i.id, seq: i.seq as number, sku: i.sku as string, name: i.description as string, unitCode: i.unitCode as string, qty: i.qty as number, invoiced: (i.invoicedQty ?? 0) as number, billable: billable.get(i.id) ?? 0, unitPrice: i.unitPrice as number })),
+    };
+  });
+}
+
+/** Importa o orçamento/pedido no atendimento do terminal (o atual com itens vai para espera). */
+export async function importDocumentAction(terminalId: string, documentId: string, quantities: Record<string, number> | null) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
+    const { importDocumentToCart } = await import("@/domain/sales-documents");
+    const c = await importDocumentToCart(s.ctx, terminalId, documentId, quantities);
+    return { ok: true as const, message: `${c.salesDocumentLabel ?? "Documento"} importado no atendimento.`, data: plainCart(c) };
   });
 }
