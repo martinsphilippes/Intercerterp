@@ -657,6 +657,8 @@ export const COLLECTIONS: CollectionDef[] = [
       orderCharges: json,
       // origem da entrada (xml | manual) e vínculo com pedido (with_order | without_order) — COM-03
       origin: s(20), orderLink: s(20),
+      // precificação após a entrada (COM-07): ausente = pendente quando o recebimento está confirmado
+      pricingStatus: s(20), pricedAt: dt, pricedBy: id(),
     },
     indexes: [u("u_scope", "scopeKey"), k("i_supplier", "supplierId")],
   },

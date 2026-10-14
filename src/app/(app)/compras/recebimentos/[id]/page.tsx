@@ -25,6 +25,7 @@ import { NewProducts } from "./new-products";
 import { defaultMarginBps, planProductsFromReceipt } from "@/domain/receipt-products";
 import { SupplierReturnsCard } from "./supplier-returns";
 import { isFeatureOn } from "@/lib/core/settings";
+import { ReceiptShortcuts } from "./receipt-shortcuts";
 
 export const metadata = { title: "Recebimento" };
 
@@ -139,6 +140,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <>
             {r.xmlFileId && <LinkButton href={`/api/files/${r.xmlFileId}`}><Download className="size-4" /> XML</LinkButton>}
             {canReturn && <LinkButton href={`/fiscal/nfe/nova?origem=receipt:${id}`}><Undo2 className="size-4" /> Devolver ao fornecedor</LinkButton>}
+            <ReceiptShortcuts s={s} receipt={r} />
             {r.status === "confirming" && canReceive && <ActionButton variant="primary" action={resumeConfirmAction.bind(null, id)} label="Concluir confirmação interrompida" />}
             {draft && canReceive && <ActionButton variant="danger" action={cancelReceiptAction.bind(null, id)} label="Cancelar recebimento" askReason="Motivo do cancelamento (a chave poderá ser importada novamente):" />}
           </>

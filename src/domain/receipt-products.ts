@@ -1,4 +1,5 @@
 import { detId, findOne, isConflict, listAll } from "@/lib/db";
+import { priceFromMargin } from "./price-adjust";
 import type { Doc, Store } from "@/lib/db/types";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
@@ -17,8 +18,8 @@ import { getReceipt, linkReceiptItems, type ReceiptItem } from "./receipts";
  *    produto (com aviso) em vez de criar outro.
  *  - Grava o vínculo em `supplier_products` (código do fornecedor + fator de conversão) para as próximas notas do
  *    mesmo fornecedor serem associadas automaticamente.
- *  - Preço de venda inicial: custo × (1 + margem padrão) quando há parâmetro de margem (ver `defaultMarginBps`);
- *    sem margem, fica em branco (o produto pode ser cadastrado sem preço) ou o informado na prévia.
+ *  - Preço de venda inicial: custo ÷ (1 − margem padrão) (margem padrão 30% se não configurada) (ver `defaultMarginBps`);
+ *    margem 0 configurada: fica em branco (o produto pode ser cadastrado sem preço) ou o informado na prévia.
  *  - Idempotente por item (`idemKey` receipt-item:<recebimento>:<item>): repetir não cria outro produto.
  */
 
@@ -28,16 +29,17 @@ export const DEFAULT_MARGIN_KEYS = ["pricing.defaultMarginBps", "purchase.defaul
 /** Margem padrão (pontos-base) para o preço inicial; 0 = sem parâmetro (preço em branco). */
 export async function defaultMarginBps(store: Store, companyId: string, branchId: string | null | undefined) {
   for (const key of DEFAULT_MARGIN_KEYS) {
-    const v = Number(await getSetting<unknown>(store, companyId, branchId, key, null));
+    // sem valor gravado, vale o padrão do catálogo (30%) — o mesmo da precificação após a entrada
+    const v = Number(await getSetting<unknown>(store, companyId, branchId, key, key === "pricing.defaultMarginBps" ? 3000 : null));
     if (Number.isFinite(v) && v > 0) return Math.round(v);
   }
   return 0;
 }
 
-/** Preço sugerido = custo × (1 + margem). */
+/** Preço sugerido pela margem sobre o preço de venda — mesma fórmula do motor de preços: custo ÷ (1 − margem). */
 export function suggestedPrice(cost: number, marginBps: number) {
-  if (!(marginBps > 0) || !(cost > 0)) return null;
-  return roundDiv(cost * (10000 + marginBps), 10000);
+  if (!(marginBps > 0) || marginBps >= 10000 || !(cost > 0)) return null;
+  return priceFromMargin(cost, Math.round(marginBps));
 }
 
 const UNIT_ALIASES: Record<string, string> = {

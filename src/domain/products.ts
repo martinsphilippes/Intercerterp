@@ -347,7 +347,7 @@ async function productSearchText(store: Store, p: Record<string, any>, skus?: Ar
   return searchable(p.name, p.code, p.gtin, brand?.name, cat?.name, ...list.flatMap((s) => [s.sku, s.barcode, ...(s.extraBarcodes ?? [])]));
 }
 
-async function refreshProductSearch(store: Store, productId: string) {
+export async function refreshProductSearch(store: Store, productId: string) {
   const p = await store.get("products", productId);
   if (!p) return;
   const text = await productSearchText(store, p);

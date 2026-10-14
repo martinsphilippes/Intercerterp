@@ -206,7 +206,7 @@ describe("COM-04 — cadastrar produto a partir do item do XML", () => {
     const cur = await store.getOrThrow("receipts", r.id);
     const plan = await planProductsFromReceipt(stockist, cur);
     expect(plan).toHaveLength(3);
-    expect(plan[0]).toMatchObject({ gtin: gNew, ncm: "48202000", cest: "1902000", unitCode: "CX", existing: null, cost: 1000, price: 1500 });
+    expect(plan[0]).toMatchObject({ gtin: gNew, ncm: "48202000", cest: "1902000", unitCode: "CX", existing: null, cost: 1000, price: 2000 });
     expect(plan[1].existing?.skuId).toBe(otherSku.id);
     expect(plan[2]).toMatchObject({ gtin: null, invalidGtin: "7891234567890", ncm: null, unitCode: "UN" });
 
@@ -224,7 +224,7 @@ describe("COM-04 — cadastrar produto a partir do item do XML", () => {
     const newSku = await store.getOrThrow("skus", res[0].skuId);
     expect(newSku.costAcquisition).toBe(1000);
     const price = (await listAll(store, "prices", { filters: [["eq", "skuId", newSku.id]] }))[0];
-    expect(price.price).toBe(1500);
+    expect(price.price).toBe(2000);
     // vínculo lembrado: código do fornecedor + fator
     const sp = (await listAll(store, "supplier_products", { filters: [["eq", "supplierId", refs.suppliers.papel.id], ["eq", "skuId", newSku.id]] }))[0];
     expect(sp).toMatchObject({ supplierCode: "PC-AGENDA", conversionFactor: 12000 });
@@ -256,7 +256,8 @@ describe("COM-04 — cadastrar produto a partir do item do XML", () => {
     expect(unitFor("UNID", units)).toBe("UN");
     expect(unitFor("FD", units)).toBe("UN");
     expect(suggestedPrice(1000, 0)).toBeNull();
-    expect(suggestedPrice(1001, 3333)).toBe(roundDiv(1001 * 13333, 10000));
+    // margem sobre o preço de venda (mesma fórmula do motor de preços): 10,01 ÷ (1 − 33,33%)
+    expect(suggestedPrice(1001, 3333)).toBe(roundDiv(1001 * 10000, 10000 - 3333));
   });
 });
 
