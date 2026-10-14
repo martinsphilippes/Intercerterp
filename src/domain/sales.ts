@@ -16,6 +16,7 @@ import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, postEntr
 import { cashAccountFor, currentSession } from "./cash";
 import { resolvePrices } from "./pricing";
 import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
+import { auditSaleOverdue, checkSaleOverdue, type OverdueRelease } from "./delinquency";
 import { refundIntentAtProvider } from "./payments/intents";
 import type { CtxUser } from "@/lib/core/ctx";
 
@@ -68,6 +69,8 @@ export interface FinalizeSaleInput {
   emitFiscal?: boolean;
   /** autorização de supervisor (login/senha) para desconto acima do limite do operador */
   discountApproval?: SupervisorCredentials | null;
+  /** liberação da venda bloqueada pela política de inadimplência (motivo + permissão `sale.overdue_override`) */
+  overdueRelease?: OverdueRelease | null;
   /** somente carga de demonstração/importação histórica: instante da venda */
   occurredAt?: string;
 }
@@ -335,6 +338,8 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
     }
     pays.push({ ...p, method, change, intent, voucher, term, status, manual });
   }
+  // Inadimplência (VEN-07): política da filial aplicada no servidor; bloqueio só segue com liberação registrada
+  const overdueCheck = customer ? await checkSaleOverdue(ctx, { branchId, customerId: customer.id, deferred: pays.some((p) => DEFERRED_KINDS.includes(p.method.kind)), release: input.overdueRelease }) : null;
 
   const deferredPaysAll = pays.filter((p) => DEFERRED_KINDS.includes(p.method.kind));
   const hasCrediario = pays.some((p) => p.method.kind === "crediario");
@@ -583,6 +588,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         related: [`sale:${saleId}`, `sale:${exchangeRet.saleId}`],
       });
     }
+    if (overdueCheck) await auditSaleOverdue(ctx, overdueCheck, { id: saleId, number }, customer!);
     if (operatorMismatch && mismatchPolicy === "warn") {
       await audit(ctx, {
         module: "cash", action: "sale.operator_mismatch", entityType: "cash_session", entityId: session!.id,

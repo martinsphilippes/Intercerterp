@@ -3,6 +3,9 @@ import { requireApiSession } from "@/lib/server/session";
 import { can } from "@/lib/permissions";
 import { listAll } from "@/lib/db";
 import { onlyDigits, searchable } from "@/lib/core/text";
+import { today } from "@/lib/dates";
+import { overdueParams } from "@/domain/delinquency";
+import { summarizeOverdue } from "@/domain/overdue";
 
 /** Identificação do cliente no PDV (Tela 6): nome, CPF/CNPJ, telefone e e-mail — mesma base do CRM. */
 export async function GET(req: NextRequest) {
@@ -40,6 +43,8 @@ export async function GET(req: NextRequest) {
     const r = await store.list("sales", { filters: [["eq", "customerId", cidk], ["eq", "status", "completed"]], orderBy: [{ field: "completedAt", dir: "desc" }], limit: 1, total: false });
     if (r.items[0]) last.set(cidk, r.items[0].completedAt);
   }
+  const odParams = await overdueParams(store, cid, s.ctx.branchId);
+  const t0 = today();
   const items = rows.map((c) => {
     const openBalance = open.filter((i) => i.partyId === c.id).reduce((a, i) => a + i.balance, 0);
     return {
@@ -59,6 +64,7 @@ export async function GET(req: NextRequest) {
       priceTableName: c.priceTableId ? (tmap.get(c.priceTableId) ?? null) : null,
       lastPurchaseAt: last.get(c.id) ?? null,
       vouchers: vouchers.filter((v) => v.customerId === c.id).map((v) => ({ code: v.code, balance: v.balance, expiresAt: v.expiresAt })),
+      overdue: summarizeOverdue(open.filter((i) => i.partyId === c.id), odParams, t0),
     };
   });
   return NextResponse.json({ items });

@@ -18,6 +18,14 @@ import { formatDoc, formatPhone } from "@/lib/core/text";
 import { can } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { setCustomerStatusAction, deleteCustomerAction } from "../actions";
+import { listAll } from "@/lib/db";
+import { today } from "@/lib/dates";
+import { isFeatureOn } from "@/lib/core/settings";
+import { Notice } from "@/components/ui/empty";
+import { overdueParams } from "@/domain/delinquency";
+import { overdueReceiveHref, overdueText, summarizeOverdue } from "@/domain/overdue";
+import { collectionContext, collectionDraft } from "@/domain/collection";
+import { WhatsAppCollectButton } from "../../financeiro/_components/whatsapp-collect";
 
 export const metadata = { title: "Cliente" };
 
@@ -31,6 +39,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const users = await nameMap(s.ctx, "users");
   const addr = c.addresses?.[0];
   const base = `/clientes/${id}`;
+  const t0 = today();
+  // inadimplência pela política da filial (VEN-07) e cobrança pelo WhatsApp (PLA-27) nas parcelas em aberto
+  const overdue = summarizeOverdue(sum.installments, await overdueParams(s.ctx.store, s.ctx.companyId, s.ctx.branchId), t0);
+  const openInsts = sum.installments.filter((i) => ["open", "partial"].includes(i.status));
+  const canCollect = can(s.user, "finance", "edit") && openInsts.length > 0 && (await isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, "cobrancaWhatsapp", true));
+  const waContext = canCollect && tab === "financeiro" ? await collectionContext(s.ctx.store, s.ctx.companyId, s.ctx.branchId, t0) : null;
+  const titles = waContext ? new Map((await listAll(s.ctx.store, "titles", { filters: [["eq", "id", [...new Set(openInsts.map((i) => i.titleId))]]] })).map((x) => [x.id, x])) : new Map();
   return (
     <>
       <PageHeader
@@ -40,6 +55,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <>
             <StatusBadge kind="generic" status={c.status} />
             {c.vip && <Badge tone="accent">VIP</Badge>}
+            {overdue.delinquent && <Badge tone="bad" title={overdueText(overdue)}>Inadimplente</Badge>}
             <Badge>{c.personType === "PF" ? "Pessoa física" : "Pessoa jurídica"}</Badge>
           </>
         }
@@ -150,6 +166,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           )}
         </Card>
       )}
+      {tab === "financeiro" && overdue.delinquent && (
+        <Notice tone="bad" title="Cliente inadimplente">
+          {overdueText(overdue)} (tolerância de {overdue.graceDays} dia(s)).{" "}
+          {can(s.user, "finance") && <Link className="font-medium text-brand-700 underline" href={overdueReceiveHref(id)}>Receber parcelas vencidas</Link>}
+        </Notice>
+      )}
       {tab === "financeiro" && (
         <Card bodyClass="p-0">
           {sum.installments.length === 0 ? (
@@ -157,7 +179,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           ) : (
             <table className="table-base w-full text-sm">
               <thead>
-                <tr><th>Título / parcela</th><th>Vencimento</th><th>Situação</th><th className="text-right">Valor</th><th className="text-right">Saldo</th></tr>
+                <tr><th>Título / parcela</th><th>Vencimento</th><th>Situação</th><th className="text-right">Valor</th><th className="text-right">Saldo</th>{waContext && <th className="text-right">Cobrança</th>}</tr>
               </thead>
               <tbody>
                 {sum.installments.map((i) => (
@@ -167,6 +189,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                     <td><StatusBadge kind="title" status={dueState(i)} /></td>
                     <td className="tabular text-right">{formatMoney(i.amount)}</td>
                     <td className="tabular text-right">{formatMoney(i.balance)}</td>
+                    {waContext && (
+                      <td className="text-right">
+                        {["open", "partial"].includes(i.status) && titles.get(i.titleId) && (
+                          <WhatsAppCollectButton draft={collectionDraft(waContext, i, titles.get(i.titleId)!, c)} title={`Cobrar no WhatsApp — ${i.description} — parcela ${i.number}`} />
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

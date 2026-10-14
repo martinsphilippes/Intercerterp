@@ -19,6 +19,7 @@ import { formatDoc, formatPhone } from "@/lib/core/text";
 import { cartTotals, effectiveUnitPrice, tablePrice, type CartItem } from "@/domain/cart-calc";
 import { ProductSearch, type ProductHit, type ProductSearchHandle } from "./product-search";
 import { CustomerPicker, type CustomerInfo } from "./customer-picker";
+import { OverdueAlert } from "./overdue-alert";
 import { cancelCartAction, parkCartAction, resumeCartAction, saveCartAction, startExchangeAction, type PlainCart } from "./actions";
 
 type Line = CartItem & { key?: string };
@@ -26,7 +27,7 @@ type Line = CartItem & { key?: string };
 export interface PdvProps {
   branch: { id: string; name: string };
   companyName: string;
-  operator: { id: string; name: string; discountLimitBps: number; canOverLimit: boolean; canCreateCustomer: boolean };
+  operator: { id: string; name: string; discountLimitBps: number; canOverLimit: boolean; canCreateCustomer: boolean; canViewFinance?: boolean };
   terminal: { id: string; name: string; code: string; printerMode: string | null; scannerMode: string | null };
   terminals: Array<{ id: string; name: string; code: string; status: string }>;
   session: { id: string; number: number; openedAt: string; operatorName: string; status: string; operatorMismatch?: "warn" | "block" | null } | null;
@@ -561,6 +562,7 @@ export function PdvApp(props: PdvProps) {
               </>
             )}
           </button>
+          {customer && <OverdueAlert customerId={customer.id} overdue={customer.overdue} canReceive={Boolean(props.operator.canViewFinance)} />}
           <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-white p-3">
             <Field label="Tabela de preço">
               <Select value={cart.priceTableId ?? ""} onChange={(e) => void changeTable(e.target.value)} options={props.priceTables} aria-label="Tabela de preço" />

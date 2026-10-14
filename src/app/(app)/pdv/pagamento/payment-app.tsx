@@ -17,6 +17,9 @@ import { formatDate, formatTime } from "@/lib/dates";
 import { formatDoc } from "@/lib/core/text";
 import { changeFor, previewSchedule } from "@/domain/cart-calc";
 import { cancelPixAction, createPixAction, finalizeCartAction, saveCartAction, simulatePixAction } from "../actions";
+import { DEFERRED_KINDS } from "@/domain/pricing-calc";
+import { overdueBlocks, type OverdueStatus } from "@/domain/overdue";
+import { OverdueReleasePanel, overdueReleaseReady } from "./overdue-release";
 
 interface Method { id: string; name: string; kind: string; maxInstallments: number; requiresCustomer: boolean; allowsChange: boolean; feeBps: number; hasAccount: boolean }
 interface Term { id: string; name: string; installments: number; firstDueDays: number; intervalDays: number; interestBps?: number }
@@ -75,6 +78,10 @@ export function PaymentApp(props: {
   unitsCount: number;
   discountLimitBps: number;
   approvalNeeded: string | null;
+  /** inadimplência do cliente (VEN-07) e se o operador pode liberar sozinho */
+  overdue?: OverdueStatus | null;
+  canOverrideOverdue?: boolean;
+  canViewFinance?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -90,6 +97,7 @@ export function PaymentApp(props: {
   const [emitFiscal, setEmitFiscal] = useState(props.emitFiscal);
   const [receipt, setReceipt] = useState("imprimir");
   const [approval, setApproval] = useState({ login: "", password: "" });
+  const [odRelease, setOdRelease] = useState({ reason: "", login: "", password: "" });
   useEffect(() => {
     try {
       const v = localStorage.getItem("ic.pdv.receipt");
@@ -106,6 +114,9 @@ export function PaymentApp(props: {
   const remaining = props.total - paid;
   const change = payments.reduce((a, p) => a + (p.kind === "cash" ? changeFor(p.received ?? p.amount, p.amount) : 0), 0);
   const method = props.methods.find((m) => m.id === methodId) ?? null;
+  // política de inadimplência: o bloqueio depende dos meios escolhidos (a prazo × qualquer venda)
+  const odBlocked = overdueBlocks(props.overdue, payments.some((p) => DEFERRED_KINDS.includes(p.kind)));
+  const odReady = !odBlocked || overdueReleaseReady(odRelease, Boolean(props.canOverrideOverdue));
 
   // rascunho dos pagamentos gravado no atendimento (atualização acidental não perde Pix/valores)
   useEffect(() => {
@@ -133,7 +144,7 @@ export function PaymentApp(props: {
       } catch {
         /* ignore */
       }
-      const res = await finalizeCartAction(props.cartId, payments.map(({ key: _k, kind: _kind, label: _l, detail: _d, ...p }) => p), { approval: props.approvalNeeded ? approval : null, receipt });
+      const res = await finalizeCartAction(props.cartId, payments.map(({ key: _k, kind: _kind, label: _l, detail: _d, ...p }) => p), { approval: props.approvalNeeded ? approval : null, receipt, overdueRelease: odBlocked ? odRelease : null });
       if (!res.ok) {
         setError(res.error);
         toast("error", res.error);
@@ -142,7 +153,7 @@ export function PaymentApp(props: {
       toast("success", res.message ?? "Venda concluída.");
       router.push(res.redirect ?? "/pdv");
     });
-  }, [remaining, pending, payments, props.cartId, props.approvalNeeded, approval, receipt, router, toast]);
+  }, [remaining, pending, payments, props.cartId, props.approvalNeeded, approval, receipt, router, toast, odBlocked, odRelease]);
 
   // atalhos: 1–9 escolhe o meio; F10/Ctrl+Enter conclui; Esc volta ao PDV
   useEffect(() => {
@@ -292,8 +303,11 @@ export function PaymentApp(props: {
               <p className="text-xs text-amber-800">A credencial é validada na conclusão e o autorizador fica registrado na venda e na auditoria.</p>
             </div>
           )}
+          {props.customer && props.overdue?.delinquent && (
+            <OverdueReleasePanel customerId={props.customer.id} overdue={props.overdue} blocked={odBlocked} canOverride={Boolean(props.canOverrideOverdue)} canViewFinance={Boolean(props.canViewFinance)} value={odRelease} onChange={setOdRelease} />
+          )}
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-          <Button size="lg" variant="accent" className="h-14 text-lg" disabled={remaining !== 0 || pending || !props.session || (Boolean(props.approvalNeeded) && (!approval.login || !approval.password))} loading={pending} onClick={conclude}>
+          <Button size="lg" variant="accent" className="h-14 text-lg" disabled={remaining !== 0 || pending || !props.session || !odReady || (Boolean(props.approvalNeeded) && (!approval.login || !approval.password))} loading={pending} onClick={conclude}>
             <CheckCircle2 className="size-5" /> {emitFiscal ? "Confirmar e emitir NFC-e" : "Confirmar venda"} <kbd className="ml-1 rounded border border-white/40 px-1 text-xs">F10</kbd>
           </Button>
           <p className="text-xs text-slate-500">Ao concluir: baixa de estoque, caixa, financeiro (recebíveis/parcelas) e emissão da NFC-e. Repetir o envio não duplica a venda.</p>

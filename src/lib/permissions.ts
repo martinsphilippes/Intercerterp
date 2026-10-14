@@ -31,6 +31,7 @@ export const SPECIAL_ACTIONS = [
   { key: "sale.cancel", label: "Cancelar venda" },
   { key: "sale.return", label: "Registrar devolução/troca" },
   { key: "sale.discount_over_limit", label: "Aprovar desconto acima do limite" },
+  { key: "sale.overdue_override", label: "Liberar venda para cliente inadimplente" },
   { key: "cash.reopen", label: "Reabrir caixa" },
   { key: "cash.withdrawal", label: "Registrar sangria/suprimento" },
   { key: "stock.adjust", label: "Ajustar estoque" },
@@ -97,7 +98,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
       dashboard: all(), pdv: all(), sales: all(), cash: all(), products: all(), stock: all(), customers: all(),
       suppliers: all(), finance: rw(), purchases: all(), fiscal: rw(), reports: all(), admin: ro(), support: rw(),
     },
-    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "stock.adjust", "stock.inventory_close", "finance.settle", "purchase.approve", "purchase.receive", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit"],
+    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "stock.adjust", "stock.inventory_close", "finance.settle", "purchase.approve", "purchase.receive", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override"],
     discountLimitBps: 2000,
   },
   {
