@@ -52,7 +52,7 @@ async function order(idem = "o1") {
 
 /** Venda do atendimento importado, paga em dinheiro pelo total calculado. */
 async function sellCart(cart: Doc, ctx = cashier) {
-  const total = cartTotals(cart).total;
+  const total = cartTotals(cart as any).total;
   return finalizeSale(ctx, { ...cartToSaleInput(cart, [{ methodId: refs.methods.dinheiro.id, amount: total, received: total }]) });
 }
 
@@ -248,7 +248,7 @@ describe("faturamento parcial no PDV + restante em NF-e (sem efeito duplo)", () 
   it("orçamento importado no PDV vira venda; cancelar a venda devolve o orçamento a aprovado", async () => {
     const q = await createSalesDocument(admin, "quote", { customerId: refs.customers.maria.id, items: [{ skuId: sku("caneca-u"), qty: 2 * QTY }], globalDiscount: 100 }, { idemKey: "q-pdv" });
     const cart = await importDocumentToCart(cashier, terminalId, q.id);
-    expect(cartTotals(cart).total).toBe(q.total);
+    expect(cartTotals(cart as any).total).toBe(q.total);
     const sale = await sellCart(cart);
     expect(sale.total).toBe(q.total);
     expect(await store.getOrThrow("sales_documents", q.id)).toMatchObject({ status: "converted", convertedSaleId: sale.id });

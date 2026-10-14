@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertTriangle, ArrowLeftRight, BadgePercent, Ban, CheckCircle2, ClipboardList, CloudOff, CreditCard, HandCoins, LogOut, Minus, Monitor, Pencil, Plus, RefreshCcw, Save, ShoppingCart, Trash2, UserRound, Wallet,
+  AlertTriangle, ArrowLeftRight, BadgePercent, Ban, CheckCircle2, ClipboardList, CloudOff, CreditCard, FileInput, HandCoins, LogOut, Minus, Monitor, Pencil, Plus, RefreshCcw, Save, ShoppingCart, Trash2, UserRound, Wallet,
 } from "lucide-react";
 import { Dialog, Drawer } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,8 @@ import { cartTotals, effectiveUnitPrice, tablePrice, type CartItem } from "@/dom
 import { ProductSearch, type ProductHit, type ProductSearchHandle } from "./product-search";
 import { CustomerPicker, type CustomerInfo } from "./customer-picker";
 import { OverdueAlert } from "./overdue-alert";
-import { cancelCartAction, parkCartAction, resumeCartAction, saveCartAction, startExchangeAction, type PlainCart } from "./actions";
+import { cancelCartAction, importDocumentAction, parkCartAction, resumeCartAction, saveCartAction, startExchangeAction, type PlainCart } from "./actions";
+import { ImportDocumentDialog } from "./import-document-dialog";
 import { ReceivablesDialog, type ReceiveMethod } from "./receivables-dialog";
 
 type Line = CartItem & { key?: string };
@@ -46,6 +47,8 @@ export interface PdvProps {
   pendingExchange: { returnId: string; number: number; itemsTotal: number; credit: number } | null;
   /** recebimento de parcelas do crediário no caixa (parâmetro feature.recebimentoPdv + permissão); null = ação oculta */
   receivables: { methods: ReceiveMethod[]; canReverse: boolean } | null;
+  /** orçamento/pedido (PDV-12): parâmetro feature.documentoComercial + acesso a Vendas; null = ação oculta */
+  salesDocs?: { importId: string | null } | null;
 }
 
 const TERMINAL_COOKIE = "ic_pdv_terminal";
@@ -73,7 +76,7 @@ export function PdvApp(props: PdvProps) {
   const [customer, setCustomer] = useState<CustomerInfo | null>(props.customer);
   const [selected, setSelected] = useState(props.cart.items.length ? props.cart.items.length - 1 : -1);
   const [saveState, setSaveState] = useState<{ state: "saved" | "saving" | "error"; at?: string; error?: string }>({ state: "saved", at: props.cart.updatedAt });
-  const [dialog, setDialog] = useState<null | "customer" | "discount" | "line" | "park" | "cancel" | "new" | "parked" | "receive">(null);
+  const [dialog, setDialog] = useState<null | "customer" | "discount" | "line" | "park" | "cancel" | "new" | "parked" | "receive" | "import">(props.salesDocs?.importId ? "import" : null);
   const [pending, start] = useTransition();
   const searchRef = useRef<ProductSearchHandle>(null);
   const dirty = useRef(false);
@@ -365,6 +368,19 @@ export function PdvApp(props: PdvProps) {
       router.refresh();
     });
 
+  // importar orçamento/pedido: o atendimento é montado no servidor (o atual com itens vai para espera)
+  const importDocument = (documentId: string, quantities: Record<string, number> | null) =>
+    start(async () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      await persist();
+      const res = await importDocumentAction(props.terminal.id, documentId, quantities);
+      if (!res.ok) return toast("error", res.error);
+      toast("success", res.message ?? "Documento importado.");
+      setDialog(null);
+      router.replace(`/pdv?terminal=${props.terminal.id}`);
+      router.refresh();
+    });
+
   const line = selected >= 0 ? items[selected] : null;
   const discountBps = totals.subtotal > 0 ? Math.round((totals.discountTotal * 10000) / totals.subtotal) : 0;
   const overLimit = !props.operator.canOverLimit && discountBps > props.operator.discountLimitBps;
@@ -415,6 +431,11 @@ export function PdvApp(props: PdvProps) {
               <HandCoins className="size-4" /> <span className="hidden sm:inline">Receber parcelas</span> <kbd className="hidden rounded border border-white/30 px-1 text-[10px] lg:inline">F9</kbd>
             </button>
           )}
+          {props.salesDocs && (
+            <button type="button" onClick={() => setDialog("import")} className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800" title="Importar orçamento ou pedido de venda">
+              <FileInput className="size-4" /> <span className="hidden sm:inline">Importar orçamento/pedido</span>
+            </button>
+          )}
           <button type="button" onClick={() => setDialog("parked")} className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800">
             <ClipboardList className="size-4" /> Pré-vendas{props.parked.length ? <span className="rounded-full bg-accent-500 px-1.5 text-xs">{props.parked.length}</span> : null}
           </button>
@@ -448,6 +469,11 @@ export function PdvApp(props: PdvProps) {
           <Button size="sm" variant="primary" loading={pending} onClick={() => run(() => startExchangeAction(props.terminal.id, props.pendingExchange!.returnId))}>
             Salvar atual como pré-venda e iniciar a troca
           </Button>
+        </div>
+      )}
+      {cart.salesDocumentId && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-900">
+          <FileInput className="size-4" /> Faturando {cart.salesDocumentLabel ?? "orçamento/pedido"}: a venda concluída marca as quantidades no documento (preços do documento; quantidade acima do saldo é recusada).
         </div>
       )}
       {props.exchange && (
@@ -702,6 +728,7 @@ export function PdvApp(props: PdvProps) {
           <Button variant="danger" onClick={() => setDialog("cancel")}><Ban className="size-4" /> Cancelar o atendimento</Button>
         </div>
       </Dialog>
+      {props.salesDocs && <ImportDocumentDialog open={dialog === "import"} onClose={() => setDialog(null)} initialId={props.salesDocs.importId} onImport={importDocument} busy={pending} />}
       {props.receivables && (
         <ReceivablesDialog
           open={dialog === "receive"}

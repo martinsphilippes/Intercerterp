@@ -52,9 +52,13 @@ export interface SupplierInput {
   category?: string | null;
   notes?: string | null;
   status?: "draft" | "active" | "inactive" | "blocked";
+  /** transportadora (CAD-03): aparece no seletor do passo Transporte da NF-e */
+  isCarrier?: boolean;
+  /** RNTRC (registro do transportador na ANTT) */
+  rntrc?: string | null;
 }
 
-export const SUPPLIER_CATEGORIES = ["Mercadorias", "Logística / fretes", "Serviços", "Tecnologia", "Materiais de uso e consumo", "Embalagens"];
+export const SUPPLIER_CATEGORIES = ["Mercadorias", "Logística / fretes", "Transportadora", "Serviços", "Tecnologia", "Materiais de uso e consumo", "Embalagens"];
 
 /** Fornecedor apto a novas cotações e pedidos (bloqueado/inativo/docs. pendentes não). */
 export function assertSupplierUsable(s: { status?: string | null; tradeName?: string | null; name?: string | null; statusReason?: string | null }) {
@@ -102,6 +106,9 @@ function buildData(input: SupplierInput, doc: string | null, code: string) {
     category: input.category?.trim() || null,
     notes: input.notes || null,
     status,
+    // campos aditivos: gravados só quando o formulário os envia (ausente = não é transportadora)
+    ...(input.isCarrier !== undefined ? { isCarrier: Boolean(input.isCarrier) } : {}),
+    ...(input.rntrc !== undefined ? { rntrc: input.rntrc?.trim() || null } : {}),
     searchText: searchable(input.name, input.tradeName, doc, code, input.email),
   };
 }

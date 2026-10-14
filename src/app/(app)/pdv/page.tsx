@@ -7,6 +7,7 @@ import { sp, type SearchParams } from "@/lib/list";
 import { can, canDo } from "@/lib/permissions";
 import { getSetting } from "@/lib/core/settings";
 import { pdvReceivableEnabled, receivableMethods } from "@/domain/pdv-receivables";
+import { salesDocsEnabled } from "@/domain/sales-documents";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { ensureOpenCart, listParkedCarts, saveCart } from "@/domain/carts";
 import { resolveTerminal } from "./terminal";
@@ -115,8 +116,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     id: cart.id, status: cart.status, terminalId: cart.terminalId, customerId: cart.customerId ?? null, customerName: cart.customerName ?? null, cpfOnInvoice: cart.cpfOnInvoice ?? null,
     priceTableId: cart.priceTableId ?? null, items: cart.items ?? [], globalDiscount: cart.globalDiscount ?? 0, globalDiscountBps: cart.globalDiscountBps ?? 0, surcharge: cart.surcharge ?? 0,
     notes: cart.notes ?? null, payments: cart.payments ?? [], exchangeReturnId: cart.exchangeReturnId ?? null, sellerId: cart.sellerId ?? null, emitFiscal: cart.emitFiscal !== false,
+    salesDocumentId: cart.salesDocumentId ?? null, salesDocumentLabel: cart.salesDocumentLabel ?? null,
     revision: cart.revision ?? 0, total: cart.total ?? 0, updatedAt: cart.updatedAt,
   };
+  // orçamento/pedido (PDV-12): parâmetro feature.documentoComercial + acesso a Vendas; ?importar=<id> abre a importação
+  const salesDocs = can(s.user, "sales") && (await salesDocsEnabled(s.ctx)) ? { importId: sp(params, "importar") || null } : null;
   return (
     <PdvApp
       key={cart.id}
@@ -139,6 +143,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       exchange={exchange}
       pendingExchange={pendingExchange}
       receivables={receivables}
+      salesDocs={salesDocs}
     />
   );
 }
