@@ -203,6 +203,21 @@ export const PARAMS: ParamDef[] = [
     help: "Mostra os campos da reforma tributária (CST e cClassTrib do IBS/CBS, alíquotas de IBS, CBS e IS, vigência) no grupo tributário, no produto e a adesão em Fiscal › Configurações › Tributação padrão. Os grupos IBS/CBS (e IS) só entram na NF-e/NFC-e quando, além deste recurso, a configuração fiscal marca a adesão e a data de início já chegou; ICMS, PIS, COFINS e o total da nota não mudam. Desligado por padrão porque muda o documento fiscal; desligar volta a emitir sem os grupos (os campos cadastrados ficam guardados). Valide a classificação com a contabilidade e em homologação.",
     usedBy: "Produtos (grupo tributário e aba Fiscal), Fiscal (configuração, NF-e e NFC-e)",
   },
+  {
+    key: "feature.tributacaoCompleta", group: "Recursos", label: "Tributação completa (ST/MVA, alíquota interestadual, FCP e DIFAL)", type: "bool", scopes: ["company", "branch"], default: false,
+    help: "Liga o cálculo completo do ICMS no regime normal: ICMS próprio também nos CST 10 e 70, alíquota interestadual de 4%, 7% ou 12% conforme as UFs e a origem da mercadoria (4% para importados), ICMS-ST com MVA original (interna) ou ajustada (interestadual), FCP e FCP-ST, DIFAL na venda interestadual a consumidor final não contribuinte (por fora ou por dentro, por UF) e, se marcado em Fiscal › Configurações › Operações, a base do PIS/COFINS sem o ICMS. Mostra os campos de MVA, ST e alíquotas por UF no grupo tributário. Desligado por padrão porque muda os valores das notas; desligar volta ao cálculo anterior (os campos ficam guardados; documentos já montados mantêm o cálculo até “Atualizar do cadastro”). Valide com a contabilidade e emita primeiro em homologação.",
+    usedBy: "Produtos (grupo tributário), Fiscal (configurações, NF-e) e NFC-e (ICMS próprio)",
+  },
+  {
+    key: "feature.naturezasOperacao", group: "Recursos", label: "Naturezas de operação cadastradas (CFOP e CST por natureza)", type: "bool", scopes: ["company", "branch"], default: false,
+    help: "Mostra a tabela de naturezas de operação (venda, devolução, remessa para conserto, demonstração, bonificação, transferência, consignação…) em Fiscal › Configurações › Operações e a escolha da natureza no assistente da NF-e: a natureza define o CFOP interno/interestadual e o CST/CSOSN padrão dos itens, ou aplica o grupo tributário dedicado a ela. Desligado, a natureza continua texto livre e o CFOP vem do grupo do produto, como antes.",
+    usedBy: "Fiscal (configurações e assistente da NF-e), Produtos (grupo tributário)",
+  },
+  {
+    key: "feature.creditoSimples", group: "Recursos", label: "Crédito de ICMS do Simples Nacional (CSOSN 101/201)", type: "bool", scopes: ["company"], default: false,
+    help: "Para empresa do Simples Nacional: informa nos itens com CSOSN 101 e 201 da NF-e o percentual (pCredSN) e o valor do crédito (vCredICMSSN) e acrescenta a mensagem obrigatória do art. 23 da LC 123/2006 nas informações complementares. O percentual (alíquota do Anexo na faixa do mês anterior) é informado em Fiscal › Configurações › Operações. Desligado, a NF-e sai como antes.",
+    usedBy: "Fiscal (configurações e NF-e)",
+  },
   { key: "loyalty.pointsPerReal", group: "Fidelidade", label: "Pontos por R$ 1,00", help: "Pontos ganhos a cada R$ 1,00 do total da venda identificada (sem contar o que foi pago com pontos), arredondado para baixo. Ex.: 1 ponto por real numa venda de R$ 59,90 = 59 pontos. 0 = não acumula.", type: "int", scopes: ["company"], default: 1, min: 0, max: 1000, unit: "pontos", usedBy: "Vendas (acúmulo de pontos)" },
   { key: "loyalty.pointValue", group: "Fidelidade", label: "Valor de 1 ponto no resgate", help: "Quanto cada ponto vale como pagamento no PDV. Ex.: R$ 0,01 por ponto com 1 ponto por real = 1% de retorno.", type: "money", scopes: ["company"], default: 1, min: 1, usedBy: "PDV (resgate de pontos)" },
   { key: "loyalty.validityDays", group: "Fidelidade", label: "Validade dos pontos", help: "Dias corridos, a partir da venda que gerou os pontos, até eles vencerem. Pontos vencidos deixam de contar no saldo e não podem ser resgatados. 0 = não vencem. Vale para os pontos acumulados depois da alteração.", type: "int", scopes: ["company"], default: 365, min: 0, max: 3650, unit: "dias", usedBy: "Vendas (acúmulo) e PDV (saldo e resgate)" },

@@ -73,6 +73,8 @@ export interface NfeInput {
   branchId: string;
   origin: { type: NfeOriginType; id?: string | null };
   nature: string;
+  /** natureza de operação cadastrada (FIS-11/07 — usada só com `feature.naturezasOperacao`) */
+  operationKey?: string | null;
   purpose: "normal" | "devolucao" | "complementar" | "ajuste";
   operationType: "saida" | "entrada";
   presence: string;
@@ -344,6 +346,12 @@ async function saleRastroBySku(ctx: Ctx, saleId: string) {
   return out;
 }
 
+/** Destinatário para a tributação completa (Fase 7): UF, IE e consumidor final. */
+function recipientForTax(r: Partial<NfeRecipient> | null | undefined) {
+  if (!r) return null;
+  return { uf: r.address?.uf ?? null, ie: r.ie ?? null, ieIndicator: r.ieIndicator ?? null, finalConsumer: Boolean(r.finalConsumer) };
+}
+
 /** Monta o documento (itens, totais, pendências) a partir da entrada — cálculo no servidor, sem gravar. */
 export async function buildNfe(ctx: Ctx, input: NfeInput) {
   assert(input.items.length > 0, "Inclua ao menos um item.");
@@ -359,7 +367,7 @@ export async function buildNfe(ctx: Ctx, input: NfeInput) {
   const items = await buildItems(
     ctx,
     input.items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount ?? 0, description: i.description, taxGroupId: i.taxGroupId || null, cfopOverride: i.cfop || undefined, cstOverride: i.cstCsosn || undefined, ...(input.origin.type === "sales_document" && i.xPed ? { xPed: i.xPed, nItemPed: i.nItemPed ?? null } : {}), ...(saleRastro?.get(i.skuId)?.qty === i.qty ? { rastro: saleRastro.get(i.skuId)!.rastro } : {}) })),
-    { branchId: input.branchId, interstate, freight: input.freight, insurance: input.insurance, other: input.other, kind },
+    { branchId: input.branchId, interstate, freight: input.freight, insurance: input.insurance, other: input.other, kind, model: "nfe", recipient: recipientForTax(input.recipient), operationKey: input.operationKey || null },
   );
   const totals = computeTotals(items, { insurance: input.insurance });
   let payments = input.payments.filter((p) => p.kind === "none" || p.amount > 0);
@@ -459,6 +467,7 @@ export async function saveNfe(ctx: Ctx, input: NfeInput, opts: { idemKey: string
   const transport = { ...input.transport, mode: input.transport.mode ?? "9" };
   const common = {
     nature: input.nature.trim() || "Venda de mercadoria",
+    ...(input.operationKey || opts.draftId ? { operationKey: input.operationKey || null } : {}),
     purpose: input.purpose,
     operationType: input.operationType,
     presence: input.presence,
@@ -525,7 +534,7 @@ export async function refreshFromCatalog(ctx: Ctx, documentId: string) {
   const items = await buildItems(
     ctx,
     old.filter((i) => i.skuId).map((i) => ({ skuId: i.skuId!, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount, description: i.description, taxGroupId: i.overrides?.taxGroupId ?? null, cfopOverride: i.overrides?.cfop, cstOverride: i.overrides?.cstCsosn, rastro: i.rastro ?? null })),
-    { branchId: doc.branchId, interstate, freight, insurance, other, kind: doc.model === "nfce" ? "sale" : kind },
+    { branchId: doc.branchId, interstate, freight, insurance, other, kind: doc.model === "nfce" ? "sale" : kind, model: doc.model === "nfce" ? "nfce" : "nfe", recipient: doc.model === "nfe" ? recipientForTax(doc.recipient) : null, operationKey: doc.operationKey ?? null },
   );
   const totals = computeTotals(items, { insurance });
   const changes = items
@@ -589,6 +598,7 @@ export function docToInput(doc: Doc): NfeInput {
     branchId: doc.branchId,
     origin: { type: (doc.originType as NfeOriginType) ?? "manual", id: doc.originId ?? null },
     nature: doc.nature ?? "",
+    ...(doc.operationKey ? { operationKey: doc.operationKey } : {}),
     purpose: doc.purpose ?? "normal",
     operationType: doc.operationType ?? "saida",
     presence: doc.presence ?? "1",
