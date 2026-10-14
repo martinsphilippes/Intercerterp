@@ -6,6 +6,8 @@ import { bookRows, cancelRows, cfopRows, ncmRows, periodDocRows, rejectRows, ser
 import { BOOK_COLS, CANCEL_COLS, CFOP_COLS, DOC_COLS, NCM_COLS, REJECT_COLS, SERVICE_COLS } from "@/domain/fiscal/export";
 import { listObligations, OBLIGATION_KIND_LABEL, OBLIGATION_STATUS_LABEL } from "@/domain/fiscal/obligations";
 import { listAll } from "@/lib/db";
+import { ENTRY_BOOK_COLS, ENTRY_CFOP_COLS, entriesBook, entryCsvRows } from "@/domain/fiscal/entries";
+import { entriesParams } from "@/app/(app)/fiscal/entradas/params";
 
 /** Exportações do recorte (mesmas consultas das telas fiscais e da central de integrações). */
 const docCols = (model: string): ExportColumn[] => [
@@ -38,6 +40,9 @@ defineExport("fiscal-cfop", { module: "fiscal", title: "Resumo contábil por CFO
 defineExport("fiscal-servicos", { module: "fiscal", title: "Serviços (NFS-e) por item", columns: cast(SERVICE_COLS), rows: (s, p) => serviceRows(s.ctx, p) });
 defineExport("fiscal-cancelamentos", { module: "fiscal", title: "Cancelamentos", columns: cast(CANCEL_COLS), rows: (s, p) => cancelRows(s.ctx, p) });
 defineExport("fiscal-rejeicoes", { module: "fiscal", title: "Rejeições", columns: cast(REJECT_COLS), rows: (s, p) => rejectRows(s.ctx, p) });
+// livro de entradas (FIS-24): mesma consulta da tela /fiscal/entradas (de, ate, filial)
+defineExport("fiscal-livro-entradas", { module: "fiscal", title: "Livro de registro de entradas", columns: cast(ENTRY_BOOK_COLS), rows: async (s, p) => entryCsvRows((await entriesBook(s.ctx, entriesParams(s.ctx, p))).rows) });
+defineExport("fiscal-entradas-cfop", { module: "fiscal", title: "Entradas por CFOP", columns: cast(ENTRY_CFOP_COLS), rows: async (s, p) => (await entriesBook(s.ctx, entriesParams(s.ctx, p))).byCfop });
 defineExport("fiscal-obrigacoes", {
   module: "fiscal",
   title: "Obrigações fiscais",

@@ -26,7 +26,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const p = parseList(params, { sort: "number", dir: "desc" });
   // sem filtro informado: pendentes; "Todos" envia vazio
   const situation = params.situacao === undefined ? "pending" : (typeof params.situacao === "string" && params.situacao) || "all";
-  const confirmed = await queryReceipts(s.ctx, { q: p.q, f: { ...p.f, status: "confirmed" } });
+  // nota de entrada sem estoque (FIS-24) não tem produto a precificar
+  const confirmed = (await queryReceipts(s.ctx, { q: p.q, f: { ...p.f, status: "confirmed" } })).filter((r) => r.entryKind !== "no_stock");
   const pendingCount = confirmed.filter((r) => r.pricingStatus !== "done").length;
   const all = confirmed.filter((r) => (situation === "done" ? r.pricingStatus === "done" : situation === "all" ? true : r.pricingStatus !== "done"));
   const { rows, total } = paginate(all, p);

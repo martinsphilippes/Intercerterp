@@ -12,7 +12,7 @@ import { audit } from "@/lib/core/audit";
  * Configuração preenchida não equivale a conexão operacional: o estado só muda com um teste real.
  */
 
-export type IntegrationKind = "pix" | "card_tef" | "fiscal_nfe" | "fiscal_nfse" | "bank" | "accounting" | "email";
+export type IntegrationKind = "pix" | "card_tef" | "fiscal_nfe" | "fiscal_nfse" | "bank" | "accounting" | "accounting_dominio" | "email";
 
 export interface CatalogProvider {
   id: string;
@@ -94,6 +94,21 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     consumer: "Fiscal → Relatórios fiscais",
     consumers: [{ label: "Relatórios fiscais — exportação", href: "/fiscal/relatorios?tab=exportacao" }],
   },
+  accounting_dominio: {
+    label: "Domínio (Thomson Reuters) — lançamentos",
+    description: "Arquivo de lançamentos contábeis (texto com separador) para importação na Domínio, a partir dos títulos e baixas do período. Só configuração do layout e das contas — sem API: o arquivo é gerado no Financeiro e importado pelo escritório.",
+    providers: [
+      {
+        id: "dominio_txt",
+        label: "Arquivo texto de lançamentos (layout com separador)",
+        secrets: [],
+        config: ["dominioCompanyCode", "regime", "separator", "historyCode", "accountSuppliers", "accountCustomers", "accountCash", "accountDefaultExpense", "accountDefaultRevenue", "accountInterestPaid", "accountInterestReceived", "accountDiscountObtained", "accountDiscountGranted", "accountBankFees"],
+        test: "Sem conexão remota: confere se as contas obrigatórias do layout estão preenchidas. O arquivo é gerado em Financeiro › Exportação Domínio e importado na Domínio pelo escritório.",
+      },
+    ],
+    consumer: "Financeiro → Exportação para a Domínio",
+    consumers: [{ label: "Exportação de lançamentos (Domínio)", href: "/financeiro/exportacao-dominio" }],
+  },
   email: {
     label: "E-mail",
     description: "Envio de documentos, convites e recuperação de senha.",
@@ -118,6 +133,20 @@ export const CONFIG_LABEL: Record<string, string> = {
   linkedFirmName: "Escritório vinculado (Intercert)",
   providerId: "ID do provedor de e-mail no Appwrite",
   from: "Remetente (From)",
+  dominioCompanyCode: "Código da empresa na Domínio",
+  regime: "Regime dos lançamentos (competencia ou caixa)",
+  separator: "Separador de campos (padrão ;)",
+  historyCode: "Código do histórico padrão",
+  accountSuppliers: "Conta Fornecedores (passivo)",
+  accountCustomers: "Conta Clientes (ativo)",
+  accountCash: "Conta Caixa/Bancos padrão (sem código na conta financeira)",
+  accountDefaultExpense: "Conta de despesa/compra padrão (categoria sem código)",
+  accountDefaultRevenue: "Conta de receita padrão (categoria sem código)",
+  accountInterestPaid: "Juros e multas pagos",
+  accountInterestReceived: "Juros e multas recebidos",
+  accountDiscountObtained: "Descontos obtidos",
+  accountDiscountGranted: "Descontos concedidos",
+  accountBankFees: "Tarifas bancárias/taxas",
 };
 
 export const SECRET_LABEL: Record<string, string> = { accessToken: "Access token", connectorToken: "Token do conector", token: "Token da API", clientId: "Client ID", clientSecret: "Client secret", apiKey: "Chave da API" };
@@ -269,6 +298,11 @@ export async function saveIntegration(
   if (input.config?.connectionName) config.connectionName = String(input.config.connectionName).trim().slice(0, 120);
   if (config.accountantEmail) assert(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(config.accountantEmail)), "E-mail da contabilidade inválido.");
   if (config.connectorUrl) assert(/^https?:\/\//.test(String(config.connectorUrl)), "URL do conector inválida.");
+  if (input.kind === "accounting_dominio") {
+    const { validateDominioConfig } = await import("./accounting/dominio");
+    const problem = validateDominioConfig(config);
+    assert(!problem, problem ?? "", "invalid_config");
+  }
   const sk = scopeKey(ctx.companyId, input.branchId, input.kind);
   const id = detId("integration", sk);
   const data = {
@@ -441,6 +475,12 @@ export async function testIntegration(ctx: Ctx, kind: IntegrationKind, branchId:
         integ.provider === "file_import"
           ? { status: "configured_untested", ok: true, message: "Importação manual de arquivos (OFX/CSV/CNAB): não há conexão remota a testar. Use Financeiro → Conciliação para importar." }
           : { status: "unavailable", ok: false, message: "Conector de API bancária/Open Finance não implementado nesta versão — use a importação de arquivos." };
+    } else if (kind === "accounting_dominio") {
+      const { dominioConfigOf, dominioMissingAccounts } = await import("./accounting/dominio");
+      const missing = dominioMissingAccounts(dominioConfigOf(integ.config));
+      out = missing.length
+        ? { status: "error", ok: false, message: `Layout da Domínio sem as contas: ${missing.join(", ")}. Preencha e salve; lançamentos sem conta saem com o campo vazio e a Domínio recusa a linha.` }
+        : { status: "configured_untested", ok: true, message: "Layout configurado. Sem conexão remota: gere o arquivo em Financeiro › Exportação Domínio e importe-o na Domínio (Utilitários › Importação de lançamentos); confira o layout com o escritório na primeira importação." };
     } else if (kind === "email" || kind === "accounting") {
       const to = ctx.user.email;
       if (!to) out = { status: "error", ok: false, message: "Usuário logado sem e-mail para receber o teste." };
@@ -526,6 +566,7 @@ const JOB_PREFIX: Record<IntegrationKind, string[]> = {
   fiscal_nfse: ["fiscal.transmit", "fiscal.query", "fiscal.cancel"],
   bank: ["bank."],
   accounting: ["fiscal.accounting"],
+  accounting_dominio: ["accounting.dominio"],
   email: ["email.", "mail.", "notify.email"],
 };
 

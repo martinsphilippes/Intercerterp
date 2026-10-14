@@ -159,6 +159,7 @@ const ORIGIN_COLLECTION: Record<string, { collection: string; label: (d: Doc) =>
   purchase_order: { collection: "purchase_orders", label: (d) => `Pedido de compra nº ${d.number}` },
   product: { collection: "products", label: (d) => `Cadastro ${d.code}` },
   import: { collection: "product_imports", label: (d) => `Importação nº ${d.number}` },
+  freight_cte: { collection: "inbound_ctes", label: (d) => `CT-e nº ${d.cteNumber}` },
 };
 
 /** Rótulos legíveis das referências (venda nº, transferência nº …) buscados em lote. */

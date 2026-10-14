@@ -29,12 +29,69 @@ export interface NfeItem {
   vOutro: number;
   /** rastreabilidade (grupo rastro do item): lote, quantidade do lote (milésimos), fabricação e validade */
   rastro: Array<{ nLote: string; qLote: number; dFab: string | null; dVal: string | null }>;
+  /** seguro do item (vSeg), em centavos */
+  vSeg: number;
+  /** tributos do item conforme o XML (grupo imposto) — escrituração de entradas (FIS-24) */
+  tax: NfeItemTax;
+}
+
+/**
+ * Tributos do item lidos do XML (grupo imposto/ICMS*, IPI). Valores em centavos e alíquotas em pontos-base; campos
+ * ausentes no XML ficam 0/null. Informativo para o livro de entradas: o custo do recebimento não usa estes valores.
+ */
+export interface NfeItemTax {
+  /** grupo do ICMS no XML (ex.: ICMS00, ICMS10, ICMSSN102) */
+  icmsGroup: string | null;
+  orig: string | null;
+  /** CST do ICMS (regime normal) */
+  cst: string | null;
+  /** CSOSN (Simples Nacional) */
+  csosn: string | null;
+  vBC: number;
+  pICMS: number;
+  vICMS: number;
+  vBCST: number;
+  vICMSST: number;
+  vFCPST: number;
+  vICMSDeson: number;
+  ipiCst: string | null;
+  vBCIPI: number;
+  pIPI: number;
+  vIPI: number;
+  vIPIDevol: number;
+  vII: number;
 }
 
 export interface NfeDuplicata {
   nDup: string;
   dVenc: string;
   vDup: number;
+}
+
+/**
+ * Totais do XML (total/ICMSTot), em centavos. Os campos a partir de `vBC` foram acrescentados para a escrituração de
+ * entradas (FIS-24): ausentes no XML = 0. O recebimento continua usando só vProd/vFrete/vDesc/vOutro/vIPI/vST/vSeg/vNF.
+ */
+export interface NfeTotals {
+  vProd: number;
+  vFrete: number;
+  vDesc: number;
+  vOutro: number;
+  vIPI: number;
+  vST: number;
+  vSeg: number;
+  vICMS: number;
+  vNF: number;
+  vBC: number;
+  vBCST: number;
+  vICMSDeson: number;
+  vFCP: number;
+  vFCPST: number;
+  vII: number;
+  vIPIDevol: number;
+  vPIS: number;
+  vCOFINS: number;
+  vTotTrib: number;
 }
 
 export interface ParsedNfe {
@@ -47,7 +104,7 @@ export interface ParsedNfe {
   emitter: { cnpj: string | null; cpf: string | null; name: string; tradeName: string | null; ie: string | null; address: Record<string, string | null> };
   recipient: { cnpj: string | null; cpf: string | null; name: string | null };
   items: NfeItem[];
-  totals: { vProd: number; vFrete: number; vDesc: number; vOutro: number; vIPI: number; vST: number; vSeg: number; vICMS: number; vNF: number };
+  totals: NfeTotals;
   duplicatas: NfeDuplicata[];
   protocol: string | null;
   /** autorizada: protocolo com cStat 100 (autorizado o uso) ou 150 (autorizado fora de prazo) */
@@ -68,6 +125,40 @@ const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_
 
 const str = (v: any): string | null => (v == null || v === "" ? null : String(typeof v === "object" ? (v["#text"] ?? "") : v).trim() || null);
 const money = (v: any) => (str(v) ? toCents(str(v)!) : 0);
+
+/** Grupo de tributo do item: o primeiro filho (ex.: ICMS → ICMS00) com o nome do grupo. */
+function firstGroup(node: any): { name: string | null; g: any } {
+  if (!node || typeof node !== "object") return { name: null, g: {} };
+  const name = Object.keys(node).find((k) => !k.startsWith("@_") && k !== "#text") ?? null;
+  return { name, g: name ? (node[name] ?? {}) : {} };
+}
+
+/** Tributos do item (grupo imposto) — ICMS (normal ou Simples), ST, IPI e II. */
+export function parseItemTax(imposto: any, impostoDevol?: any): NfeItemTax {
+  const imp = imposto ?? {};
+  const { name: icmsGroup, g: icms } = firstGroup(imp.ICMS);
+  const ipi = imp.IPI ?? {};
+  const { g: ipiGroup } = firstGroup(Object.fromEntries(Object.entries(ipi).filter(([k]) => k === "IPITrib" || k === "IPINT")));
+  return {
+    icmsGroup,
+    orig: str(icms.orig),
+    cst: str(icms.CST),
+    csosn: str(icms.CSOSN),
+    vBC: money(icms.vBC),
+    pICMS: money(icms.pICMS),
+    vICMS: money(icms.vICMS),
+    vBCST: money(icms.vBCST),
+    vICMSST: money(icms.vICMSST),
+    vFCPST: money(icms.vFCPST),
+    vICMSDeson: money(icms.vICMSDeson),
+    ipiCst: str(ipiGroup.CST),
+    vBCIPI: money(ipiGroup.vBC),
+    pIPI: money(ipiGroup.pIPI),
+    vIPI: money(ipiGroup.vIPI),
+    vIPIDevol: money(impostoDevol?.IPI?.vIPIDevol),
+    vII: money(imp.II?.vII),
+  };
+}
 
 /** Dígito verificador da chave de acesso (módulo 11, pesos 2..9). */
 export function nfeKeyIsValid(key: string) {
@@ -126,6 +217,8 @@ export function parseNfeXml(xml: string): ParsedNfe {
       vDesc: money(p.vDesc),
       vFrete: money(p.vFrete),
       vOutro: money(p.vOutro),
+      vSeg: money(p.vSeg),
+      tax: parseItemTax(d.imposto, d.impostoDevol),
       rastro: ((p.rastro ?? []) as any[])
         .map((r) => ({ nLote: (str(r.nLote) ?? "").slice(0, 60), qLote: parseQty(str(r.qLote) ?? "0"), dFab: (str(r.dFab) ?? "").slice(0, 10) || null, dVal: (str(r.dVal) ?? "").slice(0, 10) || null }))
         .filter((r) => r.nLote),
@@ -151,7 +244,10 @@ export function parseNfeXml(xml: string): ParsedNfe {
     },
     recipient: { cnpj: str(dest.CNPJ), cpf: str(dest.CPF), name: str(dest.xNome) },
     items,
-    totals: { vProd: money(tot.vProd), vFrete: money(tot.vFrete), vDesc: money(tot.vDesc), vOutro: money(tot.vOutro), vIPI: money(tot.vIPI), vST: money(tot.vST), vSeg: money(tot.vSeg), vICMS: money(tot.vICMS), vNF: money(tot.vNF) },
+    totals: {
+      vProd: money(tot.vProd), vFrete: money(tot.vFrete), vDesc: money(tot.vDesc), vOutro: money(tot.vOutro), vIPI: money(tot.vIPI), vST: money(tot.vST), vSeg: money(tot.vSeg), vICMS: money(tot.vICMS), vNF: money(tot.vNF),
+      vBC: money(tot.vBC), vBCST: money(tot.vBCST), vICMSDeson: money(tot.vICMSDeson), vFCP: money(tot.vFCP), vFCPST: money(tot.vFCPST), vII: money(tot.vII), vIPIDevol: money(tot.vIPIDevol), vPIS: money(tot.vPIS), vCOFINS: money(tot.vCOFINS), vTotTrib: money(tot.vTotTrib),
+    },
     duplicatas: dups.map((d) => ({ nDup: str(d.nDup) ?? "", dVenc: str(d.dVenc) ?? "", vDup: money(d.vDup) })).filter((d) => d.dVenc && d.vDup > 0),
     protocol: str(prot?.nProt),
     authorized: AUTHORIZED_CSTAT.includes(str(prot?.cStat) ?? ""),
@@ -184,7 +280,13 @@ export interface SampleNfeInput {
   code?: number;
   emitter: { cnpj: string; name: string; tradeName?: string; ie?: string; uf?: string; cityCode?: string; cityName?: string };
   recipient: { cnpj: string; name: string; ie?: string };
-  items: Array<{ cProd: string; cEAN?: string | null; xProd: string; ncm?: string; cest?: string; cfop?: string; uCom?: string; qCom: number; vUnCom: number; vDesc?: number }>;
+  items: Array<{
+    cProd: string; cEAN?: string | null; xProd: string; ncm?: string; cest?: string; cfop?: string; uCom?: string; qCom: number; vUnCom: number; vDesc?: number;
+    /** ICMS do regime normal (grupo ICMS00; com ST, ICMS10) — centavos e alíquota em pontos-base. Ausente = Simples (CSOSN 102). */
+    icms?: { cst?: string; vBC: number; pICMS: number; vICMS: number; vBCST?: number; pICMSST?: number; vICMSST?: number };
+    /** IPI tributado (IPITrib) */
+    ipi?: { vBC: number; pIPI: number; vIPI: number };
+  }>;
   freight?: number;
   other?: number;
   duplicatas?: Array<{ dVenc: string; vDup?: number }>;
@@ -223,19 +325,35 @@ export function buildSampleNfeXml(i: SampleNfeInput) {
     out[0] += freight - out.reduce((a, b) => a + b, 0);
     return out;
   })();
-  const vNF = vProd - vDesc + freight + other;
+  // tributos informados nos itens (regime normal): somam ICMS/ST/IPI nos totais; sem eles o XML é o do Simples (zeros)
+  const sumTax = (f: (l: (typeof lines)[number]) => number) => lines.reduce((a, l) => a + f(l), 0);
+  const vBC = sumTax((l) => l.icms?.vBC ?? 0);
+  const vICMS = sumTax((l) => l.icms?.vICMS ?? 0);
+  const vBCST = sumTax((l) => l.icms?.vBCST ?? 0);
+  const vST = sumTax((l) => l.icms?.vICMSST ?? 0);
+  const vIPI = sumTax((l) => l.ipi?.vIPI ?? 0);
+  const vNF = vProd - vDesc + freight + other + vIPI + vST;
   const dups = i.duplicatas?.length ? i.duplicatas : [];
   const dupVals = dups.length ? (dups.every((d) => d.vDup != null) ? dups.map((d) => d.vDup!) : splitEven(vNF, dups.length)) : [];
   const det = lines
     .map(
-      (l, n) => `<det nItem="${n + 1}"><prod><cProd>${esc(l.cProd)}</cProd><cEAN>${l.cEAN ?? "SEM GTIN"}</cEAN><xProd>${esc(l.xProd)}</xProd><NCM>${l.ncm ?? "61091000"}</NCM>${l.cest ? `<CEST>${l.cest}</CEST>` : ""}<CFOP>${l.cfop ?? "5102"}</CFOP><uCom>${l.uCom ?? "UN"}</uCom><qCom>${q4(l.qCom)}</qCom><vUnCom>${(l.vUnCom / 100).toFixed(10)}</vUnCom><vProd>${dec(l.vProd)}</vProd><cEANTrib>${l.cEAN ?? "SEM GTIN"}</cEANTrib><uTrib>${l.uCom ?? "UN"}</uTrib><qTrib>${q4(l.qCom)}</qTrib><vUnTrib>${(l.vUnCom / 100).toFixed(10)}</vUnTrib>${shares[n] ? `<vFrete>${dec(shares[n])}</vFrete>` : ""}${l.vDesc ? `<vDesc>${dec(l.vDesc)}</vDesc>` : ""}<indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISOutr><CST>49</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS><COFINS><COFINSOutr><CST>49</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS></imposto></det>`,
+      (l, n) => `<det nItem="${n + 1}"><prod><cProd>${esc(l.cProd)}</cProd><cEAN>${l.cEAN ?? "SEM GTIN"}</cEAN><xProd>${esc(l.xProd)}</xProd><NCM>${l.ncm ?? "61091000"}</NCM>${l.cest ? `<CEST>${l.cest}</CEST>` : ""}<CFOP>${l.cfop ?? "5102"}</CFOP><uCom>${l.uCom ?? "UN"}</uCom><qCom>${q4(l.qCom)}</qCom><vUnCom>${(l.vUnCom / 100).toFixed(10)}</vUnCom><vProd>${dec(l.vProd)}</vProd><cEANTrib>${l.cEAN ?? "SEM GTIN"}</cEANTrib><uTrib>${l.uCom ?? "UN"}</uTrib><qTrib>${q4(l.qCom)}</qTrib><vUnTrib>${(l.vUnCom / 100).toFixed(10)}</vUnTrib>${shares[n] ? `<vFrete>${dec(shares[n])}</vFrete>` : ""}${l.vDesc ? `<vDesc>${dec(l.vDesc)}</vDesc>` : ""}<indTot>1</indTot></prod><imposto><ICMS>${icmsXml(l)}</ICMS>${l.ipi ? `<IPI><cEnq>999</cEnq><IPITrib><CST>50</CST><vBC>${dec(l.ipi.vBC)}</vBC><pIPI>${dec(l.ipi.pIPI)}</pIPI><vIPI>${dec(l.ipi.vIPI)}</vIPI></IPITrib></IPI>` : ""}<PIS><PISOutr><CST>49</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS><COFINS><COFINSOutr><CST>49</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS></imposto></det>`,
     )
     .join("");
   const cobr = dups.length
     ? `<cobr><fat><nFat>${i.number}</nFat><vOrig>${dec(vNF)}</vOrig><vDesc>0.00</vDesc><vLiq>${dec(vNF)}</vLiq></fat>${dups.map((d, n) => `<dup><nDup>${String(n + 1).padStart(3, "0")}</nDup><dVenc>${d.dVenc}</dVenc><vDup>${dec(dupVals[n])}</vDup></dup>`).join("")}</cobr>`
     : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
-${prot ? '<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">' : ""}<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${key}" versao="4.00"><ide><cUF>35</cUF><cNF>${key.slice(35, 43)}</cNF><natOp>Venda de mercadoria</natOp><mod>55</mod><serie>${series}</serie><nNF>${i.number}</nNF><dhEmi>${i.issueDate}T10:00:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>${i.emitter.cityCode ?? "3550308"}</cMunFG><tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>${key[43]}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>0</indFinal><indPres>9</indPres><procEmi>0</procEmi><verProc>Intercert-Exemplo</verProc></ide><emit><CNPJ>${i.emitter.cnpj}</CNPJ><xNome>${esc(i.emitter.name)}</xNome>${i.emitter.tradeName ? `<xFant>${esc(i.emitter.tradeName)}</xFant>` : ""}<enderEmit><xLgr>Rua Industrial</xLgr><nro>200</nro><xBairro>Distrito Industrial</xBairro><cMun>${i.emitter.cityCode ?? "3550308"}</cMun><xMun>${i.emitter.cityName ?? "Sao Paulo"}</xMun><UF>${i.emitter.uf ?? "SP"}</UF><CEP>03000000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderEmit><IE>${i.emitter.ie ?? "ISENTO"}</IE><CRT>1</CRT></emit><dest><CNPJ>${i.recipient.cnpj}</CNPJ><xNome>${esc(i.recipient.name)}</xNome><enderDest><xLgr>Rua das Flores</xLgr><nro>100</nro><xBairro>Centro</xBairro><cMun>3550308</cMun><xMun>Sao Paulo</xMun><UF>SP</UF><CEP>01001000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderDest><indIEDest>1</indIEDest><IE>${i.recipient.ie ?? "110042490114"}</IE></dest>${det}<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${dec(vProd)}</vProd><vFrete>${dec(freight)}</vFrete><vSeg>0.00</vSeg><vDesc>${dec(vDesc)}</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>${dec(other)}</vOutro><vNF>${dec(vNF)}</vNF></ICMSTot></total><transp><modFrete>${freight ? 0 : 9}</modFrete></transp>${cobr}<pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>${dec(vNF)}</vPag></detPag></pag><infAdic><infCpl>XML DE EXEMPLO PARA TESTE/DEMONSTRACAO - SEM VALOR FISCAL</infCpl></infAdic></infNFe></NFe>${prot ? `<protNFe versao="4.00"><infProt><tpAmb>${tpAmb}</tpAmb><verAplic>EXEMPLO</verAplic><chNFe>${key}</chNFe><dhRecbto>${i.issueDate}T10:01:00-03:00</dhRecbto><nProt>135${String(i.number).padStart(12, "0")}</nProt><cStat>${prot.cStat}</cStat><xMotivo>${esc(prot.xMotivo)}</xMotivo></infProt></protNFe></nfeProc>` : ""}`;
+${prot ? '<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">' : ""}<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${key}" versao="4.00"><ide><cUF>35</cUF><cNF>${key.slice(35, 43)}</cNF><natOp>Venda de mercadoria</natOp><mod>55</mod><serie>${series}</serie><nNF>${i.number}</nNF><dhEmi>${i.issueDate}T10:00:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>${i.emitter.cityCode ?? "3550308"}</cMunFG><tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>${key[43]}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>0</indFinal><indPres>9</indPres><procEmi>0</procEmi><verProc>Intercert-Exemplo</verProc></ide><emit><CNPJ>${i.emitter.cnpj}</CNPJ><xNome>${esc(i.emitter.name)}</xNome>${i.emitter.tradeName ? `<xFant>${esc(i.emitter.tradeName)}</xFant>` : ""}<enderEmit><xLgr>Rua Industrial</xLgr><nro>200</nro><xBairro>Distrito Industrial</xBairro><cMun>${i.emitter.cityCode ?? "3550308"}</cMun><xMun>${i.emitter.cityName ?? "Sao Paulo"}</xMun><UF>${i.emitter.uf ?? "SP"}</UF><CEP>03000000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderEmit><IE>${i.emitter.ie ?? "ISENTO"}</IE><CRT>${lines.some((l) => l.icms) ? 3 : 1}</CRT></emit><dest><CNPJ>${i.recipient.cnpj}</CNPJ><xNome>${esc(i.recipient.name)}</xNome><enderDest><xLgr>Rua das Flores</xLgr><nro>100</nro><xBairro>Centro</xBairro><cMun>3550308</cMun><xMun>Sao Paulo</xMun><UF>SP</UF><CEP>01001000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderDest><indIEDest>1</indIEDest><IE>${i.recipient.ie ?? "110042490114"}</IE></dest>${det}<total><ICMSTot><vBC>${dec(vBC)}</vBC><vICMS>${dec(vICMS)}</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>${dec(vBCST)}</vBCST><vST>${dec(vST)}</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${dec(vProd)}</vProd><vFrete>${dec(freight)}</vFrete><vSeg>0.00</vSeg><vDesc>${dec(vDesc)}</vDesc><vII>0.00</vII><vIPI>${dec(vIPI)}</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>${dec(other)}</vOutro><vNF>${dec(vNF)}</vNF></ICMSTot></total><transp><modFrete>${freight ? 0 : 9}</modFrete></transp>${cobr}<pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>${dec(vNF)}</vPag></detPag></pag><infAdic><infCpl>XML DE EXEMPLO PARA TESTE/DEMONSTRACAO - SEM VALOR FISCAL</infCpl></infAdic></infNFe></NFe>${prot ? `<protNFe versao="4.00"><infProt><tpAmb>${tpAmb}</tpAmb><verAplic>EXEMPLO</verAplic><chNFe>${key}</chNFe><dhRecbto>${i.issueDate}T10:01:00-03:00</dhRecbto><nProt>135${String(i.number).padStart(12, "0")}</nProt><cStat>${prot.cStat}</cStat><xMotivo>${esc(prot.xMotivo)}</xMotivo></infProt></protNFe></nfeProc>` : ""}`;
+}
+
+/** Grupo ICMS do item de exemplo: Simples (CSOSN 102) sem tributos informados; ICMS00/ICMS10 com eles. */
+function icmsXml(l: { icms?: { cst?: string; vBC: number; pICMS: number; vICMS: number; vBCST?: number; pICMSST?: number; vICMSST?: number } }) {
+  if (!l.icms) return "<ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102>";
+  const st = (l.icms.vICMSST ?? 0) > 0;
+  const grp = st ? "ICMS10" : "ICMS00";
+  const cst = l.icms.cst ?? (st ? "10" : "00");
+  return `<${grp}><orig>0</orig><CST>${cst}</CST><modBC>3</modBC><vBC>${dec(l.icms.vBC)}</vBC><pICMS>${dec(l.icms.pICMS)}</pICMS><vICMS>${dec(l.icms.vICMS)}</vICMS>${st ? `<modBCST>4</modBCST><vBCST>${dec(l.icms.vBCST ?? 0)}</vBCST><pICMSST>${dec(l.icms.pICMSST ?? 0)}</pICMSST><vICMSST>${dec(l.icms.vICMSST ?? 0)}</vICMSST>` : ""}</${grp}>`;
 }
 
 function splitEven(total: number, n: number) {

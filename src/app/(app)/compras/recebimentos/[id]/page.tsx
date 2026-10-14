@@ -83,7 +83,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // entrada sem pedido (COM-03): registrada em orderLink; recebimentos anteriores ao campo seguem pelos pedidos vinculados
   const withoutOrder = !linkedOrders.length;
   // devolução a fornecedor (COM-11): NF-e de devolução a partir do recebimento concluído, na filial do recebimento
-  const canReturn = confirmed && canDo(s.user, "fiscal.issue") && s.ctx.branchId === r.branchId && (await isFeatureOn(store, s.ctx.companyId, r.branchId, "devolucaoFornecedor", true));
+  // nota de entrada sem estoque (FIS-24): sem produtos — sem devolução, precificação nem etiquetas
+  const noStock = r.entryKind === "no_stock";
+  const canReturn = !noStock && confirmed && canDo(s.user, "fiscal.issue") && s.ctx.branchId === r.branchId && (await isFeatureOn(store, s.ctx.companyId, r.branchId, "devolucaoFornecedor", true));
   const steps = [
     { label: r.xmlFileId ? "NF-e importada" : r.origin === "manual" && withoutOrder ? "Nota lançada" : "Documento informado", hint: r.xmlFileId ? "XML validado" : r.nfeKey ? "Chave informada (sem XML)" : "Sem XML", state: "done" as const },
     { label: withoutOrder ? "Entrada sem pedido" : "Pedido vinculado", hint: linkedOrders.length ? linkedOrders.map((o) => `nº ${o.number}`).join(", ") : "Compra sem pedido de compra", state: (linkedOrders.length || r.orderLink === "without_order" || !draft ? "done" : "active") as "done" | "active" },
@@ -140,7 +142,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <>
             {r.xmlFileId && <LinkButton href={`/api/files/${r.xmlFileId}`}><Download className="size-4" /> XML</LinkButton>}
             {canReturn && <LinkButton href={`/fiscal/nfe/nova?origem=receipt:${id}`}><Undo2 className="size-4" /> Devolver ao fornecedor</LinkButton>}
-            <ReceiptShortcuts s={s} receipt={r} />
+            {!noStock && <ReceiptShortcuts s={s} receipt={r} />}
             {r.status === "confirming" && canReceive && <ActionButton variant="primary" action={resumeConfirmAction.bind(null, id)} label="Concluir confirmação interrompida" />}
             {draft && canReceive && <ActionButton variant="danger" action={cancelReceiptAction.bind(null, id)} label="Cancelar recebimento" askReason="Motivo do cancelamento (a chave poderá ser importada novamente):" />}
           </>
@@ -156,6 +158,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               {r.nfeKey && <p className="tabular font-mono text-xs text-slate-600">{keyFmt}</p>}
               <div className="mt-1 flex flex-wrap gap-1">
                 {r.xmlFileId ? <Badge tone="good">XML validado (estrutura e chave)</Badge> : <Badge tone="warn">Sem XML</Badge>}
+                {noStock && <Badge tone="info" title="Escriturada no livro de entradas; não movimenta estoque nem custo">Nota de entrada sem estoque</Badge>}
                 {r.emitter?.environment === "homologacao" && <Badge tone="bad" title="NF-e emitida em ambiente de homologação (tpAmb = 2): não tem valor fiscal">Homologação – sem valor fiscal</Badge>}
                 {r.emitter?.authorized && r.emitter?.environment !== "homologacao" && <Badge tone="good">Autorizada · protocolo {r.emitter?.protocol}</Badge>}
                 {r.emitter?.authorized && r.emitter?.environment === "homologacao" && <Badge tone="warn">Protocolo de homologação {r.emitter?.protocol}</Badge>}
@@ -228,7 +231,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                       <td className="tabular text-right">{formatQty(i.receivedQty)}</td>
                       <td className={cn("tabular text-right", i.receivedQty === i.invoicedQty ? "text-emerald-700" : "text-red-700")}>{formatQty(i.receivedQty - i.invoicedQty)}</td>
                       <td className="tabular text-right">{formatMoney(i.unitCost)}</td>
-                      <td className="tabular text-right">{formatMoney((i.freightShare ?? 0) + (i.otherShare ?? 0) - (i.discountShare ?? 0))}</td>
+                      <td className="tabular text-right">{formatMoney((i.freightShare ?? 0) + (i.otherShare ?? 0) - (i.discountShare ?? 0) + (i.cteShare ?? 0))}</td>
                       <td className="tabular text-right">{formatMoney(i.landedUnitCost ?? i.unitCost)}</td>
                       <td className="tabular text-xs" title={i.cfop ? `CFOP do fornecedor ${i.cfop}` : undefined}>{i.entryCfop ?? r.entryCfop ?? "—"}{i.cfop ? <span className="block text-slate-500">forn. {i.cfop}</span> : null}</td>
                       <td className="text-xs">{[i.lot, i.expiry ? `val. ${formatDate(i.expiry)}` : null].filter(Boolean).join(" · ") || "—"}</td>
@@ -269,7 +272,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               {divergences.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-red-800">{divergences.map((d: any, i: number) => <li key={i}>{d.message}</li>)}</ul> : <p className="text-sm text-emerald-700">Sem divergências.</p>}
             </Card>
           </div>
-          <SupplierReturnsCard store={store} companyId={s.ctx.companyId} receipt={r} />
+          {!noStock && <SupplierReturnsCard store={store} companyId={s.ctx.companyId} receipt={r} />}
           {movements.length > 0 && (
             <Card bodyClass="p-0" title="Movimentos de estoque gerados">
               <table className="table-base w-full text-sm">
@@ -298,6 +301,17 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </Card>
       )}
       {draft && !divergences.length && installments.length > 0 && <p className="mt-3 text-sm text-slate-600">Parcelas a gerar: {installments.map((x) => `${formatDate(x.dueDate)} ${formatMoney(x.amount)}`).join(" · ")} ({installments[0]?.source === "xml" ? "duplicatas do XML" : "condição de pagamento"})</p>}
+      {(r.cteLinks ?? []).length > 0 && (
+        <Card className="mt-5" title="Frete de CT-e (transportadora)" description={draft ? "Rateado no custo de entrada dos itens (pelo valor da linha) — entra no estoque na conclusão; não altera o valor devido ao fornecedor." : undefined}>
+          <ul className="space-y-1 text-sm">
+            {(r.cteLinks as Array<{ cteId: string; number: string; amount: number; mode: string }>).map((l) => (
+              <li key={l.cteId}>
+                <Link className="text-brand-700 hover:underline" href={`/compras/cte/${l.cteId}`}>CT-e nº {l.number}</Link> · {formatMoney(l.amount)} · {l.mode === "cost" ? "no custo de entrada" : "ajuste de custo após a conclusão"}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <Card className="mt-5" title="Linha do tempo">
         <Timeline store={store} refs={[`receipt:${id}`]} />
       </Card>

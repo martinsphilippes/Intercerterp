@@ -8,10 +8,11 @@ import { assert } from "@/lib/core/errors";
 import { requireAction, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { readFile, saveFile } from "@/lib/core/files";
-import { getSetting, setSetting } from "@/lib/core/settings";
+import { getSetting, isFeatureOn, setSetting } from "@/lib/core/settings";
 import { getIntegration, logIntegration } from "../integrations";
 import { MODEL_LABEL, DOC_STATUS_LABEL } from "./service";
 import { cancellations, outputBook, periodDocuments, rejections, servicesSummary, summarize, summaryByCfop, taxesByNcm, type FiscalReportFilter } from "./reports";
+import { ENTRY_BOOK_COLS, ENTRY_CFOP_COLS, entriesBook, entryCsvRows } from "./entries";
 
 /**
  * Pacote para a contabilidade (Tela 35): ZIP com os XMLs ARMAZENADOS do período e relatórios CSV.
@@ -151,6 +152,10 @@ export interface PackageResult {
   period: { from: string; to: string };
   /** entrega registrada na caixa de entrada do escritório vinculado */
   deliveredToFirm?: { deliveryId: string; firmCompanyId: string } | null;
+  /** FIS-21: XMLs de entrada (NF-e dos recebimentos e CT-e de frete) incluídos e documentos do livro de entradas */
+  entryXmlCount?: number;
+  entryDocs?: number;
+  missingEntryXml?: number;
 }
 
 /** Gera o ZIP do período e grava no armazenamento (Arquivos), retornando o resumo real do conteúdo. */
@@ -196,6 +201,40 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
   add("relatorios/cancelamentos.csv", csv(CANCEL_COLS, (await cancellations(ctx, { ...f, includeSimulated: true })).map((r) => ({ ...r, modelLabel: MODEL_LABEL[r.model], simLabel: r.simulated ? "SIMULAÇÃO" : "" }))));
   add("relatorios/rejeicoes.csv", csv(REJECT_COLS, (await rejections(ctx, { ...f, includeSimulated: true })).map((r) => ({ ...r, modelLabel: MODEL_LABEL[r.model], numberOrRef: r.number ?? r.ref, statusLabel: DOC_STATUS_LABEL[r.status], currentLabel: DOC_STATUS_LABEL[r.currentStatus] }))));
   add("relatorios/documentos-do-periodo.csv", csv(DOC_COLS, docRows(docs)));
+  // FIS-21/FIS-24: XMLs das compras (NF-e dos recebimentos e CT-e de frete) e o livro de entradas do período — em
+  // pasta própria; nada do que é de saída muda. Desligado `feature.livroEntradas`, o pacote é o de antes.
+  const withEntries = await isFeatureOn(ctx.store, ctx.companyId, f.branchId ?? ctx.branchId, "livroEntradas", true);
+  let entryXmlCount = 0;
+  let missingEntryXml = 0;
+  let entryDocs = 0;
+  let entryLines: string[] = [];
+  if (withEntries) {
+    const eb = await entriesBook(ctx, { from: f.from, to: f.to, branchId: f.branchId ?? null });
+    entryDocs = eb.totals.docs;
+    const used = new Set<string>();
+    for (const x of eb.xmlFiles) {
+      try {
+        const { meta, data } = await readFile(ctx, x.fileId);
+        let name = meta.name;
+        for (let n = 2; used.has(`${x.kind}/${name}`); n++) name = `${n}-${meta.name}`;
+        used.add(`${x.kind}/${name}`);
+        add(`xml-entradas/${x.kind}/${name}`, data);
+        entryXmlCount++;
+      } catch {
+        missingEntryXml++;
+      }
+    }
+    add("relatorios/livro-registro-entradas.csv", csv(ENTRY_BOOK_COLS, entryCsvRows(eb.rows)));
+    add("relatorios/entradas-por-cfop.csv", csv(ENTRY_CFOP_COLS, eb.byCfop));
+    entryLines = [
+      "",
+      "ENTRADAS (critério: recebimentos de mercadoria concluídos e notas sem estoque pela data de entrada, CT-e de frete pela data do registro, NF-e de entrada emitidas pela empresa pela emissão)",
+      `- Documentos de entrada: ${eb.totals.docs} · valor contábil ${formatMoney(eb.totals.value)} · base ICMS ${formatMoney(eb.totals.icmsBase)} · ICMS ${formatMoney(eb.totals.icms)} · IPI ${formatMoney(eb.totals.ipi)} · ICMS-ST ${formatMoney(eb.totals.st)}`,
+      `- XMLs de compra incluídos (pasta xml-entradas: nfe = NF-e de fornecedores, cte = CT-e de frete): ${entryXmlCount}${missingEntryXml ? ` · ${missingEntryXml} ilegível(is)` : ""}`,
+      eb.pendingReceipts.length ? `- ATENÇÃO: ${eb.pendingReceipts.length} recebimento(s) com NF-e emitida no período ainda em conferência (fora do livro): ${eb.pendingReceipts.map((p) => `nº ${p.number}${p.nfeNumber ? ` (NF-e ${p.nfeNumber})` : ""}`).join(", ")}` : "- Nenhum recebimento com NF-e do período pendente de conferência.",
+      "- Relatórios: relatorios/livro-registro-entradas.csv e relatorios/entradas-por-cfop.csv.",
+    ];
+  }
   const readme = [
     `PACOTE PARA A CONTABILIDADE — ${company.name} (CNPJ ${company.cnpj ?? "—"})`,
     `Filial: ${branchName ?? "—"}`,
@@ -217,6 +256,7 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
     `XML incluídos: ${xmlCount}${simulatedXml ? ` — dos quais ${simulatedXml} de SIMULAÇÃO (pasta xml/SIMULACAO-sem-validade-fiscal), SEM VALIDADE FISCAL` : ""}`,
     missingXml.length ? `XML AUSENTES no armazenamento (${missingXml.length}): ${missingXml.map((m) => m.label).join("; ")}` : "Nenhum XML ausente.",
     summary.simulatedCount ? `ATENÇÃO: ${summary.simulatedCount} documento(s) do período foram emitidos pelo provedor de SIMULAÇÃO e não têm validade fiscal.` : "",
+    ...entryLines,
   ]
     .filter((l) => l !== undefined)
     .join("\r\n");
@@ -226,7 +266,7 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
   const fileName = `contabilidade-${f.from}-a-${f.to}${f.branchId || ctx.branchId ? "-filial" : ""}.zip`;
   const file = await saveFile(ctx, { bucket: "documents", name: fileName, mime: "application/zip", data: buf, entityType: "fiscal_export", entityId: `${f.from}:${f.to}`, kind: "accounting_package", branchId: f.branchId ?? ctx.branchId });
   await audit(ctx, { module: "fiscal", action: "export.package", entityType: "file", entityId: file.id, summary: `Pacote contábil ${formatDate(f.from)}–${formatDate(f.to)} gerado: ${xmlCount} XML, ${docs.length} documentos${missingXml.length ? `, ${missingXml.length} XML ausente(s)` : ""}`, after: { xmlCount, simulatedXml, missing: missingXml.length } });
-  const result: PackageResult = { fileId: file.id, fileName, sizeBytes: buf.length, xmlCount, simulatedXml, missingXml, docs: docs.length, period: { from: f.from, to: f.to } };
+  const result: PackageResult = { fileId: file.id, fileName, sizeBytes: buf.length, xmlCount, simulatedXml, missingXml, docs: docs.length, period: { from: f.from, to: f.to }, ...(withEntries ? { entryXmlCount, entryDocs, missingEntryXml } : {}) };
   // empresa vinculada a um escritório contábil no Intercert: o pacote entra na caixa de entrada dele automaticamente
   const { deliverPackageToFirm } = await import("../accounting/deliveries");
   const delivery = await deliverPackageToFirm(ctx, { ...result, missingXml: missingXml.length, branchId: f.branchId ?? ctx.branchId }).catch((e) => {

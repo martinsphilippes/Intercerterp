@@ -12,7 +12,7 @@ import { allocate, formatMoney, formatQty, lineTotal, roundDiv, QTY } from "@/li
 import { buildSchedule, createTitle } from "./finance";
 import { defaultWarehouse, postMovements } from "./stock";
 import { receiptLotBlockers, receiptLotSplit } from "./lots";
-import { parseNfeXml, nfeKeyIsValid, type ParsedNfe } from "./nfe-xml";
+import { parseNfeXml, nfeKeyIsValid, type NfeItemTax, type ParsedNfe } from "./nfe-xml";
 import { CONFIRMED, ORDER_STATUS_LABEL, netUnitCost } from "./purchase-calc";
 import { orderItems, refreshOrderReceipts, remainingQty } from "./purchases";
 import { occupyDecisionSlots } from "./approvals";
@@ -115,6 +115,22 @@ export interface ReceiptItem {
   landedUnitCost?: number;
   /** custo total da linha com rateios (centavos): o estoque entra por este valor exato */
   landedValue?: number;
+  /**
+   * Valores fiscais do item no XML (FIS-24 — livro de entradas): vProd/vDesc/vFrete/vSeg/vOutro e tributos (ICMS, ST,
+   * IPI). Só os diferentes de zero são gravados. Informativo: o custo do recebimento (computeReceipt) não os usa.
+   */
+  fiscal?: ReceiptItemFiscal | null;
+  /** frete de CT-e de entrada rateado no custo do item (COM-10), centavos — somado ao landedValue fora do computeReceipt */
+  cteShare?: number;
+}
+
+/** Valores fiscais do item lidos do XML (centavos; alíquotas em pontos-base). Campos ausentes = 0/null. */
+export type ReceiptItemFiscal = Partial<{ vProd: number; vDesc: number; vFrete: number; vSeg: number; vOutro: number; /** valor contábil informado (nota sem estoque lançada sem XML) */ vItem: number } & NfeItemTax>;
+
+/** Valores fiscais do item do XML, sem os campos zerados/vazios (o recebimento guarda só o que existe na nota). */
+export function itemFiscalOf(it: ParsedNfe["items"][number]): ReceiptItemFiscal {
+  const all: Record<string, unknown> = { vProd: it.vProd, vDesc: it.vDesc, vFrete: it.vFrete, vSeg: it.vSeg, vOutro: it.vOutro, ...it.tax };
+  return Object.fromEntries(Object.entries(all).filter(([, v]) => v !== null && v !== 0 && v !== "")) as ReceiptItemFiscal;
 }
 
 export interface Divergence {
@@ -349,6 +365,24 @@ export function computeReceipt(r: { items: ReceiptItem[]; freight: number; other
   return { items, productsTotal, dueTotal, divergences };
 }
 
+/**
+ * Rateio do frete de CT-e de entrada (COM-10) nos itens ativos (estocados, com quantidade), proporcional ao valor da
+ * linha — o mesmo critério do frete da NF-e em computeReceipt. Soma a parte de cada item ao custo de entrada
+ * (landedValue/landedUnitCost). Itens fora do estoque ficam com parte zero.
+ */
+export function applyCteShares(items: ReceiptItem[], amount: number) {
+  const active = items.filter((it) => !it.ignore && it.skuId && it.receivedQty > 0);
+  for (const it of items) if (!active.includes(it)) it.cteShare = 0;
+  if (!active.length || amount <= 0) return items;
+  const shares = allocate(amount, active.map((it) => it.lineValue ?? 0));
+  active.forEach((it, i) => {
+    it.cteShare = shares[i] ?? 0;
+    it.landedValue = (it.landedValue ?? 0) + it.cteShare;
+    it.landedUnitCost = roundDiv(it.landedValue * QTY, it.receivedQty);
+  });
+  return items;
+}
+
 export interface OrderChargeLine {
   id: string;
   qty: number;
@@ -444,6 +478,9 @@ async function recompute(ctx: Ctx, r: Doc, patch: Record<string, any> = {}) {
     Object.assign(charges, { freight: c.freight, otherExpenses: c.otherExpenses, discount: c.discount });
     comp = computeReceipt({ ...input, ...charges }, lines as any);
   }
+  // CT-e de entrada vinculado (COM-10): frete do transportador rateado no custo dos itens pelo mesmo critério do frete
+  // da nota (valor da linha). Fora do computeReceipt e fora do valor devido ao fornecedor (o CT-e tem título próprio).
+  if ((merged.cteFreight ?? 0) > 0) applyCteShares(comp.items, merged.cteFreight);
   const term = merged.paymentTermId ? await ctx.store.get("payment_terms", merged.paymentTermId) : null;
   const amount = effectsOf(merged).createPayable ? payableAmount({ dueTotal: comp.dueTotal, invoicedTotal: merged.invoicedTotal, differenceAction: merged.differenceAction }) : 0;
   const base = merged.nfeIssueDate ? toLocalDate(merged.nfeIssueDate) : today();
@@ -465,7 +502,8 @@ async function recompute(ctx: Ctx, r: Doc, patch: Record<string, any> = {}) {
 
 // ───────────────────────────── Criação
 
-async function companyCnpjs(store: Store, companyId: string) {
+/** CNPJs da empresa e das filiais (destinatário/tomador de documentos de entrada). */
+export async function companyCnpjs(store: Store, companyId: string) {
   const c = await store.get("companies", companyId);
   const bs = await listAll(store, "branches", { filters: [["eq", "companyId", companyId]] });
   return new Set([c?.cnpj, ...bs.map((b) => b.cnpj)].filter(Boolean).map((x) => onlyDigits(x)));
@@ -541,6 +579,8 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
       idx: i + 1, nItem: it.nItem, cProd: it.cProd, cEAN: it.cEAN, xProd: it.xProd, uCom: it.uCom, ncm: it.ncm, cest: it.cest, cfop: it.cfop, entryCfop: convertCfop(it.cfop, pairs), invoicedQtySupplier: it.qCom, conversionFactor: m.conversionFactor,
       invoicedQty, invoicedValue: net, invoiceUnitCost: unit, skuId: m.skuId, sku: sku?.sku ?? null, description: sku?.name ?? it.xProd, unitCode: sku?.unitCode ?? it.uCom, mapping: m.mapping,
       expectedQty: 0, receivedQty: invoicedQty, unitCost: unit, ignore: false, divergence: null,
+      // valores fiscais do item (livro de entradas — FIS-24); não entram no custo
+      fiscal: itemFiscalOf(it),
       // lote/validade do XML (grupo rastro): o primeiro preenche a conferência; com mais de um, todos vão ao estoque
       ...(it.rastro?.length ? { lot: it.rastro[0].nLote, expiry: it.rastro[0].dVal, mfg: it.rastro[0].dFab, ...(it.rastro.length > 1 ? { rastro: it.rastro } : {}) } : {}),
     });
@@ -1298,6 +1338,102 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
     related: [`supplier:${r.supplierId}`, ...(r.orderIds ?? []).map((o: string) => `purchase_order:${o}`), ...(titleId ? [`title:${titleId}`] : [])],
   });
   return r;
+}
+
+// ───────────────────────────── CT-e de entrada (COM-10)
+
+export interface CteLink {
+  cteId: string;
+  key: string;
+  number: string;
+  amount: number;
+  /** cost = rateado no custo de entrada (recebimento em conferência); adjustment = ajuste de custo (já concluído) */
+  mode: "cost" | "adjustment";
+}
+
+export interface CteItemAdjustment {
+  idx: number;
+  skuId: string;
+  description: string;
+  share: number;
+  /** parte absorvida pelo estoque existente (movimento cost_adjust) */
+  absorbed: number;
+  /** parte das unidades já vendidas/baixadas: não volta ao estoque (fica registrada para a contabilidade) */
+  notAbsorbed: number;
+  movementId: string | null;
+}
+
+/**
+ * Lança o frete de um CT-e de entrada num recebimento (idempotente por CT-e):
+ *  - em conferência: soma ao `cteFreight` e recalcula — o frete entra no custo de entrada dos itens na conclusão pelo
+ *    mesmo rateio (valor da linha), sem mudar o valor devido ao fornecedor;
+ *  - concluído: ajuste de custo documentado — a parte de cada item é rateada pelo valor da linha; a fração das
+ *    unidades ainda em estoque no depósito do recebimento entra no custo médio (movimento `cost_adjust`, quantidade
+ *    zero) e a fração já vendida/baixada fica registrada como não absorvida. O último custo do SKU é atualizado só se
+ *    ainda for o deste recebimento.
+ */
+export async function addCteFreight(ctx: Ctx, receiptId: string, link: Omit<CteLink, "mode">): Promise<{ mode: CteLink["mode"]; adjustments: CteItemAdjustment[] }> {
+  const r = await ctx.store.getOrThrow("receipts", receiptId);
+  assert(r.companyId === ctx.companyId, "Recebimento de outra empresa.");
+  const links: CteLink[] = r.cteLinks ?? [];
+  const prior = links.find((l) => l.cteId === link.cteId);
+  // já rateado no custo de entrada (lançado em conferência): a conclusão posterior levou o frete ao estoque
+  if (prior?.mode === "cost") return { mode: "cost", adjustments: [] };
+  if (r.status === "draft") {
+    const patch = { cteLinks: [...links, { ...link, mode: "cost" as const }], cteFreight: (r.cteFreight ?? 0) + link.amount };
+    const calc = await recompute(ctx, r, patch);
+    await ctx.store.update("receipts", receiptId, { ...patch, ...omit(calc, "payable") });
+    await audit(ctx, { module: "purchases", action: "receipt.cte_freight", entityType: "receipt", entityId: receiptId, summary: `Recebimento nº ${r.number}: frete do CT-e nº ${link.number} (${formatMoney(link.amount)}) rateado no custo de entrada dos itens (entra no estoque na conclusão)`, related: [`inbound_cte:${link.cteId}`] });
+    return { mode: "cost", adjustments: [] };
+  }
+  assert(r.status === "confirmed", `Recebimento nº ${r.number} ${r.status === "cancelled" ? "cancelado" : "em conclusão"}: não recebe frete de CT-e.`);
+  const items: ReceiptItem[] = r.items ?? [];
+  const active = items.filter((it) => !it.ignore && it.skuId && it.receivedQty > 0);
+  const shares = active.length ? allocate(link.amount, active.map((it) => it.lineValue ?? 0)) : [];
+  const adjustments: CteItemAdjustment[] = [];
+  const eff = effectsOf(r);
+  for (const [i, it] of active.entries()) {
+    const share = shares[i] ?? 0;
+    if (share <= 0) continue;
+    const idemKey = `cte:${link.cteId}:${receiptId}:${it.idx}`;
+    const movId = detId("mov", idemKey);
+    let mov = await ctx.store.get("stock_movements", movId);
+    if (!mov && eff.updateStock) {
+      const bal = await ctx.store.get("stock_balances", detId("bal", r.warehouseId, it.skuId!));
+      const onHand = Math.max(0, bal?.physical ?? 0);
+      const absorbed = roundDiv(share * Math.min(onHand, it.receivedQty), it.receivedQty);
+      if (absorbed > 0) {
+        await postMovements(ctx, [{ warehouseId: r.warehouseId, skuId: it.skuId!, qty: 0, type: "cost_adjust", totalCost: absorbed, originType: "freight_cte", originId: link.cteId, reason: `Frete do CT-e nº ${link.number} — recebimento nº ${r.number}${r.nfeNumber ? ` (NF-e ${r.nfeNumber})` : ""}`, idemKey }]);
+        mov = await ctx.store.get("stock_movements", movId);
+      }
+    }
+    const absorbed = mov?.totalCost ?? 0;
+    adjustments.push({ idx: it.idx, skuId: it.skuId!, description: it.description, share, absorbed, notAbsorbed: share - absorbed, movementId: mov?.id ?? null });
+    // último custo do SKU: só quando ainda é o custo deste recebimento (nenhuma entrada posterior o alterou)
+    if (eff.updateCost) {
+      const sku = await ctx.store.get("skus", it.skuId!);
+      const landed = it.landedValue ?? lineTotal(it.unitCost, it.receivedQty);
+      const before = it.landedUnitCost ?? it.unitCost;
+      const after = roundDiv((landed + share) * QTY, it.receivedQty);
+      const phId = detId("ph", "cte", link.cteId, it.skuId!);
+      if (sku && sku.costAcquisition === before && after !== before && !(await ctx.store.get("price_history", phId))) {
+        await ctx.store.update("skus", sku.id, { costAcquisition: after, costTotal: after + (sku.costAdditional ?? 0) });
+        await ctx.store.create("price_history", { companyId: ctx.companyId, branchId: r.branchId, createdBy: ctx.user.id, skuId: sku.id, productId: sku.productId, priceTableId: null, field: "costAcquisition", oldValue: before, newValue: after, reason: `Frete do CT-e nº ${link.number} rateado no recebimento nº ${r.number}` }, phId).catch((e) => {
+          if (!isConflict(e)) throw e;
+        });
+      }
+    }
+  }
+  if (!prior) {
+    await ctx.store.update("receipts", receiptId, { cteLinks: [...links, { ...link, mode: "adjustment" }], cteFreight: (r.cteFreight ?? 0) + link.amount });
+    const abs = adjustments.reduce((a, x) => a + x.absorbed, 0);
+    await audit(ctx, {
+      module: "purchases", action: "receipt.cte_adjustment", entityType: "receipt", entityId: receiptId,
+      summary: `Recebimento nº ${r.number} (concluído): frete do CT-e nº ${link.number} (${formatMoney(link.amount)}) lançado como ajuste de custo — ${formatMoney(abs)} no custo médio do estoque existente, ${formatMoney(link.amount - abs)} referente a unidades já baixadas (não absorvido)`,
+      related: [`inbound_cte:${link.cteId}`],
+    });
+  }
+  return { mode: "adjustment", adjustments };
 }
 
 /** Movimentos de estoque gerados pelo recebimento. */
