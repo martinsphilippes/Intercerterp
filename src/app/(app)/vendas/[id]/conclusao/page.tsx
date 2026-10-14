@@ -1,7 +1,7 @@
 import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
 import { canViewBranch } from "../../queries";
-import { AlertTriangle, CheckCircle2, Eye, LogOut, Printer } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Eye, LogOut, Printer } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { formatMoney, formatQty } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatDoc, formatPhone } from "@/lib/core/text";
 import { nameMap } from "@/lib/server/lookups";
+import { featureOn } from "@/lib/server/features";
 import { EmailReceipt, FiscalStatus, NewSaleShortcut, ReceiptAutomation, WhatsAppLink } from "../../sale-widgets";
 
 export const metadata = { title: "Venda concluída" };
@@ -37,6 +38,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const c = sale.customerSnapshot;
   const deferredTitles = payments.filter((p) => p.titleId && ["crediario", "boleto"].includes(p.methodKind)).map((p) => p.titleId);
   const installments = deferredTitles.length ? await listAll(store, "installments", { filters: [["eq", "titleId", deferredTitles]], orderBy: [{ field: "dueDate" }] }) : [];
+  // carnê do crediário/boleto (FIN-06)
+  const carneTitleId = sale.status === "completed" && installments.some((i) => ["open", "partial"].includes(i.status)) && (await featureOn(s, "carne")) ? (deferredTitles[0] as string) : null;
   const company = await store.get("companies", sale.companyId);
   const units = items.reduce((a, i) => a + i.qty, 0);
   const waText = `${company?.tradeName || company?.name}: comprovante da compra nº ${sale.number} (${formatDateTime(sale.completedAt)}) — total ${formatMoney(sale.total)}. ${items.map((i) => `${formatQty(i.qty)} × ${i.description}`).join("; ")}.${doc?.status === "authorized" && doc.accessKey ? ` NFC-e chave ${doc.accessKey}.` : ""} Obrigado!`;
@@ -51,6 +54,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         actions={
           <>
             <LinkButton href={`/vendas/${id}/recibo?print=1`} target="_blank"><Printer className="size-4" /> Imprimir recibo</LinkButton>
+            {carneTitleId && <LinkButton href={`/financeiro/receber/${carneTitleId}/carne?print=1`} target="_blank"><BookOpen className="size-4" /> Imprimir carnê</LinkButton>}
             <LinkButton href={`/vendas/${id}`}><Eye className="size-4" /> Consultar esta venda</LinkButton>
             <LinkButton href="/vendas" variant="ghost"><LogOut className="size-4" /> Sair do PDV</LinkButton>
           </>

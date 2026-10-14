@@ -1,6 +1,6 @@
 import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
-import { BadgeCheck, Ban, CreditCard, Download, Mail, Paperclip, Pencil, Receipt, Undo2 } from "lucide-react";
+import { BadgeCheck, Ban, BookOpen, CreditCard, Download, Mail, Paperclip, Pencil, Receipt, Undo2 } from "lucide-react";
 import type { SessionInfo } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import { formatMoney } from "@/lib/money";
 import { formatDate, formatDateTime, today } from "@/lib/dates";
 import { can, canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
+import { featureOn } from "@/lib/server/features";
 import { dueState, lateChargeParams, RENEG_MAX_ITEMS, renegotiationBlockMessage, type TitleKind } from "@/domain/finance";
 import { ORIGIN_LABEL, originHref, partyHref, titleDetail } from "../queries";
 import { approvePayableAction, cancelTitleAction, reverseSettlementAction, revokeApprovalAction, sendNoticeAction, undoRenegotiationAction, updateInstallmentAction, updateTitleAction, uploadAttachmentAction } from "../actions";
@@ -75,6 +76,8 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
       ? await collectionContext(s.ctx.store, s.ctx.companyId, t.branchId ?? s.ctx.branchId, t0)
       : null;
   const isCard = t.originType === "sale_card";
+  // carnê (FIN-06): título a receber com parcelas ativas, exceto recebível de cartão
+  const showCarne = rec && !isCard && t.status !== "cancelled" && d.installments.some((i) => !["cancelled", "renegotiated"].includes(i.status)) && (await featureOn(s, "carne"));
   const isReneg = t.originType === "renegotiation" && t.status !== "cancelled";
   const renegNested = d.installments.some((i) => i.status === "renegotiated");
   // título original já cancelado: desfazer apenas cancela este título (nada volta ao saldo do original)
@@ -148,6 +151,11 @@ export async function TitleDetail({ s, kind, id, tab }: { s: SessionInfo; kind: 
                   <Textarea name="reason" required rows={2} maxLength={300} />
                 </Field>
               </FormDialog>
+            )}
+            {showCarne && (
+              <LinkButton href={`${self}/carne?print=1`} target="_blank">
+                <BookOpen className="size-4" /> Imprimir carnê
+              </LinkButton>
             )}
             {activeSettlements.length > 0 && (
               <LinkButton href={`${self}/recibo`}>

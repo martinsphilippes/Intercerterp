@@ -25,7 +25,7 @@ export interface ParamDef {
   installation?: boolean;
 }
 
-export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Notificações", "Usuários", "Regional", "Recursos"];
+export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Financeiro", "Notificações", "Usuários", "Regional", "Recursos"];
 
 export const PARAMS: ParamDef[] = [
   {
@@ -98,6 +98,13 @@ export const PARAMS: ParamDef[] = [
     key: "feature.recebimentoPdv", group: "Recursos", label: "Receber parcelas do crediário no PDV", type: "bool", scopes: ["company", "branch"], default: true,
     help: "Mostra no PDV a ação “Receber parcelas” (F9): o operador localiza o cliente, escolhe as parcelas em aberto (com multa e juros por atraso) e recebe em dinheiro, cartão ou Pix no caixa aberto. O dinheiro recebido entra no dinheiro esperado do caixa e todos os meios aparecem no fechamento em “Recebimentos de crediário”. A baixa é a mesma do Financeiro (Contas a receber). Desligado, a ação não aparece e nenhum recebimento novo é registrado no caixa (estornos de recebimentos já feitos continuam possíveis).",
     usedBy: "PDV (Receber parcelas) e Caixa (previsto e fechamento)",
+  },
+  { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
+  { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },
+  {
+    key: "finance.dueDateNonBusinessDay", group: "Financeiro", label: "Vencimento em dia não útil", type: "select", scopes: ["company", "branch"], default: "keep",
+    help: "Ao gerar parcelas por condição de pagamento (venda a prazo no PDV e lançamento manual de títulos), o vencimento que cair em sábado, domingo ou feriado nacional de data fixa pode ser levado ao próximo dia útil. Feriados móveis (Carnaval, Sexta-feira Santa, Corpus Christi), estaduais e municipais não são considerados. Não altera parcelas já geradas.",
+    options: [{ value: "keep", label: "Manter a data gerada" }, { value: "next", label: "Levar para o próximo dia útil" }], usedBy: "PDV (venda a prazo) e Financeiro (novo título)",
   },
   { key: "users.inviteExpiryDays", group: "Usuários", label: "Validade do convite de primeiro acesso", help: "Depois deste prazo o link de convite deixa de funcionar e precisa ser reenviado.", type: "int", scopes: ["company"], default: 7, min: 1, max: 30, unit: "dias", usedBy: "Usuários e permissões (convites)" },
   {

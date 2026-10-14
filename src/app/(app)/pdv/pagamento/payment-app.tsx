@@ -71,6 +71,8 @@ export function PaymentApp(props: {
   drafts: Draft[];
   exchangeVoucher: { code: string; balance: number; returnNumber: number } | null;
   today: string;
+  /** vencimento em dia não útil (FIN-26) — mesma regra aplicada na conclusão da venda */
+  dueRule?: "keep" | "next";
   initialMethodId: string | null;
   emitFiscal: boolean;
   fiscalLabel: string;
@@ -596,7 +598,7 @@ function DeferredForm({ method, remaining, onAdd, props }: { method: Method; rem
   const [amount, setAmount] = useState(remaining);
   const [termId, setTermId] = useState(props.terms.find((t) => t.installments > 1)?.id ?? props.terms[0]?.id ?? "");
   const term = props.terms.find((t) => t.id === termId) ?? null;
-  const schedule = useMemo(() => previewSchedule(amount, term ? { installments: term.installments, firstDueDays: term.firstDueDays, intervalDays: term.intervalDays } : { installments: 1, firstDueDays: 30, intervalDays: 30 }, props.today), [amount, term, props.today]);
+  const schedule = useMemo(() => previewSchedule(amount, term ? { installments: term.installments, firstDueDays: term.firstDueDays, intervalDays: term.intervalDays } : { installments: 1, firstDueDays: 30, intervalDays: 30 }, props.today, props.dueRule), [amount, term, props.today, props.dueRule]);
   const isCred = method.kind === "crediario";
   const c = props.customer!;
   const overLimit = isCred && amount > c.creditAvailable;

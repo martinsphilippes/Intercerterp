@@ -1,6 +1,6 @@
 import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
-import { Ban, Printer, Send, ShoppingCart, Undo2 } from "lucide-react";
+import { Ban, BookOpen, Printer, Send, ShoppingCart, Undo2 } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatDoc, formatPhone } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
+import { featureOn } from "@/lib/server/features";
 import { dueState } from "@/domain/finance";
 import { MOVEMENT_LABEL } from "@/domain/stock";
 import { COMPENSATION_LABEL, openCancelPending, REFUND_METHOD_LABEL } from "@/domain/sales";
@@ -56,6 +57,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const canCancel = sale.status === "completed" && (sale.returnedTotal ?? 0) === 0 && canDo(s.user, "sale.cancel") && s.ctx.branchId === sale.branchId;
   const canReturn = sale.status === "completed" && returnable > 0 && canDo(s.user, "sale.return") && s.ctx.branchId === sale.branchId;
   const titleLink = (t: any) => `/financeiro/${t.kind === "payable" ? "pagar" : "receber"}/${t.id}`;
+  // carnê do crediário/boleto da venda (FIN-06): título a prazo com parcela em aberto
+  const carneTitle = d.titles.find((t) => t.kind === "receivable" && t.originType === "sale" && ["open", "partial"].includes(t.status)) ?? null;
+  const showCarne = Boolean(carneTitle) && (await featureOn(s, "carne"));
   const waText = `Comprovante da compra nº ${sale.number} (${formatDateTime(sale.completedAt)}) — total ${formatMoney(sale.total)}.`;
   return (
     <>
@@ -75,6 +79,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         actions={
           <>
             <LinkButton href={`${base}/recibo?print=1`} target="_blank"><Printer className="size-4" /> Imprimir</LinkButton>
+            {showCarne && <LinkButton href={`/financeiro/receber/${carneTitle!.id}/carne?print=1`} target="_blank"><BookOpen className="size-4" /> Imprimir carnê</LinkButton>}
             <LinkButton href={`${base}?tab=visao#enviar`}><Send className="size-4" /> Enviar</LinkButton>
             {canReturn && <LinkButton href={`${base}/devolucoes`}><Undo2 className="size-4" /> Troca ou devolução</LinkButton>}
             {canCancel && (

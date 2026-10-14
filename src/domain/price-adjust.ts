@@ -320,7 +320,8 @@ export interface BatchOutcome {
  * Executa `apply` para cada item em transações de até `perTx` itens. Cada lote grava, na MESMA transação, um marcador
  * determinístico em `operations` (chave do trabalho + itens do lote): repetir o trabalho (mesma chave) ou concorrer com
  * ele não reaplica o lote. Se um lote falhar por regra de negócio, seus itens são refeitos um a um (marcador por item),
- * isolando o item com erro sem perder os demais.
+ * isolando o item com erro sem perder os demais. O `txCtx` entregue ao `apply` é um objeto novo a cada tentativa de
+ * transação e é o mesmo para todos os itens dela (o `apply` pode associar a ele estado da transação, ex.: sequência de conta).
  */
 export async function runIdempotentBatches<T extends { key: string }>(
   ctx: Ctx,

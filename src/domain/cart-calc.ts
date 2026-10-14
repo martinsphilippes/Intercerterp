@@ -3,6 +3,7 @@
  * Sem dependências de servidor: pode ser importado em componentes cliente.
  */
 import { addDays, addMonths } from "@/lib/dates";
+import { adjustDueDate, type NonBusinessDayRule } from "@/lib/business-days";
 import { roundDiv, splitInstallments, QTY } from "@/lib/money";
 import { calcSale } from "./pricing-calc";
 
@@ -62,14 +63,14 @@ export function cartTotals(cart: { items?: CartItem[] | null; globalDiscount?: n
  * Prévia dos vencimentos de venda a prazo — mesma regra de `buildSchedule` (financeiro):
  * parcelas iguais (diferença de centavos na 1ª), vencimentos mensais quando o intervalo é 30 dias.
  */
-export function previewSchedule(total: number, term: { installments: number; firstDueDays: number; intervalDays: number } | null, base: string) {
+export function previewSchedule(total: number, term: { installments: number; firstDueDays: number; intervalDays: number } | null, base: string, nonBusinessDay?: NonBusinessDayRule | null) {
   const n = Math.max(1, term?.installments ?? 1);
   const parts = splitInstallments(total, n);
   const first = term?.firstDueDays ?? 0;
   const interval = term?.intervalDays ?? 30;
   return parts.map((amount, i) => ({
     amount,
-    dueDate: interval === 30 && first % 30 === 0 ? addMonths(base, first / 30 + i) : addDays(base, first + interval * i),
+    dueDate: adjustDueDate(interval === 30 && first % 30 === 0 ? addMonths(base, first / 30 + i) : addDays(base, first + interval * i), nonBusinessDay),
   }));
 }
 

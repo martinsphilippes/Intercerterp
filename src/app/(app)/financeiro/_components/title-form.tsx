@@ -9,12 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/empty";
 import { createTitleAction } from "../actions";
 import { addDays, addMonths, brl, financedTotal, schedule } from "./calc";
+import { adjustDueDate, type NonBusinessDayRule } from "@/lib/business-days";
 
 type Opt = { value: string; label: string };
 type TermOpt = Opt & { installments: number; firstDueDays: number; intervalDays: number; interestBps?: number | null };
 
 /** Lançamento manual de título a receber / conta a pagar com parcelas geradas por condição ou personalizadas. */
-export function TitleForm({ kind, parties, categories, costCenters, terms, today, canApprove }: { kind: "receivable" | "payable"; parties: Opt[]; categories: Opt[]; costCenters: Opt[]; terms: TermOpt[]; today: string; canApprove: boolean }) {
+export function TitleForm({ kind, parties, categories, costCenters, terms, today, canApprove, dueRule = "keep" }: { kind: "receivable" | "payable"; parties: Opt[]; categories: Opt[]; costCenters: Opt[]; terms: TermOpt[]; today: string; canApprove: boolean; dueRule?: NonBusinessDayRule }) {
   const rec = kind === "receivable";
   const [partyType, setPartyType] = useState<"customer" | "supplier" | "other">(rec ? "customer" : "supplier");
   const [issueDate, setIssueDate] = useState(today);
@@ -31,10 +32,11 @@ export function TitleForm({ kind, parties, categories, costCenters, terms, today
   const interest = expected - total;
   const generate = () => {
     const term = selTerm;
-    if (!term) return setPlan(schedule(total, count, first, interval));
+    // vencimento em dia não útil (FIN-26): mesma regra de buildSchedule com o parâmetro da empresa/filial
+    if (!term) return setPlan(schedule(total, count, first, interval).map((p) => ({ ...p, dueDate: adjustDueDate(p.dueDate, dueRule) })));
     // mesma regra de buildSchedule (domínio): intervalo de 30 dias com 1º vencimento múltiplo de 30 usa meses-calendário
     const parts = schedule(expected, term.installments, issueDate, 30);
-    setPlan(parts.map((p, i) => ({ amount: p.amount, dueDate: term.intervalDays === 30 && term.firstDueDays % 30 === 0 ? addMonths(issueDate, term.firstDueDays / 30 + i) : addDays(issueDate, term.firstDueDays + term.intervalDays * i) })));
+    setPlan(parts.map((p, i) => ({ amount: p.amount, dueDate: adjustDueDate(term.intervalDays === 30 && term.firstDueDays % 30 === 0 ? addMonths(issueDate, term.firstDueDays / 30 + i) : addDays(issueDate, term.firstDueDays + term.intervalDays * i), dueRule) })));
   };
   const problems: string[] = [];
   if (plan.length && planned !== expected) problems.push(`As parcelas somam ${brl(planned)} e o total${interest ? " com juros" : ""} é ${brl(expected)}.`);
