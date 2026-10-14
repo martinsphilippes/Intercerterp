@@ -318,10 +318,10 @@ export interface DocItem {
 export function computeTotals(items: DocItem[], extra: { freight?: number; insurance?: number; other?: number } = {}) {
   const products = items.reduce((a, i) => a + i.gross, 0);
   const discount = items.reduce((a, i) => a + i.discount, 0);
-  const freight = items.reduce((a, i) => a + i.freight, 0);
-  const itemInsurance = items.reduce((a, i) => a + (i.insurance ?? 0), 0);
-  const insurance = itemInsurance || (extra.insurance ?? 0);
-  const other = items.reduce((a, i) => a + i.other, 0);
+  // acessórios: o rateio nos itens prevalece; sem rateio, vale o total informado (mesma regra para os três)
+  const freight = items.reduce((a, i) => a + (i.freight ?? 0), 0) || (extra.freight ?? 0);
+  const insurance = items.reduce((a, i) => a + (i.insurance ?? 0), 0) || (extra.insurance ?? 0);
+  const other = items.reduce((a, i) => a + (i.other ?? 0), 0) || (extra.other ?? 0);
   return {
     products,
     discount,

@@ -748,8 +748,10 @@ export interface LateChargeParams {
 export const LATE_DEFAULTS: LateChargeParams = { fineBps: 200, interestMonthlyBps: 100, graceDays: 0 };
 
 export async function lateChargeParams(store: Store, companyId: string, branchId?: string | null): Promise<LateChargeParams> {
-  const v = await getSetting<Partial<LateChargeParams> | null>(store, companyId, branchId ?? null, "finance.late", null);
-  return { ...LATE_DEFAULTS, ...(v ?? {}) };
+  // filial complementa a empresa campo a campo: gravar só a carência na filial não apaga a multa/juros da empresa
+  const company = await getSetting<Partial<LateChargeParams> | null>(store, companyId, null, "finance.late", null);
+  const branch = branchId ? await getSetting<Partial<LateChargeParams> | null>(store, companyId, branchId, "finance.late", null) : null;
+  return { ...LATE_DEFAULTS, ...(company ?? {}), ...(branch ?? {}) };
 }
 
 /**

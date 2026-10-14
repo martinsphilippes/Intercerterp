@@ -54,8 +54,13 @@ export interface MovementInput {
   /** variação do saldo físico em milésimos (positivo = entrada) */
   qty: number;
   type: MovementType;
-  /** custo unitário em centavos (entradas). Saídas usam o custo médio vigente. */
+  /**
+   * custo unitário em centavos. Entradas: custo de entrada. Saídas: sem valor, usam o custo médio vigente; a venda
+   * informa o custo que registrou no item (o médio no momento da venda), para o movimento bater com o custo da venda.
+   */
   unitCost?: number | null;
+  /** custo total exato da entrada em centavos (ex.: linha do recebimento); evita a sobra do arredondamento unitário */
+  totalCost?: number | null;
   originType?: string;
   originId?: string;
   operationId?: string;
@@ -80,7 +85,8 @@ export interface MovementInput {
 export const balanceId = (warehouseId: string, skuId: string) => detId("bal", warehouseId, skuId);
 
 /** Entradas que trazem custo próprio e recalculam o custo médio ponderado do saldo. */
-export const COST_ENTRY_TYPES: MovementType[] = ["purchase", "initial", "manual_in", "adjust_in", "transfer_in", "transfer_return", "damage_in"];
+/** Entradas que recompõem o custo médio. Estorno e devolução voltam pelo custo com que saíram (custo da venda). */
+export const COST_ENTRY_TYPES: MovementType[] = ["purchase", "initial", "manual_in", "adjust_in", "transfer_in", "transfer_return", "damage_in", "sale_cancel", "return"];
 
 /** Tipos de ajuste manual (Tela 17) — exigem a permissão especial `stock.adjust` e motivo. */
 export const MANUAL_TYPES = ["adjust_in", "adjust_out", "loss", "manual_in", "manual_out"] as const;
@@ -184,10 +190,14 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
       }
       let avg = bal.avgCost as number;
       let unitCost: number;
+      let entryTotal: number | null = null;
       if (m.qty > 0 && m.unitCost != null && COST_ENTRY_TYPES.includes(m.type)) {
         unitCost = m.unitCost;
+        entryTotal = m.totalCost != null && m.totalCost >= 0 ? m.totalCost : null;
         const basis = Math.max(before, 0);
-        avg = basis + m.qty > 0 ? roundDiv(basis * avg + m.qty * unitCost, basis + m.qty) : unitCost;
+        // valor da entrada em centavos × milésimos: total exato quando informado, senão custo unitário × quantidade
+        const entryValue = entryTotal != null ? entryTotal * QTY : m.qty * unitCost;
+        avg = basis + m.qty > 0 ? roundDiv(basis * avg + entryValue, basis + m.qty) : unitCost;
       } else {
         unitCost = m.unitCost ?? avg;
       }
@@ -208,7 +218,7 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
           balanceBefore: before,
           balanceAfter: after,
           unitCost,
-          totalCost: roundDiv(Math.abs(m.qty) * unitCost, QTY),
+          totalCost: entryTotal ?? roundDiv(Math.abs(m.qty) * unitCost, QTY),
           avgCostAfter: avg,
           seq,
           originType: m.originType ?? null,

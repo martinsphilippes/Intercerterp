@@ -126,7 +126,8 @@ export function buildInstallmentPlan(total: number, term: { installments: number
     days = Array.from({ length: n }, (_, i) => (term.firstDueDays ?? 0) + (term.intervalDays ?? 30) * i);
   } else days = [0];
   const parts = splitInstallments(total, days.length);
-  return days.map((d, i) => ({ number: i + 1, days: d, amount: parts[i] }));
+  // total menor que o nº de prazos: só os primeiros prazos recebem parcela (nunca parcela de R$ 0,00)
+  return parts.map((amount, i) => ({ number: i + 1, days: days[i], amount }));
 }
 
 /** Custo unitário líquido (após desconto da linha, sem IPI), centavos por unidade interna — comparável ao vUnCom − vDesc da NF-e. */

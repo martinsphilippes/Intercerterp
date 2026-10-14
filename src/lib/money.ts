@@ -55,6 +55,8 @@ export function allocate(total: number, weights: number[]): number[] {
 /** Divide um total em N parcelas iguais; a diferença de centavos vai para a primeira parcela. */
 export function splitInstallments(total: number, n: number): number[] {
   if (n <= 0) return [];
+  // valor menor que o nº de parcelas: menos parcelas de 1 centavo, nunca parcela de R$ 0,00
+  if (total > 0 && total < n) n = total;
   const base = Math.trunc(total / n);
   const parts = Array(n).fill(base);
   parts[0] += total - base * n;

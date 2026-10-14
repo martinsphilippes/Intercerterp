@@ -78,6 +78,8 @@ export interface ReceiptItem {
   otherShare?: number;
   discountShare?: number;
   landedUnitCost?: number;
+  /** custo total da linha com rateios (centavos): o estoque entra por este valor exato */
+  landedValue?: number;
 }
 
 export interface Divergence {
@@ -304,6 +306,7 @@ export function computeReceipt(r: { items: ReceiptItem[]; freight: number; other
     it.otherShare = ot[i] ?? 0;
     it.discountShare = dc[i] ?? 0;
     const landed = (it.lineValue ?? 0) + it.freightShare + it.otherShare - it.discountShare;
+    it.landedValue = landed;
     it.landedUnitCost = roundDiv(landed * QTY, it.receivedQty);
   });
   const dueTotal = productsTotal - Math.min(r.discount, productsTotal) + r.freight + r.otherExpenses;
@@ -1005,7 +1008,7 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
   const eff = effectsOf(r);
   // 1) estoque (custo de entrada com rateio → custo médio ponderado)
   const movements = active.map((it) => ({
-    warehouseId: r.warehouseId, skuId: it.skuId!, qty: it.receivedQty, type: "purchase" as const, unitCost: it.landedUnitCost ?? it.unitCost, originType: "purchase_receipt", originId: id,
+    warehouseId: r.warehouseId, skuId: it.skuId!, qty: it.receivedQty, type: "purchase" as const, unitCost: it.landedUnitCost ?? it.unitCost, totalCost: it.landedValue ?? null, originType: "purchase_receipt", originId: id,
     reason: `Recebimento nº ${r.number}${r.nfeNumber ? ` — NF-e ${r.nfeNumber}` : ""}`, idemKey: `receipt:${id}:${it.idx}`, occurredAt,
   }));
   if (eff.updateStock) for (let i = 0; i < movements.length; i += 40) await postMovements(ctx, movements.slice(i, i + 40));

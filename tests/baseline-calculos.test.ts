@@ -65,11 +65,12 @@ describe("baseline — aritmética monetária", () => {
   });
 
   // Regra: parcelas iguais (truncadas) e a SOBRA de centavos vai inteira para a 1ª parcela.
-  // ATENÇÃO (comportamento atual): total menor que o nº de parcelas gera parcelas de R$ 0,00.
+  // Corrigido (achado 4): total menor que o nº de parcelas gera menos parcelas de 1 centavo, nunca R$ 0,00.
   it("splitInstallments: sobra na primeira parcela", () => {
     expect(splitInstallments(10000, 3)).toEqual([3334, 3333, 3333]);
     expect(splitInstallments(100, 7)).toEqual([16, 14, 14, 14, 14, 14, 14]);
-    expect(splitInstallments(1, 3)).toEqual([1, 0, 0]);
+    expect(splitInstallments(1, 3)).toEqual([1]);
+    expect(splitInstallments(2, 5)).toEqual([1, 1]);
     expect(splitInstallments(100, 0)).toEqual([]);
   });
 
@@ -385,11 +386,10 @@ describe("baseline — buildSchedule / juros da condição / multa e juros por a
     expect(buildSchedule(1000, { installments: 0, firstDueDays: 0, intervalDays: 30 }, "2026-10-14")).toEqual([{ amount: 1000, dueDate: "2026-10-14" }]);
   });
 
-  // ATENÇÃO (comportamento atual): 1 centavo em 3 parcelas gera duas parcelas de R$ 0,00; 1º vencimento 45 dias usa dias corridos.
-  it("buildSchedule — borda: parcelas zeradas e 1º vencimento não múltiplo de 30", () => {
-    expect(buildSchedule(1, { installments: 3, firstDueDays: 45, intervalDays: 30 }, "2026-10-14")).toEqual([
-      { amount: 1, dueDate: "2026-11-28" }, { amount: 0, dueDate: "2026-12-28" }, { amount: 0, dueDate: "2027-01-27" },
-    ]);
+  // Corrigido (achado 4): 1 centavo em 3 parcelas vira 1 parcela de 1 centavo; 1º vencimento 45 dias usa dias corridos.
+  it("buildSchedule — borda: sem parcelas zeradas e 1º vencimento não múltiplo de 30", () => {
+    expect(buildSchedule(1, { installments: 3, firstDueDays: 45, intervalDays: 30 }, "2026-10-14")).toEqual([{ amount: 1, dueDate: "2026-11-28" }]);
+    expect(buildSchedule(3000, { installments: 3, firstDueDays: 45, intervalDays: 30 }, "2026-10-14").map((x) => x.dueDate)).toEqual(["2026-11-28", "2026-12-28", "2027-01-27"]);
   });
 
   // Regra (formulário do cliente, sem condição): parte do 1º vencimento informado e soma meses a partir dele.
@@ -453,8 +453,8 @@ describe("baseline — fiscal: CFOP padrão, NFS-e e totais", () => {
     expect(() => calcNfse({ amount: 1000, unconditionalDiscount: 1001, issRateBps: 500, issWithheld: false })).toThrow("Desconto incondicionado não pode exceder o valor dos serviços.");
   });
 
-  // Regra: totais = soma dos itens; seguro: soma dos itens OU (se zero) o `extra.insurance`.
-  // ATENÇÃO (comportamento atual): `extra.freight` e `extra.other` são ignorados (só o seguro tem fallback no extra).
+  // Regra: totais = soma dos itens; frete, seguro e outras: soma dos itens OU (se zero) o valor do `extra`.
+  // Corrigido (achado 3): a mesma regra vale para os três acessórios.
   it("computeTotals", () => {
     const di = (o: Partial<DocItem>): DocItem => ({
       seq: 1, code: "x", description: "x", ncm: "", cfop: "5102", unit: "UN", qty: 1000, unitPrice: 0, gross: 0, discount: 0, freight: 0, other: 0, total: 0,
@@ -464,7 +464,7 @@ describe("baseline — fiscal: CFOP padrão, NFS-e e totais", () => {
       di({ gross: 10000, discount: 500, freight: 300, other: 20, icmsBase: 9820, icms: 1768, pis: 65, cofins: 300, approxTax: 1000 }),
       di({ gross: 5000, freight: 200, insurance: 10 }),
     ], { insurance: 999 })).toEqual({ products: 15000, discount: 500, freight: 500, insurance: 10, other: 20, icmsBase: 9820, icms: 1768, pis: 65, cofins: 300, approxTax: 1000, total: 15030 });
-    expect(computeTotals([di({ gross: 10000 })], { insurance: 999, freight: 777, other: 555 })).toMatchObject({ freight: 0, insurance: 999, other: 0, total: 10999 });
+    expect(computeTotals([di({ gross: 10000 })], { insurance: 999, freight: 777, other: 555 })).toMatchObject({ freight: 777, insurance: 999, other: 555, total: 12331 });
   });
 });
 
@@ -575,15 +575,15 @@ describe("baseline — fluxos com banco (venda, caixa, financeiro, fiscal, estoq
   });
 
   // Regra: parâmetros de atraso = padrão (2% multa, 1% a.m., 0 dia) sobrescrito pelo parâmetro "finance.late".
-  // ATENÇÃO (comportamento atual): o valor da FILIAL substitui o objeto inteiro da empresa (não mescla campo a campo):
-  // filial com só { graceDays: 5 } perde a multa de 10% configurada na empresa e volta para 2%.
+  // Corrigido (achado 1): a filial complementa a empresa campo a campo — filial com só { graceDays: 5 } mantém a multa
+  // de 10% da empresa.
   it("lateChargeParams — padrão, empresa e filial", async () => {
     const companyId = refs.company.id;
     expect(await lateChargeParams(store, companyId, null)).toEqual({ fineBps: 200, interestMonthlyBps: 100, graceDays: 0 });
     await setSetting(store, companyId, null, "finance.late", { fineBps: 1000 });
     expect(await lateChargeParams(store, companyId, refs.branches.matriz.id)).toEqual({ fineBps: 1000, interestMonthlyBps: 100, graceDays: 0 });
     await setSetting(store, companyId, refs.branches.matriz.id, "finance.late", { graceDays: 5 });
-    expect(await lateChargeParams(store, companyId, refs.branches.matriz.id)).toEqual({ fineBps: 200, interestMonthlyBps: 100, graceDays: 5 });
+    expect(await lateChargeParams(store, companyId, refs.branches.matriz.id)).toEqual({ fineBps: 1000, interestMonthlyBps: 100, graceDays: 5 });
     expect(await lateChargeParams(store, companyId, refs.branches.shopping.id)).toEqual({ fineBps: 1000, interestMonthlyBps: 100, graceDays: 0 });
   });
 
@@ -648,9 +648,9 @@ describe("baseline — fluxos com banco (venda, caixa, financeiro, fiscal, estoq
 
   // Regra do custo médio: entrada de compra/inicial/ajuste de entrada etc. recalcula
   // médio = (saldo⁺ × médio + qtd × custo) ÷ (saldo⁺ + qtd) arredondado; saída usa o médio vigente e não altera o médio;
-  // entrada de devolução ("return") NÃO recalcula o médio (registra o custo informado); saldo negativo conta como 0 na
-  // base (a entrada redefine o médio = custo da entrada); idemKey repetida é ignorada.
-  // ATENÇÃO (comportamento atual): saída com unitCost informado registra esse custo (não o médio) no movimento.
+  // devolução ("return") e estorno de venda voltam pelo custo com que saíram e recompõem o médio (corrigido, achado 6);
+  // saldo negativo conta como 0 na base (a entrada redefine o médio = custo da entrada); idemKey repetida é ignorada.
+  // Saída com unitCost informado registra esse custo: é o caso da venda, que informa o médio vigente no momento da venda.
   it("postMovements — custo médio", async () => {
     const sku = refs.skus["bone-u"];
     const wh = refs.warehouses["matriz-main"].id;
@@ -666,12 +666,12 @@ describe("baseline — fluxos com banco (venda, caixa, financeiro, fiscal, estoq
     expect(await mv(-5000, "sale", null, "b2")).toEqual([25000, 20000, 1620, 8100, 1620]);
     // entrada fracionária 0,333 un a 19,99 → médio 16,2621… → 16,26; custo total 6,65667 → 6,66
     expect(await mv(333, "purchase", 1999, "b3")).toEqual([20000, 20333, 1999, 666, 1626]);
-    // devolução com custo diferente não mexe no médio
-    expect(await mv(1000, "return", 9999, "b4")).toEqual([20333, 21333, 9999, 9999, 1626]);
+    // devolução pelo custo da venda recompõe o médio: (20,333 × 16,26 + 1 × 99,99) ÷ 21,333 → 20,18
+    expect(await mv(1000, "return", 9999, "b4")).toEqual([20333, 21333, 9999, 9999, 2018]);
     // saída com custo informado
-    expect(await mv(-1000, "adjust_out", 5, "b5")).toEqual([21333, 20333, 5, 5, 1626]);
+    expect(await mv(-1000, "adjust_out", 5, "b5")).toEqual([21333, 20333, 5, 5, 2018]);
     // saída que deixa o saldo negativo (permitido explicitamente)
-    expect(await mv(-100000, "sale", null, "b6", true)).toEqual([20333, -79667, 1626, 162600, 1626]);
+    expect(await mv(-100000, "sale", null, "b6", true)).toEqual([20333, -79667, 2018, 201800, 2018]);
     // entrada com saldo negativo: base 0 → médio = custo da entrada
     expect(await mv(2000, "purchase", 2500, "b7")).toEqual([-79667, -77667, 2500, 5000, 2500]);
     // entrada a custo zero com saldo negativo zera o médio
@@ -680,5 +680,16 @@ describe("baseline — fluxos com banco (venda, caixa, financeiro, fiscal, estoq
     expect(await mv(1000, "purchase", 3000, "b1")).toBeNull();
     const b1 = await store.getOrThrow("stock_balances", balanceId(wh, sku.id));
     expect([b1.physical, b1.avgCost]).toEqual([-76667, 0]);
+  });
+
+  // Corrigido (achado 5): entrada com custo total exato (linha do recebimento) valoriza o estoque pelo valor pago,
+  // sem a sobra do arredondamento do custo unitário (3 × 9,67 = 29,01 contra 29,00 pagos).
+  it("postMovements — custo total exato da entrada", async () => {
+    const sku = refs.skus["bone-u"];
+    const wh = refs.warehouses["matriz-main"].id;
+    const [m] = await postMovements(admin, [{ warehouseId: wh, skuId: sku.id, qty: 3000, type: "purchase", unitCost: 967, totalCost: 2900, idemKey: "tc1" }]);
+    expect([m.unitCost, m.totalCost]).toEqual([967, 2900]);
+    // (15 × 15,00 + 29,00) ÷ 18 = 14,1111 → 14,11
+    expect(m.avgCostAfter).toBe(1411);
   });
 });

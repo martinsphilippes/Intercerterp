@@ -1,8 +1,17 @@
 # Fase 0 — comportamentos atuais suspeitos nos cálculos
 
-Encontrados ao escrever `tests/baseline-calculos.test.ts` (52 testes de caracterização). **Nada foi corrigido**: os testes
-congelam o comportamento de hoje (marcados com "ATENÇÃO (comportamento atual)"). Cada correção muda valores financeiros ou
-fiscais e só será feita com aprovação; ao corrigir, o teste correspondente muda junto, de forma explícita.
+Encontrados ao escrever `tests/baseline-calculos.test.ts` (52 testes de caracterização). Os testes
+congelam o comportamento (pontos ainda abertos marcados com "ATENÇÃO (comportamento atual)").
+
+**Situação (aprovado em 14/10/2026):** itens 1, 3, 4, 5 e 6 **corrigidos** na branch `fix/calculos-fase-0`, com os testes
+atualizados explicitamente (comentário "Corrigido (achado N)"). Item 2 fica para a Fase 2 (validação contábil). Item 7 sem mudança.
+
+Detalhe das correções:
+- 1: `lateChargeParams` mescla empresa + filial campo a campo.
+- 3: `computeTotals` aplica a mesma regra (itens, senão total informado) a frete, seguro e outras.
+- 4: `splitInstallments` nunca gera parcela de R$ 0,00 (reduz o nº de parcelas); `buildInstallmentPlan` de compras idem.
+- 5: `postMovements` aceita `totalCost` exato da entrada; o recebimento informa o valor da linha com rateios (`landedValue`).
+- 6: devolução e estorno de venda recompõem o custo médio (entram pelo custo da venda); saídas continuam pelo custo informado pela venda (o médio no momento da venda) ou pelo médio vigente.
 
 | # | Onde | Comportamento atual | Impacto | Recomendação |
 |---|---|---|---|---|
