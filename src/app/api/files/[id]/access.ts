@@ -12,6 +12,7 @@ export const ENTITY_MODULE: Record<string, ModuleKey> = {
   tax_group: "fiscal",
   receipt: "purchases",
   product: "products",
+  scale_load: "products",
   ticket: "support",
   sale: "sales",
   return: "sales",

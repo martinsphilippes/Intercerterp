@@ -25,6 +25,8 @@ export interface CartItem {
   service?: boolean;
   maxDiscountBps?: number | null;
   attributes?: Record<string, string>;
+  /** etiqueta de balança que lançou a linha (PDV-06; só exibição — linha não é somada a outras do mesmo SKU) */
+  scale?: { barcode: string; content: "weight" | "value"; labelValue?: number | null } | null;
 }
 
 /** Preço de tabela efetivo da linha (atacado quando a quantidade atinge o mínimo). */

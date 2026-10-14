@@ -1,5 +1,6 @@
 import { DEFAULT_CFOP_PAIRS } from "@/domain/cfop-entry";
 import { OVERDUE_DEFAULTS, OVERDUE_POLICIES } from "@/domain/overdue";
+import { SCALE_CONTENTS, SCALE_DEFAULTS, SCALE_LAYOUTS } from "@/domain/scale-barcode";
 
 /** Catálogo de parâmetros editáveis (empresa e filial). Valores padrão vêm de DEFAULT_SETTINGS quando existem. */
 
@@ -105,6 +106,23 @@ export const PARAMS: ParamDef[] = [
     key: "feature.documentoComercial", group: "Recursos", label: "Orçamentos e pedidos de venda", type: "bool", scopes: ["company", "branch"], default: true,
     help: "Mostra Vendas › Orçamentos e Pedidos de venda: orçamento com validade (enviar pelo WhatsApp ou e-mail, imprimir), conversão em pedido com reserva de estoque, faturamento parcial no PDV (“Importar orçamento/pedido”) ou em NF-e com o número do pedido (xPed/nItemPed). O documento não movimenta estoque nem financeiro: quem baixa é a venda do PDV ou a NF-e. Desligado, o menu, as telas e a importação no PDV somem e nenhum documento novo é criado; vendas e NF-e já vinculadas continuam como estão.",
     usedBy: "Vendas (orçamentos e pedidos), PDV (importar) e Fiscal (NF-e de pedido)",
+  },
+  {
+    key: "feature.balanca", group: "Recursos", label: "Balança etiquetadora (código de peso/valor e carga)", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Liga a leitura de etiquetas de balança no PDV (EAN-13 iniciado por 2: o produto é localizado pelo PLU e a quantidade sai do peso ou do valor da etiqueta, com o preço da tabela de preços), a aba “Balança” no cadastro do produto (PLU, validade, tara e informação nutricional) e a tela Produtos › Balança, que gera o arquivo de carga para Toledo (ITENSMGV.TXT) ou Filizola (CADTXT.TXT). Desligado, o PDV volta a tratar o código como um código de barras comum e a tela some; os dados já gravados no produto são mantidos.",
+    usedBy: "PDV (leitura da etiqueta), Produtos (aba Balança) e Produtos › Balança (carga)",
+  },
+  {
+    key: "scale.barcodeLayout", group: "Vendas e PDV", label: "Formato do código de barras da balança", type: "select", scopes: ["company", "branch"], default: SCALE_DEFAULTS.layout,
+    options: SCALE_LAYOUTS.map((l) => ({ value: l.value, label: l.label })),
+    help: "Como a balança monta a etiqueta EAN-13 (2 = circulação restrita; C = código do produto na balança, o PLU; V = peso ou valor; D = dígito verificador). Deve ser o mesmo configurado na balança. A posição marcada com 0 é ignorada na leitura. O PLU do produto precisa caber no número de dígitos do código.",
+    usedBy: "PDV (leitura da etiqueta) e Produtos › Balança (conferência do PLU)",
+  },
+  {
+    key: "scale.barcodeContent", group: "Vendas e PDV", label: "Informação na etiqueta da balança", type: "select", scopes: ["company", "branch"], default: SCALE_DEFAULTS.content,
+    options: SCALE_CONTENTS.map((c) => ({ value: c.value, label: c.label })),
+    help: "“Peso”: a quantidade lançada é o peso da etiqueta (produto em KG) e o total é peso × preço por kg da tabela de preços. “Valor”: a quantidade é o valor da etiqueta ÷ preço da tabela, arredondada ao milésimo; o total segue a regra de arredondamento da venda e pode diferir da etiqueta em alguns centavos quando o preço passa de R$ 9,99 por kg (o PDV mostra o valor calculado).",
+    usedBy: "PDV (leitura da etiqueta)",
   },
   { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
   { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },

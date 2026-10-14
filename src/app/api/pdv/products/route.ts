@@ -6,11 +6,14 @@ import type { Doc } from "@/lib/db/types";
 import { searchable } from "@/lib/core/text";
 import { resolvePrices } from "@/domain/pricing";
 import { availableMap } from "@/domain/stock";
+import { resolveScaleBarcode, type ScaleResolution } from "@/domain/scale";
 
 /**
  * Busca de produtos do PDV (Tela 5): descrição, SKU, código de barras e categoria.
  * Consulta limitada e com campos mínimos (o cliente aplica debounce); `code` resolve o SKU exato do leitor.
  * Preço vigente da tabela selecionada (filial/vigência/atacado) e disponível na filial.
+ * Etiqueta de balança (PDV-06): sem SKU com o código exato, `code` EAN-13 iniciado por 2 é lido pelo PLU e devolve
+ * `scale` com a quantidade (peso ou valor ÷ preço da tabela); o preço continua vindo da tabela.
  */
 export async function GET(req: NextRequest) {
   const s = await requireApiSession();
@@ -32,6 +35,7 @@ export async function GET(req: NextRequest) {
 
   let skus: Doc[] = [];
   let exact = false;
+  let scale: ScaleResolution | null = null;
   if (ids.length) {
     skus = (await listAll(store, "skus", { filters: [["eq", "id", ids]] })).filter((k) => k.companyId === cid);
   } else if (code) {
@@ -44,6 +48,12 @@ export async function GET(req: NextRequest) {
       // GTIN do produto (produtos sem variação)
       const prods = (await store.list("products", { filters: [["eq", "companyId", cid], ["eq", "gtin", code]], limit: 2 })).items;
       if (prods.length) hit = (await store.list("skus", { filters: [["eq", "productId", prods.map((p) => p.id)]], limit: 2 })).items;
+    }
+    if (!hit.length) {
+      // etiqueta de balança: PLU + peso/valor (recurso desligado ou código comum → null, segue como antes)
+      scale = await resolveScaleBarcode(store, { companyId: cid, branchId, priceTableId, code });
+      if (scale && !scale.ok) return NextResponse.json({ items: [], exact: false, priceTableId, scale });
+      if (scale?.ok) hit = (await store.list("skus", { filters: [["eq", "id", scale.skuId]], limit: 1 })).items;
     }
     skus = hit.filter((k) => k.active !== false);
     exact = skus.length === 1;
@@ -118,5 +128,5 @@ export async function GET(req: NextRequest) {
       available: service ? null : (avail.get(k.id)?.available ?? 0),
     };
   });
-  return NextResponse.json({ items, exact, priceTableId });
+  return NextResponse.json({ items, exact, priceTableId, ...(scale ? { scale } : {}) });
 }
