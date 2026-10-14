@@ -818,6 +818,10 @@ export const COLLECTIONS: CollectionDef[] = [
       // reforma tributária (FIS-19, opcionais): CST e cClassTrib do IBS/CBS, alíquotas (IBS da UF, CBS, IS), redução de
       // alíquota (pRedAliq) e início da vigência dos grupos da reforma neste grupo; ausentes = grupo sem reforma
       ibsCbsCst: s(5), cClassTrib: s(10), ibsRateBps: int, cbsRateBps: int, isRateBps: int, ibsCbsRedBps: int, reformValidFrom: date,
+      // tributação completa (FIS-12/FIS-16, Fase 7, opcionais — só com feature.tributacaoCompleta): MVA original e alíquota
+      // interna da ST, redução da base da ST (CST 70), alíquotas por UF de destino ({UF: {internalBps, fcpBps, mvaAdjBps}})
+      // e natureza de operação a que o grupo se destina (FIS-11/07 — chave da tabela de naturezas em settings)
+      stMvaBps: int, stRateBps: int, stBaseReductionBps: int, ufRates: json, operationKey: s(40),
     },
     indexes: [k("i_company", "companyId")],
   },
@@ -834,6 +838,8 @@ export const COLLECTIONS: CollectionDef[] = [
       rpsNumber: int, rpsSeries: s(10), verificationCode: s(60), correctionCount: int, nextCheckAt: dt,
       partyType: s(20), partyId: id(), effects: json, titleId: id(), cancelReason: s(500), cancelRequestedAt: dt,
       competenceDate: date, presence: s(2), lastEmailTo: s(200), exitAt: dt,
+      // natureza de operação escolhida no assistente (FIS-11/07, opcional — chave da tabela de naturezas)
+      operationKey: s(40),
     },
     indexes: [u("u_ref", "ref"), k("i_model_date", "companyId", "model", "issuedAt"), k("i_origin", "originType", "originId")],
   },

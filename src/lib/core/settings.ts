@@ -63,6 +63,15 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   dre: true,
   /** reforma tributária (FIS-19): grupos IBS/CBS/IS nos documentos — exige também a adesão na configuração fiscal */
   reformaTributaria: false,
+  /**
+   * tributação completa (Fase 7 — FIS-12/FIS-16): ICMS próprio no CST 10/70, alíquota interestadual 4/7/12%, ICMS-ST com
+   * MVA, FCP/FCP-ST, DIFAL e base do PIS/COFINS sem ICMS (parâmetro) — muda valores dos documentos fiscais
+   */
+  tributacaoCompleta: false,
+  /** naturezas de operação cadastradas (FIS-11/07): CFOP e CST padrão por natureza no assistente de NF-e */
+  naturezasOperacao: false,
+  /** crédito do Simples Nacional (FIS-13): pCredSN/vCredICMSSN nos CSOSN 101/201 e mensagem do art. 23 da LC 123 */
+  creditoSimples: false,
 };
 
 /** Recursos novos desligados por padrão (derivado de FEATURE_DEFAULTS). */

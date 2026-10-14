@@ -40,18 +40,70 @@ export async function seedNormalGroups(refs: DemoRefs) {
   return out;
 }
 
-const SCENARIOS = [
+/**
+ * Cenário do retrato. `consumer` = destinatário consumidor final NÃO contribuinte (CPF, indIEDest 9) na UF `destUf`;
+ * `operationKey` = natureza de operação (Fase 7). Os cenários da reforma (padrão) não usam esses campos.
+ */
+export interface SnapScenario {
+  key: string;
+  model: "nfe" | "nfce";
+  interstate: boolean;
+  destUf?: string;
+  consumer?: boolean;
+  operationKey?: string;
+}
+
+/**
+ * Grupos da tributação completa (Fase 7 — FIS-12/13/16): CST 10/70 com MVA e alíquota de ST, CST 00 com FCP e alíquotas
+ * por UF, CSOSN 101/201 e um grupo exclusivo de natureza (remessa para conserto). Os campos novos ficam inertes sem o
+ * recurso `feature.tributacaoCompleta` — o retrato tests/fixtures/tributacao-baseline.json foi gravado ANTES deles existirem.
+ */
+export const COMPLETE_GROUPS = [
+  { key: "tc-10", regime: "normal", name: "Normal — ICMS próprio + ST (CST 10)", cstCsosn: "10", icmsRateBps: 1800, fcpRateBps: 200, stMvaBps: 4000, stRateBps: 1800, ufRates: { RJ: { internalBps: 2000, fcpBps: 200 }, BA: { internalBps: 2050, fcpBps: 200 } }, pisCst: "01", pisRateBps: 165, cofinsCst: "01", cofinsRateBps: 760, cfopInternal: "5401", cfopInterstate: "6401", product: { code: "TC10", origin: "0", cest: "2806300" } },
+  { key: "tc-70", regime: "normal", name: "Normal — redução de base + ST (CST 70)", cstCsosn: "70", icmsRateBps: 1800, icmsBaseReductionBps: 3333, stBaseReductionBps: 3333, stMvaBps: 4000, stRateBps: 1800, ufRates: { RJ: { internalBps: 2000, fcpBps: 200, mvaAdjBps: 5000 } }, pisCst: "01", pisRateBps: 165, cofinsCst: "01", cofinsRateBps: 760, cfopInternal: "5401", cfopInterstate: "6401", product: { code: "TC70", origin: "0", cest: "2806300" } },
+  { key: "tc-00", regime: "normal", name: "Normal — tributado com FCP e alíquotas por UF (CST 00)", cstCsosn: "00", icmsRateBps: 1800, fcpRateBps: 200, ufRates: { RJ: { internalBps: 2000, fcpBps: 200 }, BA: { internalBps: 2050, fcpBps: 200 } }, pisCst: "01", pisRateBps: 165, cofinsCst: "01", cofinsRateBps: 760, cfopInternal: "5102", cfopInterstate: "6102", product: { code: "TC00", origin: "0", cest: null } },
+  { key: "tc-imp", regime: "normal", name: "Normal — importado (CST 00, origem 1)", cstCsosn: "00", icmsRateBps: 1800, ufRates: { BA: { internalBps: 2050 } }, pisCst: "01", pisRateBps: 165, cofinsCst: "01", cofinsRateBps: 760, cfopInternal: "5102", cfopInterstate: "6102", product: { code: "TCIMP", origin: "1", cest: null } },
+  { key: "tc-101", regime: "simples", name: "Simples — com permissão de crédito (CSOSN 101)", cstCsosn: "101", icmsRateBps: 0, pisCst: "49", pisRateBps: 0, cofinsCst: "49", cofinsRateBps: 0, cfopInternal: "5102", cfopInterstate: "6102", product: { code: "TC101", origin: "0", cest: null } },
+  { key: "tc-201", regime: "simples", name: "Simples — crédito + ST (CSOSN 201)", cstCsosn: "201", icmsRateBps: 0, stMvaBps: 4000, stRateBps: 1800, ufRates: { RJ: { internalBps: 2000, fcpBps: 200 } }, pisCst: "49", pisRateBps: 0, cofinsCst: "49", cofinsRateBps: 0, cfopInternal: "5401", cfopInterstate: "6401", product: { code: "TC201", origin: "0", cest: "2806300" } },
+  { key: "tc-rem", regime: "normal", name: "Natureza — remessa para conserto", operationKey: "remessa_conserto", cstCsosn: "41", icmsRateBps: 0, pisCst: "08", pisRateBps: 0, cofinsCst: "08", cofinsRateBps: 0, cfopInternal: "5915", cfopInterstate: "6915", product: null },
+] as const;
+
+/** Cria (idempotente) os grupos e produtos da tributação completa. */
+export async function seedCompleteGroups(refs: DemoRefs) {
+  const sd = refs.seeder;
+  const out: Record<string, Doc> = {};
+  for (const g of COMPLETE_GROUPS) {
+    const { key, product, ...data } = g;
+    const tg = await sd.put("tax_groups", key, { companyId: refs.company.id, cfopReturn: "1202", active: true, ...JSON.parse(JSON.stringify(data)) });
+    out[key] = tg;
+    if (!product) continue;
+    const p = await sd.put("products", `prod-${key}`, { companyId: refs.company.id, type: "product", code: product.code, name: `Produto ${g.name}`, unitCode: "UN", ncm: "61091000", cest: product.cest, origin: product.origin, taxGroupId: tg.id, status: "active", active: true });
+    await sd.put("skus", `prod-${key}-u`, { companyId: refs.company.id, productId: p.id, sku: product.code, name: p.name, unitCode: "UN", active: true, costTotal: 1000 });
+  }
+  return out;
+}
+
+const SCENARIOS: readonly SnapScenario[] = [
   { key: "nfe-interna", model: "nfe", interstate: false },
   { key: "nfe-interestadual", model: "nfe", interstate: true },
   { key: "nfce", model: "nfce", interstate: false },
-] as const;
+];
+
+/** Cenários do teste de igualdade da tributação completa (Fase 7): os da reforma + interestadual a consumidor (DIFAL) e natureza. */
+export const COMPLETE_SCENARIOS: readonly SnapScenario[] = [
+  ...SCENARIOS,
+  { key: "nfe-interestadual-7", model: "nfe", interstate: true, destUf: "BA" },
+  { key: "nfe-consumidor-ba", model: "nfe", interstate: true, destUf: "BA", consumer: true },
+  { key: "nfe-consumidor-rj", model: "nfe", interstate: true, destUf: "RJ", consumer: true },
+  { key: "nfe-remessa-conserto", model: "nfe", interstate: false, operationKey: "remessa_conserto" },
+];
 
 /**
  * Retrato de todos os SKUs ativos da empresa (ordenados pelo código): payload, XML de simulação e totais.
  * `regimeTag` distingue as passagens (empresa no Simples e no regime normal); `opts.reform` = adesão vigente na emissão
  * (inclui os grupos IBS/CBS/IS dos itens que os calcularam).
  */
-export async function snapshotAll(store: Store, refs: DemoRefs, regimeTag: string, opts: { reform?: boolean } = {}): Promise<Record<string, SnapEntry>> {
+export async function snapshotAll(store: Store, refs: DemoRefs, regimeTag: string, opts: { reform?: boolean; scenarios?: readonly SnapScenario[] } = {}): Promise<Record<string, SnapEntry>> {
   const ctx = await refs.ctxFor("admin", "matriz");
   const company = await store.getOrThrow("companies", refs.company.id);
   const branch = await store.getOrThrow("branches", refs.branches.matriz.id);
@@ -63,8 +115,14 @@ export async function snapshotAll(store: Store, refs: DemoRefs, regimeTag: strin
   const emitUf = branch.uf ?? "SP";
   const out: Record<string, SnapEntry> = {};
   for (const sku of skus) {
-    for (const sc of SCENARIOS) {
-      const items = await buildItems(ctx, [{ skuId: sku.id, qty: 3000, unitPrice: 1999, discount: 150, description: sku.name }], { branchId: branch.id, interstate: sc.interstate, freight: sc.model === "nfe" ? 500 : 0, insurance: sc.model === "nfe" ? 120 : 0, other: 35, kind: "sale" });
+    for (const sc of opts.scenarios ?? SCENARIOS) {
+      const destUf = sc.destUf ?? (sc.interstate ? (emitUf === "RJ" ? "SP" : "RJ") : emitUf);
+      // destinatário (Fase 7: a montagem dos itens recebe a UF e o indicador de IE para alíquota interestadual e DIFAL)
+      const rcp = sc.consumer
+        ? { name: "Consumidor Teste", doc: "52998224725", ie: null, ieIndicator: "9", finalConsumer: true, address: { street: "Rua B", number: "2", district: "Centro", cityName: "Cidade", cityCode: destUf === "BA" ? "2927408" : "3304557", uf: destUf, zip: "40000000" } }
+        : { name: "Mercado Teste Ltda", doc: "11444777000161", ie: "110042490114", ieIndicator: "1", address: { street: "Rua A", number: "1", district: "Centro", cityName: "Cidade", cityCode: sc.interstate ? (destUf === "BA" ? "2927408" : "3304557") : "3550308", uf: destUf, zip: "01001000" } };
+      const extra = sc.destUf || sc.consumer || sc.operationKey ? { model: sc.model, recipient: sc.model === "nfe" ? { uf: destUf, ie: rcp.ie, ieIndicator: rcp.ieIndicator, finalConsumer: Boolean((rcp as any).finalConsumer) } : null, operationKey: sc.operationKey ?? null } : {};
+      const items = await buildItems(ctx, [{ skuId: sku.id, qty: 3000, unitPrice: 1999, discount: 150, description: sku.name }], { branchId: branch.id, interstate: sc.interstate, freight: sc.model === "nfe" ? 500 : 0, insurance: sc.model === "nfe" ? 120 : 0, other: 35, kind: sc.operationKey ? "other" : "sale", ...extra } as Parameters<typeof buildItems>[2]);
       const totals = computeTotals(items, { insurance: sc.model === "nfe" ? 120 : 0 });
       const doc = {
         model: sc.model,
@@ -79,12 +137,9 @@ export async function snapshotAll(store: Store, refs: DemoRefs, regimeTag: strin
         purpose: "normal",
         operationType: "saida",
         presence: "1",
-        recipient:
-          sc.model === "nfe"
-            ? { name: "Mercado Teste Ltda", doc: "11444777000161", ie: "110042490114", ieIndicator: "1", address: { street: "Rua A", number: "1", district: "Centro", cityName: "Cidade", cityCode: sc.interstate ? "3304557" : "3550308", uf: sc.interstate ? (emitUf === "RJ" ? "SP" : "RJ") : emitUf, zip: "01001000" } }
-            : null,
-        recipientName: sc.model === "nfe" ? "Mercado Teste Ltda" : null,
-        recipientDoc: sc.model === "nfe" ? "11444777000161" : null,
+        recipient: sc.model === "nfe" ? rcp : null,
+        recipientName: sc.model === "nfe" ? rcp.name : null,
+        recipientDoc: sc.model === "nfe" ? rcp.doc : null,
         items,
         totals,
         payments: [{ kind: "pix", amount: totals.total }],

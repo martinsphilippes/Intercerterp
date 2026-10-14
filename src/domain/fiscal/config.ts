@@ -11,6 +11,7 @@ import { isValidCnpj, onlyDigits } from "@/lib/core/text";
 import { getFiscalConfig, numberKey, saveFiscalConfig } from "./service";
 import { secretRefProblem } from "../integrations";
 import { normalizeReformGroup, type ReformGroupInput } from "./reform";
+import { normalizeCompleteGroup, type CompleteGroupInput } from "./tax-complete";
 
 /**
  * Configurações fiscais (Tela 34): dados do emitente (empresa/filial), certificado A1 (somente metadados),
@@ -208,6 +209,10 @@ export interface TaxGroupInput {
   approxTaxBps?: number;
   /** reforma tributária (FIS-19) — só quando o bloco "Reforma tributária" foi enviado; ausente = campos mantidos */
   reform?: ReformGroupInput | null;
+  /** tributação completa (FIS-12/16) — só quando o bloco foi enviado (recurso ligado); ausente = campos mantidos */
+  complete?: CompleteGroupInput | null;
+  /** natureza de operação do grupo (FIS-11/07) — undefined = mantém; null = nenhuma */
+  operationKey?: string | null;
 }
 
 function checkTaxGroup(i: TaxGroupInput) {
@@ -223,8 +228,19 @@ function checkTaxGroup(i: TaxGroupInput) {
 export async function saveTaxGroup(ctx: Ctx, id: string | null, input: TaxGroupInput) {
   requireAction(ctx, "fiscal.configure");
   checkTaxGroup(input);
-  const { reform, ...rest } = input;
-  const data = { ...rest, name: input.name.trim(), cfopReturn: input.cfopReturn || null, ipiCst: input.ipiCst || null, validFrom: input.validFrom || null, validTo: input.validTo || null, notes: input.notes?.trim() || null, ...(reform ? normalizeReformGroup(reform) : {}) };
+  const { reform, complete, operationKey, ...rest } = input;
+  const data = {
+    ...rest,
+    name: input.name.trim(),
+    cfopReturn: input.cfopReturn || null,
+    ipiCst: input.ipiCst || null,
+    validFrom: input.validFrom || null,
+    validTo: input.validTo || null,
+    notes: input.notes?.trim() || null,
+    ...(reform ? normalizeReformGroup(reform) : {}),
+    ...(complete ? normalizeCompleteGroup(complete) : {}),
+    ...(operationKey !== undefined ? { operationKey: operationKey || null } : {}),
+  };
   if (id) {
     const before = await ctx.store.getOrThrow("tax_groups", id);
     assert(before.companyId === ctx.companyId, "Grupo de outra empresa.");

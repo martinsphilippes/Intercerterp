@@ -11,6 +11,7 @@ import { formatMoney, QTY } from "@/lib/money";
 import { balanceId, ensureBalance, postMovements } from "./stock";
 import { defaultPriceTableId, priceScopeKey, recordPriceHistory, savePrice, validatePrice } from "./pricing";
 import { checkReformCodes, normalizeReformGroup, type ReformGroupInput } from "./fiscal/reform";
+import { normalizeCompleteGroup, type CompleteGroupInput } from "./fiscal/tax-complete";
 
 /**
  * Produtos e serviços (Telas 15–16 e visões complementares 1 e 2).
@@ -1146,6 +1147,10 @@ export interface TaxGroupInput {
   notes?: string | null;
   /** reforma tributária (FIS-19) — só quando o bloco "Reforma tributária" foi enviado; ausente = campos mantidos */
   reform?: ReformGroupInput | null;
+  /** tributação completa (FIS-12/16) — só quando o bloco foi enviado (recurso ligado); ausente = campos mantidos */
+  complete?: CompleteGroupInput | null;
+  /** natureza de operação do grupo (FIS-11/07) — undefined = mantém; null = nenhuma */
+  operationKey?: string | null;
 }
 
 /** Grupos tributários: CFOP por operação e CST/CSOSN coerentes com o regime informado. */
@@ -1173,6 +1178,8 @@ export async function saveTaxGroup(ctx: Ctx, input: TaxGroupInput) {
     pisCst: input.pisCst?.trim() || null, pisRateBps: input.pisRateBps ?? null, cofinsCst: input.cofinsCst?.trim() || null, cofinsRateBps: input.cofinsRateBps ?? null,
     ipiCst: input.ipiCst?.trim() || null, ipiRateBps: input.ipiRateBps ?? null, validFrom: input.validFrom || null, validTo: input.validTo || null, active: input.active ?? true, notes: input.notes?.trim() || null,
     ...(input.reform ? normalizeReformGroup(input.reform) : {}),
+    ...(input.complete ? normalizeCompleteGroup(input.complete) : {}),
+    ...(input.operationKey !== undefined ? { operationKey: input.operationKey || null } : {}),
   };
   const before = input.id ? await ctx.store.getOrThrow("tax_groups", input.id) : null;
   if (before) assert(before.companyId === ctx.companyId, "Grupo de outra empresa.");

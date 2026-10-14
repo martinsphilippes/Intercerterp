@@ -9,13 +9,14 @@ import { enqueue, registerJob } from "@/lib/core/jobs";
 import { notify, resolveOccurrence } from "@/lib/core/notify";
 import { saveFile, readFile } from "@/lib/core/files";
 import { nextNumber } from "@/lib/core/numbering";
-import { getSetting } from "@/lib/core/settings";
+import { featureDefault, getSetting, isFeatureOn } from "@/lib/core/settings";
 import { isValidCnpj, isValidCpf, onlyDigits } from "@/lib/core/text";
 import { fiscalProviderFrom, TPAG, type FiscalModel, type FiscalProvider, type ProviderResult } from "./providers";
 import { cscRefProblem, fiscalTokenRefProblem, logIntegration } from "../integrations";
 import type { SupplierReturnPlan } from "../supplier-returns";
 import { computeItemReform, ibsCbsKind, isReformActive, reformActiveForDoc, reformParamsFor, reformPayloadItem, reformPayloadTotals, reformXmlItem, reformXmlTotals, type ItemReform, type ReformParams } from "./reform";
 import { isValidGtin, ST_CODES } from "../products";
+import { completePayloadItem, completePayloadTotals, completeTotals, completeXmlItem, completeXmlTotals, computeItemComplete, loadCompleteSettings, natureFor, natureGroupFor, NATURES_FEATURE, simplesCreditMessage, type ItemComplete, type OperationNature } from "./tax-complete";
 
 /**
  * Documentos fiscais (Telas 30–35).
@@ -226,6 +227,8 @@ export interface TaxInfo {
   approxTaxBps: number;
   /** reforma tributária (FIS-19): CST/cClassTrib e alíquotas do IBS/CBS/IS — usados só com a adesão vigente */
   reform: ReformParams | null;
+  /** grupo tributário resolvido (tributação completa — MVA, ST, alíquotas por UF) */
+  group?: Doc | null;
 }
 
 export type OperationKind = "sale" | "sale_return" | "supplier_return" | "transfer" | "purchase" | "other";
@@ -259,14 +262,31 @@ function groupValidity(g: Doc | null, ref = today()): string | null {
   return null;
 }
 
-async function taxFor(store: Store, product: Doc, company: Doc, cfg: Doc | null, opts: { interstate: boolean; kind: OperationKind; taxGroupId?: string | null }): Promise<TaxInfo> {
-  const groupId = opts.taxGroupId || product.taxGroupId || cfg?.defaultTaxGroupId || null;
-  const g = groupId ? await store.get("tax_groups", groupId) : null;
+/**
+ * Natureza de operação (FIS-11/07 — só com `feature.naturezasOperacao` e a natureza escolhida): o grupo dedicado à
+ * natureza (`tax_groups.operationKey`) vale para todos os itens sem grupo manual; sem grupo dedicado, o grupo do produto
+ * continua valendo, com o CFOP e o CST/CSOSN padrão da natureza quando cadastrados. Prioridade: item (manual) → grupo da
+ * natureza → natureza (CFOP/CST) → produto → grupo do produto/padrão.
+ */
+interface NatureResolution {
+  nature: OperationNature;
+  group: Doc | null;
+}
+
+async function taxFor(store: Store, product: Doc, company: Doc, cfg: Doc | null, opts: { interstate: boolean; kind: OperationKind; taxGroupId?: string | null; nature?: NatureResolution | null }): Promise<TaxInfo> {
+  const nat = opts.nature ?? null;
+  const natGroup = !opts.taxGroupId && nat?.group ? nat.group : null;
+  const groupId = opts.taxGroupId || natGroup?.id || product.taxGroupId || cfg?.defaultTaxGroupId || null;
+  const g = natGroup ?? (groupId ? await store.get("tax_groups", groupId) : null);
   const simples = ["simples", "mei"].includes(company.regime);
-  const cfopFromProduct = opts.kind === "sale" ? product.cfop : null;
+  const cfopFromProduct = opts.kind === "sale" && !natGroup ? product.cfop : null;
+  // natureza sem grupo dedicado: CFOP/CST padrão da natureza (o grupo escolhido manualmente no item prevalece)
+  const natDefaults = nat && !natGroup && !opts.taxGroupId;
+  const natCfop = natDefaults ? (opts.interstate ? nat.nature.cfopInterstate : nat.nature.cfopInternal) : null;
+  const natCst = natDefaults ? (simples ? nat.nature.cstSimples : nat.nature.cstNormal) : null;
   return {
-    cfop: cfopFromProduct || defaultCfop(opts.kind, opts.interstate, g),
-    cstCsosn: product.cstCsosn || g?.cstCsosn || "",
+    cfop: natCfop || cfopFromProduct || defaultCfop(opts.kind, opts.interstate, g),
+    cstCsosn: natCst || (natGroup ? natGroup.cstCsosn : product.cstCsosn || g?.cstCsosn) || "",
     icmsRateBps: g?.icmsRateBps ?? 0,
     icmsBaseReductionBps: g?.icmsBaseReductionBps ?? 0,
     pisCst: g?.pisCst || (simples ? "49" : "01"),
@@ -278,6 +298,7 @@ async function taxFor(store: Store, product: Doc, company: Doc, cfg: Doc | null,
     groupIssue: groupValidity(g),
     approxTaxBps: g?.approxTaxBps ?? cfg?.approxTaxBps ?? 0,
     reform: reformParamsFor(product, g, today()),
+    group: g,
   };
 }
 
@@ -328,6 +349,11 @@ export interface DocItem {
   rastro?: FiscalRastro[] | null;
   /** reforma tributária (FIS-19): IBS/CBS/IS do item — presente SOMENTE com a adesão vigente e o grupo com CST do IBS/CBS */
   ibsCbs?: ItemReform | null;
+  /**
+   * tributação completa (Fase 7 — FIS-12/13/16): FCP, ICMS-ST, DIFAL, crédito do Simples e avisos — presente SOMENTE com
+   * os recursos ligados e algo calculado
+   */
+  tc?: ItemComplete | null;
 }
 
 export interface FiscalRastro {
@@ -344,6 +370,8 @@ export function computeTotals(items: DocItem[], extra: { freight?: number; insur
   const freight = items.reduce((a, i) => a + (i.freight ?? 0), 0) || (extra.freight ?? 0);
   const insurance = items.reduce((a, i) => a + (i.insurance ?? 0), 0) || (extra.insurance ?? 0);
   const other = items.reduce((a, i) => a + (i.other ?? 0), 0) || (extra.other ?? 0);
+  // tributação completa: ICMS-ST e FCP-ST somam no total da nota (vNF); DIFAL e crédito do Simples não
+  const tc = completeTotals(items);
   return {
     products,
     discount,
@@ -355,7 +383,8 @@ export function computeTotals(items: DocItem[], extra: { freight?: number; insur
     pis: items.reduce((a, i) => a + i.pis, 0),
     cofins: items.reduce((a, i) => a + i.cofins, 0),
     approxTax: items.reduce((a, i) => a + (i.approxTax ?? 0), 0),
-    total: products - discount + freight + insurance + other,
+    total: products - discount + freight + insurance + other + (tc ? tc.icmsSt + tc.fcpSt : 0),
+    ...(tc ? { icmsStBase: tc.icmsStBase, icmsSt: tc.icmsSt, fcp: tc.fcp, fcpSt: tc.fcpSt, fcpUfDest: tc.fcpUfDest, icmsUfDest: tc.icmsUfDest, icmsUfRemet: tc.icmsUfRemet, credSn: tc.credSn } : {}),
   };
 }
 
@@ -375,14 +404,49 @@ export interface ItemLine {
   rastro?: FiscalRastro[] | null;
 }
 
+/** Destinatário para a tributação completa (UF, indicador de IE e consumidor final). */
+export interface BuildRecipient {
+  uf?: string | null;
+  ie?: string | null;
+  ieIndicator?: string | null;
+  finalConsumer?: boolean | null;
+}
+
 /** Constrói itens fiscais a partir de linhas (venda, pedido ou formulário). Frete/seguro/outras despesas rateados (maior resto). */
 export async function buildItems(
   ctx: Ctx,
   lines: ItemLine[],
-  opts: { interstate?: boolean; freight?: number; insurance?: number; other?: number; branchId: string | null; kind?: OperationKind },
+  opts: {
+    interstate?: boolean;
+    freight?: number;
+    insurance?: number;
+    other?: number;
+    branchId: string | null;
+    kind?: OperationKind;
+    /** Fase 7 (usados só com os recursos ligados): modelo, destinatário e natureza de operação */
+    model?: "nfe" | "nfce";
+    recipient?: BuildRecipient | null;
+    operationKey?: string | null;
+  },
 ): Promise<DocItem[]> {
   const company = await ctx.store.getOrThrow("companies", ctx.companyId);
   const cfg = await getFiscalConfig(ctx.store, ctx.companyId, opts.branchId);
+  const simplesCo = ["simples", "mei"].includes(company.regime);
+  // tributação completa (FIS-12/13/16) e naturezas (FIS-11/07): recursos desligados por padrão — sem eles, nada muda
+  const tcs = await loadCompleteSettings(ctx.store, ctx.companyId, opts.branchId, simplesCo);
+  let natureRes: NatureResolution | null = null;
+  if (opts.operationKey && (await isFeatureOn(ctx.store, ctx.companyId, opts.branchId, NATURES_FEATURE, featureDefault(NATURES_FEATURE, false)))) {
+    const nature = await natureFor(ctx.store, ctx.companyId, opts.branchId, opts.operationKey);
+    if (nature) natureRes = { nature, group: await natureGroupFor(ctx.store, ctx.companyId, nature.key, simplesCo) };
+  }
+  const kind: OperationKind = natureRes?.nature.kind ?? opts.kind ?? "sale";
+  let emitUf: string | null = null;
+  if (tcs?.taxOn) {
+    const br = opts.branchId ? await ctx.store.get("branches", opts.branchId) : null;
+    emitUf = br?.uf ?? br?.address?.uf ?? company.address?.uf ?? null;
+  }
+  const rcp = opts.recipient ?? null;
+  const nonContributor = Boolean(rcp && String(rcp.ieIndicator ?? (rcp.ie && rcp.ie !== "ISENTO" ? "1" : rcp.ie === "ISENTO" ? "2" : "9")) === "9");
   // reforma tributária: grupos IBS/CBS/IS calculados só com a adesão vigente (recurso + configuração + data)
   const reformOn = await isReformActive(ctx.store, ctx.companyId, opts.branchId, cfg);
   const grossList = lines.map((l) => roundDiv(l.unitPrice * l.qty, QTY));
@@ -395,18 +459,48 @@ export async function buildItems(
     const sku = await ctx.store.getOrThrow("skus", l.skuId);
     assert(sku.companyId === ctx.companyId, `Produto do item ${idx + 1} pertence a outra empresa.`);
     const product = await ctx.store.getOrThrow("products", sku.productId);
-    const tax = await taxFor(ctx.store, product, company, cfg, { interstate: Boolean(opts.interstate), kind: opts.kind ?? "sale", taxGroupId: l.taxGroupId });
+    const tax = await taxFor(ctx.store, product, company, cfg, { interstate: Boolean(opts.interstate), kind, taxGroupId: l.taxGroupId, nature: natureRes });
     const gross = grossList[idx];
     assert(l.discount >= 0 && l.discount <= gross, `Desconto do item ${idx + 1} inválido.`);
     const net = gross - l.discount + freightAlloc[idx] + insAlloc[idx] + otherAlloc[idx];
     const cst = l.cstOverride || tax.cstCsosn;
     const normal = !["simples", "mei"].includes(company.regime) && ["00", "20"].includes(cst);
     // CST 20: base reduzida pelo percentual do grupo tributário (pRedBC)
-    const redBps = normal && cst === "20" ? tax.icmsBaseReductionBps : 0;
-    const icmsBase = normal ? net - pct(net, redBps) : 0;
-    const icms = normal ? pct(icmsBase, tax.icmsRateBps) : 0;
-    const pis = tax.pisRateBps ? pct(net, tax.pisRateBps) : 0;
-    const cofins = tax.cofinsRateBps ? pct(net, tax.cofinsRateBps) : 0;
+    let redBps = normal && cst === "20" ? tax.icmsBaseReductionBps : 0;
+    let icmsBase = normal ? net - pct(net, redBps) : 0;
+    let icmsRateBps = tax.icmsRateBps;
+    let icms = normal ? pct(icmsBase, tax.icmsRateBps) : 0;
+    let pisBase = net;
+    let cofinsBase = net;
+    let pis = tax.pisRateBps ? pct(net, tax.pisRateBps) : 0;
+    let cofins = tax.cofinsRateBps ? pct(net, tax.cofinsRateBps) : 0;
+    let tc: ItemComplete | null = null;
+    if (tcs) {
+      // tributação completa (recurso ligado): ICMS próprio 10/70, interestadual 4/7/12%, ST/MVA, FCP, DIFAL, PIS/COFINS sem ICMS, crédito do Simples
+      const r = computeItemComplete(
+        {
+          net,
+          cst,
+          simples: simplesCo,
+          model: opts.model ?? "nfe",
+          saida: !["purchase", "sale_return"].includes(kind),
+          interstate: Boolean(opts.interstate),
+          emitUf,
+          destUf: rcp?.uf ?? null,
+          origin: product.origin ?? "0",
+          nonContributor,
+          finalConsumer: Boolean(rcp?.finalConsumer),
+          group: tax.group ?? null,
+          icmsRateBps: tax.icmsRateBps,
+          icmsBaseReductionBps: tax.icmsBaseReductionBps,
+          pisRateBps: tax.pisRateBps,
+          cofinsRateBps: tax.cofinsRateBps,
+        },
+        tcs,
+      );
+      ({ icmsBase, icmsRateBps, icms, pisBase, pis, cofinsBase, cofins, tc } = r);
+      redBps = r.icmsBaseReductionBps;
+    }
     const overrides: DocItem["overrides"] = {};
     if (l.cfopOverride) overrides.cfop = l.cfopOverride;
     if (l.cstOverride) overrides.cstCsosn = l.cstOverride;
@@ -431,16 +525,16 @@ export async function buildItems(
       total: net,
       origin: product.origin ?? "0",
       cstCsosn: cst,
-      icmsRateBps: tax.icmsRateBps,
+      icmsRateBps,
       icmsBaseReductionBps: redBps,
       icmsBase,
       icms,
       pisCst: tax.pisCst,
-      pisBase: net,
+      pisBase,
       pisRateBps: tax.pisRateBps,
       pis,
       cofinsCst: tax.cofinsCst,
-      cofinsBase: net,
+      cofinsBase,
       cofinsRateBps: tax.cofinsRateBps,
       cofins,
       taxGroupId: tax.groupId,
@@ -452,6 +546,7 @@ export async function buildItems(
       ...(l.rastro?.length ? { rastro: l.rastro.slice(0, 500) } : {}),
       // IBS/CBS/IS (função separada, depois de ICMS/PIS/COFINS — que não mudam): só com a adesão vigente
       ...(reformOn && tax.reform ? { ibsCbs: computeItemReform({ total: net, icms, pis, cofins }, tax.reform) } : {}),
+      ...(tc ? { tc } : {}),
     });
   }
   return out;
@@ -565,6 +660,8 @@ export function validateWarnings(doc: Doc, company: Doc, branch: Doc | null, c: 
       const g = String(code ?? "").trim();
       if (/^\d+$/.test(g) && [8, 12, 13, 14].includes(g.length) && !isValidGtin(g)) out.push(`${tag}: GTIN/EAN ${g} com dígito verificador inválido — rejeição 611. Corrija o código de barras ou deixe sem GTIN.`);
     }
+    // tributação completa (Fase 7): o que não pôde ser calculado (MVA/alíquota da UF ausentes, pCredSN não informado)
+    for (const w of it.tc?.warnings ?? []) out.push(`${tag}: ${w}`);
     if (c.reformOn) {
       const r = it.ibsCbs;
       if (!r) out.push(`${tag}: empresa aderiu à reforma tributária, mas o item não tem CST/cClassTrib do IBS/CBS (cadastre no grupo tributário e use “Atualizar do cadastro”).`);
@@ -726,11 +823,13 @@ export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cf
       valor_outras_despesas: i.other ? money(i.other) : undefined,
       icms_origem: Number(i.origin ?? 0),
       icms_situacao_tributaria: i.cstCsosn,
-      icms_modalidade_base_calculo: ["00", "20"].includes(i.cstCsosn) && i.icmsBase ? 3 : undefined,
-      icms_reducao_base_calculo: i.cstCsosn === "20" && i.icmsBase ? (i.icmsBaseReductionBps ?? 0) / 100 : undefined,
+      icms_modalidade_base_calculo: ["00", "20", "10", "70"].includes(i.cstCsosn) && i.icmsBase ? 3 : undefined,
+      icms_reducao_base_calculo: ["20", "70"].includes(i.cstCsosn) && i.icmsBase ? (i.icmsBaseReductionBps ?? 0) / 100 : undefined,
       icms_base_calculo: i.icmsBase ? money(i.icmsBase) : undefined,
       icms_aliquota: i.icmsBase ? i.icmsRateBps / 100 : undefined,
       icms_valor: i.icms ? money(i.icms) : undefined,
+      // tributação completa (Fase 7): FCP, ICMS-ST/FCP-ST, ICMSUFDest (DIFAL) e crédito do Simples — só itens com os campos
+      ...completePayloadItem(i.tc),
       ...contribFields("pis", i),
       ...contribFields("cofins", i),
       valor_total_tributos: i.approxTax ? money(i.approxTax) : undefined,
@@ -749,6 +848,8 @@ export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cf
   if (t.approxTax) payload.valor_total_tributos = money(t.approxTax);
   // totais IBS/CBS/IS (não somam em valor_total — vNF — no período de teste)
   if (opts.reform) Object.assign(payload, reformPayloadTotals(doc.items ?? []));
+  // totais de ST/FCP/DIFAL (vazio sem itens da tributação completa)
+  Object.assign(payload, completePayloadTotals(doc.items ?? []));
   if (doc.exitAt && doc.model === "nfe") payload.data_entrada_saida = doc.exitAt;
   if (r) {
     if (rdoc.length === 14) payload.cnpj_destinatario = rdoc;
@@ -784,7 +885,9 @@ export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cf
   if (doc.transport?.volumes)
     payload.volumes = [{ quantidade: doc.transport.volumes, especie: doc.transport.species || undefined, peso_bruto: doc.transport.grossWeightKg || undefined, peso_liquido: doc.transport.netWeightKg || undefined }];
   if (doc.service?.referencedKeys?.length) payload.notas_referenciadas = doc.service.referencedKeys.map((k: string) => ({ chave_nfe: k }));
-  if (doc.service?.additionalInfo) payload.informacoes_adicionais_contribuinte = doc.service.additionalInfo;
+  // crédito do Simples (FIS-13): mensagem obrigatória somada às informações complementares
+  const credMsg = doc.model === "nfe" ? simplesCreditMessage(doc.items ?? []) : null;
+  if (doc.service?.additionalInfo || credMsg) payload.informacoes_adicionais_contribuinte = [doc.service?.additionalInfo, credMsg].filter(Boolean).join(" ");
   return payload;
 }
 
@@ -837,6 +940,8 @@ export interface CreateDocInput {
   effects?: DocEffects | null;
   competenceDate?: string | null;
   exitAt?: string | null;
+  /** natureza de operação cadastrada (FIS-11/07) — gravada só quando escolhida */
+  operationKey?: string | null;
   total: number;
 }
 
@@ -900,6 +1005,7 @@ export async function createDocument(ctx: Ctx, input: CreateDocInput) {
         effects: input.effects ?? null,
         competenceDate: input.competenceDate ?? null,
         exitAt: input.exitAt ?? null,
+        ...(input.operationKey ? { operationKey: input.operationKey } : {}),
         issuedAt: nowIso(),
         attempts: 0,
         isSimulated: Boolean(provider?.simulated),
@@ -1004,7 +1110,7 @@ export async function createNfceForSale(ctx: Ctx, saleId: string) {
   const docItems = await buildItems(
     ctx,
     await withSaleRastro(ctx.store, saleId, items, items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: (i.itemDiscount ?? 0) + (i.globalDiscount ?? 0), description: i.description }))),
-    { branchId: sale.branchId, other: items.reduce((a, i) => a + (i.surcharge ?? 0), 0), kind: "sale" },
+    { branchId: sale.branchId, other: items.reduce((a, i) => a + (i.surcharge ?? 0), 0), kind: "sale", model: "nfce" },
   );
   const totals = computeTotals(docItems);
   const c = sale.customerSnapshot;
@@ -1288,7 +1394,8 @@ async function applyResult(ctx: Ctx, doc: Doc, r: ProviderResult, eventType: str
 /** XML de simulação; `opts.reform` (adesão vigente) inclui os grupos IBS/CBS/IS dos itens que os têm. */
 export function simulatedXml(doc: Doc, opts: { reform?: boolean } = {}) {
   const esc = (s: any) => String(s ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!);
-  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}${(i.rastro ?? []).map((r: FiscalRastro) => `<rastro nLote="${esc(r.nLote)}" qLote="${r.qLote / QTY}"${r.dFab ? ` dFab="${r.dFab}"` : ""}${r.dVal ? ` dVal="${r.dVal}"` : ""}/>`).join("")}${opts.reform && i.ibsCbs ? reformXmlItem(i.ibsCbs) : ""}</item>`).join("\n");
+  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}${(i.rastro ?? []).map((r: FiscalRastro) => `<rastro nLote="${esc(r.nLote)}" qLote="${r.qLote / QTY}"${r.dFab ? ` dFab="${r.dFab}"` : ""}${r.dVal ? ` dVal="${r.dVal}"` : ""}/>`).join("")}${opts.reform && i.ibsCbs ? reformXmlItem(i.ibsCbs) : ""}${completeXmlItem(i.tc)}</item>`).join("\n");
+  const credMsg = doc.model === "nfe" ? simplesCreditMessage(doc.items ?? []) : null;
   const s = doc.service;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!-- SIMULAÇÃO INTERCERT — DOCUMENTO SEM VALIDADE FISCAL. Não substitui o XML autorizado pela SEFAZ/prefeitura. -->
@@ -1300,7 +1407,7 @@ export function simulatedXml(doc: Doc, opts: { reform?: boolean } = {}) {
 ${s ? `  <servico item="${esc(s.serviceListItem)}" rps="${esc(doc.rpsNumber)}" valor="${((s.amount ?? 0) / 100).toFixed(2)}" iss="${((s.iss ?? 0) / 100).toFixed(2)}" liquido="${((s.net ?? 0) / 100).toFixed(2)}">${esc(s.description)}</servico>\n` : ""}  <itens>
 ${items}
   </itens>
-${opts.reform ? reformXmlTotals(doc.items ?? []) : ""}  <total>${((doc.total ?? 0) / 100).toFixed(2)}</total>
+${opts.reform ? reformXmlTotals(doc.items ?? []) : ""}${completeXmlTotals(doc.items ?? [])}${credMsg ? `  <infCpl>${esc(credMsg)}</infCpl>\n` : ""}  <total>${((doc.total ?? 0) / 100).toFixed(2)}</total>
 </documentoSimulado>`;
 }
 
