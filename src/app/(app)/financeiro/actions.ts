@@ -16,6 +16,7 @@ import {
 } from "@/domain/finance";
 import { importBankFile, ignoreBankTx, previewBankImport, reconcile, restoreBankTx, settleFromBankTx, undoReconciliation } from "@/domain/reconciliation";
 import { settleCardReceivable } from "@/domain/sales";
+import { assertNotOpenPdvReceipt } from "@/domain/pdv-receivables";
 import type { BankFormat, CsvMapping } from "@/domain/bank";
 import { queryCardReceivables } from "./queries";
 
@@ -141,6 +142,8 @@ export async function settleAction(fd: FormData) {
 export async function reverseSettlementAction(settlementId: string, fd: FormData) {
   return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.reverse");
+    // recebida no PDV com o caixa ainda aberto: o estorno é feito no PDV (o valor sai da gaveta)
+    await assertNotOpenPdvReceipt(s.ctx, settlementId);
     await reverseSettlement(s.ctx, settlementId, fstr(fd, "reason"));
     return { ok: true as const, message: "Baixa estornada; saldo da parcela recomposto." };
   });

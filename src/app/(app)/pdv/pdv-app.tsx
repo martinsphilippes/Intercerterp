@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertTriangle, ArrowLeftRight, BadgePercent, Ban, CheckCircle2, ClipboardList, CloudOff, CreditCard, LogOut, Minus, Monitor, Pencil, Plus, RefreshCcw, Save, ShoppingCart, Trash2, UserRound, Wallet,
+  AlertTriangle, ArrowLeftRight, BadgePercent, Ban, CheckCircle2, ClipboardList, CloudOff, CreditCard, HandCoins, LogOut, Minus, Monitor, Pencil, Plus, RefreshCcw, Save, ShoppingCart, Trash2, UserRound, Wallet,
 } from "lucide-react";
 import { Dialog, Drawer } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ import { cartTotals, effectiveUnitPrice, tablePrice, type CartItem } from "@/dom
 import { ProductSearch, type ProductHit, type ProductSearchHandle } from "./product-search";
 import { CustomerPicker, type CustomerInfo } from "./customer-picker";
 import { cancelCartAction, parkCartAction, resumeCartAction, saveCartAction, startExchangeAction, type PlainCart } from "./actions";
+import { ReceivablesDialog, type ReceiveMethod } from "./receivables-dialog";
 
 type Line = CartItem & { key?: string };
 
@@ -42,6 +43,8 @@ export interface PdvProps {
   allowNegative: boolean;
   exchange: { returnId: string; number: number; saleNumber: number; voucherCode: string | null; voucherBalance: number } | null;
   pendingExchange: { returnId: string; number: number; itemsTotal: number; credit: number } | null;
+  /** recebimento de parcelas do crediário no caixa (parâmetro feature.recebimentoPdv + permissão); null = ação oculta */
+  receivables: { methods: ReceiveMethod[]; canReverse: boolean } | null;
 }
 
 const TERMINAL_COOKIE = "ic_pdv_terminal";
@@ -69,7 +72,7 @@ export function PdvApp(props: PdvProps) {
   const [customer, setCustomer] = useState<CustomerInfo | null>(props.customer);
   const [selected, setSelected] = useState(props.cart.items.length ? props.cart.items.length - 1 : -1);
   const [saveState, setSaveState] = useState<{ state: "saved" | "saving" | "error"; at?: string; error?: string }>({ state: "saved", at: props.cart.updatedAt });
-  const [dialog, setDialog] = useState<null | "customer" | "discount" | "line" | "park" | "cancel" | "new" | "parked">(null);
+  const [dialog, setDialog] = useState<null | "customer" | "discount" | "line" | "park" | "cancel" | "new" | "parked" | "receive">(null);
   const [pending, start] = useTransition();
   const searchRef = useRef<ProductSearchHandle>(null);
   const dirty = useRef(false);
@@ -295,6 +298,11 @@ export function PdvApp(props: PdvProps) {
         setDialog("discount");
         return;
       }
+      if (e.key === "F9") {
+        e.preventDefault();
+        if (props.receivables) setDialog("receive");
+        return;
+      }
       if (anyDialog) return; // Esc nos diálogos é tratado por eles
       if (e.key === "Escape") {
         if (searchRef.current?.isOpen() || searchRef.current?.hasText()) {
@@ -401,6 +409,11 @@ export function PdvApp(props: PdvProps) {
           <span className="hidden md:inline">{saveState.state === "saving" ? "Gravando…" : saveState.state === "error" ? "Não gravado no servidor (cópia local mantida)" : `Gravado ${saveState.at ? formatTime(saveState.at, true) : ""}`}</span>
         </span>
         <div className="flex items-center gap-1">
+          {props.receivables && (
+            <button type="button" onClick={() => setDialog("receive")} className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800" title="Receber parcelas do crediário (F9)">
+              <HandCoins className="size-4" /> <span className="hidden sm:inline">Receber parcelas</span> <kbd className="hidden rounded border border-white/30 px-1 text-[10px] lg:inline">F9</kbd>
+            </button>
+          )}
           <button type="button" onClick={() => setDialog("parked")} className="flex items-center gap-1 rounded px-2 py-1 hover:bg-brand-800">
             <ClipboardList className="size-4" /> Pré-vendas{props.parked.length ? <span className="rounded-full bg-accent-500 px-1.5 text-xs">{props.parked.length}</span> : null}
           </button>
@@ -616,7 +629,7 @@ export function PdvApp(props: PdvProps) {
       </div>
 
       <footer className="hidden flex-wrap gap-x-4 gap-y-1 border-t border-line bg-white px-3 py-1.5 text-xs text-slate-500 md:flex" aria-label="Atalhos de teclado">
-        {[["F2", "Buscar"], ["F4", "Cliente"], ["F6", "Pré-venda"], ["F8", "Desconto"], ["F10", "Pagamento"], ["↑↓", "Selecionar item"], ["Enter", "Editar item"], ["+ / −", "Quantidade"], ["Del", "Remover item"], ["Esc", "Fechar"]].map(([k, l]) => (
+        {[["F2", "Buscar"], ["F4", "Cliente"], ["F6", "Pré-venda"], ["F8", "Desconto"], ...(props.receivables ? [["F9", "Receber parcelas"]] : []), ["F10", "Pagamento"], ["↑↓", "Selecionar item"], ["Enter", "Editar item"], ["+ / −", "Quantidade"], ["Del", "Remover item"], ["Esc", "Fechar"]].map(([k, l]) => (
           <span key={k}><kbd className="rounded border border-line bg-slate-50 px-1 font-mono">{k}</kbd> {l}</span>
         ))}
         <span className="ml-auto">Leitor: {props.terminal.scannerMode === "keyboard_wedge" ? "teclado (emulação)" : (props.terminal.scannerMode ?? "—")} · Impressão: {props.terminal.printerMode === "browser" ? "navegador" : (props.terminal.printerMode ?? "—")}</span>
@@ -687,6 +700,26 @@ export function PdvApp(props: PdvProps) {
           <Button variant="danger" onClick={() => setDialog("cancel")}><Ban className="size-4" /> Cancelar o atendimento</Button>
         </div>
       </Dialog>
+      {props.receivables && (
+        <ReceivablesDialog
+          open={dialog === "receive"}
+          onClose={() => setDialog(null)}
+          terminalId={props.terminal.id}
+          blockReason={
+            !props.session
+              ? "Não há caixa aberto neste terminal: o recebimento exige caixa aberto (o valor entra na gaveta)."
+              : props.session.operatorMismatch === "block"
+                ? `O caixa deste terminal foi aberto por ${props.session.operatorName}: para receber, use um terminal com o seu próprio caixa aberto ou peça a um supervisor.`
+                : null
+          }
+          methods={props.receivables.methods}
+          initialCustomer={customer}
+          canCreateCustomer={props.operator.canCreateCustomer}
+          discountLimitBps={props.operator.discountLimitBps}
+          canOverLimit={props.operator.canOverLimit}
+          canReverse={props.receivables.canReverse}
+        />
+      )}
       <Drawer open={dialog === "parked"} onClose={() => setDialog(null)} title="Pré-vendas em espera">
         {props.parked.length === 0 ? (
           <p className="text-sm text-slate-500">Nenhuma pré-venda salva nesta filial.</p>

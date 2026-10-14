@@ -6,6 +6,8 @@ import { cancelCart, cartToSaleInput, createCart, ensureOpenCart, parkCart, resu
 import { finalizeSale, type SalePaymentInput } from "@/domain/sales";
 import { cancelIntent, createPixIntent, simulateIntent } from "@/domain/payments/intents";
 import { formatMoney } from "@/lib/money";
+import { currentSession } from "@/domain/cash";
+import { openInstallmentsForCustomer, receiveInstallments, reverseReceipt, sessionReceipts, type ReceiveInput } from "@/domain/pdv-receivables";
 
 function plainCart(c: Record<string, any>) {
   return {
@@ -113,5 +115,72 @@ export async function finalizeCartAction(cartId: string, payments: SalePaymentIn
     const sale = await finalizeSale(s.ctx, { ...cartToSaleInput(cart, clean), discountApproval: opts.approval?.login ? opts.approval : null });
     const receipt = opts.receipt && ["imprimir", "email", "imprimir_email"].includes(opts.receipt) ? `?comprovante=${opts.receipt}` : "";
     return { ok: true as const, message: `Venda nº ${sale.number} concluída.`, data: { saleId: sale.id }, redirect: `/vendas/${sale.id}/conclusao${receipt}` };
+  });
+}
+
+// ───────────────────────────── Recebimento de parcelas do crediário no caixa (VEN-10)
+
+function receiptView(op: Record<string, any>) {
+  const r = op.result ?? {};
+  return {
+    id: op.id as string,
+    number: (r.number ?? 0) as number,
+    status: op.status as string,
+    error: (op.error ?? null) as string | null,
+    at: (r.at ?? null) as string | null,
+    methodName: (r.methodName ?? "") as string,
+    methodKind: (r.methodKind ?? "") as string,
+    total: (r.total ?? 0) as number,
+    received: (r.received ?? 0) as number,
+    change: (r.change ?? 0) as number,
+    discount: (r.discount ?? 0) as number,
+    operatorName: (r.operatorName ?? "") as string,
+    customers: (r.customers ?? []) as string[],
+    items: ((r.items ?? []) as any[]).map((i) => ({
+      installmentId: i.installmentId as string, titleNumber: i.titleNumber as number, number: i.number as number, count: i.count as number, partyName: i.partyName as string,
+      dueDate: i.dueDate as string, principal: i.principal as number, fine: i.fine as number, interest: i.interest as number, discount: i.discount as number, total: i.total as number, done: Boolean(i.done),
+    })),
+    reversal: r.reversal ? { at: r.reversal.at as string, byName: r.reversal.byName as string, reason: r.reversal.reason as string } : null,
+  };
+}
+export type PdvReceiptView = ReturnType<typeof receiptView>;
+
+const RECEIVABLE_PATHS = ["/caixa", "/financeiro/receber"];
+
+/** Parcelas em aberto do cliente (valor atualizado com multa/juros, vencidas primeiro). */
+export async function pdvOpenInstallmentsAction(customerId: string) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => openInstallmentsForCustomer(s.ctx, customerId));
+}
+
+/** Recebe as parcelas no caixa aberto do terminal. Idempotente pela chave do formulário. */
+export async function pdvReceiveInstallmentsAction(input: ReceiveInput) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: RECEIVABLE_PATHS }, async (s) => {
+    const op = await receiveInstallments(s.ctx, {
+      terminalId: input.terminalId, installmentIds: input.installmentIds, methodId: input.methodId, received: input.received != null ? Math.round(input.received) : null,
+      discount: Math.round(input.discount ?? 0), approval: input.approval?.login ? input.approval : null, reference: input.reference?.trim() || null, idemKey: input.idemKey,
+    });
+    const v = receiptView(op);
+    if (op.status === "failed") return { ok: false as const, error: op.error ?? "Recebimento não registrado.", code: "receivable_partial" };
+    if (op.status === "reversed") return { ok: true as const, message: `O recebimento nº ${v.number} já foi estornado.`, data: v };
+    if (op.status === "partial") return { ok: true as const, message: `Recebimento nº ${v.number} concluído parcialmente: ${op.error ?? ""}`, data: v };
+    return { ok: true as const, message: `Recebimento nº ${v.number} registrado — ${formatMoney(v.total)} em ${v.methodName}${v.methodKind === "cash" && v.change ? ` · troco ${formatMoney(v.change)}` : ""}.`, data: v };
+  });
+}
+
+/** Recebimentos registrados no caixa aberto do terminal (para recibo e estorno). */
+export async function pdvSessionReceiptsAction(terminalId: string) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+    const session = await currentSession(s.ctx, terminalId);
+    if (!session) return [] as PdvReceiptView[];
+    return (await sessionReceipts(s.ctx, session.id)).map(receiptView);
+  });
+}
+
+/** Estorno do recebimento (mesma sessão aberta): recompõe as parcelas e lança a saída no caixa. */
+export async function pdvReverseReceiptAction(receiptId: string, reason: string, approval?: { login: string; password: string } | null) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: RECEIVABLE_PATHS }, async (s) => {
+    const op = await reverseReceipt(s.ctx, { receiptId, reason, approval: approval?.login ? approval : null });
+    const v = receiptView(op);
+    return { ok: true as const, message: `Recebimento nº ${v.number} estornado: parcelas reabertas e ${formatMoney(v.total)} lançado como saída ${v.methodKind === "cash" ? "do dinheiro do caixa" : `em ${v.methodName}`}.`, data: v };
   });
 }

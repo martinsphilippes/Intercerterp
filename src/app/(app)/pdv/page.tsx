@@ -6,6 +6,7 @@ import { listAll } from "@/lib/db";
 import { sp, type SearchParams } from "@/lib/list";
 import { can, canDo } from "@/lib/permissions";
 import { getSetting } from "@/lib/core/settings";
+import { pdvReceivableEnabled, receivableMethods } from "@/domain/pdv-receivables";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { ensureOpenCart, listParkedCarts, saveCart } from "@/domain/carts";
 import { resolveTerminal } from "./terminal";
@@ -104,6 +105,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const allowNegative = Boolean(terminal.allowNegativeStock) || Boolean(await getSetting(store, s.ctx.companyId, s.ctx.branchId, "sales.allowNegativeStock", false));
   // caixa aberto por outro operador: o parâmetro decide se o PDV bloqueia ou só avisa (a regra é aplicada de novo na conclusão)
   const mismatchPolicy = session && session.operatorId !== s.user.id && !canDo(s.user, "cash.reopen") ? await getSetting<string>(store, s.ctx.companyId, s.ctx.branchId, "cash.operatorMismatch", "warn") : "allow";
+  // recebimento de parcelas no caixa: parâmetro feature.recebimentoPdv (padrão ligado) + permissão do operador
+  const receivables = canDo(s.user, "pdv.receive_installments") && (await pdvReceivableEnabled(s.ctx)) ? { methods: await receivableMethods(s.ctx), canReverse: canDo(s.user, "pdv.reverse_receipt") } : null;
   const plain: PlainCart = {
     id: cart.id, status: cart.status, terminalId: cart.terminalId, customerId: cart.customerId ?? null, customerName: cart.customerName ?? null, cpfOnInvoice: cart.cpfOnInvoice ?? null,
     priceTableId: cart.priceTableId ?? null, items: cart.items ?? [], globalDiscount: cart.globalDiscount ?? 0, globalDiscountBps: cart.globalDiscountBps ?? 0, surcharge: cart.surcharge ?? 0,
@@ -131,6 +134,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       allowNegative={allowNegative}
       exchange={exchange}
       pendingExchange={pendingExchange}
+      receivables={receivables}
     />
   );
 }

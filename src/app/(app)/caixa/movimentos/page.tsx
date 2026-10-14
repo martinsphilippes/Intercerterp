@@ -20,7 +20,7 @@ import { MovementForm } from "./movement-form";
 export const metadata = { title: "Suprimentos e sangrias" };
 export const dynamic = "force-dynamic";
 
-const TONE: Record<string, "good" | "bad" | "info" | "warn" | "neutral"> = { supply: "good", withdrawal: "bad", opening: "info", refund: "warn", sale: "neutral" };
+const TONE: Record<string, "good" | "bad" | "info" | "warn" | "neutral"> = { supply: "good", withdrawal: "bad", opening: "info", refund: "warn", sale: "neutral", receivable: "good" };
 
 /** Suprimentos e sangrias (Tela 13) da sessão aberta do terminal (ou de uma sessão informada). */
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -86,8 +86,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <Stat label="Sangrias" value={formatMoney(sum.totals.withdrawal)} hint={`${count("withdrawal")} movimentação(ões)`} tone="bad" />
         <Stat label="Devoluções em espécie" value={formatMoney(sum.totals.refunds)} hint={`${count("refund")} saída(s) a clientes`} tone={sum.totals.refunds ? "warn" : "default"} />
       </div>
-      {showExpected && <p className="mb-4 text-xs text-slate-500">Saldo estimado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções {formatMoney(sum.totals.refunds)} = <b>{formatMoney(sum.expected.cash)}</b>. Sangria não reduz faturamento; suprimento não é venda.</p>}
-      {!showExpected && <p className="mb-4 text-xs text-slate-500">Conferência cega: os recebimentos de venda em dinheiro desta sessão (lista e exportação) ficam ocultos até a contagem ser registrada no fechamento.</p>}
+      {showExpected && <p className="mb-4 text-xs text-slate-500">Saldo estimado = fundo {formatMoney(sum.totals.opening)} + vendas em dinheiro {formatMoney(sum.totals.cashSales)}{count("receivable") ? ` + recebimentos de crediário em dinheiro ${formatMoney(sum.receivables.cash)}` : ""} + suprimentos {formatMoney(sum.totals.supply)} − sangrias {formatMoney(sum.totals.withdrawal)} − devoluções {formatMoney(sum.totals.refunds)} = <b>{formatMoney(sum.expected.cash)}</b>. Sangria não reduz faturamento; suprimento não é venda.</p>}
+      {!showExpected && <p className="mb-4 text-xs text-slate-500">Conferência cega: os recebimentos de venda em dinheiro e de parcelas do crediário desta sessão (lista e exportação) ficam ocultos até a contagem ser registrada no fechamento.</p>}
       <div className="grid gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
         <div>
           {open && canDo(s.user, "cash.withdrawal") && canOperate ? (
@@ -110,6 +110,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 <option value="withdrawal">Sangrias</option>
                 <option value="refund">Devoluções</option>
                 <option value="vendas">Vendas em dinheiro</option>
+                <option value="receivable">Recebimentos de crediário</option>
               </select>
               <select name="ordem" defaultValue={p.f.ordem ?? ""} className="h-8 rounded border border-line bg-white px-2" aria-label="Ordenação">
                 <option value="">Mais recentes</option>
@@ -126,7 +127,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                   <tr key={m.id}>
                     <td className="tabular">{formatDateTime(m.occurredAt).split(" ")[1]}<span className="block text-xs text-slate-500">{formatDate(m.occurredAt)}</span></td>
                     <td><Badge tone={TONE[m.type] ?? "neutral"}>{m.typeLabel}</Badge>{m.number ? <span className="block text-xs text-slate-500">nº {m.number}</span> : null}</td>
-                    <td>{m.reason}<span className="block text-xs text-slate-500">{m.type === "withdrawal" ? `Destino: ${m.accountName ?? "cofre / numerário físico"}` : m.type === "supply" ? `Origem: ${m.accountName ?? "numerário físico"}` : m.saleId ? <Link className="text-brand-700 hover:underline" href={`/vendas/${m.saleId}`}>ver venda</Link> : terminalName}</span></td>
+                    <td>{m.reason}<span className="block text-xs text-slate-500">{m.type === "withdrawal" ? `Destino: ${m.accountName ?? "cofre / numerário físico"}` : m.type === "supply" ? `Origem: ${m.accountName ?? "numerário físico"}` : m.type === "receivable" ? (m.methodLabel ?? "—") : m.saleId ? <Link className="text-brand-700 hover:underline" href={`/vendas/${m.saleId}`}>ver venda</Link> : terminalName}</span></td>
                     <td>{m.recipient ?? m.createdByName}<span className="block text-xs text-slate-500">Por {m.createdByName}{m.approvedByName ? ` · autorizado por ${m.approvedByName}` : ""}</span></td>
                     <td className={`tabular text-right font-medium ${m.amount < 0 ? "text-red-700" : m.type === "opening" ? "" : "text-emerald-700"}`}>{m.amount < 0 ? "− " : m.type === "opening" ? "" : "+ "}{formatMoney(Math.abs(m.amount))}</td>
                     <td>{["supply", "withdrawal", "opening"].includes(m.type) && <Link className="text-xs text-brand-700 hover:underline" href={`/caixa/movimentos/${m.id}/comprovante`}>Comprovante</Link>}</td>

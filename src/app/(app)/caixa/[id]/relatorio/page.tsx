@@ -30,6 +30,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const open = ["open", "reopened"].includes(session.status);
   const live: Record<string, number> = { cash: sum.expected.cash };
   for (const [k, v] of Object.entries(sum.byMethod)) if (k !== "cash") live[k] = v.expected;
+  const hasReceivables = sum.movements.some((m) => m.type === "receivable");
+  const stats: Array<[string, number | null]> = [["Fundo", sum.totals.opening], ["Vendas (" + sum.totals.salesCount + ")", showExpected ? sum.totals.sales : null], ["Suprimentos", sum.totals.supply], ["Sangrias", sum.totals.withdrawal], ["Devoluções em espécie", sum.totals.refunds], ["Vendas em dinheiro", showExpected ? sum.totals.cashSales : null], ["Troco entregue", sum.totals.change], ["Dinheiro esperado", showExpected ? sum.expected.cash : null]];
+  // linha própria (Fase 4): recebimentos de parcelas no PDV — o dinheiro entra no esperado
+  if (hasReceivables) stats.splice(6, 0, ["Recebimentos de crediário", showExpected ? sum.receivables.total : null], ["Recebimentos de crediário em dinheiro", showExpected ? sum.receivables.cash : null]);
   return (
     <div className="space-y-3">
       <PrintStyles paper="A4" />
@@ -40,7 +44,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <div className="text-right text-xs"><p>Operador: {users.get(session.operatorId)}</p><p>Abertura: {formatDateTime(session.openedAt)}</p><p>Fechamento: {session.closedAt ? `${formatDateTime(session.closedAt)} (${users.get(session.closedBy) ?? "—"})` : "—"}</p><p>Versão: {session.version ?? 1}</p></div>
         </header>
         <section className="grid grid-cols-4 gap-2 text-center">
-          {[["Fundo", sum.totals.opening], ["Vendas (" + sum.totals.salesCount + ")", showExpected ? sum.totals.sales : null], ["Suprimentos", sum.totals.supply], ["Sangrias", sum.totals.withdrawal], ["Devoluções em espécie", sum.totals.refunds], ["Vendas em dinheiro", showExpected ? sum.totals.cashSales : null], ["Troco entregue", sum.totals.change], ["Dinheiro esperado", showExpected ? sum.expected.cash : null]].map(([l, v]) => (
+          {stats.map(([l, v]) => (
             <div key={String(l)} className="rounded border border-line p-2"><p className="text-xs text-slate-600">{l}</p><p className="font-semibold">{v == null ? "oculto (conferência cega)" : formatMoney(v as number)}</p></div>
           ))}
         </section>
@@ -55,10 +59,23 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           )}
           {session.justification && !open && <p className="mt-1">Justificativa: {session.justification}</p>}
         </section>
+        {hasReceivables && (
+          <section>
+            <h2 className="mb-1 font-semibold">Recebimentos de crediário</h2>
+            {showExpected ? (
+              <table className="table-base w-full"><thead><tr><th>Forma</th><th className="text-right">Lançamentos (líquidos de estornos)</th><th className="text-right">Valor</th></tr></thead>
+                <tbody>{Object.entries(sum.receivables.byMethod).map(([k, v]) => <tr key={k}><td>{METHOD_LABEL[k] ?? v.label}</td><td className="text-right">{v.count}</td><td className="text-right">{formatMoney(v.amount)}</td></tr>)}</tbody>
+              </table>
+            ) : (
+              <p>Conferência cega ativa: valores revelados depois que a contagem for registrada no fechamento.</p>
+            )}
+            <p className="mt-1 text-xs">Parcelas recebidas no PDV: o dinheiro entra no dinheiro esperado; cartão e Pix no previsto do meio. Não são vendas.</p>
+          </section>
+        )}
         <section>
           <h2 className="mb-1 font-semibold">Movimentos</h2>
           <table className="table-base w-full"><thead><tr><th>Data/hora</th><th>Tipo</th><th>Motivo</th><th>Responsável</th><th className="text-right">Valor</th></tr></thead>
-            <tbody>{sum.movements.filter((m) => m.type !== "sale").map((m) => <tr key={m.id}><td>{formatDateTime(m.occurredAt)}</td><td>{CASH_MOVEMENT_LABEL[m.type] ?? m.type}</td><td>{m.reason}</td><td>{m.recipient ?? users.get(m.createdBy)}</td><td className="text-right">{formatMoney(m.amount)}</td></tr>)}</tbody>
+            <tbody>{sum.movements.filter((m) => m.type !== "sale").map((m) => <tr key={m.id}><td>{formatDateTime(m.occurredAt)}</td><td>{CASH_MOVEMENT_LABEL[m.type] ?? m.type}</td><td>{m.reason}</td><td>{m.recipient ?? users.get(m.createdBy)}</td><td className="text-right">{m.type === "receivable" && !showExpected ? "oculto" : formatMoney(m.amount)}</td></tr>)}</tbody>
           </table>
         </section>
         <section>

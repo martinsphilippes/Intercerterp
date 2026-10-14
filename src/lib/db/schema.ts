@@ -347,6 +347,8 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, sessionId: id(true), number: int, type: s(30, true), method: s(30), amount: money, reason: s(300),
       recipient: s(200), accountId: id(), saleId: id(), returnId: id(), occurredAt: dt, idemKey: s(120), notes: s(500),
       transferId: id(), sessionVersion: int, responsibleId: id(), approvedBy: id(),
+      /** recebimento de parcela no PDV (type "receivable"): baixa do contas a receber que originou o movimento */
+      settlementId: id(),
     },
     indexes: [k("i_session", "sessionId"), u("u_idem", "idemKey")],
   },
