@@ -1192,7 +1192,7 @@ async function applyResult(ctx: Ctx, doc: Doc, r: ProviderResult, eventType: str
   return ctx.store.getOrThrow("fiscal_documents", doc.id);
 }
 
-function simulatedXml(doc: Doc) {
+export function simulatedXml(doc: Doc) {
   const esc = (s: any) => String(s ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!);
   const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}${(i.rastro ?? []).map((r: FiscalRastro) => `<rastro nLote="${esc(r.nLote)}" qLote="${r.qLote / QTY}"${r.dFab ? ` dFab="${r.dFab}"` : ""}${r.dVal ? ` dVal="${r.dVal}"` : ""}/>`).join("")}</item>`).join("\n");
   const s = doc.service;
