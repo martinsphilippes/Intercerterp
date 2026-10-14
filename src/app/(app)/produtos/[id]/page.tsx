@@ -23,7 +23,9 @@ import { expiryStatus, sortFefo, unlottedQty, type LotEntry } from "@/domain/lot
 import { productFormOptions } from "../form-options";
 import { ProductEditForm } from "../product-form";
 import { VariantsForm } from "../variants-editor";
-import { ImagePanel, ConversionsPanel, CostDialogButton, PriceDialogButton, DeletePriceButton, StockParamsButton, InitialBalanceForm, ComponentsPanel } from "./panels";
+import { ImagePanel, ConversionsPanel, CostDialogButton, PriceDialogButton, DeletePriceButton, StockParamsButton, InitialBalanceForm, ComponentsPanel, ReformProductPanel } from "./panels";
+import { getFiscalConfig } from "@/domain/fiscal/service";
+import { reformAdhered } from "@/domain/fiscal/reform";
 import { canSeeBranch } from "../../estoque/queries";
 import { featureOn } from "@/lib/server/features";
 import { scaleConfig } from "@/domain/scale";
@@ -82,6 +84,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const supplier = p.supplierId ? await ctx.store.get("suppliers", p.supplierId) : null;
   const brand = p.brandId ? await ctx.store.get("brands", p.brandId) : null;
   const isService = p.type === "service";
+  // reforma tributária (FIS-19): bloco na aba Fiscal só com o recurso ligado
+  const reformOn = !isService && (await featureOn(s, "reformaTributaria"));
+  const reformCfg = reformOn ? await getFiscalConfig(ctx.store, ctx.companyId, ctx.branchId) : null;
+  const reformAdhesion = !reformOn ? "" : reformAdhered(reformCfg, true, today()) ? `Empresa aderiu à reforma desde ${formatDate(reformCfg!.reformAdherenceFrom)}: a NF-e/NFC-e leva os grupos IBS/CBS deste produto.` : reformCfg?.reformAdherence ? `Adesão marcada a partir de ${formatDate(reformCfg.reformAdherenceFrom)} (ainda não vigente).` : "Empresa sem adesão (Fiscal › Configurações › Tributação padrão): os documentos saem sem IBS/CBS.";
   // balança etiquetadora (CAD-16): aba só para mercadorias com o recurso ligado
   const scale = !isService && (await featureOn(s, "balanca")) ? await scaleConfig(ctx.store, ctx.companyId, ctx.branchId) : null;
   const composition = compositionOf(p);
@@ -474,6 +480,15 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               <Card title="Dados fiscais">
                 <DefinitionList items={[{ label: "NCM", value: formatNcm(p.ncm) }, { label: "CEST", value: formatCest(p.cest) }, { label: "Origem", value: ORIGINS.find((x) => x.value === p.origin)?.label }, { label: "CFOP próprio", value: p.cfop }, { label: "CST/CSOSN próprio", value: p.cstCsosn }]} />
               </Card>
+            )}
+            {reformOn && (
+              <ReformProductPanel
+                productId={id}
+                product={{ ibsCbsCst: p.ibsCbsCst ?? null, cClassTrib: p.cClassTrib ?? null }}
+                group={taxGroup ? { name: taxGroup.name, ibsCbsCst: taxGroup.ibsCbsCst ?? null, cClassTrib: taxGroup.cClassTrib ?? null, ibsRateBps: taxGroup.ibsRateBps ?? null, cbsRateBps: taxGroup.cbsRateBps ?? null, isRateBps: taxGroup.isRateBps ?? null, ibsCbsRedBps: taxGroup.ibsCbsRedBps ?? null, reformValidFrom: taxGroup.reformValidFrom ?? null } : null}
+                adhesion={reformAdhesion}
+                canEdit={canEdit}
+              />
             )}
           </div>
           {!isService ? (

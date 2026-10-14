@@ -25,7 +25,9 @@ import {
   deletePriceAction,
   saveStockParamsAction,
   initialBalanceAction,
+  saveProductReformAction,
 } from "../actions";
+import { IBS_CBS_CST_OPTIONS } from "@/domain/fiscal/reform-codes";
 
 type Opt = { value: string; label: string };
 
@@ -556,5 +558,60 @@ function ComponentQtyButton({ productId, row }: { productId: string; row: Compon
         </ActionForm>
       </Dialog>
     </>
+  );
+}
+
+// ───────────────────────────── Reforma tributária (FIS-19)
+
+export interface ReformGroupView {
+  name: string;
+  ibsCbsCst: string | null;
+  cClassTrib: string | null;
+  ibsRateBps: number | null;
+  cbsRateBps: number | null;
+  isRateBps: number | null;
+  ibsCbsRedBps: number | null;
+  reformValidFrom: string | null;
+}
+
+/**
+ * Bloco "Reforma tributária" da aba Fiscal do produto: classificação efetiva (produto sobrepõe CST/cClassTrib do grupo;
+ * alíquotas e vigência vêm do grupo) e situação da adesão. Exibido só com `feature.reformaTributaria` ligado.
+ */
+export function ReformProductPanel({ productId, product, group, adhesion, canEdit }: { productId: string; product: { ibsCbsCst: string | null; cClassTrib: string | null }; group: ReformGroupView | null; adhesion: string; canEdit: boolean }) {
+  const cst = product.ibsCbsCst || group?.ibsCbsCst || null;
+  const cls = product.cClassTrib || group?.cClassTrib || null;
+  const src = (own: string | null, fromGroup: string | null | undefined) => (own ? "produto" : fromGroup ? "grupo" : "não definido");
+  return (
+    <div className="space-y-3 rounded-lg border border-line bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Reforma tributária (IBS, CBS e IS)</h3>
+        <Badge tone={cst && cls ? "good" : "warn"}>{cst && cls ? "Classificado" : "Sem classificação"}</Badge>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+        <div><dt className="text-xs text-slate-500">CST IBS/CBS</dt><dd className="font-mono">{cst ?? "—"} <span className="text-xs text-slate-500">({src(product.ibsCbsCst, group?.ibsCbsCst)})</span></dd></div>
+        <div><dt className="text-xs text-slate-500">cClassTrib</dt><dd className="font-mono">{cls ?? "—"} <span className="text-xs text-slate-500">({src(product.cClassTrib, group?.cClassTrib)})</span></dd></div>
+        <div><dt className="text-xs text-slate-500">Vigência no grupo</dt><dd>{group?.reformValidFrom ? group.reformValidFrom.split("-").reverse().join("/") : "imediata"}</dd></div>
+        <div><dt className="text-xs text-slate-500">IBS (UF)</dt><dd>{formatBps(group?.ibsRateBps ?? 0)}</dd></div>
+        <div><dt className="text-xs text-slate-500">CBS</dt><dd>{formatBps(group?.cbsRateBps ?? 0)}</dd></div>
+        <div><dt className="text-xs text-slate-500">Redução / IS</dt><dd>{formatBps(group?.ibsCbsRedBps ?? 0)} / {group?.isRateBps ? formatBps(group.isRateBps) : "—"}</dd></div>
+      </dl>
+      <p className="text-xs text-slate-500">{adhesion} Alíquotas e vigência vêm do grupo tributário{group ? ` “${group.name}”` : ""}.</p>
+      {canEdit && (
+        <ActionForm action={saveProductReformAction} className="space-y-2">
+          {({ pending, error }) => (
+            <>
+              <input type="hidden" name="productId" value={productId} />
+              <FormGrid cols={2}>
+                <Field label="CST próprio do IBS/CBS" hint="Vazio = usa o do grupo."><Select name="ibsCbsCst" defaultValue={product.ibsCbsCst ?? ""} options={IBS_CBS_CST_OPTIONS} placeholder="— (do grupo)" /></Field>
+                <Field label="cClassTrib próprio" hint="6 dígitos começando pelo CST."><Input name="cClassTrib" defaultValue={product.cClassTrib ?? ""} maxLength={6} inputMode="numeric" className="font-mono" /></Field>
+              </FormGrid>
+              {error && <Notice tone="bad">{error}</Notice>}
+              <div className="flex justify-end"><SubmitButton pending={pending}>Salvar classificação</SubmitButton></div>
+            </>
+          )}
+        </ActionForm>
+      )}
+    </div>
   );
 }

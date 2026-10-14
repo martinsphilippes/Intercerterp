@@ -6,9 +6,9 @@ import type { SessionInfo } from "./session";
 
 /**
  * Recursos novos (telas aditivas) controlados por `feature.<chave>` em Parâmetros — ligados por padrão, exceto os de
- * `FEATURE_DEFAULTS` em src/lib/core/settings.ts (fidelidade, lotes e reserva na pré-venda nascem desligados).
+ * `FEATURE_DEFAULTS` em src/lib/core/settings.ts (fidelidade, lotes, reserva na pré-venda e reforma tributária nascem desligados).
  */
-export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "inadimplencia" | "cobrancaWhatsapp" | "baixaLote" | "carne" | "comissoes" | "documentoComercial" | "balanca" | "kits" | "promocoes" | "fidelidade" | "lotes" | "reservaPreVenda" | "bipagemContagem";
+export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "inadimplencia" | "cobrancaWhatsapp" | "baixaLote" | "carne" | "comissoes" | "documentoComercial" | "balanca" | "kits" | "promocoes" | "fidelidade" | "lotes" | "reservaPreVenda" | "bipagemContagem" | "reformaTributaria";
 
 export function featureOn(s: SessionInfo, key: FeatureKey): Promise<boolean> {
   return isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, key, featureDefault(key));

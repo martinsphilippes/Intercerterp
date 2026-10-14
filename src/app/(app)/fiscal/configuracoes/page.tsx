@@ -17,7 +17,9 @@ import { formatDoc } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import { getFiscalConfig, measuredStatus, PRESENCE_LABEL } from "@/domain/fiscal/service";
 import { certificateDaysLeft, CRT_LABEL, issuerChecklist, numberingStatus, REGIME_LABEL, taxGroupUsage } from "@/domain/fiscal/config";
-import { deleteTaxGroupAction, saveConfigAction, saveIssuerAction, saveTaxGroupAction, setNumberAction, testConnectionAction, uploadCertificateAction } from "../actions";
+import { deleteTaxGroupAction, saveConfigAction, saveIssuerAction, saveReformAdherenceAction, saveTaxGroupAction, setNumberAction, testConnectionAction, uploadCertificateAction } from "../actions";
+import { featureOn } from "@/lib/server/features";
+import { ReformGroupFields } from "../../produtos/cadastros/aux-forms";
 import { cscRefProblem, fiscalTokenRefProblem, secretRefProblem } from "@/domain/integrations";
 
 export const metadata = { title: "Configurações fiscais" };
@@ -58,6 +60,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   const envLabel = !cfg ? "Não configurado" : cfg.provider === "simulated" ? "Simulação" : cfg.environment === "producao" ? "Produção" : "Homologação";
   const scopeNote = branch ? (own ? `Configuração própria da filial ${branch.name}.` : `Filial ${branch.name} usando a configuração da empresa — ao salvar, a filial passa a ter configuração própria (herdando os valores atuais).`) : "Contexto consolidado: configuração padrão da empresa (vale para filiais sem configuração própria).";
   const taxGroups = await listAll(s.ctx.store, "tax_groups", { filters: [["eq", "companyId", s.ctx.companyId]], orderBy: [{ field: "name" }] });
+  const reformOn = await featureOn(s, "reformaTributaria");
   const tgOptions = taxGroups.map((g) => ({ value: g.id, label: g.name }));
   // nomes não permitidos (segredos do sistema, gravados antes da validação) nunca são consultados no ambiente
   // (o motivo aparece como "nome não permitido", não como "não definida" — redefinir a variável não resolveria)
@@ -215,10 +218,25 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
               </ActionForm>
             </Card>
           )}
+          {cfg && reformOn && (
+            <Card title="Reforma tributária — adesão (IBS, CBS e IS)" description="Com a adesão e a partir da data de início, a NF-e e a NFC-e levam os grupos IBS/CBS (e IS) dos itens cujo grupo tributário tem CST/cClassTrib da reforma. ICMS, PIS, COFINS e o total da nota não mudam.">
+              <ActionForm action={saveReformAdherenceAction} className="space-y-3">
+                <input type="hidden" name="scope" value={branch ? "branch" : "company"} />
+                <Checkbox name="reformAdherence" label="Aderir: emitir os grupos IBS/CBS/IS nos documentos desta configuração" defaultChecked={Boolean(cfg.reformAdherence)} />
+                <FormGrid cols={3}>
+                  <Field label="Início da adesão" hint="Documentos emitidos antes desta data saem sem os grupos."><Input type="date" name="reformAdherenceFrom" defaultValue={cfg.reformAdherenceFrom ?? ""} /></Field>
+                </FormGrid>
+                <p className="text-xs text-slate-500">
+                  {cfg.reformAdherence ? `Aderida desde ${formatDate(cfg.reformAdherenceFrom)}.` : "Sem adesão: os documentos saem como antes."} Período de teste de 2026 (LC 214/2025): CBS 0,9% e IBS 0,1%, informados no grupo tributário. Optantes do Simples Nacional não estão sujeitos às alíquotas de teste. Valide com a contabilidade e emita primeiro em homologação. <Link className="text-brand-700 hover:underline" href="/ajuda/artigos/reforma-tributaria-ibs-cbs">Ajuda: reforma tributária</Link>
+                </p>
+                {canEdit && <div className="flex justify-end gap-2">{discard}{submit("Salvar adesão")}</div>}
+              </ActionForm>
+            </Card>
+          )}
           <Card title="Grupos tributários (com vigência)" description="Mesma tabela de Produtos → Cadastros auxiliares → Grupos tributários; aqui com vigência e tributos aproximados." actions={<><Link href="/produtos/cadastros?tab=grupos" className={buttonClass("ghost", "sm")}>Ver em Produtos</Link>{canEdit && <Link href="/fiscal/configuracoes?tab=tributacao&grupo=novo" className={buttonClass("secondary", "sm")}>Novo grupo</Link>}</>} bodyClass="p-0">
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
-                <thead><tr><th>Grupo</th><th>CST/CSOSN</th><th>CFOP int./inter./dev.</th><th>ICMS</th><th>PIS/COFINS</th><th>Trib. aprox.</th><th>Vigência</th><th>Situação</th><th>Uso</th><th /></tr></thead>
+                <thead><tr><th>Grupo</th><th>CST/CSOSN</th><th>CFOP int./inter./dev.</th><th>ICMS</th><th>PIS/COFINS</th>{reformOn && <th>IBS/CBS</th>}<th>Trib. aprox.</th><th>Vigência</th><th>Situação</th><th>Uso</th><th /></tr></thead>
                 <tbody>
                   {await Promise.all(
                     taxGroups.map(async (g) => {
@@ -232,6 +250,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                           <td className="font-mono text-xs">{g.cfopInternal}/{g.cfopInterstate}/{g.cfopReturn ?? "—"}</td>
                           <td>{formatBps(g.icmsRateBps ?? 0)}</td>
                           <td className="text-xs">{g.pisCst} {formatBps(g.pisRateBps ?? 0)} / {g.cofinsCst} {formatBps(g.cofinsRateBps ?? 0)}</td>
+                          {reformOn && <td className="text-xs">{g.ibsCbsCst ? <><span className="font-mono">{g.ibsCbsCst}/{g.cClassTrib ?? "—"}</span> {formatBps(g.ibsRateBps ?? 0)}/{formatBps(g.cbsRateBps ?? 0)}</> : "—"}</td>}
                           <td>{g.approxTaxBps ? formatBps(g.approxTaxBps) : "—"}</td>
                           <td className="text-xs">{g.validFrom ? formatDate(g.validFrom) : "—"} a {g.validTo ? formatDate(g.validTo) : "indeterminado"}</td>
                           <td>{g.active === false ? <Badge>Inativo</Badge> : <Badge tone={vig === "Vigente" ? "good" : "warn"}>{vig}</Badge>}</td>
@@ -245,7 +264,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
               </table>
             </div>
           </Card>
-          {grupo && canEdit && <TaxGroupForm group={grupo === "novo" ? null : (taxGroups.find((g) => g.id === grupo) ?? null)} />}
+          {grupo && canEdit && <TaxGroupForm group={grupo === "novo" ? null : (taxGroups.find((g) => g.id === grupo) ?? null)} reformOn={reformOn} />}
         </div>
       )}
 
@@ -340,7 +359,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
   );
 }
 
-function TaxGroupForm({ group }: { group: Record<string, any> | null }) {
+function TaxGroupForm({ group, reformOn }: { group: Record<string, any> | null; reformOn: boolean }) {
   const g = group ?? {};
   const pc = (v?: number | null) => (v ? String(v / 100).replace(".", ",") : "");
   return (
@@ -367,6 +386,7 @@ function TaxGroupForm({ group }: { group: Record<string, any> | null }) {
           <Field label="Vigente de"><Input type="date" name="validFrom" defaultValue={g.validFrom ?? ""} /></Field>
           <Field label="Vigente até"><Input type="date" name="validTo" defaultValue={g.validTo ?? ""} /></Field>
         </FormGrid>
+        {reformOn && <ReformGroupFields row={g} />}
         <Field label="Observações"><Textarea name="notes" defaultValue={g.notes ?? ""} /></Field>
         <Checkbox name="active" label="Ativo" defaultChecked={g.active !== false} />
         <p className="text-xs text-slate-500">Grupo fora da vigência ou inativo gera pendência nos documentos dos produtos que o usam (não transmite).</p>

@@ -21,7 +21,9 @@ import {
   type NfseInput,
 } from "@/domain/fiscal/service";
 import { buildNfe, normalizeNfeInput, refreshFromCatalog, saveNfe, type NfeInput } from "@/domain/fiscal/nfe";
-import { saveIssuer, setNextNumber, uploadCertificate, saveTaxGroup, deleteTaxGroup, type TaxGroupInput } from "@/domain/fiscal/config";
+import { saveIssuer, setNextNumber, uploadCertificate, saveTaxGroup, deleteTaxGroup, saveReformAdherence, type TaxGroupInput } from "@/domain/fiscal/config";
+import { reformFromForm } from "@/domain/fiscal/reform";
+import { requireFeature } from "@/lib/server/features";
 import { buildAccountingPackage, sendAccountingPackage, saveAccountingSchedule } from "@/domain/fiscal/export";
 import { completeObligation, deleteObligation, generateObligations, saveObligation, saveTemplates, setObligationStatus, type ObligationTemplate } from "@/domain/fiscal/obligations";
 import { normalizeFilter } from "@/domain/fiscal/reports";
@@ -193,6 +195,16 @@ export async function saveNfseAction(fd: FormData) {
 
 // ───────────────────────────── Configurações (Tela 34)
 
+/** Adesão à reforma tributária (FIS-19) — exige o recurso ligado em Parâmetros › Recursos. */
+export async function saveReformAdherenceAction(fd: FormData) {
+  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+    await requireFeature(s, "reformaTributaria");
+    const scope = fstr(fd, "scope") === "company" ? null : requireBranch(s.ctx);
+    await saveReformAdherence(s.ctx, scope, { adherence: fbool(fd, "reformAdherence"), from: fopt(fd, "reformAdherenceFrom") });
+    return { ok: true as const, message: "Adesão à reforma tributária salva." };
+  });
+}
+
 export async function saveConfigAction(fd: FormData) {
   return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     const scope = fstr(fd, "scope") === "company" ? null : requireBranch(s.ctx);
@@ -297,6 +309,7 @@ function parseTaxGroup(fd: FormData): TaxGroupInput {
     active: fbool(fd, "active"),
     notes: fopt(fd, "notes"),
     approxTaxBps: bps("approxTax"),
+    reform: reformFromForm(fd),
   };
 }
 

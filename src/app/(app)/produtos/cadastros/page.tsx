@@ -12,6 +12,7 @@ import { formatDate } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import { categoryPath, CSOSN_OPTIONS, CST_ICMS_OPTIONS } from "@/domain/products";
 import { AuxDialog } from "./aux-forms";
+import { featureOn } from "@/lib/server/features";
 import { setAuxStatusAction, deleteAuxAction } from "./actions";
 
 export const metadata = { title: "Cadastros auxiliares" };
@@ -34,6 +35,7 @@ function RowActions({ collection, id, active, used, canEdit, canDelete, kindLabe
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const s = await requireSession("products");
+  const reformOn = await featureOn(s, "reformaTributaria");
   const { tab = "categorias" } = await searchParams;
   const ctx = s.ctx;
   const cf = [["eq", "companyId", ctx.companyId]] as any[];
@@ -155,11 +157,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         </Card>
       )}
       {tab === "grupos" && (
-        <Card title="Grupos tributários" description="CFOP por operação e CST/CSOSN conforme o regime; alíquotas por grupo — nada é fixo para todos os produtos." actions={canCreate && <AuxDialog kind="grupo" cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} />} bodyClass="p-0">
+        <Card title="Grupos tributários" description="CFOP por operação e CST/CSOSN conforme o regime; alíquotas por grupo — nada é fixo para todos os produtos." actions={canCreate && <AuxDialog kind="grupo" cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} reformOn={reformOn} />} bodyClass="p-0">
           {groups.length === 0 ? <EmptyState title="Nenhum grupo tributário" /> : (
             <div className="overflow-x-auto">
               <table className="table-base w-full text-sm">
-                <thead><tr><th>Grupo</th><th>Regime</th><th>CST/CSOSN</th><th>CFOP interna · interestadual · devolução</th><th className="text-right">ICMS</th><th className="text-right">PIS · COFINS</th><th>Vigência</th><th className="text-right">Produtos</th><th>Situação</th><th /></tr></thead>
+                <thead><tr><th>Grupo</th><th>Regime</th><th>CST/CSOSN</th>{reformOn && <th>IBS/CBS</th>}<th>CFOP interna · interestadual · devolução</th><th className="text-right">ICMS</th><th className="text-right">PIS · COFINS</th><th>Vigência</th><th className="text-right">Produtos</th><th>Situação</th><th /></tr></thead>
                 <tbody>
                   {groups.map((g) => {
                     const used = count((p) => p.taxGroupId === g.id);
@@ -168,13 +170,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                         <td>{g.name}</td>
                         <td>{g.regime === "normal" ? "Normal" : "Simples"}</td>
                         <td className="font-mono">{g.cstCsosn ?? "—"}</td>
+                        {reformOn && <td className="text-xs">{g.ibsCbsCst ? <><span className="font-mono">{g.ibsCbsCst}/{g.cClassTrib ?? "—"}</span> · IBS {formatBps(g.ibsRateBps ?? 0)} · CBS {formatBps(g.cbsRateBps ?? 0)}{g.reformValidFrom ? ` · desde ${formatDate(g.reformValidFrom)}` : ""}</> : "—"}</td>}
                         <td className="font-mono text-xs">{[g.cfopInternal, g.cfopInterstate, g.cfopReturn].map((x) => x ?? "—").join(" · ")}</td>
                         <td className="tabular text-right">{formatBps(g.icmsRateBps)}</td>
                         <td className="tabular text-right text-xs">{formatBps(g.pisRateBps)} · {formatBps(g.cofinsRateBps)}</td>
                         <td className="text-xs">{g.validFrom || g.validTo ? `${formatDate(g.validFrom)} a ${formatDate(g.validTo)}` : "—"}</td>
                         <td className="tabular text-right">{used}</td>
                         <td><StatusBadge kind="generic" status={g.active === false ? "inactive" : "active"} /></td>
-                        <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="grupo" row={g} cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} />}<RowActions collection="tax_groups" id={g.id} active={g.active !== false} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="o grupo" /></div></td>
+                        <td className="whitespace-nowrap text-right"><div className="flex items-center justify-end gap-1">{canEdit && <AuxDialog kind="grupo" row={g} cstSimples={CSOSN_OPTIONS} cstNormal={CST_ICMS_OPTIONS} reformOn={reformOn} />}<RowActions collection="tax_groups" id={g.id} active={g.active !== false} used={used} canEdit={canEdit} canDelete={canDelete} kindLabel="o grupo" /></div></td>
                       </tr>
                     );
                   })}

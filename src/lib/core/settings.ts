@@ -50,13 +50,15 @@ export const DEFAULT_SETTINGS = {
 
 /**
  * Padrão de recursos que mudam a operação (nascem DESLIGADOS por empresa: fidelidade muda o cupom e o pagamento, lotes e
- * reserva na pré-venda mudam o estoque). Os demais recursos novos (telas aditivas) nascem ligados.
+ * reserva na pré-venda mudam o estoque, a reforma tributária muda os documentos fiscais). Os demais recursos novos (telas aditivas) nascem ligados.
  */
 export const FEATURE_DEFAULTS: Record<string, boolean> = {
   fidelidade: false,
   lotes: false,
   reservaPreVenda: false,
   bipagemContagem: true,
+  /** reforma tributária (FIS-19): grupos IBS/CBS/IS nos documentos — exige também a adesão na configuração fiscal */
+  reformaTributaria: false,
 };
 
 /** Recursos novos desligados por padrão (derivado de FEATURE_DEFAULTS). */

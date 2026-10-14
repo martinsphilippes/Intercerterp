@@ -254,6 +254,18 @@ export async function setLotControlAction(id: string, on: boolean) {
   });
 }
 
+/** Reforma tributária do produto (FIS-19): CST e cClassTrib do IBS/CBS próprios (exige `feature.reformaTributaria`). */
+export async function saveProductReformAction(fd: FormData) {
+  const id = fstr(fd, "productId");
+  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${id}`] }, async (s) => {
+    const { requireFeature } = await import("@/lib/server/features");
+    await requireFeature(s, "reformaTributaria");
+    const { saveProductReform } = await import("@/domain/products");
+    await saveProductReform(s.ctx, id, { ibsCbsCst: fopt(fd, "ibsCbsCst"), cClassTrib: fopt(fd, "cClassTrib") });
+    return { ok: true as const, message: "Classificação da reforma tributária salva." };
+  });
+}
+
 // ───────────────────────────── Importação CSV
 
 export async function analyzeCsvAction(text: string) {

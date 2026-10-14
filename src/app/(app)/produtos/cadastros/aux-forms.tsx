@@ -9,6 +9,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/empty";
 import type { ActionResult } from "@/lib/server/action";
 import { saveCategoryAction, saveBrandAction, saveUnitAction, savePriceTableAction, saveTaxGroupAction } from "./actions";
+import { IBS_CBS_CST_OPTIONS } from "@/domain/fiscal/reform-codes";
 
 type Opt = { value: string; label: string };
 type Kind = "categoria" | "marca" | "unidade" | "tabela" | "grupo";
@@ -25,7 +26,7 @@ const NEW_LABEL: Record<Kind, string> = { categoria: "Nova categoria", marca: "N
 const pctText = (bps: number | null | undefined) => (bps == null ? "" : String(bps / 100).replace(".", ","));
 
 /** Botão + diálogo de criação/edição para os cadastros auxiliares. */
-export function AuxDialog({ kind, row, parents = [], cstSimples = [], cstNormal = [] }: { kind: Kind; row?: Record<string, any>; parents?: Opt[]; cstSimples?: Opt[]; cstNormal?: Opt[] }) {
+export function AuxDialog({ kind, row, parents = [], cstSimples = [], cstNormal = [], reformOn = false }: { kind: Kind; row?: Record<string, any>; parents?: Opt[]; cstSimples?: Opt[]; cstNormal?: Opt[]; reformOn?: boolean }) {
   const [open, setOpen] = useState(false);
   const r = row ?? {};
   const [regime, setRegime] = useState<string>(r.regime ?? "simples");
@@ -97,6 +98,7 @@ export function AuxDialog({ kind, row, parents = [], cstSimples = [], cstNormal 
                     <Field label="Vigência — início"><Input type="date" name="validFrom" defaultValue={r.validFrom ?? ""} /></Field>
                     <Field label="Vigência — fim"><Input type="date" name="validTo" defaultValue={r.validTo ?? ""} /></Field>
                   </FormGrid>
+                  {reformOn && <ReformGroupFields row={r} />}
                   <Field label="Observações"><Textarea name="notes" defaultValue={r.notes ?? ""} rows={2} /></Field>
                   <Checkbox name="active" label="Ativo" defaultChecked={r.active ?? true} />
                   <p className="text-xs text-slate-500">Valide os parâmetros com a contabilidade. Produtos podem sobrepor CFOP e CST/CSOSN individualmente.</p>
@@ -112,5 +114,28 @@ export function AuxDialog({ kind, row, parents = [], cstSimples = [], cstNormal 
         </ActionForm>
       </Dialog>
     </>
+  );
+}
+
+/**
+ * Bloco "Reforma tributária" do grupo tributário (FIS-19) — exibido só com `feature.reformaTributaria` ligado. O marcador
+ * `reformBlock` diz ao servidor que os campos foram enviados (sem ele, os valores gravados são mantidos).
+ */
+export function ReformGroupFields({ row }: { row: Record<string, any> }) {
+  return (
+    <div className="min-w-0 space-y-3 rounded-md border border-line p-3">
+      <p className="text-sm font-semibold">Reforma tributária (IBS, CBS e IS)</p>
+      <input type="hidden" name="reformBlock" value="1" />
+      <FormGrid cols={4}>
+        <Field label="CST do IBS/CBS" className="sm:col-span-2"><Select name="ibsCbsCst" defaultValue={row.ibsCbsCst ?? ""} options={IBS_CBS_CST_OPTIONS} placeholder="— (sem reforma)" /></Field>
+        <Field label="cClassTrib" hint="6 dígitos, inicia pelo CST."><Input name="cClassTrib" defaultValue={row.cClassTrib ?? ""} maxLength={6} inputMode="numeric" className="font-mono" placeholder="000001" /></Field>
+        <Field label="Vigência da reforma — início" hint="Vazio = imediata."><Input type="date" name="reformValidFrom" defaultValue={row.reformValidFrom ?? ""} /></Field>
+        <Field label="IBS — UF (%)" hint="Teste de 2026: 0,1%."><Input name="ibsRate" inputMode="decimal" defaultValue={pctText(row.ibsRateBps)} placeholder="0,1" /></Field>
+        <Field label="CBS (%)" hint="Teste de 2026: 0,9%."><Input name="cbsRate" inputMode="decimal" defaultValue={pctText(row.cbsRateBps)} placeholder="0,9" /></Field>
+        <Field label="Redução de alíquota (%)" hint="CST 011, 200 e 210."><Input name="ibsCbsRed" inputMode="decimal" defaultValue={pctText(row.ibsCbsRedBps)} /></Field>
+        <Field label="IS — Imposto Seletivo (%)" hint="A partir de 2027."><Input name="isRate" inputMode="decimal" defaultValue={pctText(row.isRateBps)} /></Field>
+      </FormGrid>
+      <p className="whitespace-normal break-words text-xs text-slate-500">Os grupos IBS/CBS só entram na NF-e/NFC-e quando a empresa aderiu (Fiscal › Configurações › Tributação padrão) e a data de início chegou. ICMS, PIS, COFINS e o total da nota não mudam. Valide a classificação com a contabilidade e em homologação.</p>
+    </div>
   );
 }

@@ -15,7 +15,9 @@ import { formatDoc } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import type { SessionInfo } from "@/lib/server/session";
 import { cancelWindow, DOC_STATUS_LABEL, FREIGHT_MODE_LABEL, getFiscalConfig, INACTIVE, OPERATION_ORIGINS, PRESENCE_LABEL, PURPOSE_LABEL, type DocItem } from "@/domain/fiscal/service";
-import { currentIssues } from "@/domain/fiscal/nfe";
+import { currentIssues, currentWarnings } from "@/domain/fiscal/nfe";
+import { reformTotals } from "@/domain/fiscal/reform";
+import { rejectionHelp } from "@/domain/help-content";
 import { TPAG_LABEL } from "@/domain/fiscal/providers";
 import { DocActions } from "./doc-actions";
 import { MODEL_LABEL, ORIGIN_LABEL, OP_LABEL, docNumberLabel, formatKey, originHref, partyHref } from "../labels";
@@ -62,10 +64,15 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
   const cfg = await getFiscalConfig(s.ctx.store, s.ctx.companyId, doc.branchId);
   const events = await listAll(s.ctx.store, "fiscal_events", { filters: [["eq", "documentId", doc.id]], orderBy: [{ field: "occurredAt", dir: "desc" }] });
   const issues = ["draft", "pending", "rejected"].includes(doc.status) && doc.originType !== "disable" ? await currentIssues(s.ctx, doc) : [];
+  // avisos prévios (FIS-26/27): não impedem a transmissão
+  const warnings = ["draft", "pending", "rejected", "error"].includes(doc.status) && doc.originType !== "disable" ? await currentWarnings(s.ctx, doc) : [];
+  // catálogo de rejeições (FIS-27): causa provável e como resolver o código do retorno
+  const rejection = ["rejected", "denied"].includes(doc.status) ? rejectionHelp(doc.statusCode) : null;
   const branch = doc.branchId ? await s.ctx.store.get("branches", doc.branchId) : null;
   const win = cancelWindow(doc, cfg);
   const items = (doc.items ?? []) as DocItem[];
   const t = doc.totals ?? {};
+  const reform = reformTotals(items);
   const svc = doc.service ?? {};
   const oHref = originHref(doc.originType, doc.originId);
   const pHref = partyHref(doc.partyType, doc.partyId);
@@ -133,6 +140,11 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
         <div className="mb-4">
           <Notice tone={statusTone(doc.status)} title={`${DOC_STATUS_LABEL[doc.status] ?? doc.status}${doc.statusCode ? ` (código ${doc.statusCode})` : ""}`}>
             {doc.statusMessage}
+            {rejection && (
+              <p className="mt-2 text-xs">
+                <strong>Causa provável:</strong> {rejection.cause.replace(/\*\*/g, "")} <strong>Como resolver:</strong> {rejection.fix.replace(/\*\*/g, "")} <Link className="underline" href="/ajuda/artigos/rejeicoes-comuns-sefaz">Rejeições comuns</Link>
+              </p>
+            )}
           </Notice>
         </div>
       )}
@@ -147,6 +159,18 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
             <p className="mt-2 text-xs">
               Corrija o cadastro (produto, cliente, emitente em <Link className="underline" href="/fiscal/configuracoes">Configurações fiscais</Link>), use “Atualizar do cadastro” e depois “Retransmitir” — a referência {doc.ref} é mantida.
             </p>
+          </Notice>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="mb-4">
+          <Notice tone="info" title="Avisos prévios (não impedem a transmissão)">
+            <ul className="list-disc pl-5">
+              {warnings.map((w, k) => (
+                <li key={k}>{w}</li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs">Causas comuns de rejeição da SEFAZ — veja <Link className="underline" href="/ajuda/artigos/rejeicoes-comuns-sefaz">Rejeições comuns</Link> e o <Link className="underline" href="/ajuda/artigos/glossario-fiscal">Glossário fiscal</Link>.</p>
           </Notice>
         </div>
       )}
@@ -309,6 +333,7 @@ export async function DocDetail({ s, doc, tab }: { s: SessionInfo; doc: Doc; tab
                   <tr className="text-slate-500"><td>Base ICMS / ICMS</td><td className="tabular text-right">{formatMoney(t.icmsBase)} / {formatMoney(t.icms)}</td></tr>
                   <tr className="text-slate-500"><td>PIS / COFINS</td><td className="tabular text-right">{formatMoney(t.pis)} / {formatMoney(t.cofins)}</td></tr>
                   <tr className="text-slate-500"><td>Tributos aproximados (Lei 12.741/2012)</td><td className="tabular text-right">{formatMoney(t.approxTax ?? 0)}</td></tr>
+                  {reform && <tr className="text-slate-500"><td>Base IBS/CBS · IBS / CBS (não somam no total)</td><td className="tabular text-right">{formatMoney(reform.base)} · {formatMoney(reform.ibs)} / {formatMoney(reform.cbs)}{reform.hasIs ? ` · IS ${formatMoney(reform.is)}` : ""}</td></tr>}
                 </tbody>
               </table>
             </Card>

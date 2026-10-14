@@ -31,6 +31,90 @@ export const HELP_AREAS: Array<{ key: string; label: string; description: string
   { key: "suporte", label: "Notificações e suporte", description: "Central de notificações e chamados." },
 ];
 
+/**
+ * Catálogo de rejeições comuns da SEFAZ (FIS-27) — código, mensagem resumida, causa provável e como resolver no ERP.
+ * Textos resumidos do Manual de Orientação do Contribuinte (MOC) e das notas técnicas: a mensagem exata vem no retorno
+ * do documento. Usado no artigo "Rejeições comuns da SEFAZ" e no detalhe do documento rejeitado.
+ */
+export interface SefazRejection {
+  code: string;
+  message: string;
+  cause: string;
+  fix: string;
+}
+
+export const SEFAZ_REJECTIONS: SefazRejection[] = [
+  { code: "204", message: "Duplicidade de NF-e", cause: "O número/série já foi autorizado (reenvio após falha de comunicação).", fix: "Use **Consultar** no documento: o ERP mantém a mesma referência e aplica a autorização existente. Não emita outra nota para a mesma operação." },
+  { code: "225", message: "Falha no schema XML", cause: "Campo com formato ou tamanho inválido (descrição, endereço, e-mail, caracteres especiais).", fix: "Revise os textos do produto e do destinatário (sem quebras de linha ou símbolos), corrija e retransmita." },
+  { code: "228", message: "Data de emissão muito atrasada", cause: "Documento ficou retido (contingência ou fila) por mais tempo que o permitido.", fix: "Descarte o documento e emita novamente para a operação; inutilize o número, se necessário." },
+  { code: "233", message: "IE do destinatário não cadastrada", cause: "Inscrição estadual digitada errada ou contribuinte sem cadastro na UF.", fix: "Confira a IE no cadastro do cliente (consulta pública da SEFAZ). Não contribuinte: indicador 9, sem IE; isento: indicador 2." },
+  { code: "236", message: "Chave de acesso com dígito verificador inválido", cause: "Chave referenciada (devolução, complementar) digitada errada.", fix: "Copie a chave de 44 dígitos do XML original e corrija a nota referenciada." },
+  { code: "281", message: "Certificado do transmissor com validade vencida", cause: "Certificado A1 vencido no provedor.", fix: "Renove o certificado e carregue-o no provedor e em Fiscal › Configurações › Certificado digital." },
+  { code: "301", message: "Uso denegado: irregularidade fiscal do emitente", cause: "Inscrição estadual da empresa suspensa ou irregular.", fix: "Regularize com a SEFAZ (contabilidade). A numeração denegada não pode ser reutilizada." },
+  { code: "302", message: "Uso denegado: irregularidade fiscal do destinatário", cause: "IE do cliente irregular na SEFAZ.", fix: "Confirme a situação do cliente; para não contribuinte, emita sem IE (indicador 9)." },
+  { code: "501", message: "Prazo de cancelamento superior ao previsto", cause: "Pedido de cancelamento fora do prazo legal da UF.", fix: "Não é possível cancelar: emita nota de devolução/estorno conforme orientação da contabilidade." },
+  { code: "523", message: "CFOP não é de operação estadual e UF do emitente igual à do destinatário", cause: "CFOP 6xxx (interestadual) para cliente da mesma UF.", fix: "Use CFOP 5xxx no grupo tributário (venda interna) ou corrija a UF do endereço do cliente." },
+  { code: "524", message: "CFOP de operação estadual e UF do emitente diferente da do destinatário", cause: "CFOP 5xxx para cliente de outra UF.", fix: "Use CFOP 6xxx (o grupo tributário tem o CFOP interestadual) ou corrija a UF do cliente." },
+  { code: "528", message: "Valor do ICMS difere de base × alíquota", cause: "ICMS informado manualmente ou arredondamento divergente.", fix: "Use **Atualizar do cadastro** para recalcular os tributos e retransmita." },
+  { code: "539", message: "Duplicidade de NF-e com diferença na chave de acesso", cause: "Mesmo número/série já usado com outro conteúdo.", fix: "Consulte o documento; se o número foi usado por outra nota, avance a numeração e inutilize as lacunas." },
+  { code: "590", message: "Informado CST para emissor do Simples Nacional", cause: "Empresa do Simples (CRT 1) com CST de 2 dígitos no item.", fix: "Use CSOSN (101, 102, 500…) no grupo tributário ou no produto. O aviso prévio do ERP aponta o item." },
+  { code: "591", message: "Informado CSOSN para emissor que não é do Simples Nacional", cause: "Empresa do regime normal com CSOSN de 3 dígitos.", fix: "Use CST do ICMS (00, 20, 40, 60…) no grupo tributário ou no produto e confira o CRT em Configurações fiscais." },
+  { code: "610", message: "Total da NF difere do somatório dos valores", cause: "Totais editados ou desconto/frete sem rateio.", fix: "O ERP recalcula os totais no servidor: use **Atualizar do cadastro** e retransmita." },
+  { code: "611", message: "GTIN (cEAN) inválido", cause: "Código de barras com dígito verificador errado ou não registrado no GS1.", fix: "Corrija o GTIN do produto/variação ou deixe sem GTIN (o documento sai com “SEM GTIN”)." },
+  { code: "629", message: "Valor do produto difere de quantidade × valor unitário", cause: "Arredondamento de quantidade fracionada ou preço com muitas casas.", fix: "Revise quantidade e preço do item; o ERP calcula com 4 casas na quantidade e centavos no valor." },
+  { code: "656", message: "Consumo indevido", cause: "Muitas consultas ou envios repetidos em pouco tempo.", fix: "Aguarde cerca de 1 hora antes de consultar ou retransmitir novamente." },
+  { code: "694", message: "Não informado o grupo de ICMS para a UF de destino", cause: "Venda interestadual a consumidor final não contribuinte exige o DIFAL.", fix: "O DIFAL ainda não é calculado pelo ERP (Fase 7): confirme com a contabilidade antes de emitir este tipo de venda." },
+  { code: "725", message: "NFC-e com CFOP inválido", cause: "NFC-e só admite venda interna a consumidor (CFOP 5xxx).", fix: "Use CFOP 5102/5405 no grupo tributário; para outra UF ou para empresa, emita NF-e." },
+  { code: "778", message: "Informado NCM inexistente", cause: "NCM com 8 dígitos que não existe na tabela TIPI (ex.: 00000000).", fix: "Corrija o NCM no cadastro do produto (consulte a TIPI e a contabilidade) e use **Atualizar do cadastro**." },
+  { code: "806", message: "Operação com ICMS-ST sem informação do CEST", cause: "Item com substituição tributária (CSOSN 500, CST 60, CFOP 5405…) sem CEST.", fix: "Informe o CEST (7 dígitos) no cadastro do produto e use **Atualizar do cadastro**." },
+  { code: "1104", message: "Base de cálculo do IBS/CBS diverge do somatório (regra UB16-10 — reforma tributária)", cause: "vBC do grupo IBS/CBS diferente de valor do item − ICMS − PIS − COFINS (fórmula da NT 2025.002).", fix: "Use **Atualizar do cadastro**; persistindo, confira com a contabilidade a base adotada (hipótese registrada nas regras do sistema)." },
+  { code: "1115", message: "Grupo IBS/CBS obrigatório (regra UB12-10 — reforma tributária, regime normal)", cause: "Empresa do regime normal (CRT 3) sem os grupos IBS/CBS quando a validação está ativa.", fix: "Ligue o recurso de reforma tributária, informe CST, cClassTrib e alíquotas no grupo tributário e marque a adesão em Configurações fiscais." },
+];
+
+/** Ajuda de uma rejeição pelo código do retorno (null quando o código não está no catálogo). */
+export function rejectionHelp(code: string | number | null | undefined): SefazRejection | null {
+  const c = String(code ?? "").trim();
+  return c ? (SEFAZ_REJECTIONS.find((r) => r.code === c) ?? null) : null;
+}
+
+/** Glossário fiscal (PLA-08) — termos usados nas telas fiscais e de cadastro. */
+export const FISCAL_GLOSSARY: Array<{ term: string; definition: string }> = [
+  { term: "NF-e (modelo 55)", definition: "Nota fiscal eletrônica de mercadorias: vendas a empresas, transferências, devoluções e remessas." },
+  { term: "NFC-e (modelo 65)", definition: "Nota fiscal de consumidor eletrônica: venda presencial no varejo, somente dentro do estado." },
+  { term: "NFS-e", definition: "Nota fiscal de serviços eletrônica, emitida para a prefeitura (padrão municipal ou nacional)." },
+  { term: "Chave de acesso", definition: "Número de 44 dígitos que identifica o documento autorizado; usado para consultar e referenciar a nota." },
+  { term: "CFOP", definition: "Código Fiscal de Operações e Prestações: 1/2/3xxx entradas (estado, outro estado, exterior) e 5/6/7xxx saídas. Ex.: 5102 venda interna, 6102 venda interestadual, 5405 venda com ST." },
+  { term: "CRT", definition: "Código de Regime Tributário do emitente: 1 Simples Nacional, 2 Simples com excesso de sublimite, 3 regime normal, 4 MEI." },
+  { term: "CST (ICMS)", definition: "Código de Situação Tributária do ICMS para empresas do regime normal (2 dígitos). Ex.: 00 tributado, 20 com redução de base, 40 isento, 60 ICMS cobrado anteriormente por ST." },
+  { term: "CSOSN", definition: "Código de Situação da Operação no Simples Nacional (3 dígitos), usado no lugar do CST. Ex.: 102 sem crédito, 500 ICMS cobrado anteriormente por ST." },
+  { term: "CST de PIS/COFINS", definition: "Situação tributária das contribuições: 01/02 tributado com alíquota, 04 a 09 sem incidência ou isento, 49 outras saídas (comum no Simples)." },
+  { term: "NCM", definition: "Nomenclatura Comum do Mercosul: classificação da mercadoria em 8 dígitos (tabela TIPI). NCM inexistente gera a rejeição 778." },
+  { term: "CEST", definition: "Código Especificador da Substituição Tributária (7 dígitos): obrigatório para mercadorias sujeitas à ST (sem ele, rejeição 806)." },
+  { term: "GTIN / EAN", definition: "Código de barras global do produto (8, 12, 13 ou 14 dígitos com dígito verificador). Sem GTIN o documento leva “SEM GTIN”." },
+  { term: "Origem da mercadoria", definition: "Dígito de 0 a 8 que indica se a mercadoria é nacional ou importada (e o conteúdo de importação)." },
+  { term: "Base de cálculo", definition: "Valor sobre o qual a alíquota é aplicada (ex.: valor do item menos desconto, mais frete, seguro e outras despesas)." },
+  { term: "ST — substituição tributária", definition: "Regime em que o ICMS de toda a cadeia é recolhido antecipadamente por um contribuinte (indústria ou importador); na revenda o item sai com CST 60 ou CSOSN 500." },
+  { term: "MVA", definition: "Margem de Valor Agregado: percentual usado para presumir o preço final e calcular o ICMS-ST na operação do substituto." },
+  { term: "DIFAL", definition: "Diferencial de alíquota do ICMS em vendas interestaduais a consumidor final não contribuinte: diferença entre a alíquota interna do destino e a interestadual." },
+  { term: "FCP", definition: "Fundo de Combate à Pobreza: adicional de ICMS cobrado por alguns estados sobre determinados produtos." },
+  { term: "IPI", definition: "Imposto sobre Produtos Industrializados, devido pela indústria e por importadores (o comércio em geral não destaca)." },
+  { term: "PIS e COFINS", definition: "Contribuições federais sobre o faturamento; no Simples são recolhidas no DAS. Serão substituídas pela CBS a partir de 2027." },
+  { term: "Reforma tributária do consumo", definition: "EC 132/2023 e LC 214/2025: substituição gradual de PIS, COFINS, IPI, ICMS e ISS por CBS, IBS e IS (transição de 2026 a 2033)." },
+  { term: "IBS", definition: "Imposto sobre Bens e Serviços, de estados e municípios (substitui ICMS e ISS). Em 2026, alíquota de teste de 0,1% (estadual)." },
+  { term: "CBS", definition: "Contribuição sobre Bens e Serviços, federal (substitui PIS e COFINS). Em 2026, alíquota de teste de 0,9%." },
+  { term: "IS — Imposto Seletivo", definition: "Imposto federal sobre bens e serviços prejudiciais à saúde ou ao meio ambiente, a partir de 2027." },
+  { term: "CST do IBS/CBS", definition: "Código de situação tributária da reforma (3 dígitos). Ex.: 000 tributação integral, 200 alíquota zero ou reduzida, 410 imunidade e não incidência." },
+  { term: "cClassTrib", definition: "Código de classificação tributária do IBS/CBS (6 dígitos, os 3 primeiros iguais ao CST), que liga o item à regra da LC 214/2025. Ex.: 000001 tributação integral." },
+  { term: "pRedAliq", definition: "Percentual de redução de alíquota do IBS/CBS aplicado em regimes diferenciados (ex.: redução de 60%)." },
+  { term: "Período de teste (2026)", definition: "Em 2026 a NF-e/NFC-e destaca CBS 0,9% e IBS 0,1%, sem somar no total da nota; o recolhimento é dispensado para quem cumpre as obrigações acessórias (LC 214/2025, art. 348)." },
+  { term: "Tributos aproximados (Lei 12.741/2012)", definition: "Valor estimado dos tributos informado ao consumidor no documento, calculado pelo percentual parametrizado (IBPT)." },
+  { term: "Homologação e produção", definition: "Ambientes da SEFAZ: homologação é para testes (sem validade fiscal); produção emite documentos válidos." },
+  { term: "Contingência", definition: "Emissão quando a SEFAZ está indisponível; o documento é transmitido depois, dentro do prazo." },
+  { term: "Inutilização", definition: "Comunicação à SEFAZ de números que não serão usados (lacunas), para não gerar pendência." },
+  { term: "CC-e — carta de correção", definition: "Evento que corrige dados da NF-e que não alteram valores, tributos, destinatário nem data." },
+  { term: "Rejeição e denegação", definition: "Rejeição: a nota não foi autorizada e pode ser corrigida e retransmitida. Denegação: uso denegado por irregularidade cadastral; o número não pode ser reutilizado." },
+];
+
 export const HELP_ARTICLES: HelpArticle[] = [
   {
     slug: "primeiro-acesso-e-unidades",
@@ -496,6 +580,59 @@ A tela de origem, a filial e o navegador são registrados automaticamente para a
 
 ## Acompanhar
 O chamado recebe um número. Você é notificado a cada resposta; responda pelo próprio chamado. Quando o suporte pede informações, a situação fica "Aguardando usuário" — ao responder, o chamado volta para a fila. Se o problema foi resolvido, marque como resolvido.`,
+  },
+  {
+    slug: "rejeicoes-comuns-sefaz",
+    summary: "Códigos de rejeição mais comuns da SEFAZ, a causa provável e como resolver no ERP.",
+    area: "fiscal",
+    title: "Rejeições comuns da SEFAZ: causa e como resolver",
+    tags: ["rejeição", "sefaz", "código", "nf-e", "nfc-e", "ncm", "cfop", "cest", "gtin", "csosn"],
+    contextRoutes: ["/fiscal/nfe", "/fiscal/nfce"],
+    body: `## Antes de transmitir
+O ERP mostra **avisos prévios** no formulário da NF-e e no detalhe do documento (NCM inexistente, CEST ausente em item com ST, CFOP incompatível com o destino, CST × regime, GTIN inválido e, com a reforma tributária, CST/cClassTrib do IBS/CBS). Os avisos **não impedem** o envio — corrija o cadastro e use **Atualizar do cadastro** para evitar a rejeição.
+
+## Catálogo
+${SEFAZ_REJECTIONS.map((r) => `- **${r.code} — ${r.message}.** Causa provável: ${r.cause} Como resolver: ${r.fix}`).join("\n")}
+
+## Observação
+Textos resumidos do Manual de Orientação do Contribuinte e das notas técnicas — a mensagem exata está no retorno do documento (aba Eventos). Os códigos da reforma tributária (1104, 1115) seguem a NT 2025.002 e podem mudar de versão.`,
+  },
+  {
+    slug: "glossario-fiscal",
+    summary: "O que significam CFOP, CST, CSOSN, NCM, CEST, MVA, ST, DIFAL, IBS, CBS, IS, cClassTrib e outros termos.",
+    area: "fiscal",
+    title: "Glossário fiscal",
+    tags: ["glossário", "cfop", "cst", "csosn", "ncm", "cest", "mva", "st", "difal", "ibs", "cbs", "is", "cclasstrib"],
+    contextRoutes: ["/fiscal", "/produtos/cadastros"],
+    body: `## Termos
+${FISCAL_GLOSSARY.map((g) => `- **${g.term}:** ${g.definition}`).join("\n")}`,
+  },
+  {
+    slug: "reforma-tributaria-ibs-cbs",
+    summary: "Como aderir aos grupos IBS/CBS/IS na NF-e e NFC-e: recurso, adesão, grupo tributário, vigência e cálculo.",
+    area: "fiscal",
+    title: "Reforma tributária: IBS, CBS e IS nos documentos",
+    tags: ["reforma tributária", "ibs", "cbs", "is", "cclasstrib", "lc 214", "nt 2025.002"],
+    contextRoutes: ["/fiscal/configuracoes", "/produtos/cadastros"],
+    body: `## O que muda
+Com a adesão, cada item da NF-e/NFC-e leva o grupo **IBS/CBS** (CST, cClassTrib, base, alíquotas e valores) e, quando houver, o **IS**; a nota leva os totais. **ICMS, PIS, COFINS e o total da nota não mudam** — no período de teste de 2026 os valores de IBS/CBS não somam no total.
+
+## Como ligar
+1. Administração › Parâmetros › Recursos: ligue **Reforma tributária** (desligado por padrão).
+2. Produtos › Cadastros auxiliares › Grupos tributários (ou Fiscal › Configurações › Tributação padrão): no bloco **Reforma tributária**, informe CST do IBS/CBS, cClassTrib, alíquotas (teste de 2026: IBS 0,1% e CBS 0,9%) e, se quiser, a data de início no grupo.
+3. Fiscal › Configurações › Tributação padrão: marque a **adesão** e a **data de início**.
+4. Na aba Fiscal do produto é possível sobrepor o CST e o cClassTrib do grupo.
+
+## Cálculo
+- Base = valor do item (produtos − desconto + frete + seguro + outras despesas) − ICMS − PIS − COFINS (+ IS).
+- IBS da UF = base × alíquota; IBS municipal = 0 em 2026; CBS = base × alíquota; com redução (CST 011, 200 e 210) a alíquota efetiva é alíquota × (1 − redução).
+- CST de isenção, imunidade e suspensão (400, 410 e 550) levam só CST e cClassTrib. CST de alíquota fixa, diferimento, monofásico, crédito e ajustes ainda não são calculados (aviso no documento).
+
+## Quando sai
+Somente com o recurso ligado, a adesão marcada e a data de início alcançada; antes disso os documentos saem como sempre. Documentos montados antes da data podem ser recalculados com **Atualizar do cadastro**.
+
+## Atenção
+Optantes do Simples Nacional não estão sujeitos às alíquotas de teste de 2026 (LC 214/2025, art. 348). **Valide a classificação com a contabilidade e emita primeiro em homologação.**`,
   },
 ];
 

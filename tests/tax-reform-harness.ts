@@ -48,9 +48,10 @@ const SCENARIOS = [
 
 /**
  * Retrato de todos os SKUs ativos da empresa (ordenados pelo código): payload, XML de simulação e totais.
- * `regimeTag` distingue as passagens (empresa no Simples e no regime normal).
+ * `regimeTag` distingue as passagens (empresa no Simples e no regime normal); `opts.reform` = adesão vigente na emissão
+ * (inclui os grupos IBS/CBS/IS dos itens que os calcularam).
  */
-export async function snapshotAll(store: Store, refs: DemoRefs, regimeTag: string): Promise<Record<string, SnapEntry>> {
+export async function snapshotAll(store: Store, refs: DemoRefs, regimeTag: string, opts: { reform?: boolean } = {}): Promise<Record<string, SnapEntry>> {
   const ctx = await refs.ctxFor("admin", "matriz");
   const company = await store.getOrThrow("companies", refs.company.id);
   const branch = await store.getOrThrow("branches", refs.branches.matriz.id);
@@ -90,8 +91,20 @@ export async function snapshotAll(store: Store, refs: DemoRefs, regimeTag: strin
         transport: { mode: "9" },
         total: totals.total,
       } as unknown as Doc;
-      out[`${regimeTag}|${sku.sku}|${sku.id}|${sc.key}`] = { payload: JSON.parse(JSON.stringify(toProviderPayload(doc, company, branch, cfg))), xml: simulatedXml(doc), totals: totals as any };
+      out[`${regimeTag}|${sku.sku}|${sku.id}|${sc.key}`] = { payload: JSON.parse(JSON.stringify(toProviderPayload(doc, company, branch, cfg, opts))), xml: simulatedXml(doc, opts), totals: totals as any };
     }
   }
   return out;
+}
+
+const REFORM_KEY = /^(ibs|cbs|is)_/;
+
+/** Remove do retrato tudo o que a reforma acrescenta (campos ibs_/cbs_/is_ do payload e elementos IBSCBS/IS do XML). */
+export function stripReform(e: SnapEntry): SnapEntry {
+  const clean = (o: Record<string, any>) => Object.fromEntries(Object.entries(o).filter(([k]) => !REFORM_KEY.test(k)));
+  return {
+    payload: { ...clean(e.payload), items: (e.payload.items ?? []).map((i: Record<string, any>) => clean(i)) },
+    xml: e.xml.replace(/<IBSCBS [^>]*\/>/g, "").replace(/<IS [^>]*\/>/g, "").replace(/  <IBSCBSTot [^>]*\/>\n/g, ""),
+    totals: e.totals,
+  };
 }
