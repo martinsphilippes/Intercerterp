@@ -289,10 +289,12 @@ export const COLLECTIONS: CollectionDef[] = [
   },
   {
     id: "product_imports",
-    label: "Importações de produtos",
+    label: "Importações (produtos, cadastros e saldos)",
     fields: {
       ...ctx, number: int, fileName: s(250), mode: s(20), matchBy: s(20), mapping: json, status: s(20), totals: json,
       results: json, idemKey: s(120), finishedAt: dt,
+      // tipo da importação de cadastros e saldos (PLA-19): customers | suppliers | stock | receivables | payables; ausente = produtos
+      kind: s(30),
     },
     indexes: [k("i_company", "companyId"), u("u_idem", "idemKey")],
   },

@@ -19,7 +19,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const { id } = await params;
   const { acao = "" } = await searchParams;
   const imp = await s.ctx.store.get("product_imports", id);
-  if (!imp || imp.companyId !== s.ctx.companyId) notFound();
+  if (!imp || imp.companyId !== s.ctx.companyId || imp.kind) notFound();
   const users = await nameMap(s.ctx, "users");
   const results: Array<{ line: number; key: string; name?: string; action: string; productId?: string | null; messages: string[] }> = imp.results ?? [];
   const shown = acao ? results.filter((r) => r.action === acao) : results;

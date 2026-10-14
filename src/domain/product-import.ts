@@ -11,6 +11,7 @@ import { onlyDigits } from "@/lib/core/text";
 import { createProduct, isValidGtin, normalizeSkuCode, saveSkuCosts, updateProduct, type ProductInput } from "./products";
 import { defaultPriceTableId, savePrice } from "./pricing";
 import { defaultWarehouse } from "./stock";
+import { analyzeCsvFor, falsy, guessMappingFor, parseCsv, truthy, type ImportField } from "./csv-import";
 
 /**
  * Importação de produtos por CSV (Tela 15): mapeamento de colunas, prévia sem gravação,
@@ -31,7 +32,7 @@ export const IMPORT_MODES: Array<{ value: ImportMode; label: string }> = [
   { value: "update_only", label: "Somente atualizar existentes (ignorar novos)" },
 ];
 
-export const IMPORT_FIELDS: Array<{ key: string; label: string; aliases: string[] }> = [
+export const IMPORT_FIELDS: ImportField[] = [
   { key: "code", label: "Código interno", aliases: ["codigo", "cod", "code", "codigo interno", "cod interno", "codigo produto"] },
   { key: "sku", label: "SKU", aliases: ["sku", "referencia", "ref", "cod sku"] },
   { key: "name", label: "Nome / descrição", aliases: ["nome", "descricao", "produto", "name", "descricao produto", "nome produto"] },
@@ -55,72 +56,18 @@ export const IMPORT_FIELDS: Array<{ key: string; label: string; aliases: string[
 
 export const MAX_IMPORT_ROWS = 1000;
 
-/** CSV com separador detectado (; , ou tab), aspas e BOM. */
-export function parseCsv(text: string): { headers: string[]; rows: string[][]; delimiter: string } {
-  const clean = text.replace(/^﻿/, "");
-  const firstLine = clean.split(/\r?\n/)[0] ?? "";
-  const delimiter = [";", "\t", ","].map((d) => ({ d, n: firstLine.split(d).length })).sort((a, b) => b.n - a.n)[0].d;
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  for (let i = 0; i < clean.length; i++) {
-    const ch = clean[i];
-    if (quoted) {
-      if (ch === '"') {
-        if (clean[i + 1] === '"') {
-          cell += '"';
-          i++;
-        } else quoted = false;
-      } else cell += ch;
-      continue;
-    }
-    if (ch === '"' && cell === "") quoted = true;
-    else if (ch === delimiter) {
-      row.push(cell);
-      cell = "";
-    } else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && clean[i + 1] === "\n") i++;
-      row.push(cell);
-      rows.push(row);
-      row = [];
-      cell = "";
-    } else cell += ch;
-  }
-  if (cell !== "" || row.length) {
-    row.push(cell);
-    rows.push(row);
-  }
-  const nonEmpty = rows.filter((r) => r.some((c) => c.trim() !== ""));
-  const headers = (nonEmpty.shift() ?? []).map((h) => h.trim());
-  return { headers, rows: nonEmpty.map((r) => r.map((c) => c.trim())), delimiter };
-}
+/** CSV com separador detectado (; , ou tab), aspas e BOM — motor comum em `csv-import.ts`. */
+export { parseCsv };
 
 /** Sugestão de mapeamento: coluna → campo, pelo nome do cabeçalho. */
 export function guessMapping(headers: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  const used = new Set<string>();
-  headers.forEach((h, i) => {
-    const n = normalizeSearch(h).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
-    const f = IMPORT_FIELDS.find((x) => !used.has(x.key) && (x.key.toLowerCase() === n || x.aliases.includes(n)));
-    if (f) {
-      out[String(i)] = f.key;
-      used.add(f.key);
-    }
-  });
-  return out;
+  return guessMappingFor(IMPORT_FIELDS, headers);
 }
 
 /** Leitura inicial do arquivo: cabeçalhos, amostra e mapeamento sugerido (nada é gravado). */
 export function analyzeCsv(text: string) {
-  assert(text && text.length <= 5_000_000, "Arquivo vazio ou maior que 5 MB.");
-  const { headers, rows, delimiter } = parseCsv(text);
-  assert(headers.length > 0, "Não foi possível ler o cabeçalho do CSV.");
-  return { headers, sample: rows.slice(0, 5), rowCount: rows.length, delimiter, mapping: guessMapping(headers), fields: IMPORT_FIELDS.map((f) => ({ key: f.key, label: f.label })), maxRows: MAX_IMPORT_ROWS };
+  return analyzeCsvFor(text, IMPORT_FIELDS, MAX_IMPORT_ROWS);
 }
-
-const truthy = (v: string) => ["s", "sim", "1", "true", "x", "y", "yes", "ativo", "verdadeiro"].includes(normalizeSearch(v));
-const falsy = (v: string) => ["n", "nao", "0", "false", "no", "inativo", "falso"].includes(normalizeSearch(v));
 
 export interface ImportRowResult {
   line: number;

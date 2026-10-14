@@ -12,7 +12,8 @@ export const metadata = { title: "Importar produtos" };
 
 export default async function Page() {
   const s = await requireSession("products", "create");
-  const imports = await listAll(s.ctx.store, "product_imports", { filters: [["eq", "companyId", s.ctx.companyId]], orderBy: [{ field: "createdAt", dir: "desc" }] }, 30);
+  // só as importações de produtos (as de cadastros e saldos — `kind` preenchido — ficam em Administração › Importação)
+  const imports = await listAll(s.ctx.store, "product_imports", { filters: [["eq", "companyId", s.ctx.companyId], ["isNull", "kind"]], orderBy: [{ field: "createdAt", dir: "desc" }] }, 30);
   const users = await nameMap(s.ctx, "users");
   const modeLabel = new Map(IMPORT_MODES.map((m) => [m.value, m.label]));
   return (

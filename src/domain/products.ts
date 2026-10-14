@@ -885,7 +885,11 @@ function canPostInitial(ctx: Ctx) {
   return canDo(ctx.user, "stock.adjust") || can(ctx.user, "stock", "create");
 }
 
-export async function postInitialBalance(ctx: Ctx, input: { warehouseId: string; skuId: string; qty: number; unitCost?: number | null }) {
+/**
+ * Saldo inicial do SKU no depósito (um por saldo, só antes de qualquer movimento). `reason`, `occurredAt` (data do
+ * saldo na implantação) e `documentRef` são opcionais (importação de saldos — PLA-19); sem eles, como sempre.
+ */
+export async function postInitialBalance(ctx: Ctx, input: { warehouseId: string; skuId: string; qty: number; unitCost?: number | null; reason?: string | null; occurredAt?: string | null; documentRef?: string | null }) {
   assert(canPostInitial(ctx), "Você não tem permissão para lançar saldo inicial.");
   const branchId = requireBranch(ctx);
   assert(Number.isInteger(input.qty) && input.qty > 0, "Informe a quantidade inicial.");
@@ -901,7 +905,13 @@ export async function postInitialBalance(ctx: Ctx, input: { warehouseId: string;
   if (existing) return existing;
   assert(!bal.seq, "Este saldo já possui movimentos; use um ajuste de estoque ou inventário.");
   const unitCost = input.unitCost ?? sku.costTotal ?? 0;
-  const [mov] = await postMovements(ctx, [{ warehouseId: wh.id, skuId: sku.id, qty: input.qty, type: "initial", unitCost, originType: "product", originId: product.id, reason: "Saldo inicial do cadastro", idemKey }]);
+  const [mov] = await postMovements(ctx, [
+    {
+      warehouseId: wh.id, skuId: sku.id, qty: input.qty, type: "initial", unitCost, originType: "product", originId: product.id, reason: input.reason || "Saldo inicial do cadastro", idemKey,
+      ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
+      ...(input.documentRef ? { documentRef: input.documentRef } : {}),
+    },
+  ]);
   if (mov) {
     await audit(ctx, { module: "products", action: "stock.initial", entityType: "product", entityId: product.id, summary: `Saldo inicial de ${sku.sku} em ${wh.name}: ${input.qty / QTY} ${sku.unitCode ?? ""} a ${formatMoney(unitCost)}`, related: [`sku:${sku.id}`, `stock_movement:${mov.id}`] });
   }

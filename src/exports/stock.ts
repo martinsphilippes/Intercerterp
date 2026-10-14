@@ -3,6 +3,9 @@ import { defineExport } from "@/lib/exporters";
 import { parseList } from "@/lib/list";
 import { queryBalances, queryMovements, queryTransfers, queryInventories, queryInventoryItems } from "@/app/(app)/estoque/queries";
 import { TRANSFER_STATUS_LABEL, transferCode } from "@/domain/transfers";
+import { fiscalInventory } from "@/domain/inventory-fiscal";
+import { featureOn } from "@/lib/server/features";
+import { inventoryParams } from "@/app/(app)/estoque/inventario-fiscal/params";
 
 defineExport("stock-balances", {
   module: "stock",
@@ -126,5 +129,34 @@ defineExport("inventory-items", {
   rows: async (s, params) => {
     const p = parseList(params);
     return queryInventoryItems(s.ctx, String(params.id ?? ""), p);
+  },
+});
+
+/** Inventário em data-base (EST-05): mesmos parâmetros da tela /estoque/inventario-fiscal (data, filial, depósito, categoria, NCM, busca). */
+defineExport("stock-fiscal-inventory", {
+  module: "stock",
+  title: "Inventário em data-base",
+  columns: [
+    { key: "date", label: "Data-base", type: "date" },
+    { key: "ncm", label: "NCM" },
+    { key: "productCode", label: "Código" },
+    { key: "skuCode", label: "SKU" },
+    { key: "productName", label: "Produto" },
+    { key: "skuName", label: "Variação" },
+    { key: "unitCode", label: "Unidade" },
+    { key: "categoryName", label: "Categoria" },
+    { key: "branchName", label: "Filial" },
+    { key: "warehouseName", label: "Depósito" },
+    { key: "qty", label: "Quantidade", type: "qty" },
+    { key: "avgCost", label: "Custo médio na data", type: "money" },
+    { key: "value", label: "Valor (custo médio)", type: "money" },
+    { key: "situation", label: "Situação" },
+    { key: "lastMovementAt", label: "Último movimento até a data", type: "datetime" },
+  ],
+  rows: async (s, params) => {
+    if (!(await featureOn(s, "inventarioFiscal"))) return [];
+    const { filters } = inventoryParams(s, params);
+    const res = await fiscalInventory(s.ctx.store, s.ctx.companyId, filters).catch(() => null);
+    return (res?.rows ?? []).map((r) => ({ ...r, date: res!.date, situation: r.negative ? "Saldo negativo (não valorizado)" : "" }));
   },
 });

@@ -25,6 +25,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   supplier_return: "Devolução a fornecedor (crédito)",
   commission: "Comissão de vendedor",
   freight_cte: "CT-e de frete (compra)",
+  data_import: "Importação (implantação)",
 };
 
 export const ENTRY_KIND_LABEL: Record<string, string> = {
@@ -42,6 +43,7 @@ export function originHref(t: { originType?: string | null; originId?: string | 
   if (t.originType === "renegotiation") return `/financeiro/receber/${t.originId}`;
   if (t.originType === "supplier_return") return `/fiscal/nfe/${t.originId}`;
   if (t.originType === "freight_cte") return `/compras/cte/${t.originId}`;
+  if (t.originType === "data_import") return `/administracao/importacao/${t.originId}`;
   if (t.originType === "commission" && t.commissionDetail?.from) return `/vendas/comissoes?de=${t.commissionDetail.from}&ate=${t.commissionDetail.to}&vendedor=${t.partyId ?? ""}${t.commissionDetail.branchId ? `&filial=${t.commissionDetail.branchId}` : ""}`;
   return null;
 }

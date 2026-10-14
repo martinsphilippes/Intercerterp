@@ -156,6 +156,16 @@ export const PARAMS: ParamDef[] = [
     help: "Mostra Financeiro › Exportação Domínio: gera o arquivo texto de lançamentos contábeis (títulos emitidos e baixas do período, por competência ou caixa) no layout de importação da Domínio configurado em Central de integrações › Domínio, usando o código contábil das categorias e contas financeiras. Sem API: o escritório importa o arquivo. Desligado, a tela some.",
     usedBy: "Financeiro (exportação Domínio) e Central de integrações",
   },
+  {
+    key: "feature.inventarioFiscal", group: "Recursos", label: "Inventário em data-base (inventário fiscal)", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Estoque › Inventário em data-base: o saldo de cada produto por depósito numa data passada (ex.: 31/12), reconstruído dos movimentos de estoque e valorizado pelo custo médio vigente na data, com totais por NCM e categoria, impressão no modelo do Livro de Registro de Inventário e exportação CSV/XLSX. Na data de hoje confere com o saldo atual. Só consulta: nada é gravado. Desligado, a tela e a exportação somem.",
+    usedBy: "Estoque (inventário em data-base) e Central de relatórios",
+  },
+  {
+    key: "feature.importacaoCadastros", group: "Recursos", label: "Importação de cadastros e saldos (implantação)", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Administração › Importação: assistente por CSV (modelo para baixar, mapeamento de colunas, prévia linha a linha) para clientes, fornecedores, saldos iniciais de estoque (movimento “Saldo inicial” com custo) e títulos a receber/pagar em aberto. Aplica em lotes de até 100 linhas, com relatório de erros por linha; reimportar o mesmo arquivo não duplica nada. Só administradores importam. Desligado, a tela some; o que já foi importado continua como está.",
+    usedBy: "Administração (importação), Clientes, Fornecedores, Estoque e Financeiro",
+  },
   { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
   { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },
   {
