@@ -327,6 +327,21 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
   throw new BusinessError("Origem não suportada.");
 }
 
+/** Rastro por SKU da venda (somente SKUs em uma única linha com saída por lote). */
+async function saleRastroBySku(ctx: Ctx, saleId: string) {
+  const { rastroOf, saleMovementId } = await import("../lots");
+  const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", saleId]] });
+  const out = new Map<string, { qty: number; rastro: ReturnType<typeof rastroOf> }>();
+  const count = new Map<string, number>();
+  for (const i of items) count.set(i.skuId, (count.get(i.skuId) ?? 0) + 1);
+  for (const i of items) {
+    if (count.get(i.skuId) !== 1 || !i.warehouseId || (i.returnedQty ?? 0) > 0) continue;
+    const rastro = rastroOf(await ctx.store.get("stock_movements", saleMovementId(saleId, i.seq)));
+    if (rastro.length) out.set(i.skuId, { qty: i.qty, rastro });
+  }
+  return out;
+}
+
 /** Monta o documento (itens, totais, pendências) a partir da entrada — cálculo no servidor, sem gravar. */
 export async function buildNfe(ctx: Ctx, input: NfeInput) {
   assert(input.items.length > 0, "Inclua ao menos um item.");
@@ -337,9 +352,11 @@ export async function buildNfe(ctx: Ctx, input: NfeInput) {
   const emitUf = branch.uf ?? branch.address?.uf ?? company.address?.uf;
   const interstate = Boolean(input.recipient.address?.uf && emitUf && input.recipient.address.uf !== emitUf);
   const kind = operationKind(input);
+  // NF-e da venda (EST-02): rastro dos lotes que saíram, quando o item é emitido pela quantidade vendida
+  const saleRastro = input.origin.type === "sale" && input.origin.id ? await saleRastroBySku(ctx, input.origin.id) : null;
   const items = await buildItems(
     ctx,
-    input.items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount ?? 0, description: i.description, taxGroupId: i.taxGroupId || null, cfopOverride: i.cfop || undefined, cstOverride: i.cstCsosn || undefined, ...(input.origin.type === "sales_document" && i.xPed ? { xPed: i.xPed, nItemPed: i.nItemPed ?? null } : {}) })),
+    input.items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount ?? 0, description: i.description, taxGroupId: i.taxGroupId || null, cfopOverride: i.cfop || undefined, cstOverride: i.cstCsosn || undefined, ...(input.origin.type === "sales_document" && i.xPed ? { xPed: i.xPed, nItemPed: i.nItemPed ?? null } : {}), ...(saleRastro?.get(i.skuId)?.qty === i.qty ? { rastro: saleRastro.get(i.skuId)!.rastro } : {}) })),
     { branchId: input.branchId, interstate, freight: input.freight, insurance: input.insurance, other: input.other, kind },
   );
   const totals = computeTotals(items, { insurance: input.insurance });
@@ -504,7 +521,7 @@ export async function refreshFromCatalog(ctx: Ctx, documentId: string) {
   const other = old.reduce((a, i) => a + i.other, 0);
   const items = await buildItems(
     ctx,
-    old.filter((i) => i.skuId).map((i) => ({ skuId: i.skuId!, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount, description: i.description, taxGroupId: i.overrides?.taxGroupId ?? null, cfopOverride: i.overrides?.cfop, cstOverride: i.overrides?.cstCsosn })),
+    old.filter((i) => i.skuId).map((i) => ({ skuId: i.skuId!, qty: i.qty, unitPrice: i.unitPrice, discount: i.discount, description: i.description, taxGroupId: i.overrides?.taxGroupId ?? null, cfopOverride: i.overrides?.cfop, cstOverride: i.overrides?.cstCsosn, rastro: i.rastro ?? null })),
     { branchId: doc.branchId, interstate, freight, insurance, other, kind: doc.model === "nfce" ? "sale" : kind },
   );
   const totals = computeTotals(items, { insurance });

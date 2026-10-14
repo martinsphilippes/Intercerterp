@@ -8,6 +8,7 @@ import { resolvePrices } from "@/domain/pricing";
 import { availableMap } from "@/domain/stock";
 import { resolveScaleBarcode, type ScaleResolution } from "@/domain/scale";
 import { kitAvailability } from "@/domain/product-components";
+import { lotsEnabled } from "@/domain/lots";
 
 /**
  * Busca de produtos do PDV (Tela 5): descrição, SKU, código de barras e categoria.
@@ -99,6 +100,8 @@ export async function GET(req: NextRequest) {
   const avail = await availableMap(store, branchId, skus.map((k) => k.id));
   // kit (CAD-12): disponível calculado pelos componentes (menor saldo ÷ quantidade por kit)
   const kitAvail = await kitAvailability(store, branchId, skus.map((k) => ({ id: k.id, productId: k.productId })), pmap);
+  // lotes e validades (EST-02): a linha do PDV oferece a escolha do lote
+  const lotsOn = products.some((p) => p.lotControl) && (await lotsEnabled(store, cid, branchId));
   const siblings = new Map<string, number>();
   for (const k of skus) siblings.set(k.productId, (siblings.get(k.productId) ?? 0) + 1);
 
@@ -129,6 +132,7 @@ export async function GET(req: NextRequest) {
       maxDiscountBps: pr.maxDiscountBps,
       priced: pr.price > 0,
       available: service ? null : (kitAvail.get(k.id) ?? avail.get(k.id)?.available ?? 0),
+      lotControl: !service && lotsOn && Boolean(p.lotControl),
     };
   });
   return NextResponse.json({ items, exact, priceTableId, ...(scale ? { scale } : {}) });

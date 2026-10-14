@@ -212,6 +212,8 @@ export const COLLECTIONS: CollectionDef[] = [
       // composição (CAD-12/13): ausente = produto comum; "kit" = vendido como um item com baixa dos componentes;
       // "composite" = composto com estoque próprio (montagem/desmembramento em /estoque/montagem)
       composition: s(20),
+      // controle de saldo por lote e validade (EST-02); ausente = sem controle
+      lotControl: bool,
     },
     indexes: [k("i_company", "companyId"), u("u_code", "companyId", "code"), k("i_category", "categoryId"), u("u_plu", "companyId", "plu")],
   },
@@ -309,6 +311,8 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, warehouseId: id(true), skuId: id(true), productId: id(), physical: qty, reserved: qty, inTransit: qty,
       avgCost: money, minQty: qty, maxQty: qty, safetyQty: qty, reorderMultiple: qty, seq: int, lastMovementAt: dt,
       location: s(60),
+      // saldo por lote (EST-02): [{ lot, expiry, mfg, qty }] alterado só pelo movimento, na mesma transação do físico
+      lots: json,
     },
     indexes: [u("u_wh_sku", "warehouseId", "skuId"), k("i_sku", "skuId"), k("i_branch", "branchId")],
   },
@@ -320,8 +324,10 @@ export const COLLECTIONS: CollectionDef[] = [
       balanceBefore: qty, balanceAfter: qty, unitCost: money, totalCost: money, avgCostAfter: money, seq: int,
       originType: s(40), originId: id(), operationId: id(), reason: s(300), occurredAt: dt, idemKey: s(120, true),
       lot: s(60), lotExpiry: date, documentRef: s(120), notes: s(500),
+      // divisão por lote do movimento (produto com controle de lote) e saída que esta entrada desfaz (devolução/estorno)
+      lots: json, sourceMovementId: id(),
     },
-    indexes: [u("u_seq", "balanceId", "seq"), u("u_idem", "idemKey"), k("i_sku", "skuId"), k("i_origin", "originType", "originId"), k("i_branch_date", "branchId", "occurredAt")],
+    indexes: [u("u_seq", "balanceId", "seq"), u("u_idem", "idemKey"), k("i_sku", "skuId"), k("i_origin", "originType", "originId"), k("i_branch_date", "branchId", "occurredAt"), k("i_source", "sourceMovementId")],
   },
   {
     id: "stock_reservations",
@@ -359,6 +365,8 @@ export const COLLECTIONS: CollectionDef[] = [
       counted: bool, movementsDuringCount: qty, expectedQty: qty, difference: qty, unitCost: money, differenceValue: money,
       note: s(500), countedBy: id(), countedAt: dt, adjustmentMovementId: id(),
       baseSeq: int, countSeq: int, recountAt: dt, recountBy: id(), finalQty: qty, location: s(60),
+      // contagem por lote (produto com controle de lote): [{ lot, expiry, qty }] — a soma é a quantidade contada
+      lotCounts: json,
     },
     indexes: [k("i_inventory", "inventoryId"), u("u_inv_sku", "inventoryId", "skuId")],
   },
@@ -462,6 +470,8 @@ export const COLLECTIONS: CollectionDef[] = [
       components: json,
       // promoção aplicada (CAD-15): parte do itemDiscount que veio da regra — ausente = item sem promoção
       promoDiscount: money, promoId: id(), promoName: s(120),
+      // lote escolhido no PDV (produto com controle de lote); ausente = FEFO automático
+      lot: s(60),
     },
     indexes: [k("i_sale", "saleId"), k("i_sku", "skuId"), k("i_branch_date", "branchId", "completedAt")],
   },

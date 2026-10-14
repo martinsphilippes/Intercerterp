@@ -57,3 +57,9 @@ registerRoutine("stock.inventories_stale", async (store, companyId) => {
   }
   return { stale: n };
 });
+
+/** Lotes vencidos e a vencer (EST-02, recurso `feature.lotes`; antecedência `stock.lotExpiryAlertDays`). */
+registerRoutine("stock.lot_expiry", async (store, companyId) => {
+  const { notifyLotExpiry } = await import("../lots");
+  return notifyLotExpiry(store, companyId);
+});

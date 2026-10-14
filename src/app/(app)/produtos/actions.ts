@@ -245,6 +245,15 @@ export async function deleteConversionAction(productId: string, id: string) {
   });
 }
 
+/** Controle de lote e validade do produto (EST-02; exige o recurso `feature.lotes` para ligar). */
+export async function setLotControlAction(id: string, on: boolean) {
+  return runAction({ module: "products", op: "edit", revalidate: ["/produtos", `/produtos/${id}`, "/estoque/validades"] }, async (s) => {
+    const { setLotControl } = await import("@/domain/lots");
+    await setLotControl(s.ctx, id, on);
+    return { ok: true as const, message: on ? "Controle de lote e validade ligado. O saldo atual fica “sem lote” até ser classificado (inventário por lote)." : "Controle de lote e validade desligado." };
+  });
+}
+
 // ───────────────────────────── Importação CSV
 
 export async function analyzeCsvAction(text: string) {

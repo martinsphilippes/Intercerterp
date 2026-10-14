@@ -49,14 +49,26 @@ export const DEFAULT_SETTINGS = {
 } as const;
 
 /**
- * Chave de liga/desliga de recursos novos (evolução por fases). Lê o parâmetro `feature.<key>` (filial → empresa);
- * sem valor gravado, vale o padrão informado — recursos novos nascem desligados e são ligados por empresa/filial,
- * o que permite reverter uma fase sem reimplantar.
+ * Padrão de recursos que mudam a operação (nascem DESLIGADOS por empresa: fidelidade muda o cupom e o pagamento, lotes e
+ * reserva na pré-venda mudam o estoque). Os demais recursos novos (telas aditivas) nascem ligados.
  */
-/** Recursos novos DESLIGADOS por padrão (os demais `feature.*` nascem ligados). */
-export const FEATURES_OFF_BY_DEFAULT = ["fidelidade"];
-export const featureDefault = (key: string) => !FEATURES_OFF_BY_DEFAULT.includes(key);
+export const FEATURE_DEFAULTS: Record<string, boolean> = {
+  fidelidade: false,
+  lotes: false,
+  reservaPreVenda: false,
+  bipagemContagem: true,
+};
 
+/** Recursos novos desligados por padrão (derivado de FEATURE_DEFAULTS). */
+export const FEATURES_OFF_BY_DEFAULT = Object.entries(FEATURE_DEFAULTS).filter(([, on]) => !on).map(([k]) => k);
+
+/** Padrão do recurso: o do catálogo acima ou, sem registro, o informado (padrão: ligado). */
+export const featureDefault = (key: string, fallback = true) => FEATURE_DEFAULTS[key] ?? fallback;
+
+/**
+ * Chave de liga/desliga de recursos novos (evolução por fases). Lê o parâmetro `feature.<key>` (filial → empresa);
+ * sem valor gravado, vale o padrão informado, o que permite reverter uma fase sem reimplantar.
+ */
 export async function isFeatureOn(store: Store, companyId: string, branchId: string | null | undefined, key: string, fallback = false): Promise<boolean> {
   return Boolean(await getSetting(store, companyId, branchId, `feature.${key}`, fallback));
 }

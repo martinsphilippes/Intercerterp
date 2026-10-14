@@ -9,6 +9,8 @@ import { nowIso } from "@/lib/dates";
 import { QTY, roundDiv } from "@/lib/money";
 import { balanceId, postMovements, type MovementInput } from "./stock";
 import { categoryDescendants } from "./products";
+import { lotsEnabled } from "./lots";
+import { normDate, normLot } from "./lot-calc";
 
 /**
  * Inventário e contagem (Tela 19) — método da BASE TEMPORAL por sequência de movimentos.
@@ -247,6 +249,11 @@ export interface CountEntry {
   qty: number | null;
   note?: string | null;
   recount?: boolean;
+  /**
+   * Contagem por lote (produto com controle de lote e recurso `feature.lotes`): a soma vira a quantidade contada e,
+   * na conclusão, o ajuste leva os lotes do saldo às quantidades contadas (o que não fechar fica "sem lote").
+   */
+  lots?: Array<{ lot: string; expiry?: string | null; qty: number }> | null;
 }
 
 /**
@@ -262,6 +269,7 @@ export async function saveCounts(ctx: Ctx, inventoryId: string, entries: CountEn
   assert(ctx.branchId === inv.branchId, "Opere o inventário no contexto da sua filial.");
   let saved = 0;
   const at = nowIso();
+  const lotsOn = entries.some((e) => e.lots?.length) ? await lotsEnabled(ctx.store, ctx.companyId, inv.branchId) : false;
   for (const e of entries) {
     if (e.qty == null && e.note == null) continue;
     const id = detId("invcount", inventoryId, e.skuId);
@@ -274,6 +282,21 @@ export async function saveCounts(ctx: Ctx, inventoryId: string, entries: CountEn
       }
       continue;
     }
+    let lotCounts: Array<{ lot: string; expiry: string | null; qty: number }> | null = null;
+    if (lotsOn && e.lots?.length && (await ctx.store.get("products", c!.productId))?.lotControl) {
+      const byLot = new Map<string, { lot: string; expiry: string | null; qty: number }>();
+      for (const l of e.lots) {
+        const lot = normLot(l.lot);
+        assert(lot, "Informe o código do lote contado.");
+        assert(Number.isInteger(l.qty) && l.qty >= 0, `Quantidade contada do lote ${lot} inválida.`);
+        const cur = byLot.get(lot!);
+        byLot.set(lot!, { lot: lot!, expiry: cur?.expiry ?? normDate(l.expiry), qty: (cur?.qty ?? 0) + l.qty });
+      }
+      lotCounts = [...byLot.values()];
+      const sum = lotCounts.reduce((a, l) => a + l.qty, 0);
+      // a quantidade do item é a soma dos lotes mais o que foi contado sem lote (qty informado acima da soma)
+      e.qty = Math.max(e.qty, sum);
+    }
     assert(Number.isInteger(e.qty) && e.qty >= 0, "Quantidade contada inválida.");
     const bal = await ctx.store.get("stock_balances", balanceId(inv.warehouseId, e.skuId));
     const countSeq = bal?.seq ?? 0;
@@ -282,6 +305,8 @@ export async function saveCounts(ctx: Ctx, inventoryId: string, entries: CountEn
       ? { recountQty: e.qty, recountAt: at, recountBy: ctx.user.id, countSeq }
       : { countedQty: e.qty, counted: true, countedAt: at, countedBy: ctx.user.id, countSeq, recountQty: null, recountAt: null, recountBy: null };
     if (e.note !== undefined) patch.note = e.note?.slice(0, 500) || null;
+    if (lotCounts) patch.lotCounts = lotCounts;
+    else if (e.lots !== undefined && c!.lotCounts) patch.lotCounts = null;
     const merged = { ...c!, ...patch };
     const mdc = await movementsBetween(ctx, inv, e.skuId, c!.baseSeq ?? 0, countSeq);
     const ev = evaluate(merged as Doc, mdc);
@@ -353,8 +378,9 @@ export async function concludeInventory(ctx: Ctx, inventoryId: string, opts: { u
 
   // fase 2 — um ajuste por item com diferença (idempotente por idemKey)
   const frozen = await listAll(ctx.store, "inventory_counts", { filters: [["eq", "inventoryId", inventoryId]] });
+  // contagem por lote (EST-02): o ajuste leva os lotes às quantidades contadas mesmo sem diferença no total
   const movements: MovementInput[] = frozen
-    .filter((c) => c.difference)
+    .filter((c) => c.difference || (c.finalQty != null && Array.isArray(c.lotCounts)))
     .map((c) => ({
       warehouseId: inv.warehouseId,
       skuId: c.skuId,
@@ -367,6 +393,7 @@ export async function concludeInventory(ctx: Ctx, inventoryId: string, opts: { u
       reason: `Inventário ${invLabel(inv)}: contado ${c.finalQty / QTY}, esperado ${c.expectedQty / QTY}`,
       idemKey: `inventory:${inventoryId}:${c.skuId}`,
       allowNegative: true,
+      ...(Array.isArray(c.lotCounts) && c.finalQty != null ? { lotTarget: c.lotCounts } : {}),
     }));
   for (let i = 0; i < movements.length; i += 40) await postMovements(ctx, movements.slice(i, i + 40));
   for (const c of frozen) if (c.difference && !c.adjustmentMovementId) await ctx.store.update("inventory_counts", c.id, { adjustmentMovementId: detId("mov", `inventory:${inventoryId}:${c.skuId}`) });
@@ -374,7 +401,7 @@ export async function concludeInventory(ctx: Ctx, inventoryId: string, opts: { u
   const summary: InventorySummary = {
     itemsTotal: frozen.length,
     itemsCounted: frozen.filter((c) => c.finalQty != null).length,
-    itemsAdjusted: movements.length,
+    itemsAdjusted: frozen.filter((c) => c.difference).length,
     qtyPositive: frozen.reduce((a, c) => a + Math.max(0, c.difference ?? 0), 0),
     qtyNegative: frozen.reduce((a, c) => a + Math.min(0, c.difference ?? 0), 0),
     valuePositive: frozen.reduce((a, c) => a + Math.max(0, c.differenceValue ?? 0), 0),

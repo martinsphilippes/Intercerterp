@@ -319,6 +319,15 @@ export interface DocItem {
   /** pedido do cliente (FIS-05, origem documento comercial): número do pedido (xPed) e item do pedido (nItemPed) */
   xPed?: string | null;
   nItemPed?: number | null;
+  /** rastreabilidade do lote (EST-02): nLote, qLote (milésimos), dFab e dVal (AAAA-MM-DD) */
+  rastro?: FiscalRastro[] | null;
+}
+
+export interface FiscalRastro {
+  nLote: string;
+  qLote: number;
+  dFab: string | null;
+  dVal: string | null;
 }
 
 export function computeTotals(items: DocItem[], extra: { freight?: number; insurance?: number; other?: number } = {}) {
@@ -355,6 +364,8 @@ export interface ItemLine {
   /** pedido do cliente (xPed/nItemPed) — somente quando a NF-e fatura um pedido de venda */
   xPed?: string | null;
   nItemPed?: number | null;
+  /** lotes que saíram no item (produto com controle de lote) */
+  rastro?: FiscalRastro[] | null;
 }
 
 /** Constrói itens fiscais a partir de linhas (venda, pedido ou formulário). Frete/seguro/outras despesas rateados (maior resto). */
@@ -426,6 +437,7 @@ export async function buildItems(
       approxTax: tax.approxTaxBps ? pct(net, tax.approxTaxBps) : 0,
       overrides,
       ...(l.xPed ? { xPed: String(l.xPed).slice(0, 15), nItemPed: l.nItemPed ?? null } : {}),
+      ...(l.rastro?.length ? { rastro: l.rastro.slice(0, 500) } : {}),
     });
   }
   return out;
@@ -636,6 +648,8 @@ export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cf
       inclui_no_total: 1,
       // xPed / nItemPed (pedido de venda do cliente — FIS-05)
       ...(i.xPed ? { pedido_compra: i.xPed, ...(i.nItemPed ? { numero_item_pedido_compra: i.nItemPed } : {}) } : {}),
+      // rastro do lote (EST-02): nLote, qLote, dFab, dVal
+      ...(i.rastro?.length ? { rastros: i.rastro.map((r) => ({ numero_lote: r.nLote, quantidade_lote: qtyNum(r.qLote), ...(r.dFab ? { data_fabricacao: r.dFab } : {}), ...(r.dVal ? { data_validade: r.dVal } : {}) })) } : {}),
     })),
     formas_pagamento: (doc.payments ?? []).map((p: any) => ({ forma_pagamento: TPAG[p.kind] ?? "99", valor_pagamento: p.kind === "none" ? 0 : money(p.amount) })),
   };
@@ -878,13 +892,25 @@ async function syncOrigin(ctx: Ctx, doc: Doc) {
   }
 }
 
+/** Rastro (lotes) de cada item de venda a partir do movimento de saída do item (produto com controle de lote). */
+export async function withSaleRastro(store: Store, saleId: string, saleItems: Doc[], lines: ItemLine[]): Promise<ItemLine[]> {
+  const { rastroOf, saleMovementId } = await import("../lots");
+  const out: ItemLine[] = [];
+  for (const [idx, l] of lines.entries()) {
+    const it = saleItems[idx];
+    const rastro = it?.warehouseId ? rastroOf(await store.get("stock_movements", saleMovementId(saleId, it.seq))) : [];
+    out.push(rastro.length ? { ...l, rastro } : l);
+  }
+  return out;
+}
+
 export async function createNfceForSale(ctx: Ctx, saleId: string) {
   const sale = await ctx.store.getOrThrow("sales", saleId);
   const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", saleId]], orderBy: [{ field: "seq" }] });
   const payments = await listAll(ctx.store, "sale_payments", { filters: [["eq", "saleId", saleId]] });
   const docItems = await buildItems(
     ctx,
-    items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: (i.itemDiscount ?? 0) + (i.globalDiscount ?? 0), description: i.description })),
+    await withSaleRastro(ctx.store, saleId, items, items.map((i) => ({ skuId: i.skuId, qty: i.qty, unitPrice: i.unitPrice, discount: (i.itemDiscount ?? 0) + (i.globalDiscount ?? 0), description: i.description }))),
     { branchId: sale.branchId, other: items.reduce((a, i) => a + (i.surcharge ?? 0), 0), kind: "sale" },
   );
   const totals = computeTotals(docItems);
@@ -1168,7 +1194,7 @@ async function applyResult(ctx: Ctx, doc: Doc, r: ProviderResult, eventType: str
 
 function simulatedXml(doc: Doc) {
   const esc = (s: any) => String(s ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!);
-  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}</item>`).join("\n");
+  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}${(i.rastro ?? []).map((r: FiscalRastro) => `<rastro nLote="${esc(r.nLote)}" qLote="${r.qLote / QTY}"${r.dFab ? ` dFab="${r.dFab}"` : ""}${r.dVal ? ` dVal="${r.dVal}"` : ""}/>`).join("")}</item>`).join("\n");
   const s = doc.service;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!-- SIMULAÇÃO INTERCERT — DOCUMENTO SEM VALIDADE FISCAL. Não substitui o XML autorizado pela SEFAZ/prefeitura. -->

@@ -1,5 +1,6 @@
 import { registerRoutine } from "../scheduler";
 import { expireSalesDocuments } from "../sales-documents";
+import { releaseExpiredPresales } from "../carts";
 
 /**
  * Rotina diária dos documentos comerciais de venda (Fase 5):
@@ -8,3 +9,6 @@ import { expireSalesDocuments } from "../sales-documents";
  * Idempotente: documentos já expirados/liberados não são tocados de novo.
  */
 registerRoutine("sales.documents_expire", (store, companyId) => expireSalesDocuments(store, companyId));
+
+/** Pré-vendas (VEN-03): reservas de estoque de pré-vendas expiradas ou de atendimentos encerrados são liberadas. */
+registerRoutine("sales.presale_reservations", (store, companyId) => releaseExpiredPresales(store, companyId));

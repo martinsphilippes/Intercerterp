@@ -206,7 +206,7 @@ export function PdvApp(props: PdvProps) {
       return false;
     }
     // etiqueta de balança vira linha própria (o total de cada etiqueta fica visível e não se mistura a outra leitura)
-    const existing = scale ? -1 : items.findIndex((l) => l.skuId === hit.skuId && l.unitPrice == null && !l.itemDiscount && !l.itemSurcharge && !l.scale);
+    const existing = scale ? -1 : items.findIndex((l) => l.skuId === hit.skuId && l.unitPrice == null && !l.itemDiscount && !l.itemSurcharge && !l.scale && !l.lot);
     const block = stockBlocks({ ...hit }, existing >= 0 ? items[existing].qty + qty : qty, existing);
     if (block) {
       toast("error", block);
@@ -224,6 +224,7 @@ export function PdvApp(props: PdvProps) {
           wholesalePrice: hit.wholesalePrice, wholesaleMinQty: hit.wholesaleMinQty, available: hit.available, service: hit.service, maxDiscountBps: hit.maxDiscountBps, attributes: hit.attributes,
           ...(scale ? { scale: { barcode: scale.barcode, content: scale.content, labelValue: scale.labelValue } } : {}),
           productId: hit.productId, categoryId: hit.categoryId,
+          ...(hit.lotControl ? { lotControl: true, lot: null } : {}),
         });
         setSelected(list.length - 1);
       }
@@ -553,6 +554,7 @@ export function PdvApp(props: PdvProps) {
                             {totals.promos[i]?.promoName && <Badge tone="good" className="ml-2" title={`Promoção: ${totals.promos[i].promoName}`}>{totals.promos[i].promoName}</Badge>}
                             {short && <Badge tone="warn" className="ml-2">sem saldo ({formatQty(l.available)})</Badge>}
                             {l.scale && <Badge tone="info" className="ml-2" title={`Etiqueta de balança ${l.scale.barcode}`}>balança</Badge>}
+                            {l.lotControl && <Badge tone={l.lot ? "brand" : "neutral"} className="ml-2" title="Lote (Enter para escolher)">{l.lot ? `lote ${l.lot}` : "lote: vence primeiro"}</Badge>}
                           </p>
                           {l.scale?.labelValue != null && calc && calc.grossTotal !== l.scale.labelValue && (
                             <p className="text-xs text-amber-700">Etiqueta {formatMoney(l.scale.labelValue)} · calculado {formatMoney(calc.grossTotal)} (quantidade arredondada ao milésimo)</p>
@@ -719,6 +721,7 @@ export function PdvApp(props: PdvProps) {
           line={line}
           allowNegative={props.allowNegative}
           otherQty={qtyInCart(line.skuId, selected)}
+          terminalId={props.terminal.id}
           onClose={() => setDialog(null)}
           onSave={(patch) => {
             if (patch.qty !== undefined) {
@@ -806,7 +809,8 @@ export function PdvApp(props: PdvProps) {
   );
 }
 
-function LineDialog({ line, allowNegative, otherQty, onClose, onSave, onRemove }: { line: Line; allowNegative: boolean; otherQty: number; onClose: () => void; onSave: (p: Partial<Line>) => void; onRemove: () => void }) {
+function LineDialog({ line, allowNegative, otherQty, terminalId, onClose, onSave, onRemove }: { line: Line; allowNegative: boolean; otherQty: number; terminalId: string; onClose: () => void; onSave: (p: Partial<Line>) => void; onRemove: () => void }) {
+  const [lot, setLot] = useState<string | null>(line.lot ?? null);
   const table = tablePrice(line);
   const [qtyText, setQtyText] = useState(String(line.qty / QTY).replace(".", ","));
   const [price, setPrice] = useState(line.unitPrice ?? table);
@@ -827,11 +831,11 @@ function LineDialog({ line, allowNegative, otherQty, onClose, onSave, onRemove }
         <>
           <Button variant="ghost" className="mr-auto text-red-700" onClick={onRemove}><Trash2 className="size-4" /> Remover</Button>
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" disabled={qty <= 0} onClick={() => onSave({ qty, unitPrice: price === table ? null : price, itemDiscount: Math.min(discount, gross), itemSurcharge: sur })}>Aplicar</Button>
+          <Button variant="primary" disabled={qty <= 0} onClick={() => onSave({ qty, unitPrice: price === table ? null : price, itemDiscount: Math.min(discount, gross), itemSurcharge: sur, ...(line.lotControl ? { lot } : {}) })}>Aplicar</Button>
         </>
       }
     >
-      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (qty > 0) onSave({ qty, unitPrice: price === table ? null : price, itemDiscount: Math.min(discount, gross), itemSurcharge: sur }); }}>
+      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (qty > 0) onSave({ qty, unitPrice: price === table ? null : price, itemDiscount: Math.min(discount, gross), itemSurcharge: sur, ...(line.lotControl ? { lot } : {}) }); }}>
         <Field label={`Quantidade (${line.unitCode ?? "un"})`} error={stockMsg}>
           <Input value={qtyText} onChange={(e) => setQtyText(e.target.value)} inputMode="decimal" autoFocus className="tabular text-right" />
         </Field>
@@ -850,12 +854,50 @@ function LineDialog({ line, allowNegative, otherQty, onClose, onSave, onRemove }
         <Field label="Acréscimo no item">
           <MoneyInput value={sur} onChange={setSur} ariaLabel="Acréscimo" />
         </Field>
+        {line.lotControl && <LotPicker skuId={line.skuId} terminalId={terminalId} qty={qty} unitCode={line.unitCode} value={lot} onChange={setLot} />}
         <p className="sm:col-span-2 rounded-md bg-slate-50 px-3 py-2 text-sm">
           Bruto {formatMoney(gross)} − desconto {formatMoney(Math.min(discount, gross) + (price < table ? Math.round(((table - price) * qty) / QTY) : 0))} + acréscimo {formatMoney(sur)}. Preço abaixo da tabela conta como desconto (limites do perfil e da tabela são validados na conclusão).
         </p>
         <button type="submit" hidden />
       </form>
     </Dialog>
+  );
+}
+
+interface LotOption {
+  lot: string;
+  expiry: string | null;
+  qty: number;
+  status: "expired" | "expiring" | "ok" | "none";
+}
+
+/** Escolha do lote da linha (EST-02): automático = vence primeiro sai primeiro (FEFO); lotes vencidos não são vendidos. */
+function LotPicker({ skuId, terminalId, qty, unitCode, value, onChange }: { skuId: string; terminalId: string; qty: number; unitCode?: string; value: string | null; onChange: (lot: string | null) => void }) {
+  const [lots, setLots] = useState<LotOption[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/pdv/lots?sku=${encodeURIComponent(skuId)}&terminal=${encodeURIComponent(terminalId)}`)
+      .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({})))?.error ?? "Falha ao consultar os lotes."))))
+      .then((d) => alive && setLots(d.lots ?? []))
+      .catch((e) => alive && setError(String(e?.message ?? e)));
+    return () => {
+      alive = false;
+    };
+  }, [skuId, terminalId]);
+  const chosen = lots?.find((l) => l.lot === value);
+  const msg = chosen && chosen.qty < qty ? `O lote ${chosen.lot} tem ${formatQty(chosen.qty, unitCode)} — divida a quantidade em outra linha ou use o automático.` : null;
+  return (
+    <Field label="Lote" className="sm:col-span-2" error={error ?? msg} hint={value ? undefined : "Automático: baixa primeiro o lote que vence antes (FEFO)."}>
+      <select className="focus-ring h-9 w-full rounded-md border border-line bg-white px-2 text-sm" value={value ?? ""} onChange={(e) => onChange(e.target.value || null)} aria-label="Lote" disabled={!lots}>
+        <option value="">{lots ? "Automático — vence primeiro sai primeiro" : "Carregando lotes…"}</option>
+        {(lots ?? []).map((l) => (
+          <option key={l.lot} value={l.lot} disabled={l.status === "expired"}>
+            {l.lot} · {l.expiry ? `val. ${l.expiry.split("-").reverse().join("/")}` : "sem validade"} · {formatQty(l.qty, unitCode)}{l.status === "expired" ? " · VENCIDO" : l.status === "expiring" ? " · a vencer" : ""}
+          </option>
+        ))}
+      </select>
+    </Field>
   );
 }
 

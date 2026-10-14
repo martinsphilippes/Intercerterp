@@ -330,6 +330,8 @@ export async function queryInventoryItems(ctx: Ctx, inventoryId: string, p: P) {
         inventoryNumber: inv.number,
         skuCode: sku?.sku ?? "—",
         barcode: sku?.barcode ?? null,
+        extraBarcodes: (sku?.extraBarcodes ?? []) as string[],
+        lotControl: Boolean(product?.lotControl),
         productName: sku?.name ?? product?.name ?? "—",
         unitCode: sku?.unitCode ?? product?.unitCode ?? "",
         countedByName: c.countedBy ? (users.get(c.countedBy) ?? "—") : null,

@@ -2,6 +2,7 @@ import Link from "@/components/ui/link";
 import { notFound } from "next/navigation";
 import { History } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
+import { featureOn } from "@/lib/server/features";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList, Stat } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
@@ -36,6 +37,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   ]);
   const bals = await listAll(ctx.store, "stock_balances", { filters: [["eq", "warehouseId", inv.warehouseId]] });
   const live = new Map(bals.map((b) => [b.id, b.physical]));
+  const balLots = new Map(bals.map((b) => [b.id, ((b.lots ?? []) as Array<{ lot: string; expiry: string | null; qty: number }>).filter((l) => l.qty > 0)]));
+  // bipagem (EST-04, padrão ligado) e contagem por lote (EST-02, padrão desligado)
+  const [scanEnabled, lotsOn] = await Promise.all([featureOn(s, "bipagemContagem"), featureOn(s, "lotes")]);
   const code = inv.code ?? `nº ${inv.number}`;
   const active = ["open", "counting"].includes(inv.status) && !inv.closingAt;
   const preparing = inv.status === "preparing";
@@ -90,10 +94,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             inventoryId={id}
             editable={editable}
             canClose={canDo(s.user, "stock.inventory_close")}
+            scanEnabled={scanEnabled}
+            lotsEnabled={lotsOn}
             items={items.map((i) => ({
               skuId: i.skuId, skuCode: i.skuCode, productName: i.productName, unitCode: i.unitCode, location: i.location ?? null, baseQty: i.baseQty ?? 0, liveQty: live.get(balanceId(inv.warehouseId, i.skuId)) ?? 0,
               counted: Boolean(i.counted) || i.finalQty != null, countedQty: i.countedQty ?? (i.finalQty != null && !i.counted ? i.finalQty : null), recountQty: i.recountQty ?? null, expectedQty: i.expectedQty ?? null, difference: i.difference ?? null,
               differenceValue: i.differenceValue ?? null, unitCost: i.unitCost ?? 0, note: i.note ?? null, countedByName: i.countedByName,
+              barcode: i.barcode ?? null, extraBarcodes: i.extraBarcodes ?? [], lotControl: i.lotControl, lots: balLots.get(balanceId(inv.warehouseId, i.skuId)) ?? [], lotCounts: Array.isArray(i.lotCounts) ? i.lotCounts : null,
             }))}
           />
         </Card>

@@ -1,10 +1,11 @@
 import { detId, isConflict, listAll, retryOnConflict } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { DEFAULT_TZ, nowIso, startOfLocalDay, toLocalDate } from "@/lib/dates";
+import { DEFAULT_TZ, nowIso, startOfLocalDay, toLocalDate, today } from "@/lib/dates";
 import { roundDiv, QTY } from "@/lib/money";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requireBranch, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
+import { allocateBack, allocateExit, applyParts, mergeParts, normDate, normLot, targetSplit, type LotEntry, type LotPart } from "./lot-calc";
 
 /**
  * Estoque por movimentos.
@@ -77,9 +78,20 @@ export interface MovementInput {
   idemKey: string;
   allowNegative?: boolean;
   occurredAt?: string;
-  /** rastreabilidade informativa (lote/validade/documento) — o saldo não é controlado por lote */
+  /**
+   * Lote/validade. Produto SEM controle de lote: informativo, como sempre. Produto COM controle (`products.lotControl`):
+   * na entrada é o lote que recebe a quantidade; na saída é o lote preferido (o restante sai por FEFO).
+   */
   lot?: string | null;
   lotExpiry?: string | null;
+  /** data de fabricação do lote (rastro da NF-e), quando conhecida */
+  lotMfg?: string | null;
+  /** produto com controle de lote: divisão explícita por lote (quantidades com sinal; a soma deve ser `qty`) */
+  lotSplit?: LotPart[] | null;
+  /** produto com controle de lote: entrada que desfaz esta saída volta aos lotes de onde ela tirou */
+  sourceMovementId?: string | null;
+  /** inventário por lote: quantidades contadas por lote; o movimento leva os lotes a elas (pode ter `qty` 0) */
+  lotTarget?: LotPart[] | null;
   documentRef?: string | null;
   notes?: string | null;
   /**
@@ -121,6 +133,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   seed: "Carga inicial (demonstração)",
   sales_document: "Pedido de venda (reserva)",
   assembly: "Montagem/desmembramento",
+  cart: "Pré-venda (reserva)",
 };
 
 export function originHref(originType: string | null | undefined, originId: string | null | undefined): string | null {
@@ -183,17 +196,48 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
   if (inputs.length === 0) return [];
   const store = ctx.store;
   for (const m of inputs) {
-    if (!Number.isInteger(m.qty) || m.qty === 0) throw new BusinessError("Quantidade do movimento deve ser diferente de zero.");
+    // quantidade 0 só no reenquadramento de lotes do inventário (o físico não muda)
+    if (!Number.isInteger(m.qty) || (m.qty === 0 && !m.lotTarget)) throw new BusinessError("Quantidade do movimento deve ser diferente de zero.");
     await ensureBalance(store, ctx, m.warehouseId, m.skuId);
   }
+  // controle de lote por produto (lido uma vez por chamada)
+  const lotControl = new Map<string, boolean>();
+  const tracked = async (productId: string | null | undefined) => {
+    if (!productId) return false;
+    if (!lotControl.has(productId)) lotControl.set(productId, Boolean((await store.get("products", productId))?.lotControl));
+    return lotControl.get(productId)!;
+  };
   const run = async (t: Store) => {
     const cache = new Map<string, Doc>();
     const created: Doc[] = [];
+    // partes já devolvidas nesta chamada por saída de origem (ainda não gravadas)
+    const backInCall = new Map<string, LotPart[]>();
     for (const m of inputs) {
       const movId = detId("mov", m.idemKey);
       if (await store.get("stock_movements", movId)) continue;
       const bid = balanceId(m.warehouseId, m.skuId);
       const bal = cache.get(bid) ?? (await store.getOrThrow("stock_balances", bid));
+      // ── lotes (produto com controle): divisão do movimento e novo saldo por lote, gravados junto com o físico
+      let lotParts: LotPart[] | null = null;
+      let newLots: LotEntry[] | null = null;
+      if (await tracked(bal.productId)) {
+        const curLots = (bal.lots ?? []) as LotEntry[];
+        if (m.lotTarget) lotParts = targetSplit(curLots, m.lotTarget, m.qty);
+        else if (m.lotSplit) lotParts = mergeParts(m.lotSplit.map((p) => ({ lot: normLot(p.lot), expiry: normDate(p.expiry), mfg: normDate(p.mfg), qty: p.qty })));
+        else if (m.sourceMovementId && m.qty > 0) {
+          const source = await store.get("stock_movements", m.sourceMovementId);
+          // gravadas antes desta chamada (as desta chamada vêm de `backInCall`, mesmo que o armazenamento já as mostre)
+          const prior = (await listAll(store, "stock_movements", { filters: [["eq", "sourceMovementId", m.sourceMovementId]] })).filter((x) => !created.some((c) => c.id === x.id)).flatMap((x) => (x.lots ?? []) as LotPart[]);
+          const inCall = backInCall.get(m.sourceMovementId) ?? [];
+          const srcParts = ((source?.lots ?? []) as LotPart[]).filter((p) => p.qty < 0);
+          lotParts = allocateBack(srcParts, [...prior, ...inCall], m.qty);
+          backInCall.set(m.sourceMovementId, [...inCall, ...lotParts]);
+        } else if (m.qty > 0) lotParts = [{ lot: normLot(m.lot), expiry: normLot(m.lot) ? normDate(m.lotExpiry) : null, mfg: normLot(m.lot) ? normDate(m.lotMfg) : null, qty: m.qty }];
+        else if (m.qty < 0) lotParts = allocateExit(curLots, bal.physical as number, -m.qty, m.lot, today()).map((p) => ({ ...p, qty: -p.qty }));
+        lotParts = mergeParts(lotParts ?? []);
+        newLots = applyParts(curLots, lotParts);
+      }
+      if (m.qty === 0 && !(lotParts ?? []).length) continue; // inventário sem diferença por lote: nada a lançar
       const before = bal.physical as number;
       const after = before + m.qty;
       if (after < 0 && m.qty < 0 && !m.allowNegative) {
@@ -248,15 +292,19 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
           reason: m.reason ?? null,
           occurredAt,
           idemKey: m.idemKey,
-          lot: m.lot ?? null,
-          lotExpiry: m.lotExpiry ?? null,
+          lot: lotParts ? (lotParts.find((p) => p.lot)?.lot ?? null) : (m.lot ?? null),
+          lotExpiry: lotParts ? (lotParts.find((p) => p.lot)?.expiry ?? null) : (m.lotExpiry ?? null),
           documentRef: m.documentRef ?? null,
           notes: m.notes ?? null,
+          ...(lotParts ? { lots: lotParts } : {}),
+          ...(m.sourceMovementId ? { sourceMovementId: m.sourceMovementId } : {}),
         },
         movId,
       );
-      const updated = { ...bal, physical: after, avgCost: avg, seq, lastMovementAt: occurredAt };
-      await t.update("stock_balances", bid, { physical: after, avgCost: avg, seq, lastMovementAt: occurredAt });
+      const balPatch: Record<string, any> = { physical: after, avgCost: avg, seq, lastMovementAt: occurredAt };
+      if (newLots) balPatch.lots = newLots;
+      const updated = { ...bal, ...balPatch };
+      await t.update("stock_balances", bid, balPatch);
       if (m.qty < 0 && m.respectReserved && !m.allowNegative) {
         // Reserva gravada depois da leitura acima (ex.: separação simultânea): o limite atômico confere, no
         // commit, que o reservado vigente não passa do físico resultante (+1/−1: efeito líquido nulo).
@@ -370,6 +418,14 @@ export async function releaseReservations(ctx: Ctx, originType: string, originId
     if (done) ended++;
   }
   return ended;
+}
+
+/** Reservado ativo de uma origem por SKU na filial (a própria reserva conta como disponível para quem a fez). */
+export async function reservedForOrigin(store: Store, originType: string, originId: string, branchId: string) {
+  const rs = await listAll(store, "stock_reservations", { filters: [["eq", "originType", originType], ["eq", "originId", originId], ["eq", "status", "active"]] });
+  const out = new Map<string, number>();
+  for (const r of rs) if (r.branchId === branchId) out.set(r.skuId, (out.get(r.skuId) ?? 0) + (r.qty ?? 0));
+  return out;
 }
 
 /**

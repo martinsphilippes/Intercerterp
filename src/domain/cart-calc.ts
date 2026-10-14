@@ -31,6 +31,9 @@ export interface CartItem {
   /** produto e categoria do item (para casar com as promoções por produto/categoria) */
   productId?: string | null;
   categoryId?: string | null;
+  /** produto com controle de lote (EST-02) e lote escolhido (null/ausente = FEFO automático) */
+  lotControl?: boolean;
+  lot?: string | null;
 }
 
 /** Promoções vigentes enviadas ao PDV (regras + fuso da empresa) — o servidor reaplica tudo na conclusão. */
