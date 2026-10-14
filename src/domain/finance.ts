@@ -10,6 +10,9 @@ import { reopenOccurrence, resolveOccurrence } from "@/lib/core/notify";
 import { getSetting } from "@/lib/core/settings";
 import { enqueue } from "@/lib/core/jobs";
 import { adjustDueDate, type NonBusinessDayRule } from "@/lib/business-days";
+import { validateFeeTable } from "./card-fees";
+import { assertPeriodOpen } from "./period-close";
+import { descendantsOf, levelOf, MAX_CATEGORY_LEVEL, MAX_COST_CENTER_LEVEL, subtreeHeight } from "./chart-of-accounts";
 
 /**
  * Financeiro:
@@ -97,6 +100,8 @@ export async function createTitle(ctx: Ctx, input: CreateTitleInput, tx?: Store)
   const total = input.installments.reduce((a, b) => a + b.amount, 0);
   assert(total > 0, "O valor do título deve ser maior que zero.");
   for (const i of input.installments) assert(i.amount > 0, "Parcelas devem ter valor positivo.");
+  // FIN-21: competência (ou emissão) em período financeiro fechado é recusada
+  await assertPeriodOpen(ctx.store, ctx.companyId, input.competenceDate ?? input.issueDate ?? today(), "título (data de competência)");
   const number = await nextNumber(ctx.store, `title:${input.kind}:${ctx.companyId}`);
   const issueDate = input.issueDate ?? today();
   const base = {
@@ -218,6 +223,8 @@ export async function postEntry(ctx: Ctx, t: Store, e: EntryInput, cache = new M
   const id = detId("entry", e.idemKey);
   const existing = await ctx.store.get("account_entries", id);
   if (existing) return existing;
+  // FIN-21: verificação central do fechamento de período (uma leitura por transação, pelo cache das contas)
+  await assertPeriodOpen(ctx.store, ctx.companyId, e.date, "lançamento em conta", cache);
   const acc = cache.get(e.accountId) ?? (e.accountId ? await ctx.store.get("financial_accounts", e.accountId) : null);
   // toda movimentação (baixa, estorno, transferência, avulso) só entra em conta da empresa ativa
   assert(acc && acc.companyId === ctx.companyId, "Conta financeira inválida: selecione uma conta desta empresa.", "invalid_account");
@@ -309,6 +316,7 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
   const existing = await ctx.store.get("settlements", sid);
   if (existing) return existing;
   assert(input.principal > 0, "Informe o valor principal da baixa.");
+  await assertPeriodOpen(ctx.store, ctx.companyId, input.date, "baixa", entryCache);
   const interest = input.interest ?? 0;
   const fine = input.fine ?? 0;
   const discount = input.discount ?? 0;
@@ -515,6 +523,8 @@ export async function reverseSettlement(ctx: Ctx, settlementId: string, reason: 
   assert(s.companyId === ctx.companyId, "Baixa de outra empresa.", "cross_company");
   if (s.status === "reversed") return s;
   assert(s.kind === "settlement", "Somente baixas podem ser estornadas.");
+  // FIN-21: baixa de período fechado não é estornada (o estorno alteraria o período conferido)
+  await assertPeriodOpen(ctx.store, ctx.companyId, s.date, "estorno de baixa (data da baixa)");
   const entry = s.accountEntryId ? await ctx.store.get("account_entries", s.accountEntryId) : null;
   assert(!entry || entry.companyId === ctx.companyId, "Lançamento de outra empresa.", "cross_company");
   if (entry?.reconciled) throw new BusinessError("A baixa está conciliada com o extrato. Desfaça a conciliação antes de estornar.", "reconciled");
@@ -891,6 +901,11 @@ export async function updateTitle(ctx: Ctx, id: string, patch: TitleUpdate) {
   if (next.description === null) delete next.description;
   const d = diff(title, next);
   if (!Object.keys(d.after).length) return title;
+  // FIN-21: competência e classificação (categoria/centro) de título de período fechado não mudam; nem para dentro dele
+  if (["competenceDate", "categoryId", "costCenterId"].some((k) => k in d.after)) {
+    await assertPeriodOpen(ctx.store, ctx.companyId, title.competenceDate ?? title.issueDate, "alteração de competência/classificação do título");
+    if ("competenceDate" in d.after) await assertPeriodOpen(ctx.store, ctx.companyId, next.competenceDate, "título (nova competência)");
+  }
   const updated = await ctx.store.update("titles", id, next);
   // dados denormalizados nas parcelas (filtros e fluxo previsto)
   const instPatch: Record<string, any> = {};
@@ -1032,6 +1047,12 @@ export async function changeInitialBalance(ctx: Ctx, accountId: string, input: {
   assert(isDate(input.initialBalanceDate), "Data de referência inválida.");
   const first = await ctx.store.list("account_entries", { filters: [["eq", "accountId", accountId], ["ne", "kind", "initial"]], orderBy: [{ field: "date", dir: "asc" }], limit: 1, total: false });
   if (first.items[0]) assert(input.initialBalanceDate <= first.items[0].date, `A data do saldo inicial deve ser anterior ou igual ao primeiro lançamento (${formatDate(first.items[0].date)}).`);
+  // FIN-21: o saldo inicial altera todos os saldos desde a sua data — recusado se a data (antiga ou nova) estiver fechada
+  const cur = await ctx.store.get("financial_accounts", accountId);
+  if (cur && cur.companyId === ctx.companyId && ((cur.initialBalance ?? 0) !== input.initialBalance || cur.initialBalanceDate !== input.initialBalanceDate)) {
+    const oldest = [cur.initialBalanceDate, input.initialBalanceDate].filter(Boolean).sort()[0];
+    await assertPeriodOpen(ctx.store, ctx.companyId, oldest, "alteração do saldo inicial da conta");
+  }
   const res = await retryOnConflict(() =>
     ctx.store.transaction(async (t) => {
       const acc = await ctx.store.getOrThrow("financial_accounts", accountId);
@@ -1131,6 +1152,7 @@ export async function reverseEntry(ctx: Ctx, entryId: string, reason: string) {
   if (e.reversedBy) return ctx.store.getOrThrow("account_entries", e.reversedBy);
   assert(["fee", "adjustment"].includes(e.kind) && !e.settlementId, "Somente lançamentos avulsos podem ser estornados aqui. Baixas são estornadas no título.");
   assert(!e.reconciled, "Lançamento conciliado: desfaça a conciliação antes de estornar.");
+  await assertPeriodOpen(ctx.store, ctx.companyId, e.date, "estorno de lançamento (data do lançamento)");
   const rev = await retryOnConflict(() =>
     ctx.store.transaction(async (t) => {
       const r = await postEntry(ctx, t, {
@@ -1172,6 +1194,11 @@ export interface PaymentMethodInput {
   maxInstallments: number;
   sortOrder?: number;
   active?: boolean;
+  /**
+   * FIN-24: tabela de taxas por bandeira × parcelas (cartões). `undefined` mantém a gravada; [] remove (volta à taxa única).
+   * Só é gravada quando enviada (tela com o recurso `feature.taxasCartao` ligado).
+   */
+  feeTable?: unknown;
 }
 
 /** Meios que lançam direto numa conta precisam da conta de destino. */
@@ -1192,6 +1219,11 @@ export async function savePaymentMethod(ctx: Ctx, id: string | null, input: Paym
     requiresCustomer: input.requiresCustomer, availablePdv: input.availablePdv, maxInstallments: input.kind === "credit" || input.kind === "crediario" ? input.maxInstallments : 1, active: input.active !== false,
     sortOrder: input.sortOrder ?? 99,
   };
+  if (input.feeTable !== undefined) {
+    const table = validateFeeTable(input.feeTable, input.kind === "credit" ? input.maxInstallments : 1);
+    assert(!table.length || input.kind === "credit" || input.kind === "debit", "A tabela de taxas por bandeira e parcelas vale só para cartões de débito e crédito.", "invalid_fee_table");
+    Object.assign(data, { feeTable: table.length ? table : null });
+  }
   return saveSimple(ctx, "payment_methods", id, data, "Meio de pagamento");
 }
 
@@ -1230,7 +1262,43 @@ export async function savePaymentTerm(ctx: Ctx, id: string | null, input: Paymen
 
 export const DRE_GROUPS = ["Receita bruta", "Deduções", "CMV", "Despesas operacionais", "Despesas com pessoal", "Despesas administrativas", "Despesas financeiras", "Receitas financeiras", "Outras receitas", "Outras despesas", "Investimentos"];
 
-export async function saveFinCategory(ctx: Ctx, id: string | null, input: { name: string; type: "revenue" | "expense"; parentId?: string | null; dreGroup?: string | null; active?: boolean }) {
+export interface FinCategoryInput {
+  name: string;
+  type: "revenue" | "expense";
+  parentId?: string | null;
+  dreGroup?: string | null;
+  active?: boolean;
+  /** FIN-19: código de classificação no plano (ex.: 3.1.01); `undefined` mantém o gravado */
+  code?: string | null;
+  /** FIN-19: código da conta no plano contábil do escritório (integração/pacote contábil); `undefined` mantém */
+  accountingCode?: string | null;
+}
+
+/** Valida o pai na hierarquia (sem ciclo, nível máximo) e devolve o nível do registro (1 = raiz). */
+async function hierarchyLevel(ctx: Ctx, collection: "fin_categories" | "cost_centers", id: string | null, parentId: string | null | undefined, maxLevel: number, label: string) {
+  const all = await listAll(ctx.store, collection, { filters: [["eq", "companyId", ctx.companyId]] });
+  const byId = new Map(all.map((x) => [x.id, x]));
+  const parentLevel = parentId ? levelOf(parentId, byId as Map<string, any>) : 0;
+  if (parentId && id) {
+    assert(parentId !== id, `${label}: o registro não pode ser pai de si mesmo.`);
+    assert(!descendantsOf(id, all as any[]).includes(parentId), `${label}: o pai escolhido está abaixo deste registro na hierarquia (ciclo).`);
+  }
+  const height = id ? subtreeHeight(id, all as any[]) : 1;
+  assert(parentLevel + height <= maxLevel, `${label}: a hierarquia aceita até ${maxLevel} níveis.`, "max_level");
+  return { level: parentLevel + 1, all, byId };
+}
+
+/** Recalcula o nível dos descendentes depois de mudar o pai (hierarquia por parentId). */
+async function refreshDescendantLevels(ctx: Ctx, collection: "fin_categories" | "cost_centers", id: string) {
+  const all = await listAll(ctx.store, collection, { filters: [["eq", "companyId", ctx.companyId]] });
+  const byId = new Map(all.map((x) => [x.id, x]));
+  for (const d of descendantsOf(id, all as any[])) {
+    const lvl = levelOf(d, byId as Map<string, any>);
+    if (byId.get(d)?.level !== lvl) await ctx.store.update(collection, d, { level: lvl });
+  }
+}
+
+export async function saveFinCategory(ctx: Ctx, id: string | null, input: FinCategoryInput) {
   assert(input.name?.trim(), "Informe o nome da categoria.");
   assert(["revenue", "expense"].includes(input.type), "Tipo inválido.");
   if (input.parentId) {
@@ -1238,23 +1306,49 @@ export async function saveFinCategory(ctx: Ctx, id: string | null, input: { name
     const parent = await assertOwned(ctx, "fin_categories", input.parentId, "Categoria pai");
     assert(parent!.type === input.type, "A categoria pai deve ser do mesmo tipo.");
   }
+  if (input.dreGroup) assert(DRE_GROUPS.includes(input.dreGroup), "Grupo do DRE inválido.");
+  const prev = id ? await ctx.store.get("fin_categories", id) : null;
   if (id && input.type) {
-    const cur = await ctx.store.get("fin_categories", id);
-    if (cur && cur.type !== input.type) {
+    if (prev && prev.type !== input.type) {
       const used = await ctx.store.list("titles", { filters: [["eq", "categoryId", id]], limit: 1, total: false });
       assert(!used.items.length, "Categoria já utilizada em títulos: o tipo (receita/despesa) não pode ser alterado.");
+      assert(!(await ctx.store.list("fin_categories", { filters: [["eq", "parentId", id]], limit: 1, total: false })).items.length, "Categoria com subcategorias: o tipo (receita/despesa) não pode ser alterado.");
     }
   }
-  return saveSimple(ctx, "fin_categories", id, { name: input.name.trim(), type: input.type, parentId: input.parentId || null, dreGroup: input.dreGroup || null, active: input.active !== false }, "Categoria financeira");
+  const { level, all } = await hierarchyLevel(ctx, "fin_categories", id, input.parentId || null, MAX_CATEGORY_LEVEL, "Plano de contas");
+  const data: Record<string, any> = { name: input.name.trim(), type: input.type, parentId: input.parentId || null, dreGroup: input.dreGroup || null, active: input.active !== false, level };
+  if (input.code !== undefined) {
+    const code = input.code?.trim() || null;
+    if (code) {
+      assert(/^[0-9A-Za-z.\-]{1,20}$/.test(code), "Código da categoria: use até 20 caracteres (números, letras, ponto e hífen).");
+      assert(!all.some((c) => c.id !== id && c.code === code), `Código ${code} já usado em outra categoria.`);
+    }
+    data.code = code;
+  }
+  if (input.accountingCode !== undefined) data.accountingCode = input.accountingCode?.trim().slice(0, 40) || null;
+  const doc = await saveSimple(ctx, "fin_categories", id, data, "Categoria financeira");
+  if (id && (prev?.parentId ?? null) !== (data.parentId ?? null)) await refreshDescendantLevels(ctx, "fin_categories", id);
+  return doc;
 }
 
-export async function saveCostCenter(ctx: Ctx, id: string | null, input: { name: string; code?: string | null; active?: boolean }) {
+export async function saveCostCenter(ctx: Ctx, id: string | null, input: { name: string; code?: string | null; active?: boolean; parentId?: string | null }) {
   assert(input.name?.trim(), "Informe o nome do centro de custo.");
   if (input.code?.trim()) {
     const dup = await ctx.store.list("cost_centers", { filters: [["eq", "companyId", ctx.companyId], ["eq", "code", input.code.trim()]], limit: 2, total: false });
     assert(!dup.items.some((d) => d.id !== id), `Código ${input.code} já usado em outro centro de custo.`);
   }
-  return saveSimple(ctx, "cost_centers", id, { name: input.name.trim(), code: input.code?.trim() || null, active: input.active !== false }, "Centro de custo");
+  const data: Record<string, any> = { name: input.name.trim(), code: input.code?.trim() || null, active: input.active !== false };
+  let parentChanged = false;
+  if (input.parentId !== undefined || !id) {
+    if (input.parentId) await assertOwned(ctx, "cost_centers", input.parentId, "Centro de custo pai");
+    const { level } = await hierarchyLevel(ctx, "cost_centers", id, input.parentId || null, MAX_COST_CENTER_LEVEL, "Centros de custo");
+    const prev = id ? await ctx.store.get("cost_centers", id) : null;
+    parentChanged = Boolean(id) && (prev?.parentId ?? null) !== (input.parentId || null);
+    Object.assign(data, { parentId: input.parentId || null, level });
+  }
+  const doc = await saveSimple(ctx, "cost_centers", id, data, "Centro de custo");
+  if (id && parentChanged) await refreshDescendantLevels(ctx, "cost_centers", id);
+  return doc;
 }
 
 async function saveSimple(ctx: Ctx, collection: string, id: string | null, data: Record<string, any>, label: string) {

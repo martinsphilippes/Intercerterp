@@ -169,6 +169,21 @@ export const PARAMS: ParamDef[] = [
   { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
   { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },
   {
+    key: "feature.taxasCartao", group: "Recursos", label: "Taxas de cartão por bandeira e parcelas e conciliação com a adquirente", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra a tabela de taxas por bandeira × nº de parcelas no cadastro dos meios de cartão (Financeiro › Cadastros › Meios de pagamento) e a conciliação com o arquivo da adquirente (Financeiro › Recebíveis de cartão). Na venda, a taxa e o prazo de recebimento vêm da linha da bandeira/parcelas; sem tabela (ou sem linha para a bandeira) vale a taxa única do meio, como antes. Desligado, a tabela é ignorada na venda e as telas somem; recebíveis já gerados não mudam.",
+    usedBy: "PDV (taxa e prazo do recebível de cartão) e Financeiro (cadastros e recebíveis de cartão)",
+  },
+  {
+    key: "feature.dre", group: "Recursos", label: "Relatórios financeiros (DRE gerencial e aging)", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Financeiro › Relatórios financeiros: DRE gerencial por competência (receita bruta, deduções, CMV pelo custo das vendas, despesas por grupo do plano de contas e resultado) e aging de contas a receber e a pagar por faixa de atraso, com impressão e CSV. Somente leitura: não altera nenhum lançamento.",
+    usedBy: "Financeiro (relatórios financeiros)",
+  },
+  {
+    key: "feature.fechamentoPeriodo", group: "Recursos", label: "Fechamento de período financeiro", type: "bool", scopes: ["company"], default: false,
+    help: "Liga a tela Financeiro › Fechamento de período: com uma data de fechamento definida, lançamentos em conta, baixas, estornos, títulos e alterações de competência com data até o fechamento são recusados no servidor (inclusive vendas, recebimentos e conciliação). Reabrir exige a permissão “Fechar e reabrir período financeiro” e motivo, e fica no histórico. Muda a operação: nasce desligado. Desligado, nenhuma data é verificada.",
+    usedBy: "Financeiro (todos os lançamentos, baixas, estornos e títulos), PDV e Compras (conta a pagar do recebimento)",
+  },
+  {
     key: "feature.comissoes", group: "Recursos", label: "Comissões de vendedores", type: "bool", scopes: ["company", "branch"], default: true,
     help: "Mostra Vendas › Comissões: apuração por período, filial e vendedor (prévia por venda, devoluções abatendo a comissão), fechamento que gera a conta a pagar ao vendedor no Financeiro, reabertura enquanto o título estiver em aberto, relatório imprimível e CSV. Desligado, a tela some e nada é apurado; títulos já gerados continuam no Financeiro.",
     usedBy: "Vendas (comissões) e Financeiro (contas a pagar)",

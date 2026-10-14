@@ -57,6 +57,10 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   lotes: false,
   reservaPreVenda: false,
   bipagemContagem: true,
+  // Fase 7: fechamento de período financeiro recusa lançamentos retroativos (muda a operação); taxas por bandeira e DRE são aditivos
+  fechamentoPeriodo: false,
+  taxasCartao: true,
+  dre: true,
 };
 
 /** Recursos novos desligados por padrão (derivado de FEATURE_DEFAULTS). */

@@ -484,6 +484,8 @@ export const COLLECTIONS: CollectionDef[] = [
       ...ctx, saleId: id(true), seq: int, methodId: id(), methodKind: s(30, true), methodName: s(120), amount: money,
       received: money, change: money, installments: int, paymentTermId: id(), status: s(20), provider: s(40),
       providerRef: s(120), intentId: id(), nsu: s(60), authCode: s(60), cardBrand: s(40), feeAmount: money, netAmount: money,
+      // FIN-24: taxa aplicada pela tabela por bandeira/parcelas do meio (ausente = taxa única do meio)
+      feeBps: int, feeRule: s(120),
       settlementDate: date, confirmedAt: dt, manual: bool, voucherId: id(), titleId: id(), dueDates: json,
       refundedAt: dt, refundMessage: s(500),
       // resgate de pontos de fidelidade (CAD-21, methodKind "loyalty"): pontos consumidos
@@ -572,6 +574,9 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, name: s(120, true), kind: s(30, true), accountId: id(), feeBps: int, settlementDays: int, allowsChange: bool,
       requiresCustomer: bool, integrationId: id(), maxInstallments: int, active: bool, sortOrder: int, availablePdv: bool,
+      // FIN-24: taxa e prazo por bandeira × nº de parcelas ([{ brand, minInstallments, maxInstallments, feeBps, settlementDays }]);
+      // ausente/vazia = taxa e prazo únicos do meio (feeBps/settlementDays)
+      feeTable: json,
     },
     indexes: [k("i_company", "companyId")],
   },
@@ -584,11 +589,13 @@ export const COLLECTIONS: CollectionDef[] = [
   {
     id: "fin_categories",
     label: "Categorias financeiras",
-    // accountingCode: conta contábil (código reduzido) para a exportação de lançamentos (CTB-02 — Domínio); opcional
-    fields: { ...ctx, name: s(120, true), type: s(20, true), parentId: id(), dreGroup: s(60), active: bool, accountingCode: s(40) },
+    // FIN-19: plano de contas — código (classificação), nível na hierarquia (1 = raiz, até 6); accountingCode: conta contábil
+    // (código reduzido) usada também na exportação de lançamentos (CTB-02 — Domínio); opcionais
+    fields: { ...ctx, name: s(120, true), type: s(20, true), parentId: id(), dreGroup: s(60), active: bool, code: s(20), level: int, accountingCode: s(40) },
     indexes: [k("i_company", "companyId")],
   },
-  { id: "cost_centers", label: "Centros de custo", fields: { ...ctx, name: s(120, true), code: s(20), active: bool }, indexes: [k("i_company", "companyId")] },
+  // FIN-19: centros de custo em até 3 níveis (parentId/level)
+  { id: "cost_centers", label: "Centros de custo", fields: { ...ctx, name: s(120, true), code: s(20), active: bool, parentId: id(), level: int }, indexes: [k("i_company", "companyId")] },
   {
     id: "titles",
     label: "Títulos",

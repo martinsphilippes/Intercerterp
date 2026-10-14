@@ -372,13 +372,34 @@ export interface CompetenceRow {
  * Devolução ao fornecedor abatida do título a pagar: reduz a despesa da categoria do título pela data do abatimento.
  * Encargos de baixa (juros/multa/desconto) não entram (são financeiros, vistos no realizado).
  */
-export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
+export interface CompetenceItem {
+  categoryId: string | null;
+  type: "revenue" | "expense";
+  source?: "abatement";
+  /** AAAA-MM-DD (competência do título, data do lançamento ou do abatimento) */
+  date: string;
+  /** receita positiva / despesa negativa (abatimento a receber negativo; a pagar positivo) */
+  amount: number;
+  /** de onde veio o valor: título (competência), lançamento direto em conta ou abatimento de devolução */
+  from: "title" | "entry" | "abatement";
+  originType: string | null;
+  /** tipo do lançamento (fee, payment, reversal…) quando `from = entry` */
+  entryKind: string | null;
+  /** tarifa/taxa (lançamento de tarifa ou estorno da tarifa de uma baixa) */
+  fee: boolean;
+  titleKind: "receivable" | "payable" | null;
+  branchId: string | null;
+  costCenterId: string | null;
+}
+
+/**
+ * Itens do regime de competência entre `from` e `to` (datas AAAA-MM-DD) — base ÚNICA da visão "Competência" do
+ * fluxo de caixa e do DRE gerencial (FIN-22). Regras em `computeCompetence`.
+ */
+export async function competenceItems(ctx: Ctx, f: { from: string; to: string; branchId?: string | null; categoryId?: string | null; costCenterId?: string | null }) {
   const store = ctx.store;
-  const from = `${f.fromMonth}-01`;
-  const to = monthEnd(`${f.toMonth}-01`);
+  const { from, to } = f;
   const defaults = await categoryDefaults(store, ctx.companyId);
-  const months: string[] = [];
-  for (let m = from; m <= to; m = addDays(monthEnd(m), 1)) months.push(m.slice(0, 7));
   const tf: any[] = [["eq", "companyId", ctx.companyId], ["between", "competenceDate", from, to], ["ne", "status", "cancelled"]];
   if (f.branchId) tf.push(["eq", "branchId", f.branchId]);
   const titles = (await listAll(store, "titles", { filters: tf })).filter((t) => t.status !== "cancelled");
@@ -395,33 +416,27 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
   // abatimentos de devolução (baixa sem lançamento em conta) pela data do abatimento; branch pelo título
   const abatements = await listAll(store, "settlements", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "abatement"], ["eq", "status", "active"], ["between", "date", from, to]] });
   const atitles = await titlesByIds(store, abatements.map((s) => s.titleId));
-  const rows = new Map<string, CompetenceRow>();
-  const add = (categoryId: string | null, type: "revenue" | "expense", month: string, v: number, source?: "abatement") => {
-    const k = `${type}|${categoryId ?? ""}|${source ?? ""}`;
-    if (!rows.has(k)) rows.set(k, { categoryId: categoryId ?? "", type, ...(source ? { source } : {}), months: {}, total: 0 });
-    const r = rows.get(k)!;
-    r.months[month] = (r.months[month] ?? 0) + v;
-    r.total += v;
-  };
-  let titleCount = 0;
-  let entryCount = 0;
-  let abatementCount = 0;
+  const items: CompetenceItem[] = [];
   const catFilter = categoryFilterValue(f.categoryId);
   for (const t of titles) {
     if (t.originType === "renegotiation") continue; // receita já reconhecida no título original
     const c = resolveCategory({ categoryId: t.categoryId, kind: "", originType: t.originType }, t, defaults);
     if (catFilter !== undefined && c !== catFilter) continue;
     if (f.costCenterId && t.costCenterId !== f.costCenterId) continue;
-    titleCount++;
-    add(c, t.kind === "receivable" ? "revenue" : "expense", t.competenceDate.slice(0, 7), t.kind === "receivable" ? t.total : -t.total);
+    items.push({
+      categoryId: c, type: t.kind === "receivable" ? "revenue" : "expense", date: t.competenceDate, amount: t.kind === "receivable" ? t.total : -t.total,
+      from: "title", originType: t.originType ?? null, entryKind: null, fee: false, titleKind: t.kind, branchId: t.branchId ?? null, costCenterId: t.costCenterId ?? null,
+    });
   }
   for (const e of entries) {
     const title = e.titleId ? etitles.get(e.titleId) : null;
     const c = resolveCategory(e, title, defaults);
     if (catFilter !== undefined && c !== catFilter) continue;
     if (f.costCenterId && e.costCenterId !== f.costCenterId) continue;
-    entryCount++;
-    add(c, entrySide(e) === "in" ? "revenue" : "expense", e.date.slice(0, 7), e.amount);
+    items.push({
+      categoryId: c, type: entrySide(e) === "in" ? "revenue" : "expense", date: e.date, amount: e.amount,
+      from: "entry", originType: e.originType ?? null, entryKind: e.kind ?? null, fee: e.kind === "fee" || isSettlementFeeReversal(e), titleKind: title?.kind ?? null, branchId: e.branchId ?? null, costCenterId: e.costCenterId ?? null,
+    });
   }
   for (const s of abatements) {
     const t = atitles.get(s.titleId);
@@ -431,9 +446,41 @@ export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
     const c = resolveCategory({ categoryId: t.categoryId, kind: "", originType: t.originType }, t, defaults);
     if (catFilter !== undefined && c !== catFilter) continue;
     if (f.costCenterId && t.costCenterId !== f.costCenterId) continue;
-    abatementCount++;
-    if (t.kind === "payable") add(c, "expense", s.date.slice(0, 7), s.principal ?? 0, "abatement");
-    else add(c, "revenue", s.date.slice(0, 7), -(s.principal ?? 0), "abatement");
+    const base = { categoryId: c, source: "abatement" as const, date: s.date as string, from: "abatement" as const, originType: t.originType ?? null, entryKind: null, fee: false, titleKind: t.kind, branchId: t.branchId ?? null, costCenterId: t.costCenterId ?? null };
+    if (t.kind === "payable") items.push({ ...base, type: "expense", amount: s.principal ?? 0 });
+    else items.push({ ...base, type: "revenue", amount: -(s.principal ?? 0) });
+  }
+  return { items, defaults };
+}
+
+/**
+ * Regime de competência: títulos (exceto cancelados) pelo total na data de competência — a receber = receita,
+ * a pagar = despesa; lançamentos diretos sem título (vendas à vista, cancelamentos, devoluções, tarifas) pela data.
+ * Devolução de venda a prazo abatida do título (baixa "abatimento", sem lançamento em conta): reduz a receita
+ * pela data do abatimento, na categoria do título (linha "Devoluções (abatimento)"); título cancelado já não conta.
+ * Devolução ao fornecedor abatida do título a pagar: reduz a despesa da categoria do título pela data do abatimento.
+ * Encargos de baixa (juros/multa/desconto) não entram (são financeiros, vistos no realizado).
+ */
+export async function computeCompetence(ctx: Ctx, f: CompetenceFilter) {
+  const from = `${f.fromMonth}-01`;
+  const to = monthEnd(`${f.toMonth}-01`);
+  const months: string[] = [];
+  for (let m = from; m <= to; m = addDays(monthEnd(m), 1)) months.push(m.slice(0, 7));
+  const { items } = await competenceItems(ctx, { from, to, branchId: f.branchId, categoryId: f.categoryId, costCenterId: f.costCenterId });
+  const rows = new Map<string, CompetenceRow>();
+  let titleCount = 0;
+  let entryCount = 0;
+  let abatementCount = 0;
+  for (const it of items) {
+    if (it.from === "title") titleCount++;
+    else if (it.from === "entry") entryCount++;
+    else abatementCount++;
+    const k = `${it.type}|${it.categoryId ?? ""}|${it.source ?? ""}`;
+    if (!rows.has(k)) rows.set(k, { categoryId: it.categoryId ?? "", type: it.type, ...(it.source ? { source: it.source } : {}), months: {}, total: 0 });
+    const r = rows.get(k)!;
+    const month = it.date.slice(0, 7);
+    r.months[month] = (r.months[month] ?? 0) + it.amount;
+    r.total += it.amount;
   }
   const list = [...rows.values()].sort((a, b) => (a.type === b.type ? Math.abs(b.total) - Math.abs(a.total) : a.type === "revenue" ? -1 : 1));
   const byMonth = months.map((m) => {

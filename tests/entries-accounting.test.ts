@@ -309,7 +309,9 @@ describe("CTB-02 — exportação para a Domínio", () => {
     const r = await dominioEntries(admin, { from: "2025-01-01", to: "2025-01-31", branchId: refs.branches.matriz.id });
     const byOrigin = (id: string) => r.lines.filter((l) => l.origin.id === id);
     expect(byOrigin(pay.id)).toEqual([expect.objectContaining({ date: "2025-01-05", debit: "4110", credit: "2101", amount: 100000, document: "ALG-01", history: "15" })]);
-    expect(byOrigin(rec.id)).toEqual([expect.objectContaining({ debit: "1121", credit: "3999", amount: 50000 })]);
+    // receita: conta contábil da categoria quando cadastrada (a demonstração do plano de contas preenche), senão a padrão
+    const servicosCode = (await store.getOrThrow("fin_categories", refs.finCategories.servicos.id)).accountingCode || "3999";
+    expect(byOrigin(rec.id)).toEqual([expect.objectContaining({ debit: "1121", credit: servicosCode, amount: 50000 })]);
     expect(byOrigin(sp.id).map((l) => [l.debit, l.credit, l.amount])).toEqual([["2101", "1111", 99000], ["2101", "3502", 1000], ["4501", "1111", 500]]);
     // recebimento no período da baixa; o estorno (feito hoje) sai invertido no período do estorno
     const recv = r.lines.filter((l) => l.origin.id === sr.id);

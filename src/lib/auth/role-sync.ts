@@ -24,6 +24,8 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   // evolução por fases (Fases 3 a 5): compras/precificação, crediário no PDV, inadimplência, comissões e documento comercial
   "purchase.pricing", "products.bulk_edit", "pdv.receive_installments", "pdv.reverse_receipt", "sale.overdue_override", "sales.commissions",
   "sales_doc.quote", "sales_doc.order", "sales_doc.cancel",
+  // Fase 7: fechamento e reabertura de período financeiro (FIN-21)
+  "finance.close_period",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);

@@ -46,6 +46,7 @@ export const SPECIAL_ACTIONS = [
   { key: "finance.reverse", label: "Estornar baixas" },
   { key: "finance.reconcile", label: "Conciliar extratos" },
   { key: "finance.approve_payable", label: "Autorizar contas a pagar" },
+  { key: "finance.close_period", label: "Fechar e reabrir período financeiro" },
   { key: "purchase.approve", label: "Aprovar compras" },
   { key: "purchase.receive", label: "Receber mercadorias" },
   { key: "purchase.pricing", label: "Precificar após a entrada de mercadorias" },
@@ -128,7 +129,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     name: "Financeiro",
     description: "Contas a receber e pagar, fluxo de caixa e conciliação.",
     permissions: { dashboard: ro(), finance: all(), customers: ro(), suppliers: ro(), sales: ro(), purchases: ro(), reports: ro(), support: rw() },
-    actions: ["finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "data.export"],
+    actions: ["finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "data.export"],
     discountLimitBps: 0,
   },
   {
@@ -151,7 +152,7 @@ export const FIRM_ROLES: RoleTemplate[] = [
     name: "Sócio / Administrador do escritório",
     description: "Acesso integral: carteira, equipe, financeiro do escritório, fiscal de serviços e administração.",
     permissions: Object.fromEntries(FIRM_MODULES.map((m) => [m.key, all()])),
-    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
+    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
     discountLimitBps: 10000,
   },
   {
@@ -175,7 +176,7 @@ export const FIRM_ROLES: RoleTemplate[] = [
     name: "Financeiro do escritório",
     description: "Contas a pagar e a receber do escritório, conciliação e NFS-e; carteira em consulta.",
     permissions: { dashboard: ro(), accounting: ro(), finance: all(), fiscal: rw(), support: rw() },
-    actions: ["accounting.all_clients", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "fiscal.issue", "data.export"],
+    actions: ["accounting.all_clients", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "data.export"],
     discountLimitBps: 0,
   },
 ];

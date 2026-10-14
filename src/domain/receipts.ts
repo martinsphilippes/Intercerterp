@@ -10,6 +10,7 @@ import { onlyDigits, searchable } from "@/lib/core/text";
 import { addDays, nowIso, toLocalDate, today } from "@/lib/dates";
 import { allocate, formatMoney, formatQty, lineTotal, roundDiv, QTY } from "@/lib/money";
 import { buildSchedule, createTitle } from "./finance";
+import { assertPeriodOpen } from "./period-close";
 import { defaultWarehouse, postMovements } from "./stock";
 import { receiptLotBlockers, receiptLotSplit } from "./lots";
 import { parseNfeXml, nfeKeyIsValid, type NfeItemTax, type ParsedNfe } from "./nfe-xml";
@@ -1246,6 +1247,8 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
     // lote obrigatório para produto com controle de lote (EST-02, recurso feature.lotes)
     blockers.push(...(await receiptLotBlockers(ctx, r)));
     if (blockers.length) throw new BusinessError(blockers.join(" "), "receipt_blocked");
+    // FIN-21: conta a pagar com competência em período financeiro fechado é recusada antes de qualquer efeito (estoque)
+    if (effectsOf(r).createPayable && payableAmount(r as any) > 0) await assertPeriodOpen(ctx.store, ctx.companyId, r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : today(), "conta a pagar do recebimento (data de emissão da nota)");
     r = await startConfirming(ctx, id);
     if (r.status === "confirmed") return r;
   }

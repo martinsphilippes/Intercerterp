@@ -112,7 +112,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const methods = methodsRaw.filter((m) => !["store_credit", "crediario", "cash"].includes(m.kind)).map((m) => ({ value: m.id, label: m.name }));
   const stmt = await lastStatementBalance(s.ctx.store, account.id);
   const erpAt = stmt?.date ? await accountBalanceAt(s.ctx.store, account.id, stmt.date) : null;
-  const lastImport = (await s.ctx.store.list("bank_imports", { filters: [["eq", "accountId", account.id]], orderBy: [{ field: "createdAt", dir: "desc" }], limit: 1, total: false })).items[0];
+  // arquivos da adquirente (FIN-24) têm relatório próprio em Recebíveis de cartão
+  const lastImport = (await s.ctx.store.list("bank_imports", { filters: [["eq", "accountId", account.id]], orderBy: [{ field: "createdAt", dir: "desc" }], limit: 20, total: false })).items.find((i) => i.kind !== "acquirer");
   const canWrite = can(s.user, "finance", "edit") && canDo(s.user, "finance.reconcile") && Boolean(s.ctx.branchId);
   const writeBlock = !s.ctx.branchId ? "Selecione uma filial (consolidado é somente consulta)." : !canDo(s.user, "finance.reconcile") ? "Sem permissão para conciliar extratos." : null;
   const base = `/financeiro/conciliacao${qs({ account: account.id, from: sp(params, "from") || null, to: sp(params, "to") || null })}`;
@@ -260,7 +261,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
 }
 
 async function Imports({ accountId, s }: { accountId: string; s: Awaited<ReturnType<typeof requireSession>> }) {
-  const imps = await listAll(s.ctx.store, "bank_imports", { filters: [["eq", "accountId", accountId]], orderBy: [{ field: "createdAt", dir: "desc" }] });
+  const imps = (await listAll(s.ctx.store, "bank_imports", { filters: [["eq", "accountId", accountId]], orderBy: [{ field: "createdAt", dir: "desc" }] })).filter((i) => i.kind !== "acquirer");
   const users = await nameMap(s.ctx, "users");
   if (!imps.length) return <EmptyState title="Nenhuma importação nesta conta" action={<Link className="text-brand-700 underline" href={`/financeiro/conciliacao/importar?account=${accountId}`}>Importar extrato ou retorno</Link>} />;
   return (
