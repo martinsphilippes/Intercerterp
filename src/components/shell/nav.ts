@@ -7,6 +7,8 @@ export interface NavItem {
   icon: string;
   /** operação especial exigida além do módulo (ex.: fila da certificação só para quem opera a certificação) */
   action?: SpecialAction;
+  /** recurso novo controlado por `feature.<chave>` em Parâmetros (ligado por padrão) */
+  feature?: string;
 }
 export interface NavGroup {
   label: string;
@@ -33,6 +35,8 @@ export const NAV: NavGroup[] = [
       { href: "/estoque/movimentos", label: "Movimentação de estoque", module: "stock", icon: "ArrowLeftRight" },
       { href: "/estoque/transferencias", label: "Transferências", module: "stock", icon: "Truck" },
       { href: "/estoque/inventarios", label: "Inventário e contagem", module: "stock", icon: "ClipboardList" },
+      { href: "/produtos/alteracao-em-massa", label: "Alteração em massa", module: "products", icon: "ListChecks", action: "products.bulk_edit", feature: "alteracaoMassa" },
+      { href: "/produtos/etiquetas", label: "Etiquetas de produtos", module: "products", icon: "Tag", feature: "etiquetas" },
       { href: "/produtos/cadastros", label: "Cadastros auxiliares", module: "products", icon: "Tags" },
     ],
   },
@@ -57,6 +61,7 @@ export const NAV: NavGroup[] = [
       { href: "/compras/pedidos", label: "Pedidos de compra", module: "purchases", icon: "ShoppingCart" },
       { href: "/compras/aprovacoes", label: "Aprovação de compras", module: "purchases", icon: "BadgeCheck" },
       { href: "/compras/recebimentos", label: "Recebimento de mercadorias", module: "purchases", icon: "PackageCheck" },
+      { href: "/compras/precificacao", label: "Precificação após a entrada", module: "purchases", icon: "BadgePercent", action: "purchase.pricing", feature: "precificacaoEntrada" },
     ],
   },
   {

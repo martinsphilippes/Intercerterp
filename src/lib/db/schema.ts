@@ -655,6 +655,8 @@ export const COLLECTIONS: CollectionDef[] = [
       dueTotal: money, emitter: json, differenceAction: s(30), searchText: s(1000), confirmedBy: id(),
       entryCfop: s(10), categoryId: id(), costCenterId: id(), paymentMethodId: id(), effects: json,
       orderCharges: json,
+      // precificação após a entrada (COM-07): ausente = pendente quando o recebimento está confirmado
+      pricingStatus: s(20), pricedAt: dt, pricedBy: id(),
     },
     indexes: [u("u_scope", "scopeKey"), k("i_supplier", "supplierId")],
   },

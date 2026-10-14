@@ -21,7 +21,7 @@ export interface ParamDef {
   installation?: boolean;
 }
 
-export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Notificações", "Usuários", "Regional"];
+export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Notificações", "Usuários", "Regional", "Recursos"];
 
 export const PARAMS: ParamDef[] = [
   {
@@ -46,7 +46,21 @@ export const PARAMS: ParamDef[] = [
     help: "Diferença máxima aceita, sem registrar divergência, entre o total faturado informado na nota do fornecedor e o valor devido calculado no recebimento. Acima dela, a divergência de valor é registrada e exige justificativa. 0 = qualquer diferença é divergência.",
     usedBy: "Compras (recebimento de mercadorias)",
   },
+  {
+    key: "purchase.pricingMode", group: "Compras", label: "Sugestão de preço após a entrada", type: "select", scopes: ["company", "branch"], default: "keep_margin",
+    help: "Como a tela de precificação do recebimento sugere o novo preço quando o custo muda. “Manter a margem atual” aplica ao custo novo a margem que o produto tinha com o custo anterior (sem preço ou margem válida, usa a margem padrão abaixo). Nada é gravado sem a prévia e a confirmação do usuário.",
+    options: [{ value: "keep_margin", label: "Manter a margem atual do produto" }, { value: "target_margin", label: "Usar a margem padrão" }], usedBy: "Compras (precificação após a entrada)",
+  },
+  { key: "pricing.defaultMarginBps", group: "Compras", label: "Margem padrão de venda", help: "Margem sobre o preço de venda: preço = custo ÷ (1 − margem). Ex.: custo R$ 7,00 com 30% → R$ 10,00. Usada na sugestão de preço após a entrada e no preço sugerido de produto cadastrado a partir da nota.", type: "bps", scopes: ["company", "branch"], default: 3000, min: 0, max: 9500, unit: "%", usedBy: "Compras (precificação após a entrada e cadastro pela nota)" },
+  {
+    key: "purchase.priceEnding", group: "Compras", label: "Arredondamento comercial do preço sugerido", type: "select", scopes: ["company", "branch"], default: "none",
+    help: "Arredonda o preço sugerido para cima até o final escolhido (ex.: R$ 10,13 → R$ 10,90). Pode ser trocado na própria tela antes de aplicar.",
+    options: [{ value: "none", label: "Sem arredondamento" }, { value: "90", label: "Terminar em ,90" }, { value: "99", label: "Terminar em ,99" }, { value: "00", label: "Valor inteiro (,00)" }], usedBy: "Compras (precificação após a entrada)",
+  },
   { key: "purchase.monthlyBudget", group: "Compras", label: "Orçamento mensal de compras", help: "0 = sem orçamento. Usado nas aprovações para indicar consumo do orçamento.", type: "money", scopes: ["company", "branch"], default: 0, min: 0, usedBy: "Aprovação de compras" },
+  { key: "feature.precificacaoEntrada", group: "Recursos", label: "Precificação após a entrada de mercadorias", help: "Mostra a tela que sugere o novo preço de venda a partir do custo de cada recebimento concluído (com prévia antes de gravar). Desligado, o atalho e a tela ficam ocultos; nada é alterado nos preços.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Compras (recebimento concluído → Precificar)" },
+  { key: "feature.alteracaoMassa", group: "Recursos", label: "Alteração de produtos em massa", help: "Mostra a tela de reajuste de preços e de alteração de categoria, marca, NCM, grupo tributário e situação de vários produtos de uma vez (sempre com prévia).", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Produtos (alteração em massa)" },
+  { key: "feature.etiquetas", group: "Recursos", label: "Impressão de etiquetas de produtos", help: "Mostra a tela de etiquetas de gôndola e adesivas com preço e código de barras, inclusive a partir de um recebimento concluído.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Produtos (etiquetas) e Compras (recebimento)" },
   { key: "users.inviteExpiryDays", group: "Usuários", label: "Validade do convite de primeiro acesso", help: "Depois deste prazo o link de convite deixa de funcionar e precisa ser reenviado.", type: "int", scopes: ["company"], default: 7, min: 1, max: 30, unit: "dias", usedBy: "Usuários e permissões (convites)" },
   {
     key: "timezone", group: "Regional", label: "Fuso horário", type: "timezone", scopes: ["company"], default: "America/Sao_Paulo", installation: true,

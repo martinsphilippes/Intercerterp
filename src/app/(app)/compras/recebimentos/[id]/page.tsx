@@ -21,6 +21,7 @@ import { orderItems } from "@/domain/purchases";
 import { supplierLabel } from "@/domain/suppliers";
 import { cancelReceiptAction, resumeConfirmAction } from "../actions";
 import { Conference } from "./conference";
+import { ReceiptShortcuts } from "./receipt-shortcuts";
 
 export const metadata = { title: "Recebimento" };
 
@@ -123,6 +124,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         actions={
           <>
             {r.xmlFileId && <LinkButton href={`/api/files/${r.xmlFileId}`}><Download className="size-4" /> XML</LinkButton>}
+            <ReceiptShortcuts s={s} receipt={r} />
             {r.status === "confirming" && canReceive && <ActionButton variant="primary" action={resumeConfirmAction.bind(null, id)} label="Concluir confirmação interrompida" />}
             {draft && canReceive && <ActionButton variant="danger" action={cancelReceiptAction.bind(null, id)} label="Cancelar recebimento" askReason="Motivo do cancelamento (a chave poderá ser importada novamente):" />}
           </>
