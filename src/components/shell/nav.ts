@@ -41,6 +41,7 @@ export const NAV: NavGroup[] = [
       { href: "/estoque/inventarios", label: "Inventário e contagem", module: "stock", icon: "ClipboardList" },
       { href: "/estoque/montagem", label: "Montagem e desmembramento", module: "stock", icon: "Combine", feature: "kits" },
       { href: "/estoque/validades", label: "Validades e lotes", module: "stock", icon: "CalendarClock", feature: "lotes" },
+      { href: "/estoque/inventario-fiscal", label: "Inventário em data-base", module: "stock", icon: "BookOpenCheck", feature: "inventarioFiscal" },
       { href: "/produtos/alteracao-em-massa", label: "Alteração em massa", module: "products", icon: "ListChecks", action: "products.bulk_edit", feature: "alteracaoMassa" },
       { href: "/produtos/etiquetas", label: "Etiquetas de produtos", module: "products", icon: "Tag", feature: "etiquetas" },
       { href: "/produtos/balanca", label: "Balança (carga e PLU)", module: "products", icon: "Weight", feature: "balanca" },
@@ -92,6 +93,7 @@ export const NAV: NavGroup[] = [
   {
     label: "Análise",
     items: [
+      { href: "/relatorios", label: "Central de relatórios", module: "reports", icon: "LibraryBig" },
       { href: "/relatorios/gerenciais", label: "Relatórios gerenciais", module: "reports", icon: "BarChart3" },
       { href: "/relatorios/curva-abc", label: "Produtos e curva ABC", module: "reports", icon: "PieChart" },
     ],
@@ -104,6 +106,7 @@ export const NAV: NavGroup[] = [
       { href: "/administracao/terminais", label: "Terminais do PDV", module: "admin", icon: "Monitor" },
       { href: "/administracao/integracoes", label: "Central de integrações", module: "admin", icon: "Plug" },
       { href: "/administracao/backups", label: "Backup e restauração", module: "admin", icon: "DatabaseBackup" },
+      { href: "/administracao/importacao", label: "Importação de cadastros e saldos", module: "admin", icon: "FileInput", feature: "importacaoCadastros" },
       { href: "/administracao/historico", label: "Histórico e auditoria", module: "admin", icon: "History" },
       { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
       { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },

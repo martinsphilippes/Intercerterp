@@ -76,6 +76,11 @@ export function DataTable<T extends { id: string }>({
               <Download className="size-4" aria-hidden /> Exportar
             </a>
           )}
+          {exportKey && (
+            <a href={`/api/export/${exportKey}${qs({ formato: "xlsx" }, { ...params, page: undefined, pageSize: undefined })}`} className={buttonClass("ghost", "sm")} title="Exportar o recorte filtrado como planilha (XLSX)">
+              XLSX
+            </a>
+          )}
           <ColumnConfig tableId={id} columns={columns.map((c) => ({ key: c.key, label: c.label, hidden: c.hidden, fixed: c.fixed }))} />
         </div>
       </div>
