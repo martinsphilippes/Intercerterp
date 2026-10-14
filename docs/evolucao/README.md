@@ -14,10 +14,11 @@ recursos novos atrás de parâmetro (`feature.*`, lido por `isFeatureOn`) e publ
 | `08-logica-negocio.md` | Regras de negócio das funcionalidades novas |
 | `09-plano.md` | Plano por fases (0 a 8 + trilha de periféricos) |
 | `10-riscos.md` | Riscos, mitigação e limitações do estudo |
+| `achados-fase-0.md` | Fase 0: comportamentos suspeitos nos cálculos (relatados, não corrigidos) |
 | `inventario-fiscal-documents.md` | Fase 0: leitores de `fiscal_documents` e decisão revista da escrituração de entradas |
 
 ## Andamento
 
 | Fase | Branch | Situação |
 |---|---|---|
-| 0 — base de segurança | `feat/fase-0-baseline` | testes de caracterização dos cálculos, `isFeatureOn`, regra "venda em caixa de outro operador" (parâmetro `cash.operatorMismatch`), inventário fiscal |
+| 0 — base de segurança | `feat/fase-0-baseline` | 52 testes de caracterização dos cálculos (`tests/baseline-calculos.test.ts`), `isFeatureOn`, regra "venda em caixa de outro operador" (parâmetro `cash.operatorMismatch`), inventário fiscal |
