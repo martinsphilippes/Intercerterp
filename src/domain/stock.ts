@@ -30,7 +30,9 @@ export type MovementType =
   | "manual_out"
   | "damage_in"
   | "supplier_return"
-  | "supplier_return_cancel";
+  | "supplier_return_cancel"
+  | "assembly_out"
+  | "assembly_in";
 
 export const MOVEMENT_LABEL: Record<MovementType, string> = {
   initial: "Saldo inicial",
@@ -50,6 +52,8 @@ export const MOVEMENT_LABEL: Record<MovementType, string> = {
   damage_in: "Entrada em depósito de avarias",
   supplier_return: "Saída por devolução ao fornecedor",
   supplier_return_cancel: "Estorno de devolução ao fornecedor",
+  assembly_out: "Saída por montagem/desmembramento",
+  assembly_in: "Entrada por montagem/desmembramento",
 };
 
 export interface MovementInput {
@@ -88,9 +92,11 @@ export interface MovementInput {
 
 export const balanceId = (warehouseId: string, skuId: string) => detId("bal", warehouseId, skuId);
 
-/** Entradas que trazem custo próprio e recalculam o custo médio ponderado do saldo. */
-/** Entradas que recompõem o custo médio. Estorno e devolução voltam pelo custo com que saíram (custo da venda). */
-export const COST_ENTRY_TYPES: MovementType[] = ["purchase", "initial", "manual_in", "adjust_in", "transfer_in", "transfer_return", "damage_in", "sale_cancel", "return", "supplier_return_cancel"];
+/**
+ * Entradas que trazem custo próprio e recompõem o custo médio ponderado do saldo. Estorno e devolução voltam pelo
+ * custo com que saíram (custo da venda). Montagem/desmembramento (`assembly_in`) entra pelo custo dos itens consumidos.
+ */
+export const COST_ENTRY_TYPES: MovementType[] = ["purchase", "initial", "manual_in", "adjust_in", "transfer_in", "transfer_return", "damage_in", "sale_cancel", "return", "supplier_return_cancel", "assembly_in"];
 
 /** Tipos de ajuste manual (Tela 17) — exigem a permissão especial `stock.adjust` e motivo. */
 export const MANUAL_TYPES = ["adjust_in", "adjust_out", "loss", "manual_in", "manual_out"] as const;
@@ -114,6 +120,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   import: "Importação de produtos",
   seed: "Carga inicial (demonstração)",
   sales_document: "Pedido de venda (reserva)",
+  assembly: "Montagem/desmembramento",
 };
 
 export function originHref(originType: string | null | undefined, originId: string | null | undefined): string | null {
@@ -143,6 +150,8 @@ export function originHref(originType: string | null | undefined, originId: stri
       return `/produtos/importar/${originId}`;
     case "sales_document":
       return `/vendas/pedidos/${originId}`;
+    case "assembly":
+      return `/estoque/montagem?id=${originId}`;
     default:
       return null;
   }

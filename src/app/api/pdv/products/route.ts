@@ -7,6 +7,7 @@ import { searchable } from "@/lib/core/text";
 import { resolvePrices } from "@/domain/pricing";
 import { availableMap } from "@/domain/stock";
 import { resolveScaleBarcode, type ScaleResolution } from "@/domain/scale";
+import { kitAvailability } from "@/domain/product-components";
 
 /**
  * Busca de produtos do PDV (Tela 5): descrição, SKU, código de barras e categoria.
@@ -96,6 +97,8 @@ export async function GET(req: NextRequest) {
   const priceDocs = priceIds.length ? await listAll(store, "prices", { filters: [["eq", "id", priceIds]] }) : [];
   const prmap = new Map(priceDocs.map((p) => [p.id, p]));
   const avail = await availableMap(store, branchId, skus.map((k) => k.id));
+  // kit (CAD-12): disponível calculado pelos componentes (menor saldo ÷ quantidade por kit)
+  const kitAvail = await kitAvailability(store, branchId, skus.map((k) => ({ id: k.id, productId: k.productId })), pmap);
   const siblings = new Map<string, number>();
   for (const k of skus) siblings.set(k.productId, (siblings.get(k.productId) ?? 0) + 1);
 
@@ -125,7 +128,7 @@ export async function GET(req: NextRequest) {
       wholesaleMinQty: doc?.wholesaleMinQty ?? null,
       maxDiscountBps: pr.maxDiscountBps,
       priced: pr.price > 0,
-      available: service ? null : (avail.get(k.id)?.available ?? 0),
+      available: service ? null : (kitAvail.get(k.id) ?? avail.get(k.id)?.available ?? 0),
     };
   });
   return NextResponse.json({ items, exact, priceTableId, ...(scale ? { scale } : {}) });

@@ -21,11 +21,13 @@ import { setProductStatusAction, deleteProductAction } from "../actions";
 import { productFormOptions } from "../form-options";
 import { ProductEditForm } from "../product-form";
 import { VariantsForm } from "../variants-editor";
-import { ImagePanel, ConversionsPanel, CostDialogButton, PriceDialogButton, DeletePriceButton, StockParamsButton, InitialBalanceForm } from "./panels";
+import { ImagePanel, ConversionsPanel, CostDialogButton, PriceDialogButton, DeletePriceButton, StockParamsButton, InitialBalanceForm, ComponentsPanel } from "./panels";
 import { canSeeBranch } from "../../estoque/queries";
 import { featureOn } from "@/lib/server/features";
 import { scaleConfig } from "@/domain/scale";
 import { ScalePanel } from "./scale-panel";
+import { COMPOSITION_LABEL, componentRows, componentsCost, compositionOf, kitAvailableFrom, rowsForSku } from "@/domain/product-components";
+import { availableMap } from "@/domain/stock";
 
 export const metadata = { title: "Produto" };
 
@@ -80,12 +82,18 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const isService = p.type === "service";
   // balança etiquetadora (CAD-16): aba só para mercadorias com o recurso ligado
   const scale = !isService && (await featureOn(s, "balanca")) ? await scaleConfig(ctx.store, ctx.companyId, ctx.branchId) : null;
+  const composition = compositionOf(p);
+  // aba "Componentes" (CAD-12/13): recurso ligado; com ele desligado só aparece para quem já tem composição (consulta)
+  const kitsOn = !isService && (await featureOn(s, "kits"));
+  const showComponents = !isService && (kitsOn || Boolean(composition));
+  const compRows = showComponents ? await componentRows(ctx.store, id) : [];
 
   const tabs = [
     { key: "geral", label: "Dados gerais" },
     ...(isService ? [] : [{ key: "variacoes", label: "Variações", count: skus.length }]),
     { key: "precos", label: "Custos e preços", count: prices.length },
     ...(isService ? [] : [{ key: "estoque", label: "Estoque" }]),
+    ...(showComponents ? [{ key: "componentes", label: "Componentes", count: compRows.length }] : []),
     { key: "fiscal", label: "Fiscal" },
     ...(scale ? [{ key: "balanca", label: "Balança" }] : []),
     { key: "historico", label: "Histórico" },
@@ -101,6 +109,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <>
             <StatusBadge kind="generic" status={p.status} />
             <Badge>{isService ? "Serviço" : "Produto"}</Badge>
+            {composition && <Badge tone="brand">{COMPOSITION_LABEL[composition]}</Badge>}
             {p.availablePdv ? <Badge tone="good">No PDV</Badge> : <Badge>Fora do PDV</Badge>}
             {p.availableEcommerce && <Badge tone="info">Loja virtual</Badge>}
             {(() => {
@@ -138,7 +147,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         <Stat label="Preço (tabela padrão)" value={priceRef == null ? "Sem preço" : formatMoney(priceRef)} hint={tableName.get(defTable ?? "") ?? "—"} href={`${base}?tab=precos`} />
         <Stat label="Custo total" value={formatMoney(costRef)} hint="Aquisição + adicionais" href={`${base}?tab=precos`} />
         <Stat label="Margem · Markup" value={`${formatBps(metrics.marginBps, 1)} · ${formatBps(metrics.markupBps, 1)}`} hint="Margem s/ preço · markup s/ custo" />
-        {!isService && <Stat label="Disponível (todas as filiais)" value={formatQty(available, p.unitCode)} hint={inTransit ? `+ ${formatQty(inTransit)} em trânsito` : "Físico − reservado"} href={`${base}?tab=estoque`} />}
+        {!isService && composition === "kit" && <Stat label="Disponível" value="Pelos componentes" hint="Kit não tem estoque próprio" href={`${base}?tab=componentes`} />}
+        {!isService && composition !== "kit" && <Stat label="Disponível (todas as filiais)" value={formatQty(available, p.unitCode)} hint={inTransit ? `+ ${formatQty(inTransit)} em trânsito` : "Físico − reservado"} href={`${base}?tab=estoque`} />}
         {!isService && <Stat label="Vendido em 90 dias" value={formatQty(soldQty, p.unitCode)} hint={`Desde ${formatDate(since)}`} href={`/estoque/movimentos?produto=${id}&tipo=sale&de=${since}&filial=all`} />}
       </div>
       <LinkTabs basePath={base} active={tab} tabs={tabs} />
@@ -362,6 +372,35 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             })()}
           </Card>
         </div>
+      )}
+
+      {tab === "componentes" && showComponents && (
+        await (async () => {
+          const compSkus = compRows.length ? await listAll(ctx.store, "skus", { filters: [["eq", "id", [...new Set(compRows.map((r) => r.componentSkuId))]]] }) : [];
+          const compSku = new Map(compSkus.map((x) => [x.id, x]));
+          const avail = ctx.branchId ? await availableMap(ctx.store, ctx.branchId, [...compSku.keys(), ...activeSkus.map((x) => x.id)]) : new Map();
+          const costOf = (skuId: string) => avail.get(skuId)?.avgCost ?? compSku.get(skuId)?.costTotal ?? 0;
+          const availNum = new Map([...avail].map(([k, v]) => [k, v.available as number]));
+          const rows = compRows.map((r) => {
+            const k = compSku.get(r.componentSkuId);
+            return { id: r.id, skuId: r.componentSkuId, sku: k?.sku ?? "—", name: k?.name ?? "—", unitCode: k?.unitCode ?? "UN", qty: r.qty, parentSkuId: r.parentSkuId ?? null, parentSku: r.parentSkuId ? (skuById.get(r.parentSkuId)?.sku ?? "—") : null, unitCost: costOf(r.componentSkuId), available: ctx.branchId ? (availNum.get(r.componentSkuId) ?? 0) : null, notes: r.notes ?? null };
+          });
+          const summary = composition
+            ? activeSkus.map((x) => {
+                const mine = rowsForSku(compRows, x.id).map((r) => ({ skuId: r.componentSkuId, qty: r.qty, unitCost: costOf(r.componentSkuId) }));
+                return { skuId: x.id, sku: x.sku, count: mine.length, unitCost: componentsCost(mine, 1000), fromComponents: ctx.branchId ? kitAvailableFrom(mine, availNum) : null, own: ctx.branchId && composition === "composite" ? (availNum.get(x.id) ?? 0) : null };
+              })
+            : [];
+          return (
+            <div className="space-y-4">
+              {!kitsOn && <Notice tone="warn">Kits e composição estão desligados em Administração › Parâmetros › Recursos: a composição fica só para consulta e kits não podem ser vendidos.</Notice>}
+              <ComponentsPanel productId={id} unitCode={p.unitCode ?? "UN"} composition={composition} canEdit={canEdit && kitsOn} parentSkus={activeSkus.map((x) => ({ id: x.id, sku: x.sku }))} rows={rows} summary={summary} branchSelected={Boolean(ctx.branchId)} />
+              {composition === "composite" && kitsOn && can(s.user, "stock") && (
+                <p className="text-sm"><Link className="text-brand-700 hover:underline" href={`/estoque/montagem?sku=${activeSkus[0]?.id ?? ""}`}>Montar ou desmembrar este produto →</Link></p>
+              )}
+            </div>
+          );
+        })()
       )}
 
       {tab === "fiscal" && (

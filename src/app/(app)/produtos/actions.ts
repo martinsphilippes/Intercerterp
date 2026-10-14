@@ -22,6 +22,10 @@ import {
 } from "@/domain/products";
 import { savePrice, deletePrice } from "@/domain/pricing";
 import { analyzeCsv, previewImport, runImport, type ImportMode, type MatchBy } from "@/domain/product-import";
+import { COMPOSITION_LABEL, compositionOf, removeComponent, saveComponent, setComposition } from "@/domain/product-components";
+import { availableMap } from "@/domain/stock";
+import { listAll } from "@/lib/db";
+import { normalizeSearch } from "@/lib/list";
 
 const optInt = (fd: FormData, k: string): number | null => {
   const v = fstr(fd, k);
@@ -255,5 +259,51 @@ export async function runImportAction(payload: { fileName: string; text: string;
   return runAction({ module: "products", op: "create", revalidate: ["/produtos", "/produtos/importar"] }, async (s) => {
     const r = await runImport(s.ctx, payload);
     return { ok: true as const, data: { id: r.id }, message: `Importação nº ${r.number} concluída.`, redirect: `/produtos/importar/${r.id}` };
+  });
+}
+
+// ───────────────────────────── Componentes (kits e compostos — CAD-12/13)
+
+export async function setCompositionAction(productId: string, composition: string) {
+  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+    const value = composition === "kit" || composition === "composite" ? composition : null;
+    await setComposition(s.ctx, productId, value);
+    return { ok: true as const, message: value ? `Produto definido como ${COMPOSITION_LABEL[value].toLowerCase()}.` : "Composição removida: o produto volta a ser comum." };
+  });
+}
+
+export async function saveComponentAction(fd: FormData) {
+  const productId = fstr(fd, "productId");
+  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+    await saveComponent(s.ctx, { productId, parentSkuId: fopt(fd, "parentSkuId"), componentSkuId: fstr(fd, "componentSkuId"), qty: fint(fd, "qty"), notes: fopt(fd, "notes") });
+    return { ok: true as const, message: "Componente salvo." };
+  });
+}
+
+export async function removeComponentAction(productId: string, id: string) {
+  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+    await removeComponent(s.ctx, id);
+    return { ok: true as const, message: "Componente removido." };
+  });
+}
+
+/** Pesquisa de SKUs que podem ser componentes do produto (exclui serviços, kits e o próprio produto). */
+export async function searchComponentSkusAction(q: string, productId: string) {
+  return runAction({ module: "products" }, async (s) => {
+    const term = q.trim();
+    if (term.length < 2) return [];
+    const store = s.ctx.store;
+    const res = await store.list("skus", { filters: [["eq", "companyId", s.ctx.companyId], ["or", [["contains", "searchText", normalizeSearch(term)], ["eq", "barcode", term], ["eq", "sku", term.toUpperCase()]]]], limit: 30 });
+    const products = new Map((await listAll(store, "products", { filters: [["eq", "id", [...new Set(res.items.map((x) => x.productId))]]] })).map((p) => [p.id, p]));
+    const hits = res.items.filter((x) => {
+      const p = products.get(x.productId);
+      return p && x.active !== false && p.id !== productId && p.type !== "service" && compositionOf(p) !== "kit";
+    });
+    const avail = s.ctx.branchId ? await availableMap(store, s.ctx.branchId, hits.map((x) => x.id)) : new Map<string, { physical: number; available: number; avgCost: number }>();
+    return hits.slice(0, 15).map((x) => {
+      const a = avail.get(x.id);
+      const p = products.get(x.productId);
+      return { id: x.id, sku: x.sku as string, name: (x.name ?? p?.name) as string, unitCode: (x.unitCode ?? p?.unitCode ?? "UN") as string, barcode: (x.barcode ?? null) as string | null, physical: a?.physical ?? 0, available: a?.available ?? 0, avgCost: a?.avgCost ?? x.costTotal ?? 0 };
+    });
   });
 }

@@ -701,6 +701,8 @@ export interface DocEffects {
   note?: string | null;
   /** devolução a fornecedor pelo recebimento: linhas devolvidas e abatimento no pagar (resultado após a autorização) */
   supplierReturn?: SupplierReturnPlan | null;
+  /** kits (CAD-12) movimentados pelos componentes: seq do item → componentes por unidade (usado também no estorno) */
+  kits?: Record<string, Array<{ skuId: string; qty: number }>> | null;
 }
 
 export interface CreateDocInput {
@@ -969,22 +971,28 @@ async function applyDocumentEffects(ctx: Ctx, doc: Doc) {
     const { defaultWarehouse, postMovements } = await import("../stock");
     const wid = eff.warehouseId || (await defaultWarehouse(ctx.store, doc.branchId)).id;
     const items = (doc.items as DocItem[]).filter((i) => i.skuId);
+    // kit (CAD-12): o documento leva o kit como um item; o estoque movimenta os componentes (pelo custo médio)
+    const { docKitComponents, kitExpand } = await import("../product-components");
+    const kits = supplierReturnOut ? {} : await docKitComponents(ctx.store, items);
     const movs = await postMovements(
       ctx,
-      items.map((i) => ({
-        warehouseId: wid,
-        skuId: i.skuId!,
-        qty: sign * i.qty,
-        type: sign > 0 ? ("manual_in" as const) : supplierReturnOut ? ("supplier_return" as const) : ("manual_out" as const),
-        unitCost: sign > 0 ? roundDiv(i.total * QTY, i.qty) : null,
-        originType: "fiscal_document",
-        originId: doc.id,
-        operationId: doc.id,
-        reason: `${label} — ${doc.nature}`,
-        idemKey: `fiscaldoc:${doc.id}:${i.seq}`,
-        allowNegative: true,
-      })),
+      items.flatMap((i) =>
+        kitExpand(kits[String(i.seq)], i.qty, {
+          warehouseId: wid,
+          skuId: i.skuId!,
+          qty: sign * i.qty,
+          type: sign > 0 ? ("manual_in" as const) : supplierReturnOut ? ("supplier_return" as const) : ("manual_out" as const),
+          unitCost: sign > 0 ? roundDiv(i.total * QTY, i.qty) : null,
+          originType: "fiscal_document",
+          originId: doc.id,
+          operationId: doc.id,
+          reason: `${label} — ${doc.nature}`,
+          idemKey: `fiscaldoc:${doc.id}:${i.seq}`,
+          allowNegative: true,
+        }),
+      ),
     );
+    if (Object.keys(kits).length) patch.kits = kits;
     patch.warehouseId = wid;
     patch.movements = movs.length || items.length;
   }
@@ -1052,21 +1060,24 @@ async function reverseDocumentEffects(ctx: Ctx, doc: Doc, reason: string) {
     const supplierReturnBack = doc.originType === "receipt" && sign > 0;
     const outCost = new Map<number, number | null>();
     if (supplierReturnBack) for (const i of items) outCost.set(i.seq, (await ctx.store.get("stock_movements", detId("mov", `fiscaldoc:${doc.id}:${i.seq}`)))?.unitCost ?? null);
+    const { kitExpand } = await import("../product-components");
     await postMovements(
       ctx,
-      items.map((i) => ({
-        warehouseId: eff.warehouseId!,
-        skuId: i.skuId!,
-        qty: sign * i.qty,
-        type: supplierReturnBack ? ("supplier_return_cancel" as const) : sign > 0 ? ("manual_in" as const) : ("manual_out" as const),
-        ...(supplierReturnBack ? { unitCost: outCost.get(i.seq) ?? null } : {}),
-        originType: "fiscal_document_cancel",
-        originId: doc.id,
-        operationId: doc.id,
-        reason: `Cancelamento ${MODEL_LABEL[doc.model]} nº ${doc.number}: ${reason}`.slice(0, 290),
-        idemKey: `fiscaldoc-cancel:${doc.id}:${i.seq}`,
-        allowNegative: true,
-      })),
+      items.flatMap((i) =>
+        kitExpand(eff.kits?.[String(i.seq)], i.qty, {
+          warehouseId: eff.warehouseId!,
+          skuId: i.skuId!,
+          qty: sign * i.qty,
+          type: supplierReturnBack ? ("supplier_return_cancel" as const) : sign > 0 ? ("manual_in" as const) : ("manual_out" as const),
+          ...(supplierReturnBack ? { unitCost: outCost.get(i.seq) ?? null } : {}),
+          originType: "fiscal_document_cancel",
+          originId: doc.id,
+          operationId: doc.id,
+          reason: `Cancelamento ${MODEL_LABEL[doc.model]} nº ${doc.number}: ${reason}`.slice(0, 290),
+          idemKey: `fiscaldoc-cancel:${doc.id}:${i.seq}`,
+          allowNegative: true,
+        }),
+      ),
     );
     notes.push("estoque estornado");
   }

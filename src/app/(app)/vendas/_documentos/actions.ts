@@ -8,6 +8,7 @@ import { searchable } from "@/lib/core/text";
 import { resolvePrices } from "@/domain/pricing";
 import { availableMap } from "@/domain/stock";
 import { skuForScaleBarcode } from "@/domain/scale";
+import { kitAvailability } from "@/domain/product-components";
 import {
   approveQuote, cancelOrder, convertQuoteToOrder, createSalesDocument, docLabel, docPath, duplicateSalesDocument, markQuoteSent, rejectQuote, renewReservation, sendDocumentEmail,
   updateSalesDocument, whatsappText, type SalesDocInput, type SalesDocType,
@@ -165,10 +166,12 @@ export async function searchDocSkusAction(q: string, priceTableId: string | null
     const prices = await resolvePrices(store, { companyId: s.ctx.companyId, branchId: s.ctx.branchId, priceTableId: priceTableId || branch?.defaultPriceTableId || null, items: usable.map((k) => ({ skuId: k.id, qty: 1000 })) });
     const priceRows = await listAll(store, "prices", { filters: [["eq", "id", prices.map((p) => p.priceId).filter(Boolean) as string[]]] });
     const avail = s.ctx.branchId ? await availableMap(store, s.ctx.branchId, usable.map((k) => k.id)) : new Map();
+    // kit (CAD-12): disponível pelos componentes
+    const kitAvail = s.ctx.branchId ? await kitAvailability(store, s.ctx.branchId, usable.map((k) => ({ id: k.id, productId: k.productId })), products) : new Map<string, number>();
     return usable.map((k, i): DocSkuHit => {
       const pr = priceRows.find((x) => x.id === prices[i].priceId);
       const p = products.get(k.productId)!;
-      return { skuId: k.id, sku: k.sku, name: k.name ?? p.name, unitCode: k.unitCode ?? p.unitCode ?? "UN", price: prices[i].price, wholesalePrice: pr?.wholesalePrice ?? null, wholesaleMinQty: pr?.wholesaleMinQty ?? null, maxDiscountBps: prices[i].maxDiscountBps, available: p.type === "service" ? null : (avail.get(k.id)?.available ?? (s.ctx.branchId ? 0 : null)), service: p.type === "service" };
+      return { skuId: k.id, sku: k.sku, name: k.name ?? p.name, unitCode: k.unitCode ?? p.unitCode ?? "UN", price: prices[i].price, wholesalePrice: pr?.wholesalePrice ?? null, wholesaleMinQty: pr?.wholesaleMinQty ?? null, maxDiscountBps: prices[i].maxDiscountBps, available: p.type === "service" ? null : (kitAvail.get(k.id) ?? avail.get(k.id)?.available ?? (s.ctx.branchId ? 0 : null)), service: p.type === "service" };
     });
   });
 }

@@ -55,6 +55,17 @@ export async function skuBalanceAction(skuId: string, warehouseId: string) {
   });
 }
 
+// ───────────────────────────── Montagem e desmembramento (CAD-13)
+
+export async function runAssemblyAction(fd: FormData) {
+  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: ["/estoque/montagem", "/estoque/movimentos", "/estoque"] }, async (s) => {
+    const { runAssembly, ASSEMBLY_LABEL } = await import("@/domain/product-components");
+    const direction = fstr(fd, "direction") === "disassemble" ? "disassemble" : "assemble";
+    const r = await runAssembly(s.ctx, { skuId: fstr(fd, "skuId"), warehouseId: fstr(fd, "warehouseId"), qty: fint(fd, "qty"), direction, idemKey: fstr(fd, "_idem"), notes: fopt(fd, "notes") });
+    return { ok: true as const, data: { id: r.id }, message: r.applied ? `${ASSEMBLY_LABEL[direction]} registrada.` : "Operação já registrada (repetição ignorada)." };
+  });
+}
+
 // ───────────────────────────── Ajustes
 
 export async function adjustStockAction(fd: FormData) {

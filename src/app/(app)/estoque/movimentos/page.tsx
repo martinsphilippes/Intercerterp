@@ -23,7 +23,7 @@ export const metadata = { title: "Movimentação de estoque" };
 const TYPE_TONE: Record<string, Tone> = {
   initial: "info", purchase: "good", sale: "bad", sale_cancel: "good", return: "good", adjust_in: "accent", adjust_out: "accent", loss: "bad", transfer_out: "brand", transfer_in: "brand",
   transfer_return: "brand", inventory: "warn", manual_in: "good", manual_out: "bad", damage_in: "warn",
-  supplier_return: "bad", supplier_return_cancel: "good",
+  supplier_return: "bad", supplier_return_cancel: "good", assembly_out: "accent", assembly_in: "accent",
 };
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {

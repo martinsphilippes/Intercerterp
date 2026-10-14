@@ -253,20 +253,22 @@ export function productAxes(product: Record<string, any>, skus: Array<Record<str
 
 export async function skuUsage(store: Store, skuId: string) {
   const one = async (collection: string, filters: any[]) => (await store.list(collection, { filters, limit: 1, total: false })).items.length;
-  const [movements, sales, purchases, inventories, reservations] = await Promise.all([
+  const [movements, sales, purchases, inventories, reservations, components] = await Promise.all([
     one("stock_movements", [["eq", "skuId", skuId]]),
     one("sale_items", [["eq", "skuId", skuId]]),
     one("purchase_order_items", [["eq", "skuId", skuId]]),
     one("inventory_counts", [["eq", "skuId", skuId]]),
     one("stock_reservations", [["eq", "skuId", skuId]]),
+    // componente de kit/composto (CAD-12/13): não pode sumir enquanto outro produto depende dele
+    one("product_components", [["eq", "componentSkuId", skuId]]),
   ]);
-  return { movements, sales, purchases, inventories, reservations, any: movements + sales + purchases + inventories + reservations > 0 };
+  return { movements, sales, purchases, inventories, reservations, components, any: movements + sales + purchases + inventories + reservations + components > 0 };
 }
 
 export async function productUsage(store: Store, productId: string) {
   const skus = await listAll(store, "skus", { filters: [["eq", "productId", productId]] });
   let any = false;
-  const detail = { movements: 0, sales: 0, purchases: 0, inventories: 0, reservations: 0 };
+  const detail = { movements: 0, sales: 0, purchases: 0, inventories: 0, reservations: 0, components: 0 };
   for (const s of skus) {
     const u = await skuUsage(store, s.id);
     for (const k of Object.keys(detail) as Array<keyof typeof detail>) detail[k] += u[k];
@@ -614,6 +616,7 @@ export async function updateProduct(ctx: Ctx, id: string, patch: Partial<Product
   if (merged.type !== before.type) {
     const usage = await productUsage(ctx.store, id);
     assert(!usage.movements && !usage.sales, "Não é possível trocar o tipo (produto/serviço) de um item com movimentos ou vendas.");
+    assert(merged.type !== "service" || (!before.composition && !usage.components), "Kit, composto ou componente não pode virar serviço: ajuste a composição antes.");
   }
   const data: Record<string, any> = section === "fiscal" ? { ...fiscal } : { code, ...buildProductData(merged, fiscal) };
   const after = await ctx.store.update<any>("products", id, data);
@@ -648,10 +651,12 @@ export async function deleteProduct(ctx: Ctx, id: string) {
   const p = await ctx.store.getOrThrow("products", id);
   assert(p.companyId === ctx.companyId, "Produto de outra empresa.");
   const usage = await productUsage(ctx.store, id);
+  if (usage.components) throw new BusinessError("Produto usado como componente de um kit ou composto não pode ser excluído; remova-o da composição ou use Inativar.", "in_use");
   if (usage.any) throw new BusinessError("Produto com histórico (movimentos, vendas, compras ou inventários) não pode ser excluído; use Inativar.", "in_use");
   const skus = await listAll(ctx.store, "skus", { filters: [["eq", "productId", id]] });
   for (const s of skus) await purgeSku(ctx, s.id);
   for (const c of await listAll(ctx.store, "unit_conversions", { filters: [["eq", "productId", id]] })) await ctx.store.delete("unit_conversions", c.id);
+  for (const c of await listAll(ctx.store, "product_components", { filters: [["eq", "productId", id]] })) await ctx.store.delete("product_components", c.id);
   await ctx.store.delete("products", id);
   await audit(ctx, { module: "products", action: "product.delete", entityType: "product", entityId: id, summary: `Produto ${p.code} — ${p.name} excluído (sem uso)`, before: { code: p.code, name: p.name } });
 }

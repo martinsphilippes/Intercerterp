@@ -39,6 +39,7 @@ export const NAV: NavGroup[] = [
       { href: "/estoque/movimentos", label: "Movimentação de estoque", module: "stock", icon: "ArrowLeftRight" },
       { href: "/estoque/transferencias", label: "Transferências", module: "stock", icon: "Truck" },
       { href: "/estoque/inventarios", label: "Inventário e contagem", module: "stock", icon: "ClipboardList" },
+      { href: "/estoque/montagem", label: "Montagem e desmembramento", module: "stock", icon: "Combine", feature: "kits" },
       { href: "/produtos/alteracao-em-massa", label: "Alteração em massa", module: "products", icon: "ListChecks", action: "products.bulk_edit", feature: "alteracaoMassa" },
       { href: "/produtos/etiquetas", label: "Etiquetas de produtos", module: "products", icon: "Tag", feature: "etiquetas" },
       { href: "/produtos/balanca", label: "Balança (carga e PLU)", module: "products", icon: "Weight", feature: "balanca" },

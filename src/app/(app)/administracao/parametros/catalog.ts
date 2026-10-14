@@ -124,6 +124,11 @@ export const PARAMS: ParamDef[] = [
     help: "“Peso”: a quantidade lançada é o peso da etiqueta (produto em KG) e o total é peso × preço por kg da tabela de preços. “Valor”: a quantidade é o valor da etiqueta ÷ preço da tabela, arredondada ao milésimo; o total segue a regra de arredondamento da venda e pode diferir da etiqueta em alguns centavos quando o preço passa de R$ 9,99 por kg (o PDV mostra o valor calculado).",
     usedBy: "PDV (leitura da etiqueta)",
   },
+  {
+    key: "feature.kits", group: "Recursos", label: "Kits e composição de produtos", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra a aba “Componentes” no cadastro do produto e Estoque › Montagem e desmembramento. Kit: vendido como um item com preço próprio; na venda o estoque baixa os componentes pelo custo médio (o custo do item vendido é a soma) e o cancelamento ou a devolução devolvem os componentes. Disponível do kit = menor saldo de componente ÷ quantidade por kit. Composto: tem estoque próprio, montado (baixa os componentes, entra pelo custo somado) ou desmembrado (inverso). Na NFC-e/NF-e o kit sai como um único item. Desligado, a aba e a montagem somem e kits não podem ser vendidos; cancelamentos e devoluções de vendas já feitas continuam devolvendo os componentes.",
+    usedBy: "Produtos (componentes), PDV (venda de kit), Estoque (montagem)",
+  },
   { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
   { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },
   {
