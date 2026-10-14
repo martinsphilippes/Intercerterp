@@ -1,5 +1,5 @@
 import Link from "@/components/ui/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Download } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
@@ -31,6 +31,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const sp = await searchParams;
   const imp = await s.ctx.store.get("bank_imports", id);
   if (!imp || imp.companyId !== s.ctx.companyId) notFound();
+  // arquivo da adquirente (FIN-24): relatório próprio
+  if (imp.kind === "acquirer") redirect(`/financeiro/cartoes/adquirente/${imp.id}`);
   const acc = await s.ctx.store.get("financial_accounts", imp.accountId);
   const users = await nameMap(s.ctx, "users");
   const sum = imp.summary ?? {};

@@ -6,6 +6,7 @@ import "./stock";
 import "./customers";
 import "./suppliers";
 import "./finance";
+import "./finance-reports";
 import "./purchases";
 import "./fiscal";
 import "./admin";

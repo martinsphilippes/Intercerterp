@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import { freshStore } from "./helpers";
@@ -189,6 +191,15 @@ describe("conciliação com o arquivo da adquirente (FIN-24)", () => {
     const pctFile = "NSU;Valor bruto;Taxa;Data de crédito\n123;100,00;3,5%;01/02/2026\n";
     const p2 = parseAcquirerCsv(pctFile, sniffAcquirerCsv(pctFile).guess);
     expect(p2.lines[0]).toMatchObject({ gross: 10000, fee: 350, net: 9650, creditDate: "2026-02-01" });
+    // layout de exemplo documentado (docs/regras-assumidas.md §36)
+    const fixture = readFileSync(join(__dirname, "fixtures", "adquirente-exemplo.csv"));
+    const fx = parseAcquirerCsv(fixture, sniffAcquirerCsv(fixture.toString("utf8")).guess);
+    expect(fx.lines.map((l) => [l.nsu, l.installment, l.installments, l.gross, l.fee, l.net, l.creditDate])).toEqual([
+      ["552001", 1, 1, 4490, 44, 4446, "2026-10-11"],
+      ["000774411", 2, 3, 6000, 209, 5791, "2026-11-02"],
+      ["774500", 1, 1, 12990, 455, 12535, "2026-10-03"],
+    ]);
+    expect(fx.issues).toEqual([expect.objectContaining({ status: "info" })]);
   });
 
   it("prévia casa por NSU/parcela e lista as divergências sem gravar nada", async () => {

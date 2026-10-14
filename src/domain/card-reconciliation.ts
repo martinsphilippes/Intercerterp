@@ -11,6 +11,7 @@ import { assertUsableAccount, cardFeeByInstallment, settleInstallment } from "./
 import { normalizeBrand } from "./card-fees";
 import { normalizeNsu, parseAcquirerCsv, sniffAcquirerCsv, type AcquirerLayout, type AcquirerLine, type AcquirerSniff } from "./bank/acquirer";
 import { decodeBankFile, type LineIssue } from "./bank/common";
+import type { AcquirerStatus } from "./acquirer-status";
 
 /**
  * FIN-24 — Conciliação dos recebíveis de cartão com o arquivo da adquirente.
@@ -30,27 +31,8 @@ import { decodeBankFile, type LineIssue } from "./bank/common";
  *    conclui o que faltou e outro arquivo com a mesma venda encontra a parcela "já liquidada".
  */
 
-export type AcquirerStatus = "matched" | "applied" | "already_settled" | "divergent" | "not_found" | "ambiguous" | "future" | "duplicate" | "invalid" | "error";
-
-export const ACQUIRER_STATUS_LABEL: Record<AcquirerStatus, string> = {
-  matched: "Casada (a baixar)",
-  applied: "Baixada",
-  already_settled: "Já liquidada",
-  divergent: "Divergente",
-  not_found: "Sem correspondência",
-  ambiguous: "Ambígua",
-  future: "Crédito futuro",
-  duplicate: "Repetida no arquivo",
-  invalid: "Inválida",
-  error: "Erro na baixa",
-};
-
-export const ACQUIRER_STATUS_TONE: Record<AcquirerStatus, "good" | "warn" | "bad" | "info" | "neutral"> = {
-  matched: "info", applied: "good", already_settled: "neutral", divergent: "bad", not_found: "warn", ambiguous: "warn", future: "neutral", duplicate: "warn", invalid: "bad", error: "bad",
-};
-
-/** Situações que entram no relatório de divergências (além das casadas com diferença de taxa/data/bandeira). */
-export const DIVERGENT_STATUSES: AcquirerStatus[] = ["divergent", "not_found", "ambiguous", "duplicate", "invalid", "error"];
+export { ACQUIRER_STATUS_LABEL, ACQUIRER_STATUS_TONE, DIVERGENT_STATUSES, type AcquirerStatus } from "./acquirer-status";
+import { DIVERGENT_STATUSES } from "./acquirer-status";
 
 export interface AcquirerMatch {
   lineNo: number;
@@ -376,4 +358,16 @@ export async function applyAcquirerFile(ctx: Ctx, input: AcquirerInput) {
 /** Importações de arquivos de adquirente da empresa (mais recentes primeiro). */
 export async function listAcquirerImports(ctx: Ctx) {
   return (await listAll(ctx.store, "bank_imports", { filters: [["eq", "companyId", ctx.companyId], ["eq", "kind", "acquirer"]], orderBy: [{ field: "createdAt", dir: "desc" }] })).filter((i) => i.kind === "acquirer");
+}
+
+/**
+ * Linhas do relatório de uma importação (tela, impressão e CSV — mesma função). Filtro "divergencias" = linhas não
+ * baixadas por problema (divergente, sem correspondência, ambígua, repetida, inválida, erro) e as baixadas com
+ * diferença de taxa/data/bandeira; ou uma situação específica.
+ */
+export function acquirerReportLines(imp: Doc, filter?: string | null): Array<AcquirerMatch & { id: string }> {
+  const all = ((imp.lineResults ?? []) as AcquirerMatch[]).map((l, i) => ({ ...l, flags: l.flags ?? [], id: `${l.lineNo}-${i}` }));
+  if (!filter) return all;
+  if (filter === "divergencias") return all.filter((l) => (DIVERGENT_STATUSES as string[]).includes(l.status) || ((l.status === "applied" || l.status === "matched") && l.flags.length > 0));
+  return all.filter((l) => l.status === filter);
 }

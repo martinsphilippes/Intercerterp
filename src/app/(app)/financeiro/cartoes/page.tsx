@@ -1,5 +1,7 @@
 import Link from "@/components/ui/link";
-import { Layers } from "lucide-react";
+import { FileSpreadsheet, Layers } from "lucide-react";
+import { featureOn } from "@/lib/server/features";
+import { buttonClass } from "@/components/ui/button";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Stat } from "@/components/ui/card";
@@ -43,6 +45,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const bankDefault = (await listAll(s.ctx.store, "financial_accounts", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "kind", "bank"], ["eq", "active", true]] }))[0]?.id ?? accounts[0]?.value ?? "";
   const methodAcc = new Map(methods.map((m) => [m.id, m.accountId as string | null]));
   const canSettle = can(s.user, "finance", "edit") && canDo(s.user, "finance.settle") && Boolean(s.ctx.branchId);
+  const acquirerOn = await featureOn(s, "taxasCartao");
   const block = !s.ctx.branchId ? "Selecione uma filial (consolidado é somente consulta)." : "Sem permissão para baixar títulos.";
   const allOpen = await queryCardReceivables(s.ctx, { q: "", f: { status: "open", ...(p.f.branch ? { branch: p.f.branch } : {}) } });
   const monthSettled = (await queryCardReceivables(s.ctx, { q: "", f: { status: "settled", ...(p.f.branch ? { branch: p.f.branch } : {}) } })).filter((r) => (r.settledAt ?? "") >= `${t0.slice(0, 7)}-01`);
@@ -86,7 +89,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         crumbs={[{ label: "Financeiro" }, { label: "Recebíveis de cartão" }]}
         description="Vendas no cartão geram recebível contra a adquirente pela previsão de liquidação; ao liquidar, informe conta, valor bruto e taxa: o líquido entra na conta e a taxa vira lançamento de despesa."
         actions={
-          can(s.user, "finance", "edit") && (
+          <>
+          {acquirerOn && (
+            <Link className={buttonClass("secondary")} href="/financeiro/cartoes/adquirente" title="Conciliar com o arquivo de vendas/pagamentos da adquirente">
+              <FileSpreadsheet className="size-4" aria-hidden /> Arquivo da adquirente
+            </Link>
+          )}
+          {can(s.user, "finance", "edit") && (
             <FormDialog label="Liquidar previstos até…" icon={<Layers className="size-4" />} variant="accent" title="Liquidação em lote" action={settleCardsBatchAction} disabled={!canSettle} disabledReason={block} submitLabel="Liquidar em lote" description="Liquida todos os recebíveis em aberto com previsão até a data informada, cada um com sua taxa prevista, na conta escolhida (até 200 por vez).">
               <FormGrid cols={2}>
                 <Field label="Previsão até" required>
@@ -106,7 +115,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 </Field>
               </FormGrid>
             </FormDialog>
-          )
+          )}
+          </>
         }
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">

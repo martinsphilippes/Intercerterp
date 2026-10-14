@@ -1,0 +1,5 @@
+Data da venda;NSU;Autorização;Bandeira;Parcela;Valor bruto;Taxa;Valor líquido;Data de crédito
+10/10/2026;552001;A1B2C3;Visa;1/1;44,90;0,44;44,46;11/10/2026
+02/09/2026;000774411;;Mastercard;2/3;60,00;2,09;57,91;02/11/2026
+03/09/2026;774500;;Elo;1/1;129,90;3,5%;;03/10/2026
+Total;;;;;234,80;;;

@@ -12,7 +12,7 @@ import { ACQUIRER_SAMPLE_KEY } from "../../card-reconciliation";
  * Demonstração da Fase 7 — gestão financeira (idempotente: ids determinísticos, "só se ausente" e marcador
  * "demo.financeManagement.done"):
  *  - tabela de taxas por bandeira × parcelas nos meios "Cartão de crédito" e "Cartão de débito" (FIN-24);
- *  - arquivo CSV da adquirente de exemplo (layout documentado em docs/regras-assumidas.md §34) gerado a partir dos
+ *  - arquivo CSV da adquirente de exemplo (layout documentado em docs/regras-assumidas.md §36) gerado a partir dos
  *    recebíveis de cartão em aberto, guardado nos arquivos do sistema (`files`, kind "acquirer_sample") e oferecido
  *    para download em Financeiro › Arquivo da adquirente: linhas que casam, uma com taxa diferente da prevista, uma
  *    sem correspondência e uma com valor divergente (o usuário faz a prévia e a baixa pela tela);
@@ -109,7 +109,7 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   const csv = lines.join("\r\n") + "\r\n";
   let sampleId = await getSetting<string | null>(store, companyId, null, ACQUIRER_SAMPLE_KEY, null);
   if (!sampleId || !(await store.get("files", sampleId))) {
-    const file = await saveFile(fin, { bucket: "attachments", name: "VENDAS-ADQUIRENTE-DEMO.csv", mime: "text/csv", data: Buffer.from(csv, "utf8"), entityType: "company", entityId: companyId, kind: "acquirer_sample", branchId: null });
+    const file = await saveFile(fin, { bucket: "attachments", name: "VENDAS-ADQUIRENTE-DEMO.csv", mime: "text/csv", data: Buffer.from(csv, "utf8"), entityType: "bank_import", entityId: `acquirer-sample:${companyId}`, kind: "acquirer_sample", branchId: null });
     sampleId = file.id;
     await setSetting(store, companyId, null, ACQUIRER_SAMPLE_KEY, sampleId);
   }

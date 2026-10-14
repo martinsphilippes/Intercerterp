@@ -11,7 +11,7 @@ import { splitCsvLine } from "./csv";
  *   installments (parcela "2/3", "2 de 3" ou total "3") · gross (valor bruto) · fee (taxa/MDR em R$ ou %) ·
  *   net (valor líquido) · creditDate (data de crédito/pagamento).
  * Taxa ausente = bruto − líquido; líquido ausente = bruto − taxa; taxa em "%" (ex.: "3,49%") é aplicada ao bruto.
- * Todos os valores saem em CENTAVOS e datas em AAAA-MM-DD. O layout de exemplo está em docs/regras-assumidas.md (§34)
+ * Todos os valores saem em CENTAVOS e datas em AAAA-MM-DD. O layout de exemplo está em docs/regras-assumidas.md (§36)
  * e em tests/fixtures/adquirente-exemplo.csv.
  */
 

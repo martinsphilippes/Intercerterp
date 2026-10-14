@@ -13,6 +13,7 @@ import { listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import { formatBps, formatMoney } from "@/lib/money";
 import { formatDate, today } from "@/lib/dates";
+import { qs } from "@/lib/list";
 import { can, canDo } from "@/lib/permissions";
 import { featureOn } from "@/lib/server/features";
 import { CARD_BRANDS } from "@/domain/card-fees";
@@ -377,7 +378,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
           actions={
             <div className="flex flex-wrap gap-2">
               {canDo(s.user, "data.export") && (
-                <a className={buttonClass("secondary")} href="/api/export/fin-chart-of-accounts">
+                <a className={buttonClass("secondary")} href={`/api/export/fin-chart-of-accounts${qs({ tab: null })}`}>
                   <Download className="size-4" aria-hidden /> Exportar CSV
                 </a>
               )}
