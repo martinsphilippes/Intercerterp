@@ -10,12 +10,12 @@ import { InstallAppButton } from "@/components/pwa/install-button";
 import { can, canDo } from "@/lib/permissions";
 import { listAll, getStore, configuredBackend } from "@/lib/db";
 import { accessibleUnits } from "@/lib/auth/users";
-import { isFeatureOn } from "@/lib/core/settings";
+import { featureDefault, isFeatureOn } from "@/lib/core/settings";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireSession();
   const features = new Map<string, boolean>();
-  for (const g of navFor(s.company.kind)) for (const i of g.items) if (i.feature && !features.has(i.feature)) features.set(i.feature, await isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, i.feature, true));
+  for (const g of navFor(s.company.kind)) for (const i of g.items) if (i.feature && !features.has(i.feature)) features.set(i.feature, await isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, i.feature, featureDefault(i.feature)));
   const groups = navFor(s.company.kind).map((g) => ({ ...g, items: g.items.filter((i) => can(s.user, i.module) && (!i.action || canDo(s.user, i.action)) && (!i.feature || features.get(i.feature))) })).filter((g) => g.items.length);
   const [units, unread] = await Promise.all([
     getStore().get("users", s.user.id).then((userDoc) => accessibleUnits(getStore(), userDoc!)),

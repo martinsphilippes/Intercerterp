@@ -11,6 +11,7 @@ import { addDays, nowIso, toLocalDate, today } from "@/lib/dates";
 import { allocate, formatMoney, formatQty, lineTotal, roundDiv, QTY } from "@/lib/money";
 import { buildSchedule, createTitle } from "./finance";
 import { defaultWarehouse, postMovements } from "./stock";
+import { receiptLotBlockers, receiptLotSplit } from "./lots";
 import { parseNfeXml, nfeKeyIsValid, type ParsedNfe } from "./nfe-xml";
 import { CONFIRMED, ORDER_STATUS_LABEL, netUnitCost } from "./purchase-calc";
 import { orderItems, refreshOrderReceipts, remainingQty } from "./purchases";
@@ -103,6 +104,9 @@ export interface ReceiptItem {
   checked?: boolean;
   lot?: string | null;
   expiry?: string | null;
+  /** fabricação do lote (rastro do XML) e lotes do XML quando a nota traz mais de um para o item (EST-02) */
+  mfg?: string | null;
+  rastro?: Array<{ nLote: string; qLote: number; dFab: string | null; dVal: string | null }> | null;
   allocations?: Array<{ orderId: string; orderItemId: string; orderNumber: number; qty: number }>;
   lineValue?: number;
   freightShare?: number;
@@ -537,6 +541,8 @@ export async function importNfeXml(ctx: Ctx, input: { xml: string; fileName?: st
       idx: i + 1, nItem: it.nItem, cProd: it.cProd, cEAN: it.cEAN, xProd: it.xProd, uCom: it.uCom, ncm: it.ncm, cest: it.cest, cfop: it.cfop, entryCfop: convertCfop(it.cfop, pairs), invoicedQtySupplier: it.qCom, conversionFactor: m.conversionFactor,
       invoicedQty, invoicedValue: net, invoiceUnitCost: unit, skuId: m.skuId, sku: sku?.sku ?? null, description: sku?.name ?? it.xProd, unitCode: sku?.unitCode ?? it.uCom, mapping: m.mapping,
       expectedQty: 0, receivedQty: invoicedQty, unitCost: unit, ignore: false, divergence: null,
+      // lote/validade do XML (grupo rastro): o primeiro preenche a conferência; com mais de um, todos vão ao estoque
+      ...(it.rastro?.length ? { lot: it.rastro[0].nLote, expiry: it.rastro[0].dVal, mfg: it.rastro[0].dFab, ...(it.rastro.length > 1 ? { rastro: it.rastro } : {}) } : {}),
     });
   }
   // só mantém pedidos que compartilham algum produto com a nota
@@ -1197,6 +1203,8 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
     const calc = await recompute(ctx, r);
     r = await ctx.store.update("receipts", id, omit(calc, "payable"));
     const blockers = confirmBlockers(r);
+    // lote obrigatório para produto com controle de lote (EST-02, recurso feature.lotes)
+    blockers.push(...(await receiptLotBlockers(ctx, r)));
     if (blockers.length) throw new BusinessError(blockers.join(" "), "receipt_blocked");
     r = await startConfirming(ctx, id);
     if (r.status === "confirmed") return r;
@@ -1209,6 +1217,8 @@ export async function confirmReceipt(ctx: Ctx, id: string) {
   const movements = active.map((it) => ({
     warehouseId: r.warehouseId, skuId: it.skuId!, qty: it.receivedQty, type: "purchase" as const, unitCost: it.landedUnitCost ?? it.unitCost, totalCost: it.landedValue ?? null, originType: "purchase_receipt", originId: id,
     reason: `Recebimento nº ${r.number}${r.nfeNumber ? ` — NF-e ${r.nfeNumber}` : ""}`, idemKey: `receipt:${id}:${it.idx}`, occurredAt,
+    // lote/validade da conferência ou do XML (EST-02): saldo por lote quando o produto controla lote
+    lot: it.lot ?? null, lotExpiry: it.expiry ?? null, lotMfg: it.mfg ?? null, lotSplit: receiptLotSplit(it),
   }));
   if (eff.updateStock) for (let i = 0; i < movements.length; i += 40) await postMovements(ctx, movements.slice(i, i + 40));
   // 2) custos: último custo por fornecedor, custo de aquisição do SKU + histórico

@@ -44,7 +44,9 @@ export async function saveCartAction(cartId: string, patch: CartPatch) {
 export async function parkCartAction(cartId: string, name: string | null) {
   return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
     const { parked, fresh } = await parkCart(s.ctx, cartId, name);
-    return { ok: true as const, message: `Pré-venda "${parked.name}" salva (${formatMoney((parked as any).total)}).`, data: plainCart(fresh) };
+    const r = parked.reservation;
+    const reserved = r.enabled ? (r.shortage.length ? ` Estoque reservado parcialmente — sem disponível para: ${r.shortage.map((x) => x.sku).join(", ")}.` : " Estoque reservado.") : "";
+    return { ok: true as const, message: `Pré-venda "${parked.name}" salva (${formatMoney((parked as any).total)}).${reserved}`, data: plainCart(fresh) };
   });
 }
 

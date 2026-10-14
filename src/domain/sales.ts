@@ -11,7 +11,8 @@ import { registerJob } from "@/lib/core/jobs";
 import { getSetting } from "@/lib/core/settings";
 import { notify, resolveOccurrence } from "@/lib/core/notify";
 import { DEFERRED_KINDS, PAYMENT_KIND_LABEL } from "./pricing-calc";
-import { availableMap, defaultWarehouse, postMovements, damageWarehouse, type MovementInput } from "./stock";
+import { availableMap, defaultWarehouse, postMovements, damageWarehouse, releaseReservations, reservedForOrigin, type MovementInput } from "./stock";
+import { checkSaleLots } from "./lots";
 import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, nonBusinessDayRule, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
 import { cashAccountFor, currentSession } from "./cash";
 import { priceSale } from "./sale-pricing";
@@ -34,6 +35,8 @@ export interface SaleItemInput {
   itemSurcharge?: number;
   /** preço digitado pelo operador (se menor que a tabela, a diferença conta como desconto) */
   unitPrice?: number;
+  /** lote escolhido no PDV (produto com controle de lote, EST-02); ausente = FEFO automático */
+  lot?: string | null;
 }
 
 export interface SalePaymentInput {
@@ -119,8 +122,10 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   const stockWarnings: string[] = [];
   // pedido de venda importado (PDV-12): a reserva do próprio pedido não impede faturá-lo
   const ownReserved = input.salesDocumentId ? await (await import("./sales-documents")).reservedForDocument(ctx.store, input.salesDocumentId, branchId) : null;
+  // pré-venda com reserva (VEN-03): a reserva do próprio atendimento também conta como disponível
+  const cartReserved = input.cartId ? await reservedForOrigin(ctx.store, "cart", input.cartId, branchId) : null;
   for (const [skuId, q] of needed) {
-    const a = (avail.get(skuId)?.available ?? 0) + (ownReserved?.get(skuId) ?? 0);
+    const a = (avail.get(skuId)?.available ?? 0) + (ownReserved?.get(skuId) ?? 0) + (cartReserved?.get(skuId) ?? 0);
     if (a < q) {
       const msg = `${skus.get(skuId)!.sku}: disponível ${a / QTY}, vendido ${q / QTY}`;
       if (!allowNegative) throw new BusinessError(`Estoque insuficiente — ${msg}. A configuração comercial não permite venda sem saldo.`, "insufficient_stock");
@@ -128,9 +133,12 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
     }
   }
 
+  // lote escolhido no PDV (EST-02): conferido no depósito da venda; sem escolha = FEFO na baixa
+  const lotByLine = await checkSaleLots(ctx, { branchId, warehouseId: warehouse.id, allowNegative, lines: lines.map((l) => ({ skuId: l.sku.id, skuCode: l.sku.sku, product: l.product, qty: l.input.qty, lot: l.input.lot })) });
+
   const customer = input.customerId ? await ctx.store.getOrThrow("customers", input.customerId) : null;
   if (customer) assert(customer.companyId === ctx.companyId, "Cliente de outra empresa.");
-  return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative };
+  return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative, lotByLine };
 }
 
 type PreparedPay = SalePaymentInput & { method: Doc; change: number; intent?: Doc | null; voucher?: Doc | null; term?: Doc | null; status: string; manual: boolean };
@@ -353,6 +361,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         cfop: l.product.cfop ?? null,
         categoryId: l.product.categoryId ?? null,
         completedAt,
+        ...(prep.lotByLine[idx] ? { lot: prep.lotByLine[idx] } : {}),
       },
     };
   });
@@ -583,6 +592,8 @@ export async function completeSalePostCommit(ctx: Ctx, sale: Doc) {
   if (sale.cartId) {
     const cart = await ctx.store.get("carts", sale.cartId);
     if (cart && cart.status !== "converted") await ctx.store.update("carts", cart.id, { status: "converted", saleId: sale.id, payments: [] });
+    // reserva da pré-venda (VEN-03): a venda concluída consome o que estava reservado para o atendimento
+    await releaseReservations(sctx, "cart", sale.cartId, "consumed");
   }
   if (sale.exchangeReturnId) {
     const ret = await ctx.store.get("returns", sale.exchangeReturnId);
@@ -643,7 +654,7 @@ export async function applySaleEffects(ctx: Ctx, saleId: string, emitFiscal: boo
     .filter((i) => i.warehouseId)
     .map((i) => ({
       warehouseId: i.warehouseId, skuId: i.skuId, qty: -i.qty, type: "sale" as const, unitCost: i.unitCost, originType: "sale", originId: saleId, operationId: saleId,
-      reason: `Venda nº ${sale.number}`, idemKey: `sale:${saleId}:${i.seq}`, allowNegative: true, occurredAt: sale.completedAt,
+      reason: `Venda nº ${sale.number}`, idemKey: `sale:${saleId}:${i.seq}`, allowNegative: true, occurredAt: sale.completedAt, lot: i.lot ?? null,
     }));
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   if (sale.status === "cancelled") {
@@ -944,7 +955,7 @@ export async function applySaleCancelEffects(ctx: Ctx, saleId: string) {
   const items = await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", saleId]], orderBy: [{ field: "seq" }] });
   const movements: MovementInput[] = items
     .filter((i) => i.warehouseId)
-    .map((i) => ({ warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel" as const, unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}` }));
+    .map((i) => ({ warehouseId: i.warehouseId, skuId: i.skuId, qty: i.qty, type: "sale_cancel" as const, unitCost: i.unitCost, originType: "sale_cancel", originId: saleId, operationId: saleId, reason: `Cancelamento venda nº ${sale.number}`, idemKey: `sale-cancel:${saleId}:${i.seq}`, sourceMovementId: detId("mov", `sale:${saleId}:${i.seq}`) }));
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   const pendingTitles = await cancelSaleTitles(ctx, sale, why);
   // documento comercial faturado por esta venda: as quantidades voltam ao saldo a faturar (idempotente)
@@ -1344,9 +1355,12 @@ export async function applyReturnEffects(ctx: Ctx, returnId: string) {
       installments: [{ dueDate: toLocalDate(ret.createdAt ?? nowIso()), amount: compensated }], idemKey: `return:${returnId}:card`, approvalStatus: "approved", branchId: ret.branchId,
     });
   }
+  // lote (EST-02): a devolução volta aos lotes de onde a venda do item tirou
+  const saleSeq = new Map((await listAll(ctx.store, "sale_items", { filters: [["eq", "saleId", sale.id]] })).map((i) => [i.id, i.seq]));
   const movements: MovementInput[] = lines.map((l) => ({
     warehouseId: l.warehouseId, skuId: l.skuId, qty: l.qty, type: l.condition === "damaged" ? ("damage_in" as const) : ("return" as const),
     unitCost: l.unitCost, originType: "return", originId: returnId, operationId: sale.id, reason: `Devolução nº ${ret.number}: ${ret.reason}`, idemKey: `return:${returnId}:${l.saleItemId}`,
+    sourceMovementId: saleSeq.has(l.saleItemId) ? detId("mov", `sale:${sale.id}:${saleSeq.get(l.saleItemId)}`) : null,
   }));
   for (let i = 0; i < movements.length; i += EFFECT_BATCH) await postMovements(ctx, movements.slice(i, i + EFFECT_BATCH));
   // Documento fiscal de devolução (NF-e de entrada referenciando a NFC-e/NF-e original) — rascunho para revisão fiscal

@@ -27,6 +27,8 @@ export interface NfeItem {
   vDesc: number;
   vFrete: number;
   vOutro: number;
+  /** rastreabilidade (grupo rastro do item): lote, quantidade do lote (milésimos), fabricação e validade */
+  rastro: Array<{ nLote: string; qLote: number; dFab: string | null; dVal: string | null }>;
 }
 
 export interface NfeDuplicata {
@@ -62,7 +64,7 @@ export interface ParsedNfe {
 const AUTHORIZED_CSTAT = ["100", "150"];
 const DENIED_CSTAT = ["110", "205", "301", "302", "303"];
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", removeNSPrefix: true, parseTagValue: false, trimValues: true, isArray: (name) => ["det", "dup", "detPag"].includes(name) });
+const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", removeNSPrefix: true, parseTagValue: false, trimValues: true, isArray: (name) => ["det", "dup", "detPag", "rastro"].includes(name) });
 
 const str = (v: any): string | null => (v == null || v === "" ? null : String(typeof v === "object" ? (v["#text"] ?? "") : v).trim() || null);
 const money = (v: any) => (str(v) ? toCents(str(v)!) : 0);
@@ -124,6 +126,9 @@ export function parseNfeXml(xml: string): ParsedNfe {
       vDesc: money(p.vDesc),
       vFrete: money(p.vFrete),
       vOutro: money(p.vOutro),
+      rastro: ((p.rastro ?? []) as any[])
+        .map((r) => ({ nLote: (str(r.nLote) ?? "").slice(0, 60), qLote: parseQty(str(r.qLote) ?? "0"), dFab: (str(r.dFab) ?? "").slice(0, 10) || null, dVal: (str(r.dVal) ?? "").slice(0, 10) || null }))
+        .filter((r) => r.nLote),
     };
   });
   const tot = inf.total?.ICMSTot ?? {};

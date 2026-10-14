@@ -171,6 +171,9 @@ export interface TransferInput {
  * a mesma transferência — e, se ela ainda for rascunho (ex.: "Confirmar e enviar" falhou na separação),
  * aplica os dados corrigidos do reenvio em vez de manter os antigos.
  */
+/** Saída da expedição do item: recebimento, avaria e retorno voltam aos lotes que ela levou (EST-02). */
+const outMovementId = (transferId: string, skuId: string) => detId("mov", `transfer:${transferId}:out:${skuId}`);
+
 export async function createTransfer(ctx: Ctx, input: TransferInput, opts: { idemKey?: string | null; id?: string } = {}) {
   requirePerm(ctx, "stock", "create");
   const fromBranchId = requireBranch(ctx);
@@ -406,8 +409,8 @@ export async function receiveTransfer(ctx: Ctx, id: string, input: { lines: Tran
       applyOnce(ctx, onceKey(l.skuId), { entityType: "transfer", entityId: id }, async (tx) => {
         await consumeTransit(tx, cid, l.receivedQty + l.damagedQty, item.shippedQty);
         const movs: MovementInput[] = [];
-        if (l.receivedQty > 0) movs.push({ warehouseId: t.toWarehouseId, skuId: l.skuId, qty: l.receivedQty, type: "transfer_in", unitCost: item.unitCost, originType: "transfer", originId: id, operationId: id, reason: `Transferência ${transferCode(t.number)} — recebimento`, idemKey: `transfer:${id}:in:${rk}:${l.skuId}` });
-        if (l.damagedQty > 0) movs.push({ warehouseId: damaged!.id, skuId: l.skuId, qty: l.damagedQty, type: "damage_in", unitCost: item.unitCost, originType: "transfer", originId: id, operationId: id, reason: `Transferência ${transferCode(t.number)} — avaria no recebimento${l.note ? `: ${l.note}` : ""}`, idemKey: `transfer:${id}:dmg:${rk}:${l.skuId}` });
+        if (l.receivedQty > 0) movs.push({ warehouseId: t.toWarehouseId, skuId: l.skuId, qty: l.receivedQty, type: "transfer_in", unitCost: item.unitCost, originType: "transfer", originId: id, operationId: id, reason: `Transferência ${transferCode(t.number)} — recebimento`, idemKey: `transfer:${id}:in:${rk}:${l.skuId}`, sourceMovementId: outMovementId(id, l.skuId) });
+        if (l.damagedQty > 0) movs.push({ warehouseId: damaged!.id, skuId: l.skuId, qty: l.damagedQty, type: "damage_in", unitCost: item.unitCost, originType: "transfer", originId: id, operationId: id, reason: `Transferência ${transferCode(t.number)} — avaria no recebimento${l.note ? `: ${l.note}` : ""}`, idemKey: `transfer:${id}:dmg:${rk}:${l.skuId}`, sourceMovementId: outMovementId(id, l.skuId) });
         await postMovements(ctx, movs, tx);
         await adjustInTransit(ctx, t.toWarehouseId, l.skuId, -(l.receivedQty + l.damagedQty), tx, { min: 0 });
       }),
@@ -466,7 +469,7 @@ async function settlePending(ctx: Ctx, t: Doc, i: TransferItem, mode: "return" |
     applyOnce(ctx, base, { entityType: "transfer", entityId: id }, async (tx) => {
       await consumeTransit(tx, cid, q, i.shippedQty);
       const movs: MovementInput[] = [
-        { warehouseId: t.fromWarehouseId, skuId: i.skuId, qty: q, type: "transfer_return", unitCost: i.unitCost, originType: "transfer", originId: id, operationId: id, reason: `Transferência ${transferCode(t.number)} — ${mode === "return" ? "retorno à origem" : "falta (retorno contábil)"}: ${reasonText}`, idemKey: `${base}:ret` },
+        { warehouseId: t.fromWarehouseId, skuId: i.skuId, qty: q, type: "transfer_return", unitCost: i.unitCost, originType: "transfer", originId: id, operationId: id, reason: `Transferência ${transferCode(t.number)} — ${mode === "return" ? "retorno à origem" : "falta (retorno contábil)"}: ${reasonText}`, idemKey: `${base}:ret`, sourceMovementId: outMovementId(id, i.skuId) },
       ];
       if (mode === "loss") movs.push({ warehouseId: t.fromWarehouseId, skuId: i.skuId, qty: -q, type: "loss", originType: "transfer", originId: id, operationId: id, reason: `Transferência ${transferCode(t.number)} — falta baixada como perda: ${reasonText}`, idemKey: `${base}:loss`, allowNegative: true });
       await postMovements(ctx, movs, tx);

@@ -49,6 +49,19 @@ export const DEFAULT_SETTINGS = {
 } as const;
 
 /**
+ * Padrão de recursos que mudam a operação (nascem DESLIGADOS por empresa). Os demais recursos novos seguem o padrão de
+ * quem consulta (telas aditivas: ligados).
+ */
+export const FEATURE_DEFAULTS: Record<string, boolean> = {
+  lotes: false,
+  reservaPreVenda: false,
+  bipagemContagem: true,
+};
+
+/** Padrão do recurso: o do catálogo acima ou, sem registro, o informado (padrão: ligado). */
+export const featureDefault = (key: string, fallback = true) => FEATURE_DEFAULTS[key] ?? fallback;
+
+/**
  * Chave de liga/desliga de recursos novos (evolução por fases). Lê o parâmetro `feature.<key>` (filial → empresa);
  * sem valor gravado, vale o padrão informado — recursos novos nascem desligados e são ligados por empresa/filial,
  * o que permite reverter uma fase sem reimplantar.

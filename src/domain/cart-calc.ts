@@ -25,6 +25,9 @@ export interface CartItem {
   service?: boolean;
   maxDiscountBps?: number | null;
   attributes?: Record<string, string>;
+  /** produto com controle de lote (EST-02) e lote escolhido (null/ausente = FEFO automático) */
+  lotControl?: boolean;
+  lot?: string | null;
 }
 
 /** Preço de tabela efetivo da linha (atacado quando a quantidade atinge o mínimo). */

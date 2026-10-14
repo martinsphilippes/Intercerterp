@@ -4,8 +4,10 @@ import { nowIso } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
-import { getSetting } from "@/lib/core/settings";
-import { formatMoney } from "@/lib/money";
+import { getSetting, isFeatureOn } from "@/lib/core/settings";
+import { formatMoney, QTY } from "@/lib/money";
+import type { Store } from "@/lib/db/types";
+import { defaultWarehouse, ensureBalance, releaseReservations, reserve } from "./stock";
 import { cartTotals, type CartItem } from "./cart-calc";
 import { cancelIntentAtProvider, maybePayable } from "./payments/intents";
 import type { FinalizeSaleInput, SalePaymentInput } from "./sales";
@@ -73,6 +75,8 @@ function clampItems(items: CartItem[]): CartItem[] {
       service: Boolean(i.service),
       maxDiscountBps: i.maxDiscountBps ?? null,
       attributes: i.attributes && typeof i.attributes === "object" ? i.attributes : undefined,
+      // lote escolhido (EST-02): só para produto com controle de lote; a venda confere o lote no servidor
+      ...(i.lotControl ? { lotControl: true, lot: typeof i.lot === "string" && i.lot.trim() ? i.lot.trim().slice(0, 60) : null } : {}),
     }));
 }
 
@@ -174,8 +178,67 @@ async function parkInternal(ctx: Ctx, cart: Doc, name?: string | null) {
   const hours = await getSetting(ctx.store, ctx.companyId, cart.branchId, "sales.presaleExpiryHours", 72);
   const label = name?.trim() || cart.customerName || `Pré-venda ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })}`;
   const parked = await ctx.store.update("carts", cart.id, { status: "parked", name: label.slice(0, 120), parkedAt: nowIso(), expiresAt: new Date(Date.now() + Number(hours) * 3600000).toISOString(), payments: [] });
-  await audit(ctx, { module: "pdv", action: "cart.park", entityType: "cart", entityId: cart.id, summary: `Pré-venda "${label}" salva — ${formatMoney(cart.total)} (${(cart.items ?? []).length} itens)`, related: cart.customerId ? [`customer:${cart.customerId}`] : [] });
-  return parked;
+  // reserva de estoque da pré-venda (VEN-03, parâmetro feature.reservaPreVenda): refeita a cada vez que é salva
+  const reservation = await syncCartReservations(ctx, parked);
+  const reservedText = reservation.enabled ? ` — reserva de estoque${reservation.shortage.length ? ` parcial (falta: ${reservation.shortage.map((x) => `${x.sku} ${x.missing / QTY}`).join(", ")})` : " feita"}` : "";
+  await audit(ctx, { module: "pdv", action: "cart.park", entityType: "cart", entityId: cart.id, summary: `Pré-venda "${label}" salva — ${formatMoney(cart.total)} (${(cart.items ?? []).length} itens)${reservedText}`, related: cart.customerId ? [`customer:${cart.customerId}`] : [] });
+  return Object.assign(parked, { reservation });
+}
+
+/**
+ * Reserva da pré-venda (VEN-03): libera a reserva anterior do atendimento e, com o recurso ligado, reserva os itens físicos
+ * no depósito do terminal (padrão da filial) até o disponível — o que faltar fica registrado como falta (não bloqueia).
+ * Mesmo mecanismo das transferências e dos pedidos de venda (`reserve`/`releaseReservations`, chave nova a cada vez).
+ * A venda concluída consome a reserva (`completeSalePostCommit`); cancelamento e expiração liberam.
+ */
+export async function syncCartReservations(ctx: Ctx, cart: Doc) {
+  const sctx: Ctx = { ...ctx, branchId: cart.branchId };
+  await releaseReservations(sctx, "cart", cart.id, "released");
+  const shortage: Array<{ skuId: string; sku: string; missing: number }> = [];
+  if (!(await isFeatureOn(ctx.store, ctx.companyId, cart.branchId, "reservaPreVenda", false))) return { enabled: false, shortage };
+  const terminal = cart.terminalId ? await ctx.store.get("terminals", cart.terminalId) : null;
+  const warehouseId = terminal?.defaultWarehouseId ?? (await defaultWarehouse(ctx.store, cart.branchId)).id;
+  const want = new Map<string, number>();
+  for (const i of (cart.items ?? []) as CartItem[]) if (i.qty > 0) want.set(i.skuId, (want.get(i.skuId) ?? 0) + i.qty);
+  for (const [skuId, qty] of want) {
+    const sku = await ctx.store.get("skus", skuId);
+    const product = sku ? await ctx.store.get("products", sku.productId) : null;
+    if (!sku || !product || product.type === "service") continue;
+    const bal = await ensureBalance(ctx.store, ctx, warehouseId, skuId);
+    const q = Math.min(qty, Math.max(0, bal.physical - bal.reserved));
+    if (q > 0) {
+      const gen = (await listAll(ctx.store, "stock_reservations", { filters: [["eq", "originType", "cart"], ["eq", "originId", cart.id], ["eq", "skuId", skuId]] })).length;
+      try {
+        await reserve(sctx, { warehouseId, skuId, qty: q, originType: "cart", originId: cart.id, idemKey: `cart:${cart.id}:${skuId}:${gen}` });
+      } catch (e) {
+        if (!(e instanceof BusinessError) || e.code !== "insufficient_stock") throw e;
+        shortage.push({ skuId, sku: sku.sku, missing: qty });
+        continue;
+      }
+    }
+    if (q < qty) shortage.push({ skuId, sku: sku.sku, missing: qty - q });
+  }
+  return { enabled: true, shortage };
+}
+
+/**
+ * Rotina diária `sales.presale_reservations`: libera reservas de pré-vendas vencidas (`expiresAt`, parâmetro
+ * `sales.presaleExpiryHours`) e de atendimentos já encerrados (convertidos/cancelados). A pré-venda continua na gaveta
+ * (marcada como expirada) e pode ser retomada; sem reserva, a venda confere o disponível normalmente.
+ */
+export async function releaseExpiredPresales(store: Store, companyId: string, now = nowIso()) {
+  const { systemCtx } = await import("@/lib/core/ctx");
+  const active = await listAll(store, "stock_reservations", { filters: [["eq", "companyId", companyId], ["eq", "originType", "cart"], ["eq", "status", "active"]] });
+  let released = 0;
+  for (const cartId of new Set(active.map((r) => r.originId as string))) {
+    const cart = await store.get("carts", cartId);
+    const expired = !cart || ["converted", "cancelled"].includes(cart.status) || Boolean(cart.expiresAt && cart.expiresAt < now);
+    if (!expired) continue;
+    const ctx = systemCtx(store, companyId, cart?.branchId ?? null);
+    released += await releaseReservations(ctx, "cart", cartId, cart?.status === "converted" ? "consumed" : "released");
+    if (cart && cart.status !== "converted") await audit(ctx, { module: "pdv", action: "cart.reservation_expire", entityType: "cart", entityId: cartId, summary: `Reserva de estoque da pré-venda "${cart.name ?? ""}" liberada (${cart.status === "cancelled" ? "atendimento cancelado" : "pré-venda expirada"})` });
+  }
+  return { released };
 }
 
 /** Salva como pré-venda (atendimento em espera) e devolve um atendimento novo para o terminal. */
@@ -233,6 +296,8 @@ export async function cancelCart(ctx: Ctx, cartId: string, reason?: string | nul
   const paidMeanwhile = await unusedConfirmedPix(ctx, cartId);
   assert(!paidMeanwhile, pixConfirmedMsg(paidMeanwhile?.amount), "pix_confirmed");
   const updated = await ctx.store.update("carts", cartId, { status: "cancelled", cancelReason: reason?.trim() || "Cancelado pelo operador", payments: [] });
+  // reserva da pré-venda (VEN-03): cancelar o atendimento libera o estoque reservado
+  await releaseReservations({ ...ctx, branchId: cart.branchId }, "cart", cartId, "released");
   if ((cart.items ?? []).length) {
     await audit(ctx, { module: "pdv", action: "cart.cancel", entityType: "cart", entityId: cartId, summary: `Atendimento cancelado — ${formatMoney(cart.total)} (${(cart.items ?? []).length} itens)`, reason: reason ?? null });
   }
@@ -257,7 +322,7 @@ export function cartToSaleInput(cart: Doc, payments: SalePaymentInput[]): Finali
     cpfOnInvoice: cart.cpfOnInvoice ?? null,
     priceTableId: cart.priceTableId ?? null,
     sellerId: cart.sellerId ?? null,
-    items: (cart.items ?? []).map((i: CartItem) => ({ skuId: i.skuId, qty: i.qty, itemDiscount: i.itemDiscount ?? 0, itemSurcharge: i.itemSurcharge ?? 0, unitPrice: i.unitPrice ?? undefined })),
+    items: (cart.items ?? []).map((i: CartItem) => ({ skuId: i.skuId, qty: i.qty, itemDiscount: i.itemDiscount ?? 0, itemSurcharge: i.itemSurcharge ?? 0, unitPrice: i.unitPrice ?? undefined, ...(i.lot ? { lot: i.lot } : {}) })),
     globalDiscount: cart.globalDiscountBps ? undefined : (cart.globalDiscount ?? 0),
     globalDiscountBps: cart.globalDiscountBps || undefined,
     surcharge: cart.surcharge ?? 0,
