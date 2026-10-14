@@ -6,6 +6,7 @@ import { lookups } from "@/lib/server/lookups";
 import { canDo } from "@/lib/permissions";
 import { today } from "@/lib/dates";
 import { TitleForm } from "../../_components/title-form";
+import { nonBusinessDayRule } from "@/domain/finance";
 
 export const metadata = { title: "Nova conta a pagar" };
 
@@ -33,6 +34,7 @@ export default async function Page() {
         terms={terms.filter((t) => t.kind !== "sale").map((t) => ({ value: t.id, label: t.name, installments: t.installments, firstDueDays: t.firstDueDays, intervalDays: t.intervalDays, interestBps: t.interestBps ?? 0 }))}
         today={today()}
         canApprove={canDo(s.user, "finance.approve_payable")}
+        dueRule={await nonBusinessDayRule(s.ctx.store, s.ctx.companyId, s.ctx.branchId)}
       />
     </>
   );

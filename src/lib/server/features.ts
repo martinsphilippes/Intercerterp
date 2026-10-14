@@ -5,7 +5,7 @@ import { isFeatureOn } from "@/lib/core/settings";
 import type { SessionInfo } from "./session";
 
 /** Recursos novos (telas aditivas) controlados por `feature.<chave>` em Parâmetros — ligados por padrão. */
-export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas";
+export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "baixaLote" | "carne";
 
 export function featureOn(s: SessionInfo, key: FeatureKey): Promise<boolean> {
   return isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, key, true);

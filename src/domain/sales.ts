@@ -12,7 +12,7 @@ import { getSetting } from "@/lib/core/settings";
 import { notify, resolveOccurrence } from "@/lib/core/notify";
 import { calcSale, DEFERRED_KINDS, PAYMENT_KIND_LABEL } from "./pricing-calc";
 import { availableMap, defaultWarehouse, postMovements, damageWarehouse, type MovementInput } from "./stock";
-import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
+import { buildSchedule, cancelTitle, createTitle, liveRenegotiationsOf, nonBusinessDayRule, postEntry, refreshTitleStatus, reverseSettlement } from "./finance";
 import { cashAccountFor, currentSession } from "./cash";
 import { resolvePrices } from "./pricing";
 import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
@@ -230,6 +230,8 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
     throw new BusinessError("O caixa deste terminal foi aberto por outro operador. Venda em um terminal com o seu próprio caixa aberto (Caixa → Abertura) ou peça a um supervisor.", "cash_operator_mismatch");
   }
   const methods = await loadMethods(ctx.store, ctx.companyId);
+  // vencimento do crediário/boleto em dia não útil (FIN-26): padrão "keep" mantém a data gerada
+  const dueRule = await nonBusinessDayRule(ctx.store, ctx.companyId, branchId);
 
   // ── Troca: a devolução de origem precisa existir e não estar vinculada a outra venda
   let exchangeRet: Doc | null = null;
@@ -481,7 +483,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
       const dueDatesByPay = new Map<number, Array<{ dueDate: string; amount: number }>>();
       if (deferredPaysAll.length) {
         const installments = deferredPaysAll.flatMap((p) => {
-          const sched = buildSchedule(p.amount, p.term ? { installments: deferredInstallments(p), firstDueDays: p.term.firstDueDays, intervalDays: p.term.intervalDays } : { installments: deferredInstallments(p), firstDueDays: 30, intervalDays: 30 }, date);
+          const sched = buildSchedule(p.amount, p.term ? { installments: deferredInstallments(p), firstDueDays: p.term.firstDueDays, intervalDays: p.term.intervalDays } : { installments: deferredInstallments(p), firstDueDays: 30, intervalDays: 30 }, date, { nonBusinessDay: dueRule });
           dueDatesByPay.set(pays.indexOf(p), sched);
           return sched.map((i) => ({ ...i, methodKind: p.method.kind }));
         });

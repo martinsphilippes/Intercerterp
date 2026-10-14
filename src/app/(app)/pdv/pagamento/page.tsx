@@ -15,6 +15,7 @@ import { cartIntents } from "@/domain/payments/intents";
 import { nameMap } from "@/lib/server/lookups";
 import { PaymentApp } from "./payment-app";
 import { getFiscalConfig } from "@/domain/fiscal/service";
+import { nonBusinessDayRule } from "@/domain/finance";
 
 export const metadata = { title: "Pagamento da venda" };
 export const dynamic = "force-dynamic";
@@ -107,6 +108,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       drafts={(cart.payments ?? []) as any[]}
       exchangeVoucher={exchangeVoucher}
       today={today()}
+      dueRule={await nonBusinessDayRule(store, s.ctx.companyId, s.ctx.branchId)}
       initialMethodId={sp(params, "meio") || null}
       approvalNeeded={needsApproval ? problem : null}
       emitFiscal={cart.emitFiscal !== false}

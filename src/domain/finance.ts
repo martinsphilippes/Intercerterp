@@ -9,6 +9,7 @@ import { nextNumber } from "@/lib/core/numbering";
 import { reopenOccurrence, resolveOccurrence } from "@/lib/core/notify";
 import { getSetting } from "@/lib/core/settings";
 import { enqueue } from "@/lib/core/jobs";
+import { adjustDueDate, type NonBusinessDayRule } from "@/lib/business-days";
 
 /**
  * Financeiro:
@@ -60,16 +61,29 @@ export function termFinancedTotal(total: number, interestBps: number | null | un
  * Gera vencimentos a partir de uma condição de pagamento.
  * `opts.interestBps` (opcional, explícito): aplica os juros da condição ao total antes de dividir as parcelas
  * (ver termFinancedTotal). Sem a opção, o total é dividido como informado.
+ * `opts.nonBusinessDay` (FIN-26, opcional): "next" leva o vencimento que cair em sábado, domingo ou feriado nacional
+ * fixo para o próximo dia útil (src/lib/business-days.ts); ausente ou "keep" mantém a data gerada (comportamento original).
  */
-export function buildSchedule(total: number, term: { installments: number; firstDueDays: number; intervalDays: number } | null, base = today(), opts?: { interestBps?: number | null }): InstallmentInput[] {
+export function buildSchedule(
+  total: number,
+  term: { installments: number; firstDueDays: number; intervalDays: number } | null,
+  base = today(),
+  opts?: { interestBps?: number | null; nonBusinessDay?: NonBusinessDayRule | null },
+): InstallmentInput[] {
   const n = Math.max(1, term?.installments ?? 1);
   const parts = splitInstallments(termFinancedTotal(total, opts?.interestBps), n);
   const first = term?.firstDueDays ?? 0;
   const interval = term?.intervalDays ?? 30;
   return parts.map((amount, i) => ({
     amount,
-    dueDate: interval === 30 && first % 30 === 0 ? addMonths(base, first / 30 + i) : addDays(base, first + interval * i),
+    dueDate: adjustDueDate(interval === 30 && first % 30 === 0 ? addMonths(base, first / 30 + i) : addDays(base, first + interval * i), opts?.nonBusinessDay),
   }));
+}
+
+/** Regra de vencimento em dia não útil da empresa/filial (parâmetro `finance.dueDateNonBusinessDay`, padrão "keep"). */
+export async function nonBusinessDayRule(store: Store, companyId: string, branchId?: string | null): Promise<NonBusinessDayRule> {
+  const v = await getSetting<string>(store, companyId, branchId, "finance.dueDateNonBusinessDay", "keep");
+  return v === "next" ? "next" : "keep";
 }
 
 export const titleId = (idemKey: string) => detId("title", idemKey);
@@ -285,7 +299,12 @@ export interface SettleInput {
   skipApprovalCheck?: boolean;
 }
 
-export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store): Promise<Doc> {
+/**
+ * Baixa uma parcela. Com `tx`, participa da transação externa (sem auditoria nem atualização do status do título —
+ * o chamador faz depois); `entryCache` compartilha a sequência das contas entre várias baixas da MESMA transação
+ * (no Appwrite as leituras não enxergam as escritas da própria transação — baixa em lote).
+ */
+export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store, entryCache?: Map<string, Doc>): Promise<Doc> {
   const sid = detId("settle", input.idemKey);
   const existing = await ctx.store.get("settlements", sid);
   if (existing) return existing;
@@ -323,7 +342,7 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
     const total = input.principal - discount + interest + fine;
     const seq = inst.seq + 1;
     // cache compartilhado: no Appwrite as leituras não enxergam escritas da própria transação (sequência da conta)
-    const cache = new Map<string, Doc>();
+    const cache = entryCache ?? new Map<string, Doc>();
     const entry = await postEntry(ctx, t, {
       accountId: input.accountId,
       date: input.date,

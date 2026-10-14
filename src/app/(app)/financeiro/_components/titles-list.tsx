@@ -1,5 +1,5 @@
 import Link from "@/components/ui/link";
-import { BadgeCheck, Eye, Plus, Receipt } from "lucide-react";
+import { BadgeCheck, BookOpen, Eye, Plus, Receipt } from "lucide-react";
 import type { SessionInfo } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -21,6 +21,8 @@ import { installmentKpis, queryInstallments, ORIGIN_LABEL, branchScope, originHr
 import { approvePayableAction } from "../actions";
 import { SettleDialog } from "./settle-dialog";
 import { PrintButton } from "./print-button";
+import { BatchCheckbox, BatchSettleBar } from "./batch-settle";
+import { featureOn } from "@/lib/server/features";
 
 type Row = Awaited<ReturnType<typeof queryInstallments>>[number];
 
@@ -74,11 +76,28 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
     .map((m) => ({ value: m.id, label: m.name, kind: m.kind, accountId: m.accountId ?? null }));
   const canSettle = can(s.user, "finance", "edit") && canDo(s.user, "finance.settle") && Boolean(s.ctx.branchId);
   const canApprove = canDo(s.user, "finance.approve_payable");
+  // FIN-02 (baixa em lote) e FIN-06 (carnê): recursos liga/desliga em Parâmetros › Recursos
+  const [batchOn, carneOn] = await Promise.all([featureOn(s, "baixaLote"), rec ? featureOn(s, "carne") : Promise.resolve(false)]);
+  const settleable = (r: Row) => ["open", "partial"].includes(r.status) && r.originType !== "sale_card" && (rec || r.approvalStatus === "approved");
+  const showBatch = batchOn && can(s.user, "finance", "edit") && canDo(s.user, "finance.settle");
+  const batchBalances = Object.fromEntries(rows.filter(settleable).map((r) => [r.id, r.balance]));
   const origins = Object.entries(ORIGIN_LABEL)
     .filter(([key]) => (rec ? ["manual", "sale", "sale_card", "renegotiation", "service", "supplier_return"] : ["manual", "purchase", "receipt", "return"]).includes(key))
     .map(([value, label]) => ({ value, label }));
   const withCharges = (r: Row) => (rec && r.state === "overdue" && r.originType !== "sale_card" ? r.balance + (() => { const c = suggestLateCharges(r.dueDate, t0, r.balance, late); return c.fine + c.interest; })() : r.balance);
   const columns: Column<Row>[] = [
+    ...(showBatch
+      ? [
+          {
+            key: "sel",
+            label: "Seleção",
+            fixed: true,
+            noLink: true,
+            className: "w-10 text-center",
+            cell: (r: Row) => (settleable(r) ? <BatchCheckbox kind={kind} id={r.id} label={`parcela ${r.installment}/${r.installments} do título nº ${r.titleNumber}`} /> : null),
+          } satisfies Column<Row>,
+        ]
+      : []),
     {
       key: "partyName",
       label: rec ? "Cliente" : "Fornecedor / descrição",
@@ -190,6 +209,11 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
           )}
           {!rec && r.approvalStatus !== "approved" && ["open", "partial"].includes(r.status) && canApprove && (
             <ActionButton action={approvePayableAction.bind(null, r.titleId)} label="Aprovar" size="sm" variant="accent" icon={<BadgeCheck className="size-4" />} confirm={`Conferir e autorizar o pagamento da obrigação nº ${r.titleNumber} (${r.partyName})?`} />
+          )}
+          {carneOn && ["open", "partial"].includes(r.status) && r.originType !== "sale_card" && (
+            <Link className={buttonClass("ghost", "sm")} href={`${basePath}/${r.titleId}/carne?print=1`} target="_blank" title="Imprimir carnê do título">
+              <BookOpen className="size-4" />
+            </Link>
           )}
           {r.paid > 0 && (
             <Link className={buttonClass("ghost", "sm")} href={`${basePath}/${r.titleId}/recibo?parcela=${r.id}`} title={rec ? "Recibo / imprimir" : "Comprovante"}>
@@ -321,6 +345,18 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
       </nav>
       <FilterBar basePath={basePath} values={params} filters={filters} />
       {periodNote && <p className="-mt-2 mb-3 text-xs text-slate-500">Recorte: {periodNote}.</p>}
+      {showBatch && (
+        <BatchSettleBar
+          kind={kind}
+          balances={batchBalances}
+          accounts={accounts}
+          methods={methods}
+          late={late}
+          today={t0}
+          disabled={!canSettle}
+          disabledReason={!s.ctx.branchId ? "Selecione uma filial (consolidado é somente consulta)." : "Sem permissão para baixar títulos."}
+        />
+      )}
       <DataTable
         id={rec ? "fin-receivables" : "fin-payables"}
         basePath={basePath}
@@ -332,7 +368,7 @@ export async function TitlesList({ s, kind, params }: { s: SessionInfo; kind: Ti
         pageSize={p.pageSize}
         exportKey={rec ? "fin-receivables" : "fin-payables"}
         rowHref={(r) => `${basePath}/${r.titleId}`}
-        totals={{ amount: formatMoney(sum("amount")), paid: formatMoney(sum("paid")), abated: formatMoney(sum("abated")), balance: formatMoney(sum("balance")) }}
+        totals={{ ...(showBatch ? { sel: "", partyName: "Total do recorte" } : {}), amount: formatMoney(sum("amount")), paid: formatMoney(sum("paid")), abated: formatMoney(sum("abated")), balance: formatMoney(sum("balance")) }}
         empty={
           <div className="p-10 text-center text-sm text-slate-500">
             Nenhuma parcela no recorte.{" "}

@@ -18,6 +18,8 @@ import { importBankFile, ignoreBankTx, previewBankImport, reconcile, restoreBank
 import { settleCardReceivable } from "@/domain/sales";
 import type { BankFormat, CsvMapping } from "@/domain/bank";
 import { queryCardReceivables } from "./queries";
+import { requireFeature } from "@/lib/server/features";
+import { previewBatchSettlement, settleBatch } from "@/domain/finance-batch";
 
 const RV = ["/financeiro/receber", "/financeiro/pagar", "/financeiro/fluxo-caixa", "/financeiro/conciliacao", "/financeiro/cartoes"];
 const MAX_FILE = 10 * 1024 * 1024;
@@ -135,6 +137,49 @@ export async function settleAction(fd: FormData) {
     if (file && attachmentFileId) await addTitleAttachment(s.ctx, inst.titleId, { fileId: attachmentFileId, name: file.name, mime: file.mime, sizeBytes: file.data.length, kind: "receipt_proof", settlementId: st.id });
     const after = await s.ctx.store.getOrThrow("installments", installmentId);
     return { ok: true as const, message: `${inst.kind === "receivable" ? "Recebimento" : "Pagamento"} de ${formatMoney(st.total)} registrado${after.balance ? ` — saldo remanescente ${formatMoney(after.balance)}` : " — parcela quitada"}.` };
+  });
+}
+
+// ───────────────────────────── Baixa em lote (FIN-02)
+
+export interface BatchSettleForm {
+  kind: "receivable" | "payable";
+  installmentIds: string[];
+  date: string;
+  applyLateCharges: boolean;
+}
+
+/** Prévia da baixa em lote: total por parcela e motivo das que não podem ser baixadas (nada é gravado). */
+export async function previewBatchSettleAction(input: BatchSettleForm) {
+  return runAction({ module: "finance", op: "edit" }, async (s) => {
+    await requireFeature(s, "baixaLote");
+    const kind = input.kind === "payable" ? "payable" : "receivable";
+    return previewBatchSettlement(s.ctx, { kind, installmentIds: input.installmentIds ?? [], date: String(input.date ?? ""), applyLateCharges: Boolean(input.applyLateCharges) });
+  });
+}
+
+/** Baixa em lote (idempotente pela chave do envio): resultado com as parcelas baixadas e as recusadas com o motivo. */
+export async function settleBatchAction(input: BatchSettleForm & { accountId: string; methodId: string; reference?: string | null; notes?: string | null; idemKey: string }) {
+  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+    await requireFeature(s, "baixaLote");
+    assert(input.idemKey, "Chave de idempotência ausente. Recarregue a página.");
+    const kind = input.kind === "payable" ? "payable" : "receivable";
+    const r = await settleBatch(s.ctx, {
+      kind,
+      installmentIds: input.installmentIds ?? [],
+      date: String(input.date ?? ""),
+      applyLateCharges: Boolean(input.applyLateCharges),
+      accountId: String(input.accountId ?? ""),
+      methodId: String(input.methodId ?? ""),
+      reference: input.reference ?? null,
+      notes: input.notes ?? null,
+      idemKey: `ui:${String(input.idemKey ?? "")}`,
+    });
+    const word = kind === "receivable" ? "recebida(s)" : "paga(s)";
+    const msg = r.replayed
+      ? "Esta baixa em lote já tinha sido registrada (nada foi baixado de novo)."
+      : `${r.settled} parcela(s) ${word} — ${formatMoney(r.total)}${r.errors ? `; ${r.errors} não baixada(s) (veja o motivo)` : ""}.`;
+    return { ok: true as const, data: r, message: msg };
   });
 }
 

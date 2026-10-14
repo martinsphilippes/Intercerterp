@@ -16,6 +16,8 @@ export interface Column<T> {
   /** não pode ser ocultada */
   fixed?: boolean;
   className?: string;
+  /** coluna de controle (ex.: seleção): não recebe o link da linha */
+  noLink?: boolean;
   cell: (row: T) => React.ReactNode;
 }
 
@@ -60,6 +62,7 @@ export function DataTable<T extends { id: string }>({
   const dir = (Array.isArray(params.dir) ? params.dir[0] : params.dir) ?? "desc";
   const href = (p: Record<string, string | number | null>) => `${basePath}${qs(p, params)}`;
   const exportQs = qs({ page: null, pageSize: null }, params);
+  const linkCol = Math.max(0, columns.findIndex((c) => !c.noLink));
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-white" data-table={id}>
       <div className="no-print flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2 text-xs text-slate-500">
@@ -104,7 +107,7 @@ export function DataTable<T extends { id: string }>({
                   <tr key={r.id} className={link ? "cursor-pointer" : undefined}>
                     {columns.map((c, i) => (
                       <td key={c.key} data-col={c.key} className={cn(c.align === "right" && "tabular text-right", c.align === "center" && "text-center", c.className)}>
-                        {link && i === 0 ? (
+                        {link && i === linkCol ? (
                           <Link href={link} className="font-medium text-brand-700 hover:underline">
                             {c.cell(r)}
                           </Link>
