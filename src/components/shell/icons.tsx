@@ -2,14 +2,14 @@ import {
   LayoutDashboard, ScanBarcode, Receipt, Undo2, Wallet, Package, ArrowLeftRight, Truck, ClipboardList, Tags, Users, ArrowDownCircle, ArrowUpCircle, LineChart,
   Landmark, CreditCard, Settings2, Factory, TrendingDown, Scale, ShoppingCart, BadgeCheck, PackageCheck, FileText, FileCheck2, FileSignature, FileBarChart, Cog,
   BarChart3, PieChart, ShieldCheck, Building2, Monitor, Plug, DatabaseBackup, History, SlidersHorizontal, Bell, LifeBuoy, Circle, Boxes, ListChecks, Tag, BadgePercent, MessageCircle, UserCheck, HandCoins, FilePen, ClipboardCheck, Weight, Combine, Percent, Gift,
-  CalendarClock,
+  CalendarClock, BookOpen, FileDown,
 } from "lucide-react";
 
 const MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, ScanBarcode, Receipt, Undo2, Wallet, Package, ArrowLeftRight, Truck, ClipboardList, Tags, Users, ArrowDownCircle, ArrowUpCircle, LineChart,
   Landmark, CreditCard, Settings2, Factory, TrendingDown, Scale, ShoppingCart, BadgeCheck, PackageCheck, FileText, FileCheck2, FileSignature, FileBarChart, Cog,
   BarChart3, PieChart, ShieldCheck, Building2, Monitor, Plug, DatabaseBackup, History, SlidersHorizontal, Bell, LifeBuoy, Boxes, ListChecks, Tag, BadgePercent, MessageCircle, UserCheck, HandCoins, FilePen, ClipboardCheck, Weight, Combine, Percent, Gift,
-  CalendarClock,
+  CalendarClock, BookOpen, FileDown,
 };
 
 export function NavIcon({ name, className }: { name: string; className?: string }) {

@@ -548,6 +548,8 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       ...ctx, name: s(120, true), kind: s(30), bankCode: s(10), agency: s(20), accountNumber: s(30), initialBalance: money,
       initialBalanceDate: date, balance: money, seq: int, active: bool, pixKey: s(120),
+      // conta contábil (código reduzido) do caixa/banco na exportação de lançamentos (CTB-02 — Domínio); opcional
+      accountingCode: s(40),
     },
     indexes: [k("i_company", "companyId")],
   },
@@ -580,7 +582,8 @@ export const COLLECTIONS: CollectionDef[] = [
   {
     id: "fin_categories",
     label: "Categorias financeiras",
-    fields: { ...ctx, name: s(120, true), type: s(20, true), parentId: id(), dreGroup: s(60), active: bool },
+    // accountingCode: conta contábil (código reduzido) para a exportação de lançamentos (CTB-02 — Domínio); opcional
+    fields: { ...ctx, name: s(120, true), type: s(20, true), parentId: id(), dreGroup: s(60), active: bool, accountingCode: s(40) },
     indexes: [k("i_company", "companyId")],
   },
   { id: "cost_centers", label: "Centros de custo", fields: { ...ctx, name: s(120, true), code: s(20), active: bool }, indexes: [k("i_company", "companyId")] },
@@ -753,8 +756,27 @@ export const COLLECTIONS: CollectionDef[] = [
       origin: s(20), orderLink: s(20),
       // precificação após a entrada (COM-07): ausente = pendente quando o recebimento está confirmado
       pricingStatus: s(20), pricedAt: dt, pricedBy: id(),
+      // FIS-24: tipo da entrada — ausente = mercadoria (estoque); "no_stock" = nota de entrada sem estoque (serviço
+      // tomado, uso e consumo, despesa com nota), escriturada no livro de entradas e com conta a pagar
+      entryKind: s(20),
+      // COM-10: frete de CT-e de entrada rateado no custo (total) e CT-e vinculados [{ cteId, key, number, amount, mode }]
+      cteFreight: money, cteLinks: json,
     },
     indexes: [u("u_scope", "scopeKey"), k("i_supplier", "supplierId")],
+  },
+  {
+    // COM-10 — CT-e de entrada (frete de compra) vinculado a recebimentos. Documento de terceiro: NÃO vai para
+    // fiscal_documents (que guarda só documentos emitidos pela empresa — ver docs/evolucao/inventario-fiscal-documents.md)
+    id: "inbound_ctes",
+    label: "CT-e de entrada (frete de compra)",
+    fields: {
+      ...ctx, number: int, cteKey: s(60), cteNumber: s(20), cteSeries: s(5), issueDate: dt, scopeKey: s(200, true),
+      carrierId: id(), emitter: json, tomador: json, cfop: s(10), entryCfop: s(10), total: money, received: money,
+      icms: json, nfeKeys: strings, receiptIds: strings, allocations: json, xmlFileId: id(), xmlHash: s(80),
+      payableTitleId: id(), status: s(20), environment: s(20), protocol: s(40), authorized: bool, notes: txt,
+      searchText: s(1000), registeredAt: dt, paymentTermId: id(), categoryId: id(),
+    },
+    indexes: [u("u_scope", "scopeKey"), k("i_company", "companyId"), k("i_carrier", "carrierId")],
   },
 
   // ───────────────────────────── Fiscal

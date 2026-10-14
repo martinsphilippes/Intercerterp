@@ -12,6 +12,7 @@ export const KIND_META: Record<IntegrationKind, { abbr: string; category: string
   fiscal_nfse: { abbr: "FS", category: "Fiscal" },
   bank: { abbr: "BC", category: "Financeiro" },
   accounting: { abbr: "CT", category: "Contabilidade" },
+  accounting_dominio: { abbr: "DM", category: "Contabilidade" },
   email: { abbr: "EM", category: "Comunicação" },
 };
 

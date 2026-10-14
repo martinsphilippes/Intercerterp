@@ -33,7 +33,9 @@ export type MovementType =
   | "supplier_return"
   | "supplier_return_cancel"
   | "assembly_out"
-  | "assembly_in";
+  | "assembly_in"
+  /** ajuste só de custo (quantidade 0): frete de CT-e de entrada lançado depois do recebimento concluído (COM-10) */
+  | "cost_adjust";
 
 export const MOVEMENT_LABEL: Record<MovementType, string> = {
   initial: "Saldo inicial",
@@ -55,6 +57,7 @@ export const MOVEMENT_LABEL: Record<MovementType, string> = {
   supplier_return_cancel: "Estorno de devolução ao fornecedor",
   assembly_out: "Saída por montagem/desmembramento",
   assembly_in: "Entrada por montagem/desmembramento",
+  cost_adjust: "Ajuste de custo (frete CT-e)",
 };
 
 export interface MovementInput {
@@ -134,6 +137,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   sales_document: "Pedido de venda (reserva)",
   assembly: "Montagem/desmembramento",
   cart: "Pré-venda (reserva)",
+  freight_cte: "CT-e de frete (compra)",
 };
 
 export function originHref(originType: string | null | undefined, originId: string | null | undefined): string | null {
@@ -165,6 +169,8 @@ export function originHref(originType: string | null | undefined, originId: stri
       return `/vendas/pedidos/${originId}`;
     case "assembly":
       return `/estoque/montagem?id=${originId}`;
+    case "freight_cte":
+      return `/compras/cte/${originId}`;
     default:
       return null;
   }
@@ -197,7 +203,9 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
   const store = ctx.store;
   for (const m of inputs) {
     // quantidade 0 só no reenquadramento de lotes do inventário (o físico não muda)
-    if (!Number.isInteger(m.qty) || (m.qty === 0 && !m.lotTarget)) throw new BusinessError("Quantidade do movimento deve ser diferente de zero.");
+    if (!Number.isInteger(m.qty) || (m.qty === 0 && !m.lotTarget && m.type !== "cost_adjust")) throw new BusinessError("Quantidade do movimento deve ser diferente de zero.");
+    // ajuste de custo (COM-10): só valor, sem quantidade
+    if (m.type === "cost_adjust" && (m.qty !== 0 || !(Number.isInteger(m.totalCost) && (m.totalCost as number) > 0))) throw new BusinessError("Ajuste de custo exige quantidade zero e valor positivo.");
     await ensureBalance(store, ctx, m.warehouseId, m.skuId);
   }
   // controle de lote por produto (lido uma vez por chamada)
@@ -220,7 +228,7 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
       // ── lotes (produto com controle): divisão do movimento e novo saldo por lote, gravados junto com o físico
       let lotParts: LotPart[] | null = null;
       let newLots: LotEntry[] | null = null;
-      if (await tracked(bal.productId)) {
+      if (m.type !== "cost_adjust" && (await tracked(bal.productId))) {
         const curLots = (bal.lots ?? []) as LotEntry[];
         if (m.lotTarget) lotParts = targetSplit(curLots, m.lotTarget, m.qty);
         else if (m.lotSplit) lotParts = mergeParts(m.lotSplit.map((p) => ({ lot: normLot(p.lot), expiry: normDate(p.expiry), mfg: normDate(p.mfg), qty: p.qty })));
@@ -237,7 +245,9 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
         lotParts = mergeParts(lotParts ?? []);
         newLots = applyParts(curLots, lotParts);
       }
-      if (m.qty === 0 && !(lotParts ?? []).length) continue; // inventário sem diferença por lote: nada a lançar
+      if (m.qty === 0 && !(lotParts ?? []).length && m.type !== "cost_adjust") continue; // inventário sem diferença por lote: nada a lançar
+      // ajuste de custo sem saldo físico: não há estoque que absorva o valor — nada a lançar
+      if (m.type === "cost_adjust" && Math.max(bal.physical as number, 0) <= 0) continue;
       const before = bal.physical as number;
       const after = before + m.qty;
       if (after < 0 && m.qty < 0 && !m.allowNegative) {
@@ -256,7 +266,12 @@ export async function postMovements(ctx: Ctx, inputs: MovementInput[], tx?: Stor
       let avg = bal.avgCost as number;
       let unitCost: number;
       let entryTotal: number | null = null;
-      if (m.qty > 0 && m.unitCost != null && COST_ENTRY_TYPES.includes(m.type)) {
+      if (m.type === "cost_adjust") {
+        // valor acrescido ao estoque existente: novo custo médio = (saldo × médio + valor) ÷ saldo
+        unitCost = 0;
+        entryTotal = m.totalCost as number;
+        avg = roundDiv((before as number) * avg + entryTotal * QTY, before as number);
+      } else if (m.qty > 0 && m.unitCost != null && COST_ENTRY_TYPES.includes(m.type)) {
         unitCost = m.unitCost;
         entryTotal = m.totalCost != null && m.totalCost >= 0 ? m.totalCost : null;
         const basis = Math.max(before, 0);

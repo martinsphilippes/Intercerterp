@@ -141,6 +141,21 @@ export const PARAMS: ParamDef[] = [
     usedBy: "PDV (pré-vendas) e Estoque (disponível)",
   },
   { key: "feature.bipagemContagem", group: "Recursos", label: "Bipagem na contagem do inventário", help: "Mostra o modo “Bipar” na folha de contagem: cada leitura do código de barras (ou do SKU digitado) soma 1 — ou a quantidade informada antes, como 6*789… — ao item lido, com som de confirmação/erro, contagem acumulada e desfazer/corrigir antes de gravar.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Estoque (inventário — folha de contagem)" },
+  {
+    key: "feature.livroEntradas", group: "Recursos", label: "Livro de entradas e nota de entrada sem estoque", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Fiscal › Livro de entradas: por período, cada documento de entrada (recebimentos de mercadoria concluídos, notas sem estoque, CT-e de frete e NF-e de entrada emitidas pela empresa) com emitente, chave/número/série, CFOP de entrada, valor contábil, base/ICMS, IPI e ICMS-ST do XML, totais por CFOP, impressão e CSV. Permite registrar nota de entrada SEM estoque (serviço tomado, uso e consumo, despesa com nota), que gera só a conta a pagar. Inclui no pacote da contabilidade os XMLs de compra do período (pasta xml-entradas) e o livro de entradas. Desligado, a tela some e o pacote volta a ter só as saídas; nada do que é de saída muda.",
+    usedBy: "Fiscal (livro de entradas), Compras (notas sem estoque) e pacote contábil",
+  },
+  {
+    key: "feature.cteEntrada", group: "Recursos", label: "CT-e de entrada (frete de compra)", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Compras › CT-e de frete: importa o XML do CT-e da transportadora (frete por conta da empresa), vincula-o a um ou mais recebimentos (sugeridos pelas NF-e transportadas) e rateia o frete no custo: no recebimento em conferência o frete entra no custo de entrada na conclusão; no já concluído vira ajuste de custo das unidades ainda em estoque. Gera a conta a pagar à transportadora (cadastrada a partir do XML se não existir). Desligado, a tela some e nenhum CT-e novo é lançado; os já lançados são mantidos.",
+    usedBy: "Compras (recebimentos e CT-e), Estoque (custo médio) e Financeiro (contas a pagar)",
+  },
+  {
+    key: "feature.exportacaoDominio", group: "Recursos", label: "Exportação de lançamentos para a Domínio", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Financeiro › Exportação Domínio: gera o arquivo texto de lançamentos contábeis (títulos emitidos e baixas do período, por competência ou caixa) no layout de importação da Domínio configurado em Central de integrações › Domínio, usando o código contábil das categorias e contas financeiras. Sem API: o escritório importa o arquivo. Desligado, a tela some.",
+    usedBy: "Financeiro (exportação Domínio) e Central de integrações",
+  },
   { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
   { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },
   {
