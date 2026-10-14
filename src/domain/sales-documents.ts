@@ -579,7 +579,17 @@ export async function syncReservations(ctx: Ctx, id: string, mode: "reduce" | "r
       shortage.push({ skuId, sku: sku?.sku ?? skuId, missing: q });
     }
   }
-  if (mode === "renew") await ctx.store.update("sales_documents", id, { reservationShortage: shortage.length ? shortage : null });
+  // falta de reserva atual (pendente − reservado por SKU) — recalculada em todo ajuste (o faturamento pode zerá-la)
+  const after = await listAll(ctx.store, "stock_reservations", { filters: [["eq", "originType", "sales_document"], ["eq", "originId", id], ["eq", "status", "active"]] });
+  const have = new Map<string, number>();
+  for (const r of after) have.set(r.skuId, (have.get(r.skuId) ?? 0) + r.qty);
+  const missing: Array<{ skuId: string; sku: string; missing: number }> = [];
+  for (const [skuId, want] of desired) {
+    const m = want - (have.get(skuId) ?? 0);
+    if (m > 0) missing.push({ skuId, sku: items.find((i) => i.skuId === skuId)?.sku ?? skuId, missing: m });
+  }
+  const now = missing.length ? missing : null;
+  if (JSON.stringify(now) !== JSON.stringify(doc.reservationShortage ?? null)) await ctx.store.update("sales_documents", id, { reservationShortage: now });
   return { shortage, released };
 }
 
