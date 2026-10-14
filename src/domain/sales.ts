@@ -24,6 +24,7 @@ import type { CtxUser } from "@/lib/core/ctx";
 import { promoClock } from "./promotions-calc";
 import { livePromotionRules } from "./promotions";
 import { LOYALTY_METHOD_ID, earnLoyaltyForSale, loyaltyEnabled, loyaltyMethod, loyaltyParams, prepareRedemption, reverseLoyaltyForCancel, reverseLoyaltyForReturn } from "./loyalty";
+import { cardFeeForSale, resolveCardFee, type CardFeeRule } from "./card-fees";
 
 /**
  * Vendas (Telas 4–11).
@@ -161,7 +162,7 @@ export async function prepareSale(ctx: Ctx, input: FinalizeSaleInput, opts: { ap
   return { branchId, branch, terminal, warehouse, lines, calc, customer, priceTableId, avail, stockWarnings, allowNegative, kits, lotByLine };
 }
 
-type PreparedPay = SalePaymentInput & { method: Doc; change: number; intent?: Doc | null; voucher?: Doc | null; term?: Doc | null; status: string; manual: boolean; loyalty?: { points: number; plan: Array<{ voucher: Doc; take: number }> } | null };
+type PreparedPay = SalePaymentInput & { method: Doc; change: number; intent?: Doc | null; voucher?: Doc | null; term?: Doc | null; status: string; manual: boolean; loyalty?: { points: number; plan: Array<{ voucher: Doc; take: number }> } | null; cardRule?: CardFeeRule | null };
 
 /** Parcelas efetivas de um pagamento a prazo (as mesmas usadas para gerar o título). */
 function deferredInstallments(p: PreparedPay) {
@@ -254,6 +255,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
     let voucher: Doc | null = null;
     let term: Doc | null = null;
     let loyalty: PreparedPay["loyalty"] = null;
+    let cardRule: CardFeeRule | null = null;
     const status = "confirmed";
     let manual = true;
     switch (method.kind) {
@@ -291,6 +293,8 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
           const n = p.installments ?? 1;
           assert(Number.isInteger(n) && n >= 1 && n <= Math.max(1, method.maxInstallments ?? 1), `${method.name}: máximo de ${Math.max(1, method.maxInstallments ?? 1)} parcela(s).`);
         }
+        // FIN-24: taxa/prazo pela tabela do meio (bandeira × parcelas); sem tabela = taxa e prazo únicos do meio
+        cardRule = await cardFeeForSale(ctx.store, ctx.companyId, branchId, method, p.cardBrand, method.kind === "credit" ? Math.max(1, p.installments ?? 1) : 1);
         break;
       }
       case "store_credit": {
@@ -335,7 +339,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
       default:
         assert(method.accountId, `Meio ${method.name} sem conta financeira de destino.`);
     }
-    pays.push({ ...p, method, change, intent, voucher, term, status, manual, loyalty });
+    pays.push({ ...p, method, change, intent, voucher, term, status, manual, loyalty, cardRule });
   }
   // Inadimplência (VEN-07): política da filial aplicada no servidor; bloqueio só segue com liberação registrada
   const overdueCheck = customer ? await checkSaleOverdue(ctx, { branchId, customerId: customer.id, deferred: pays.some((p) => DEFERRED_KINDS.includes(p.method.kind)), release: input.overdueRelease }) : null;
@@ -541,9 +545,10 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
           }
         } else if (kind === "debit" || kind === "credit") {
           // Recebível contra a adquirente: venda bruta ≠ recebível ≠ taxa ≠ liquidação
-          fee = pct(p.amount, p.method.feeBps ?? 0);
+          const rule = p.cardRule ?? resolveCardFee(p.method, null, 1, false);
+          fee = pct(p.amount, rule.feeBps);
           const n = kind === "credit" ? Math.max(1, p.installments ?? 1) : 1;
-          const firstDays = p.method.settlementDays ?? (kind === "debit" ? 1 : 30);
+          const firstDays = rule.settlementDays ?? (kind === "debit" ? 1 : 30);
           const parts = buildSchedule(p.amount, { installments: n, firstDueDays: 0, intervalDays: 30 }, addDays(date, firstDays)).map((x, k) => ({ ...x, dueDate: k === 0 ? addDays(date, firstDays) : addMonths(addDays(date, firstDays), k), methodKind: kind }));
           settlementDate = parts[0].dueDate;
           dueDates = parts.map((x) => ({ dueDate: x.dueDate, amount: x.amount }));
@@ -552,7 +557,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
             {
               kind: "receivable", partyType: "other", partyName: `Adquirente — ${p.method.name}`, description: `Recebível de cartão — venda nº ${number}`, documentNumber: p.nsu ?? null,
               originType: "sale_card", originId: saleId, operationId, issueDate: date, competenceDate: date, installments: parts, idemKey: `sale:${saleId}:card:${i + 1}`, branchId,
-              notes: `NSU ${p.nsu ?? "—"} · Aut. ${p.authCode ?? "—"} · Taxa prevista ${formatMoney(fee)}`,
+              notes: `NSU ${p.nsu ?? "—"} · Aut. ${p.authCode ?? "—"} · Taxa prevista ${formatMoney(fee)}${rule.source === "table" ? ` (tabela ${rule.label})` : ""}`,
             },
             t,
           );
@@ -587,6 +592,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
             cardBrand: p.cardBrand ?? null, feeAmount: fee, netAmount: p.amount - fee, settlementDate, confirmedAt: DEFERRED_KINDS.includes(kind) ? null : completedAt, manual: p.manual,
             voucherId: p.voucher?.id ?? null, titleId: titleIdForPay, dueDates,
             ...(p.loyalty ? { loyaltyPoints: p.loyalty.points } : {}),
+            ...(p.cardRule?.source === "table" ? { feeBps: p.cardRule.feeBps, feeRule: p.cardRule.label } : {}),
           },
           payId,
         );

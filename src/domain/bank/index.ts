@@ -42,3 +42,4 @@ export function parseBankFile(data: Buffer | string, fileName: string, opts: Par
   const csv = sniffCsv(text);
   return { result: parseCsv(text, opts.csvMapping ?? csv.guess), text, csv };
 }
+export { ACQUIRER_FIELDS, normalizeNsu, parseAcquirerCsv, parseInstallment, sniffAcquirerCsv, validateAcquirerLayout, type AcquirerLayout, type AcquirerLine, type AcquirerSniff } from "./acquirer";

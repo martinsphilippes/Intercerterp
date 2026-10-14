@@ -1,5 +1,5 @@
 import Link from "@/components/ui/link";
-import { Pencil, Plus } from "lucide-react";
+import { Download, Pencil, Plus } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
@@ -13,13 +13,17 @@ import { listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import { formatBps, formatMoney } from "@/lib/money";
 import { formatDate, today } from "@/lib/dates";
-import { can } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
+import { featureOn } from "@/lib/server/features";
+import { CARD_BRANDS } from "@/domain/card-fees";
+import { codedName, effectiveDreGroup, flattenTree } from "@/domain/chart-of-accounts";
 import { lookups } from "@/lib/server/lookups";
 import { getSetting } from "@/lib/core/settings";
 import { ACCOUNT_KIND_LABEL, DRE_GROUPS, lateChargeParams, METHOD_KINDS, paymentTermInterestNotice } from "@/domain/finance";
 import { FormDialog } from "../_components/form-dialog";
 import { buttonClass } from "@/components/ui/button";
 import { PercentField } from "./percent-field";
+import { FeeTableEditor } from "./fee-table-editor";
 import { saveAccountAction, saveCategoryAction, saveCostCenterAction, saveFinanceParamsAction, savePaymentMethodAction, savePaymentTermAction, setActiveAction } from "../actions";
 
 export const metadata = { title: "Cadastros financeiros" };
@@ -41,11 +45,16 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
     lookups.branches(s.ctx),
     lookups.accounts(s.ctx),
   ]);
+  const feeOn = await featureOn(s, "taxasCartao");
   const canEdit = can(s.user, "finance", "edit");
   const canCreate = can(s.user, "finance", "create");
   const accName = new Map(accounts.map((a) => [a.id, a.name]));
   const branchName = new Map(branches.map((b) => [b.value, b.label]));
-  const catName = new Map(cats.map((c) => [c.id, c.name]));
+  const catName = new Map(cats.map((c) => [c.id, codedName(c as any)]));
+  const catById = new Map(cats.map((c) => [c.id, c]));
+  const catTree = flattenTree(cats as any[]);
+  const ccTree = flattenTree(ccs as any[]);
+  const ccName = new Map(ccs.map((c) => [c.id, c.code ? `${c.code} — ${c.name}` : c.name]));
   const toggle = (collection: Parameters<typeof setActiveAction>[0], d: Doc) =>
     canEdit && <ActionButton action={setActiveAction.bind(null, collection, d.id, d.active === false)} label={d.active === false ? "Reativar" : "Inativar"} size="sm" variant="ghost" confirm={d.active === false ? undefined : `Inativar "${d.name}"? O histórico é preservado e ele deixa de aparecer nas seleções.`} />;
 
@@ -121,6 +130,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <Checkbox name="availablePdv" label="Disponível no PDV" defaultChecked={m ? m.availablePdv !== false : true} />
         <Checkbox name="active" label="Ativo" defaultChecked={m ? m.active !== false : true} />
       </div>
+      {feeOn && (!m || m.kind === "credit" || m.kind === "debit") && <FeeTableEditor initial={m?.feeTable} brands={CARD_BRANDS} maxHint={48} />}
     </>
   );
   const termFields = (t?: Doc) => (
@@ -162,8 +172,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <Field label="Grupo do DRE">
           <Select name="dreGroup" defaultValue={c?.dreGroup ?? ""} options={DRE_GROUPS.map((g) => ({ value: g, label: g }))} placeholder="—" />
         </Field>
-        <Field label="Categoria pai" className="sm:col-span-2">
-          <Select name="parentId" defaultValue={c?.parentId ?? ""} options={cats.filter((x) => x.id !== c?.id).map((x) => ({ value: x.id, label: `${x.name} (${x.type === "revenue" ? "receita" : "despesa"})` }))} placeholder="—" />
+        <Field label="Código (classificação)" hint="Ex.: 3.1.01 — ordena o plano de contas">
+          <Input name="code" defaultValue={c?.code ?? ""} maxLength={20} placeholder="3.1.01" />
+        </Field>
+        <Field label="Código da conta contábil" hint="Conta no plano do contador (pacote contábil)">
+          <Input name="accountingCode" defaultValue={c?.accountingCode ?? ""} maxLength={40} />
+        </Field>
+        <Field label="Categoria pai (sintética)" className="sm:col-span-2" hint="Até 6 níveis. Sem grupo do DRE, a categoria usa o grupo da categoria pai.">
+          <Select name="parentId" defaultValue={c?.parentId ?? ""} options={catTree.filter((x) => x.id !== c?.id).map((x) => ({ value: x.id, label: `${"\u00a0\u00a0".repeat(x.depth - 1)}${codedName(x)} (${x.type === "revenue" ? "receita" : "despesa"})` }))} placeholder="— (raiz)" />
         </Field>
       </FormGrid>
       <Checkbox name="active" label="Ativa" defaultChecked={c ? c.active !== false : true} />
@@ -178,6 +194,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         </Field>
         <Field label="Nome" required>
           <Input name="name" defaultValue={c?.name ?? ""} required maxLength={120} />
+        </Field>
+        <Field label="Centro de custo pai" className="sm:col-span-2" hint="Até 3 níveis (ex.: Lojas › Loja Matriz › Setor).">
+          <Select name="parentId" defaultValue={c?.parentId ?? ""} options={ccTree.filter((x) => x.id !== c?.id).map((x) => ({ value: x.id, label: `${"\u00a0\u00a0".repeat(x.depth - 1)}${ccName.get(x.id)}` }))} placeholder="— (raiz)" />
         </Field>
       </FormGrid>
       <Checkbox name="active" label="Ativo" defaultChecked={c ? c.active !== false : true} />
@@ -280,7 +299,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                     <td className="font-medium">{m.name}</td>
                     <td>{METHOD_KINDS.find((k) => k.value === m.kind)?.label ?? m.kind}</td>
                     <td>{m.accountId ? accName.get(m.accountId) : "—"}</td>
-                    <td className="tabular text-right">{formatBps(m.feeBps ?? 0)}</td>
+                    <td className="tabular text-right">
+                      {formatBps(m.feeBps ?? 0)}
+                      {Array.isArray(m.feeTable) && m.feeTable.length > 0 && (
+                        <span className="mt-0.5 block" title={`Tabela por bandeira e parcelas: ${m.feeTable.length} linha(s)${feeOn ? "" : " (recurso desligado: ignorada na venda)"}`}>
+                          <Badge tone={feeOn ? "info" : "neutral"}>Tabela ({m.feeTable.length})</Badge>
+                        </span>
+                      )}
+                    </td>
                     <td className="tabular text-right">{m.settlementDays ? `${m.settlementDays} dia(s)` : "Imediata"}</td>
                     <td>{yes(m.allowsChange)}</td>
                     <td>{yes(m.requiresCustomer)}</td>
@@ -345,36 +371,65 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         </Card>
       )}
       {tab === "categorias" && (
-        <Card title="Categorias financeiras" description="Classificam receitas e despesas no fluxo de caixa e no DRE." actions={newBtn("Nova categoria", "Nova categoria financeira", saveCategoryAction, catFields())} bodyClass="p-0">
-          <table className="table-base w-full text-sm">
-            <thead>
-              <tr>
-                <th>Categoria</th>
-                <th>Tipo</th>
-                <th>Grupo do DRE</th>
-                <th>Categoria pai</th>
-                <th>Situação</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {cats.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name, "pt-BR")).map((c) => (
-                <tr key={c.id}>
-                  <td className="font-medium">{c.name}</td>
-                  <td>{c.type === "revenue" ? <Badge tone="good">Receita</Badge> : <Badge tone="warn">Despesa</Badge>}</td>
-                  <td>{c.dreGroup ?? "—"}</td>
-                  <td>{c.parentId ? catName.get(c.parentId) : "—"}</td>
-                  <td>{active(c)}</td>
-                  <td className="text-right">
-                    <div className="flex justify-end gap-1">
-                      {editBtn(`Editar categoria — ${c.name}`, saveCategoryAction, catFields(c))}
-                      {toggle("fin_categories", c)}
-                    </div>
-                  </td>
+        <Card
+          title="Plano de contas (categorias financeiras)"
+          description="Classificam receitas e despesas no fluxo de caixa e no DRE. Hierarquia de até 6 níveis: categoria com subcategorias é sintética; sem grupo do DRE, usa o da categoria pai."
+          actions={
+            <div className="flex flex-wrap gap-2">
+              {canDo(s.user, "data.export") && (
+                <a className={buttonClass("secondary")} href="/api/export/fin-chart-of-accounts">
+                  <Download className="size-4" aria-hidden /> Exportar CSV
+                </a>
+              )}
+              {newBtn("Nova categoria", "Nova categoria financeira", saveCategoryAction, catFields())}
+            </div>
+          }
+          bodyClass="p-0"
+        >
+          <div className="overflow-x-auto">
+            <table className="table-base w-full text-sm">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Categoria</th>
+                  <th>Tipo</th>
+                  <th>Grupo do DRE</th>
+                  <th>Conta contábil</th>
+                  <th>Estrutura</th>
+                  <th>Situação</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {catTree.map((c) => {
+                  const eff = effectiveDreGroup(c.id, catById as Map<string, any>);
+                  return (
+                    <tr key={c.id}>
+                      <td className="tabular whitespace-nowrap text-xs">{c.code ?? "—"}</td>
+                      <td className="font-medium" style={{ paddingLeft: `${0.75 + (c.depth - 1) * 1.25}rem` }}>
+                        {c.name}
+                        {c.depth > 1 && <span className="block text-xs font-normal text-slate-500">{c.path}</span>}
+                      </td>
+                      <td>{c.type === "revenue" ? <Badge tone="good">Receita</Badge> : <Badge tone="warn">Despesa</Badge>}</td>
+                      <td>
+                        {eff ?? "—"}
+                        {eff && !c.dreGroup && <span className="block text-xs text-slate-500">herdado da categoria pai</span>}
+                      </td>
+                      <td className="tabular text-xs">{c.accountingCode ?? "—"}</td>
+                      <td>{c.synthetic ? <Badge tone="info">Sintética</Badge> : <span className="text-xs text-slate-500">Analítica · nível {c.depth}</span>}</td>
+                      <td>{active(c)}</td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-1">
+                          {editBtn(`Editar categoria — ${c.name}`, saveCategoryAction, catFields(c))}
+                          {toggle("fin_categories", c)}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
       {tab === "centros" && (
@@ -392,10 +447,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
                 </tr>
               </thead>
               <tbody>
-                {ccs.sort((a, b) => String(a.code ?? "").localeCompare(String(b.code ?? ""))).map((c) => (
+                {ccTree.map((c) => (
                   <tr key={c.id}>
                     <td>{c.code ?? "—"}</td>
-                    <td className="font-medium">{c.name}</td>
+                    <td className="font-medium" style={{ paddingLeft: `${0.75 + (c.depth - 1) * 1.25}rem` }}>
+                      {c.name}
+                      {c.depth > 1 && <span className="block text-xs font-normal text-slate-500">{c.path}</span>}
+                    </td>
                     <td>{active(c)}</td>
                     <td className="text-right">
                       <div className="flex justify-end gap-1">

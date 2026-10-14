@@ -19,7 +19,7 @@ import { settleCardReceivable } from "@/domain/sales";
 import { assertNotOpenPdvReceipt } from "@/domain/pdv-receivables";
 import type { BankFormat, CsvMapping } from "@/domain/bank";
 import { queryCardReceivables } from "./queries";
-import { requireFeature } from "@/lib/server/features";
+import { featureOn, requireFeature } from "@/lib/server/features";
 import { previewBatchSettlement, settleBatch } from "@/domain/finance-batch";
 
 const RV = ["/financeiro/receber", "/financeiro/pagar", "/financeiro/fluxo-caixa", "/financeiro/conciliacao", "/financeiro/cartoes"];
@@ -334,6 +334,8 @@ export async function savePaymentMethodAction(fd: FormData) {
     await savePaymentMethod(s.ctx, id, {
       name: fstr(fd, "name"), kind: fstr(fd, "kind"), accountId: fopt(fd, "accountId"), feeBps: fint(fd, "feeBps"), settlementDays: fint(fd, "settlementDays"), allowsChange: fbool(fd, "allowsChange"),
       requiresCustomer: fbool(fd, "requiresCustomer"), availablePdv: fbool(fd, "availablePdv"), maxInstallments: fint(fd, "maxInstallments", 1), sortOrder: fint(fd, "sortOrder", 99), active: fbool(fd, "active"),
+      // FIN-24: tabela por bandeira/parcelas só é enviada pelo formulário com o recurso ligado (ausente = mantém a gravada)
+      ...(fd.has("feeTable") && (await featureOn(s, "taxasCartao")) ? { feeTable: fjson<unknown>(fd, "feeTable", []) } : {}),
     });
     return { ok: true as const, message: "Meio de pagamento salvo." };
   });
@@ -351,7 +353,10 @@ export async function savePaymentTermAction(fd: FormData) {
 export async function saveCategoryAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
-    await saveFinCategory(s.ctx, id, { name: fstr(fd, "name"), type: fstr(fd, "type") as any, parentId: fopt(fd, "parentId"), dreGroup: fopt(fd, "dreGroup"), active: fbool(fd, "active") });
+    await saveFinCategory(s.ctx, id, {
+      name: fstr(fd, "name"), type: fstr(fd, "type") as any, parentId: fopt(fd, "parentId"), dreGroup: fopt(fd, "dreGroup"), active: fbool(fd, "active"),
+      ...(fd.has("code") ? { code: fopt(fd, "code") } : {}), ...(fd.has("accountingCode") ? { accountingCode: fopt(fd, "accountingCode") } : {}),
+    });
     return { ok: true as const, message: "Categoria salva." };
   });
 }
@@ -359,7 +364,7 @@ export async function saveCategoryAction(fd: FormData) {
 export async function saveCostCenterAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
-    await saveCostCenter(s.ctx, id, { name: fstr(fd, "name"), code: fopt(fd, "code"), active: fbool(fd, "active") });
+    await saveCostCenter(s.ctx, id, { name: fstr(fd, "name"), code: fopt(fd, "code"), active: fbool(fd, "active"), ...(fd.has("parentId") ? { parentId: fopt(fd, "parentId") } : {}) });
     return { ok: true as const, message: "Centro de custo salvo." };
   });
 }
