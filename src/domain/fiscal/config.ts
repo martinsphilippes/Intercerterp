@@ -10,6 +10,7 @@ import { peekNumber } from "@/lib/core/numbering";
 import { isValidCnpj, onlyDigits } from "@/lib/core/text";
 import { getFiscalConfig, numberKey, saveFiscalConfig } from "./service";
 import { secretRefProblem } from "../integrations";
+import { normalizeReformGroup, type ReformGroupInput } from "./reform";
 
 /**
  * Configurações fiscais (Tela 34): dados do emitente (empresa/filial), certificado A1 (somente metadados),
@@ -205,6 +206,8 @@ export interface TaxGroupInput {
   active: boolean;
   notes?: string | null;
   approxTaxBps?: number;
+  /** reforma tributária (FIS-19) — só quando o bloco "Reforma tributária" foi enviado; ausente = campos mantidos */
+  reform?: ReformGroupInput | null;
 }
 
 function checkTaxGroup(i: TaxGroupInput) {
@@ -220,7 +223,8 @@ function checkTaxGroup(i: TaxGroupInput) {
 export async function saveTaxGroup(ctx: Ctx, id: string | null, input: TaxGroupInput) {
   requireAction(ctx, "fiscal.configure");
   checkTaxGroup(input);
-  const data = { ...input, name: input.name.trim(), cfopReturn: input.cfopReturn || null, ipiCst: input.ipiCst || null, validFrom: input.validFrom || null, validTo: input.validTo || null, notes: input.notes?.trim() || null };
+  const { reform, ...rest } = input;
+  const data = { ...rest, name: input.name.trim(), cfopReturn: input.cfopReturn || null, ipiCst: input.ipiCst || null, validFrom: input.validFrom || null, validTo: input.validTo || null, notes: input.notes?.trim() || null, ...(reform ? normalizeReformGroup(reform) : {}) };
   if (id) {
     const before = await ctx.store.getOrThrow("tax_groups", id);
     assert(before.companyId === ctx.companyId, "Grupo de outra empresa.");
@@ -232,6 +236,16 @@ export async function saveTaxGroup(ctx: Ctx, id: string | null, input: TaxGroupI
   const doc = await ctx.store.create("tax_groups", { ...data, companyId: ctx.companyId, createdBy: ctx.user.id });
   await audit(ctx, { module: "fiscal", action: "tax_group.create", entityType: "tax_group", entityId: doc.id, summary: `Grupo tributário "${data.name}" criado`, after: data });
   return doc;
+}
+
+/**
+ * Adesão à reforma tributária (FIS-19) na configuração fiscal da empresa/filial: com adesão, a data de início é
+ * obrigatória — antes dela os documentos saem sem os grupos IBS/CBS/IS.
+ */
+export async function saveReformAdherence(ctx: Ctx, branchId: string | null, input: { adherence: boolean; from?: string | null }) {
+  const from = input.from || null;
+  if (input.adherence) assert(from && /^\d{4}-\d{2}-\d{2}$/.test(from), "Informe a data de início da adesão à reforma tributária.");
+  return saveFiscalConfig(ctx, branchId, { reformAdherence: Boolean(input.adherence), reformAdherenceFrom: input.adherence ? from : null });
 }
 
 export async function taxGroupUsage(ctx: Ctx, id: string) {

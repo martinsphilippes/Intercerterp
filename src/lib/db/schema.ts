@@ -214,6 +214,8 @@ export const COLLECTIONS: CollectionDef[] = [
       composition: s(20),
       // controle de saldo por lote e validade (EST-02); ausente = sem controle
       lotControl: bool,
+      // reforma tributária (FIS-19, opcionais): CST e cClassTrib do IBS/CBS próprios (sobrepõem os do grupo tributário)
+      ibsCbsCst: s(5), cClassTrib: s(10),
     },
     indexes: [k("i_company", "companyId"), u("u_code", "companyId", "code"), k("i_category", "categoryId"), u("u_plu", "companyId", "plu")],
   },
@@ -800,6 +802,8 @@ export const COLLECTIONS: CollectionDef[] = [
       connectionStatus: s(30), validFrom: date, extra: json,
       nfeCancelHours: int, nfceCancelMinutes: int, defaultNature: s(120), simulateOutage: bool, contingencySince: dt,
       autoEmail: bool, checkAvailability: bool, approxTaxBps: int,
+      // reforma tributária (FIS-19, opcionais): adesão aos grupos IBS/CBS/IS e data de início; ausente = sem adesão
+      reformAdherence: bool, reformAdherenceFrom: date,
     },
     indexes: [u("u_scope", "scopeKey")],
   },
@@ -811,6 +815,9 @@ export const COLLECTIONS: CollectionDef[] = [
       icmsRateBps: int, icmsBaseReductionBps: int, fcpRateBps: int, pisCst: s(5), pisRateBps: int, cofinsCst: s(5),
       cofinsRateBps: int, ipiCst: s(5), ipiRateBps: int, validFrom: date, validTo: date, active: bool, notes: s(500),
       approxTaxBps: int,
+      // reforma tributária (FIS-19, opcionais): CST e cClassTrib do IBS/CBS, alíquotas (IBS da UF, CBS, IS), redução de
+      // alíquota (pRedAliq) e início da vigência dos grupos da reforma neste grupo; ausentes = grupo sem reforma
+      ibsCbsCst: s(5), cClassTrib: s(10), ibsRateBps: int, cbsRateBps: int, isRateBps: int, ibsCbsRedBps: int, reformValidFrom: date,
     },
     indexes: [k("i_company", "companyId")],
   },

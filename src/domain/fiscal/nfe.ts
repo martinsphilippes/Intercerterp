@@ -7,6 +7,7 @@ import { requireAction, requireBranch, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { onlyDigits } from "@/lib/core/text";
 import type { SupplierReturnPlan } from "../supplier-returns";
+import { isReformActive } from "./reform";
 import {
   addEvent,
   assertDocScope,
@@ -18,6 +19,7 @@ import {
   INACTIVE,
   submitDraft,
   validateDocument,
+  validateWarnings,
   type DocEffects,
   type DocItem,
   type OperationKind,
@@ -373,8 +375,9 @@ export async function buildNfe(ctx: Ctx, input: NfeInput) {
     service: { referencedKeys: input.referencedKeys.map(onlyDigits).filter(Boolean), additionalInfo: input.additionalInfo || null },
   } as unknown as Doc;
   const issues = validateDocument(draft, company, branch);
-  // alertas (não impedem a transmissão)
-  const warnings: string[] = [];
+  // alertas (não impedem a transmissão): avisos prévios de cadastro/tributação (FIS-26/27) e do formulário
+  const cfg = await getFiscalConfig(ctx.store, ctx.companyId, input.branchId);
+  const warnings: string[] = validateWarnings(draft, company, branch, await warningContext(ctx, items, input.branchId, cfg));
   const tr = input.transport ?? { mode: "9" };
   if (String(tr.mode) !== "9" && !tr.carrierName && !["3", "4"].includes(String(tr.mode))) warnings.push("Transporte: transportador não informado para a modalidade de frete escolhida.");
   if (["0", "1", "2"].includes(String(tr.mode)) && tr.carrierName && !tr.vehiclePlate) warnings.push("Transporte incompleto: placa do veículo não informada.");
@@ -541,6 +544,32 @@ export async function refreshFromCatalog(ctx: Ctx, documentId: string) {
   await addEvent(ctx, doc.id, "refresh", doc.status, changes.length ? `Dados fiscais atualizados do cadastro: ${changes.join("; ")}` : "Dados fiscais conferidos com o cadastro (sem alterações).");
   await audit(ctx, { module: "fiscal", action: "document.refresh", entityType: "fiscal_document", entityId: doc.id, summary: `${doc.model.toUpperCase()} ${doc.number ? "nº " + doc.number : doc.ref}: dados fiscais atualizados do cadastro (${changes.length} alteração(ões))`, branchId: doc.branchId });
   return { doc: updated, changes };
+}
+
+/** Dados de apoio dos avisos prévios: adesão vigente à reforma e produtos/SKUs dos itens (GTIN). */
+async function warningContext(ctx: Ctx, items: DocItem[], branchId: string | null, cfg: Doc | null) {
+  const products = new Map<string, Doc>();
+  const skus = new Map<string, Doc>();
+  for (const i of items) {
+    if (i.productId && !products.has(i.productId)) {
+      const p = await ctx.store.get("products", i.productId);
+      if (p) products.set(p.id, p);
+    }
+    if (i.skuId && !skus.has(i.skuId)) {
+      const k = await ctx.store.get("skus", i.skuId);
+      if (k) skus.set(k.id, k);
+    }
+  }
+  return { reformOn: await isReformActive(ctx.store, ctx.companyId, branchId, cfg), products, skus };
+}
+
+/** Avisos prévios atuais do documento (não impedem a transmissão — FIS-26/27). */
+export async function currentWarnings(ctx: Ctx, doc: Doc) {
+  if (doc.model === "nfse") return [];
+  const company = await ctx.store.getOrThrow("companies", doc.companyId);
+  const branch = doc.branchId ? await ctx.store.get("branches", doc.branchId) : null;
+  const cfg = await getFiscalConfig(ctx.store, ctx.companyId, doc.branchId);
+  return validateWarnings(doc, company, branch, await warningContext(ctx, (doc.items ?? []) as DocItem[], doc.branchId, cfg));
 }
 
 /** Pendências atuais do documento (para exibição antes de retransmitir). */

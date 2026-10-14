@@ -10,6 +10,7 @@ import { saveFile } from "@/lib/core/files";
 import { formatMoney, QTY } from "@/lib/money";
 import { balanceId, ensureBalance, postMovements } from "./stock";
 import { defaultPriceTableId, priceScopeKey, recordPriceHistory, savePrice, validatePrice } from "./pricing";
+import { checkReformCodes, normalizeReformGroup, type ReformGroupInput } from "./fiscal/reform";
 
 /**
  * Produtos e serviços (Telas 15–16 e visões complementares 1 e 2).
@@ -160,7 +161,8 @@ export function fiscalIssues(p: Record<string, any>, taxGroup?: Record<string, a
   return out;
 }
 
-const ST_CODES = new Set(["201", "202", "203", "500", "10", "30", "60", "70"]);
+/** CST/CSOSN com substituição tributária (CEST obrigatório no item). */
+export const ST_CODES = new Set(["201", "202", "203", "500", "10", "30", "60", "70"]);
 
 export function formatNcm(ncm: string | null | undefined) {
   const d = onlyDigits(ncm);
@@ -1142,6 +1144,8 @@ export interface TaxGroupInput {
   validTo?: string | null;
   active?: boolean;
   notes?: string | null;
+  /** reforma tributária (FIS-19) — só quando o bloco "Reforma tributária" foi enviado; ausente = campos mantidos */
+  reform?: ReformGroupInput | null;
 }
 
 /** Grupos tributários: CFOP por operação e CST/CSOSN coerentes com o regime informado. */
@@ -1168,12 +1172,30 @@ export async function saveTaxGroup(ctx: Ctx, input: TaxGroupInput) {
     cstCsosn: cst, icmsRateBps: input.icmsRateBps ?? null, icmsBaseReductionBps: input.icmsBaseReductionBps ?? null, fcpRateBps: input.fcpRateBps ?? null,
     pisCst: input.pisCst?.trim() || null, pisRateBps: input.pisRateBps ?? null, cofinsCst: input.cofinsCst?.trim() || null, cofinsRateBps: input.cofinsRateBps ?? null,
     ipiCst: input.ipiCst?.trim() || null, ipiRateBps: input.ipiRateBps ?? null, validFrom: input.validFrom || null, validTo: input.validTo || null, active: input.active ?? true, notes: input.notes?.trim() || null,
+    ...(input.reform ? normalizeReformGroup(input.reform) : {}),
   };
   const before = input.id ? await ctx.store.getOrThrow("tax_groups", input.id) : null;
   if (before) assert(before.companyId === ctx.companyId, "Grupo de outra empresa.");
   const doc = before ? await ctx.store.update("tax_groups", before.id, data) : await ctx.store.create("tax_groups", { companyId: ctx.companyId, createdBy: ctx.user.id, ...data });
   const d = diff(before, data);
   await audit(ctx, { module: "products", action: before ? "tax_group.update" : "tax_group.create", entityType: "tax_group", entityId: doc.id, summary: `Grupo tributário ${name} ${before ? "alterado" : "cadastrado"}`, before: before ? d.before : undefined, after: d.after });
+  return doc;
+}
+
+/**
+ * Reforma tributária no produto (FIS-19): CST e cClassTrib do IBS/CBS próprios, que sobrepõem os do grupo tributário
+ * (alíquotas e vigência continuam vindo do grupo). Vazios = usa o grupo.
+ */
+export async function saveProductReform(ctx: Ctx, productId: string, input: { ibsCbsCst?: string | null; cClassTrib?: string | null }) {
+  requirePerm(ctx, "products", "edit");
+  const before = await ctx.store.getOrThrow("products", productId);
+  assert(before.companyId === ctx.companyId, "Produto de outra empresa.");
+  assert(before.type !== "service", "Serviços (NFS-e) não usam os grupos IBS/CBS da NF-e.");
+  const data = { ibsCbsCst: onlyDigits(input.ibsCbsCst) || null, cClassTrib: onlyDigits(input.cClassTrib) || null };
+  checkReformCodes(data.ibsCbsCst, data.cClassTrib);
+  const doc = await ctx.store.update("products", productId, data);
+  const d = diff(before, data);
+  await audit(ctx, { module: "products", action: "product.reform", entityType: "product", entityId: productId, summary: `Reforma tributária do produto ${before.name}: CST ${data.ibsCbsCst ?? "do grupo"}, cClassTrib ${data.cClassTrib ?? "do grupo"}`, before: d.before, after: d.after });
   return doc;
 }
 

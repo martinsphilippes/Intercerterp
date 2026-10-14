@@ -14,6 +14,8 @@ import { isValidCnpj, isValidCpf, onlyDigits } from "@/lib/core/text";
 import { fiscalProviderFrom, TPAG, type FiscalModel, type FiscalProvider, type ProviderResult } from "./providers";
 import { cscRefProblem, fiscalTokenRefProblem, logIntegration } from "../integrations";
 import type { SupplierReturnPlan } from "../supplier-returns";
+import { computeItemReform, ibsCbsKind, isReformActive, reformActiveForDoc, reformParamsFor, reformPayloadItem, reformPayloadTotals, reformXmlItem, reformXmlTotals, type ItemReform, type ReformParams } from "./reform";
+import { isValidGtin, ST_CODES } from "../products";
 
 /**
  * Documentos fiscais (Telas 30–35).
@@ -222,6 +224,8 @@ export interface TaxInfo {
   groupIssue: string | null;
   /** carga tributária aproximada (Lei 12.741/2012) — percentual parametrizado no grupo ou na configuração */
   approxTaxBps: number;
+  /** reforma tributária (FIS-19): CST/cClassTrib e alíquotas do IBS/CBS/IS — usados só com a adesão vigente */
+  reform: ReformParams | null;
 }
 
 export type OperationKind = "sale" | "sale_return" | "supplier_return" | "transfer" | "purchase" | "other";
@@ -273,6 +277,7 @@ async function taxFor(store: Store, product: Doc, company: Doc, cfg: Doc | null,
     groupName: g?.name ?? null,
     groupIssue: groupValidity(g),
     approxTaxBps: g?.approxTaxBps ?? cfg?.approxTaxBps ?? 0,
+    reform: reformParamsFor(product, g, today()),
   };
 }
 
@@ -321,6 +326,8 @@ export interface DocItem {
   nItemPed?: number | null;
   /** rastreabilidade do lote (EST-02): nLote, qLote (milésimos), dFab e dVal (AAAA-MM-DD) */
   rastro?: FiscalRastro[] | null;
+  /** reforma tributária (FIS-19): IBS/CBS/IS do item — presente SOMENTE com a adesão vigente e o grupo com CST do IBS/CBS */
+  ibsCbs?: ItemReform | null;
 }
 
 export interface FiscalRastro {
@@ -376,6 +383,8 @@ export async function buildItems(
 ): Promise<DocItem[]> {
   const company = await ctx.store.getOrThrow("companies", ctx.companyId);
   const cfg = await getFiscalConfig(ctx.store, ctx.companyId, opts.branchId);
+  // reforma tributária: grupos IBS/CBS/IS calculados só com a adesão vigente (recurso + configuração + data)
+  const reformOn = await isReformActive(ctx.store, ctx.companyId, opts.branchId, cfg);
   const grossList = lines.map((l) => roundDiv(l.unitPrice * l.qty, QTY));
   const weights = grossList.map((g, i) => Math.max(0, g - lines[i].discount));
   const freightAlloc = allocate(opts.freight ?? 0, weights);
@@ -395,6 +404,9 @@ export async function buildItems(
     // CST 20: base reduzida pelo percentual do grupo tributário (pRedBC)
     const redBps = normal && cst === "20" ? tax.icmsBaseReductionBps : 0;
     const icmsBase = normal ? net - pct(net, redBps) : 0;
+    const icms = normal ? pct(icmsBase, tax.icmsRateBps) : 0;
+    const pis = tax.pisRateBps ? pct(net, tax.pisRateBps) : 0;
+    const cofins = tax.cofinsRateBps ? pct(net, tax.cofinsRateBps) : 0;
     const overrides: DocItem["overrides"] = {};
     if (l.cfopOverride) overrides.cfop = l.cfopOverride;
     if (l.cstOverride) overrides.cstCsosn = l.cstOverride;
@@ -422,15 +434,15 @@ export async function buildItems(
       icmsRateBps: tax.icmsRateBps,
       icmsBaseReductionBps: redBps,
       icmsBase,
-      icms: normal ? pct(icmsBase, tax.icmsRateBps) : 0,
+      icms,
       pisCst: tax.pisCst,
       pisBase: net,
       pisRateBps: tax.pisRateBps,
-      pis: tax.pisRateBps ? pct(net, tax.pisRateBps) : 0,
+      pis,
       cofinsCst: tax.cofinsCst,
       cofinsBase: net,
       cofinsRateBps: tax.cofinsRateBps,
-      cofins: tax.cofinsRateBps ? pct(net, tax.cofinsRateBps) : 0,
+      cofins,
       taxGroupId: tax.groupId,
       taxGroupName: tax.groupName,
       taxGroupIssue: tax.groupIssue,
@@ -438,6 +450,8 @@ export async function buildItems(
       overrides,
       ...(l.xPed ? { xPed: String(l.xPed).slice(0, 15), nItemPed: l.nItemPed ?? null } : {}),
       ...(l.rastro?.length ? { rastro: l.rastro.slice(0, 500) } : {}),
+      // IBS/CBS/IS (função separada, depois de ICMS/PIS/COFINS — que não mudam): só com a adesão vigente
+      ...(reformOn && tax.reform ? { ibsCbs: computeItemReform({ total: net, icms, pis, cofins }, tax.reform) } : {}),
     });
   }
   return out;
@@ -494,6 +508,77 @@ export function validateDocument(doc: Doc, company: Doc, branch: Doc | null): st
   return issues;
 }
 
+/** CFOP de saída com substituição tributária (exigem CEST no item). */
+const ST_CFOPS = new Set(["5401", "5402", "5403", "5405", "6401", "6402", "6403", "6404"]);
+
+export interface WarningContext {
+  /** adesão vigente à reforma tributária (avisos de CST/cClassTrib do IBS/CBS) */
+  reformOn?: boolean;
+  /** produtos e SKUs dos itens (conferência de GTIN) */
+  products?: Map<string, Doc>;
+  skus?: Map<string, Doc>;
+}
+
+/**
+ * Avisos prévios (FIS-26/FIS-27) — NÃO impedem a transmissão: apontam causas comuns de rejeição da SEFAZ para correção
+ * antes do envio (o catálogo de rejeições da ajuda explica cada código). As pendências obrigatórias continuam em
+ * `validateDocument`.
+ */
+export function validateWarnings(doc: Doc, company: Doc, branch: Doc | null, c: WarningContext = {}): string[] {
+  const out: string[] = [];
+  if (doc.model === "nfse") return out;
+  const simples = ["simples", "mei"].includes(company.regime);
+  const emitUf = branch?.uf ?? branch?.address?.uf ?? company.address?.uf ?? null;
+  const destUf = doc.model === "nfe" ? (doc.recipient?.address?.uf ?? null) : null;
+  const entrada = doc.operationType === "entrada";
+  for (const it of (doc.items ?? []) as DocItem[]) {
+    const tag = `Item ${it.seq} (${it.code})`;
+    const ncm = it.ncm ?? "";
+    const chapter = Number(ncm.slice(0, 2));
+    if (/^\d{8}$/.test(ncm) && (chapter < 1 || chapter > 97 || chapter === 77))
+      out.push(`${tag}: NCM ${ncm} não existe na tabela TIPI (capítulo ${ncm.slice(0, 2)}) — a SEFAZ rejeita (778). Corrija no cadastro do produto.`);
+    const cst = it.cstCsosn ?? "";
+    const st = ST_CODES.has(cst) || ST_CFOPS.has(it.cfop);
+    if (st && !it.cest) out.push(`${tag}: mercadoria com substituição tributária (CST/CSOSN ${cst || "—"}, CFOP ${it.cfop}) sem CEST — rejeição 806. Informe o CEST no cadastro do produto.`);
+    else if (it.cest && !/^\d{7}$/.test(String(it.cest))) out.push(`${tag}: CEST ${it.cest} inválido (7 dígitos).`);
+    if (/^\d{4}$/.test(it.cfop ?? "")) {
+      const d = it.cfop[0];
+      if (doc.model === "nfce" && d !== "5") out.push(`${tag}: NFC-e só admite operação interna (CFOP 5xxx); CFOP ${it.cfop} é rejeitado (725).`);
+      else if (doc.model === "nfe" && emitUf && destUf) {
+        const exterior = destUf === "EX";
+        const inter = !exterior && destUf !== emitUf;
+        const expected = exterior ? (entrada ? "3" : "7") : inter ? (entrada ? "2" : "6") : entrada ? "1" : "5";
+        if (["1", "2", "3", "5", "6", "7"].includes(d) && d !== expected) {
+          const where = exterior ? "no exterior" : inter ? `em outra UF (${emitUf} → ${destUf})` : `na mesma UF (${emitUf})`;
+          const code = !exterior && !inter && ["2", "6"].includes(d) ? " — rejeição 523" : inter && ["1", "5"].includes(d) ? " — rejeição 524" : "";
+          out.push(`${tag}: CFOP ${it.cfop} incompatível com destinatário ${where}; o esperado é ${expected}xxx${code}.`);
+        }
+      }
+    }
+    if (cst) {
+      if (simples && cst.length === 2) out.push(`${tag}: CST ${cst} (regime normal) em empresa do Simples Nacional — use CSOSN (rejeição 590).`);
+      else if (!simples && cst.length === 3) out.push(`${tag}: CSOSN ${cst} (Simples Nacional) em empresa do regime normal — use CST do ICMS (rejeição 591).`);
+    }
+    const product = it.productId ? c.products?.get(it.productId) : null;
+    const sku = it.skuId ? c.skus?.get(it.skuId) : null;
+    for (const code of [product?.gtin, sku?.barcode]) {
+      const g = String(code ?? "").trim();
+      if (/^\d+$/.test(g) && [8, 12, 13, 14].includes(g.length) && !isValidGtin(g)) out.push(`${tag}: GTIN/EAN ${g} com dígito verificador inválido — rejeição 611. Corrija o código de barras ou deixe sem GTIN.`);
+    }
+    if (c.reformOn) {
+      const r = it.ibsCbs;
+      if (!r) out.push(`${tag}: empresa aderiu à reforma tributária, mas o item não tem CST/cClassTrib do IBS/CBS (cadastre no grupo tributário e use “Atualizar do cadastro”).`);
+      else {
+        if (!r.cClassTrib) out.push(`${tag}: cClassTrib do IBS/CBS ausente (CST ${r.cst}) — informe no grupo tributário ou no produto.`);
+        else if (!r.cClassTrib.startsWith(r.cst)) out.push(`${tag}: cClassTrib ${r.cClassTrib} não pertence ao CST ${r.cst} do IBS/CBS.`);
+        if (ibsCbsKind(r.cst) === "unsupported") out.push(`${tag}: CST ${r.cst} do IBS/CBS exige grupo específico (alíquota fixa, diferimento, monofásico, crédito ou ajuste) que o ERP ainda não calcula — só CST e cClassTrib são enviados; valide com a contabilidade.`);
+        if ((r.isRateBps ?? 0) > 0) out.push(`${tag}: Imposto Seletivo informado — o IS só é exigido a partir de 2027 e usa o mesmo CST/cClassTrib do grupo (hipótese a validar).`);
+      }
+    }
+  }
+  return [...new Set(out)];
+}
+
 const money = (c: number) => Number((c / 100).toFixed(2));
 const qtyNum = (m: number) => Number((m / QTY).toFixed(4));
 
@@ -517,7 +602,11 @@ function contribFields(prefix: "pis" | "cofins", i: DocItem): Record<string, any
 }
 
 /** Converte o documento interno para o payload da Focus NFe (também usado pelo simulador). */
-export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cfg: Doc | null): Record<string, any> {
+/**
+ * `opts.reform`: adesão à reforma vigente (decidida por quem transmite — `reformActiveForDoc`); sem ela os grupos
+ * IBS/CBS/IS nunca saem, mesmo que o item os tenha calculado.
+ */
+export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cfg: Doc | null, opts: { reform?: boolean } = {}): Record<string, any> {
   const emitCnpj = onlyDigits(branch?.cnpj ?? company.cnpj);
   if (doc.model === "nfse") {
     const s = doc.service;
@@ -650,12 +739,16 @@ export function toProviderPayload(doc: Doc, company: Doc, branch: Doc | null, cf
       ...(i.xPed ? { pedido_compra: i.xPed, ...(i.nItemPed ? { numero_item_pedido_compra: i.nItemPed } : {}) } : {}),
       // rastro do lote (EST-02): nLote, qLote, dFab, dVal
       ...(i.rastro?.length ? { rastros: i.rastro.map((r) => ({ numero_lote: r.nLote, quantidade_lote: qtyNum(r.qLote), ...(r.dFab ? { data_fabricacao: r.dFab } : {}), ...(r.dVal ? { data_validade: r.dVal } : {}) })) } : {}),
+      // reforma tributária (FIS-19): grupos IBS/CBS/IS — somente com a adesão vigente
+      ...(opts.reform && i.ibsCbs ? reformPayloadItem(i.ibsCbs) : {}),
     })),
     formas_pagamento: (doc.payments ?? []).map((p: any) => ({ forma_pagamento: TPAG[p.kind] ?? "99", valor_pagamento: p.kind === "none" ? 0 : money(p.amount) })),
   };
   if (doc.number) payload.numero = doc.number;
   if (doc.series) payload.serie = doc.series;
   if (t.approxTax) payload.valor_total_tributos = money(t.approxTax);
+  // totais IBS/CBS/IS (não somam em valor_total — vNF — no período de teste)
+  if (opts.reform) Object.assign(payload, reformPayloadTotals(doc.items ?? []));
   if (doc.exitAt && doc.model === "nfe") payload.data_entrada_saida = doc.exitAt;
   if (r) {
     if (rdoc.length === 14) payload.cnpj_destinatario = rdoc;
@@ -1156,7 +1249,7 @@ async function applyResult(ctx: Ctx, doc: Doc, r: ProviderResult, eventType: str
     }
   }
   if (status === "authorized" && provider.simulated && !doc.xmlFileId) {
-    const xml = Buffer.from(simulatedXml(updated));
+    const xml = Buffer.from(simulatedXml(updated, { reform: await reformActiveForDoc(ctx.store, updated, await getFiscalConfig(ctx.store, ctx.companyId, doc.branchId)) }));
     const f = await saveFile(ctx, { bucket: "documents", name: `SIMULACAO-${updated.accessKey ?? doc.ref}.xml`, mime: "application/xml", data: xml, entityType: "fiscal_document", entityId: doc.id, kind: "xml", branchId: doc.branchId });
     await ctx.store.update("fiscal_documents", doc.id, { xmlFileId: f.id });
   }
@@ -1192,9 +1285,10 @@ async function applyResult(ctx: Ctx, doc: Doc, r: ProviderResult, eventType: str
   return ctx.store.getOrThrow("fiscal_documents", doc.id);
 }
 
-function simulatedXml(doc: Doc) {
+/** XML de simulação; `opts.reform` (adesão vigente) inclui os grupos IBS/CBS/IS dos itens que os têm. */
+export function simulatedXml(doc: Doc, opts: { reform?: boolean } = {}) {
   const esc = (s: any) => String(s ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!);
-  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}${(i.rastro ?? []).map((r: FiscalRastro) => `<rastro nLote="${esc(r.nLote)}" qLote="${r.qLote / QTY}"${r.dFab ? ` dFab="${r.dFab}"` : ""}${r.dVal ? ` dVal="${r.dVal}"` : ""}/>`).join("")}</item>`).join("\n");
+  const items = (doc.items ?? []).map((i: any) => `    <item n="${i.seq}" codigo="${esc(i.code)}" ncm="${esc(i.ncm)}" cfop="${esc(i.cfop)}" qtd="${i.qty / QTY}" valor="${(i.total / 100).toFixed(2)}"${i.xPed ? ` xPed="${esc(i.xPed)}"${i.nItemPed ? ` nItemPed="${i.nItemPed}"` : ""}` : ""}>${esc(i.description)}${(i.rastro ?? []).map((r: FiscalRastro) => `<rastro nLote="${esc(r.nLote)}" qLote="${r.qLote / QTY}"${r.dFab ? ` dFab="${r.dFab}"` : ""}${r.dVal ? ` dVal="${r.dVal}"` : ""}/>`).join("")}${opts.reform && i.ibsCbs ? reformXmlItem(i.ibsCbs) : ""}</item>`).join("\n");
   const s = doc.service;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!-- SIMULAÇÃO INTERCERT — DOCUMENTO SEM VALIDADE FISCAL. Não substitui o XML autorizado pela SEFAZ/prefeitura. -->
@@ -1206,7 +1300,7 @@ function simulatedXml(doc: Doc) {
 ${s ? `  <servico item="${esc(s.serviceListItem)}" rps="${esc(doc.rpsNumber)}" valor="${((s.amount ?? 0) / 100).toFixed(2)}" iss="${((s.iss ?? 0) / 100).toFixed(2)}" liquido="${((s.net ?? 0) / 100).toFixed(2)}">${esc(s.description)}</servico>\n` : ""}  <itens>
 ${items}
   </itens>
-  <total>${((doc.total ?? 0) / 100).toFixed(2)}</total>
+${opts.reform ? reformXmlTotals(doc.items ?? []) : ""}  <total>${((doc.total ?? 0) / 100).toFixed(2)}</total>
 </documentoSimulado>`;
 }
 
@@ -1404,7 +1498,7 @@ export async function transmitDocument(ctx: Ctx, documentId: string, opts: { onB
   let payload: ReturnType<typeof toProviderPayload>;
   try {
     doc = await ensureNumber(ctx, doc, cfg);
-    payload = toProviderPayload(doc, company, branch, cfg);
+    payload = toProviderPayload(doc, company, branch, cfg, { reform: await reformActiveForDoc(ctx.store, doc, cfg) });
     // retenção interna da contingência termina no primeiro envio: "contingência" passa a refletir só o retorno do provedor
     await ctx.store.update("fiscal_documents", doc.id, { status: "processing", attempts: attempt, lastAttemptAt: nowIso(), ...((doc.attempts ?? 0) === 0 && doc.contingency ? { contingency: false } : {}) });
   } catch (e: any) {
