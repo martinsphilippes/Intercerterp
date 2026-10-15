@@ -59,7 +59,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // realização interrompida); idempotente
   const pendingDoc = r.documentStatus === "pending_invoice" || r.documentStatus === "confirmed";
   let realizeError: string | null = null;
-  if (r.documentStatus === "pending_invoice" && ["scheduled", "draft", "confirming"].includes(r.status)) {
+  if (pendingDoc && ["scheduled", "draft", "confirming"].includes(r.status)) {
     try {
       r = (await realizeEntry(store, s.ctx.companyId, id)) ?? r;
     } catch (e: any) {
@@ -108,7 +108,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         { label: "Entrada lançada", hint: `Nota a confirmar · ${formatDateTime(r.createdAt)}`, state: "done" as const },
         { label: r.status === "scheduled" ? "Entrada prevista" : "Entrada realizada", hint: r.status === "scheduled" ? `A chegar em ${formatDateTime(r.entryAt)}` : `Estoque em ${formatDateTime(r.entryAt)}`, state: (r.status === "scheduled" ? "active" : "done") as "done" | "active" },
         { label: "Nota do fornecedor", hint: r.documentStatus === "confirmed" ? `NF-e ${r.nfeNumber ?? ""} confirmada` : `Prazo ${formatDate(r.invoiceDueAt)}`, state: (r.documentStatus === "confirmed" ? "done" : r.status === "scheduled" ? "todo" : "active") as "done" | "active" | "todo" },
-        { label: "Custo e conta a pagar", hint: r.documentStatus === "confirmed" ? "Corrigidos pela nota" : "Provisórios (custo previsto)", state: (r.documentStatus === "confirmed" ? "done" : "todo") as "done" | "todo" },
+        { label: "Custo e conta a pagar", hint: r.documentStatus === "confirmed" ? (r.status === "scheduled" ? "Previsto pelos valores da nota" : "Corrigidos pela nota") : "Provisórios (custo previsto)", state: (r.documentStatus === "confirmed" ? "done" : "todo") as "done" | "todo" },
       ]
     : [
     { label: r.xmlFileId ? "NF-e importada" : r.origin === "manual" && withoutOrder ? "Nota lançada" : "Documento informado", hint: r.xmlFileId ? "XML validado" : r.nfeKey ? "Chave informada (sem XML)" : "Sem XML", state: "done" as const },

@@ -13,7 +13,7 @@ import { openSession } from "@/domain/cash";
 import { balanceId } from "@/domain/stock";
 import { finalizeSale, prepareSale, type SaleItemInput } from "@/domain/sales";
 import { priceScopeKey } from "@/domain/pricing";
-import { settleInstallment } from "@/domain/finance";
+import { approvePayable, settleInstallment } from "@/domain/finance";
 import { setClosedUntil } from "@/domain/period-close";
 import { buildSampleNfeXml } from "@/domain/nfe-xml";
 import { entriesBook } from "@/domain/fiscal/entries";
@@ -28,8 +28,8 @@ import { seed as seedPendingInvoice } from "@/domain/seed/modules/pending-invoic
 /**
  * §40 — entrada de mercadoria com nota a confirmar: entrada realizada (estoque, custo médio, título provisório),
  * entrada prevista (a chegar, título previsto) realizada pela rotina, venda antes da nota com documento fiscal,
- * confirmação com a nota (igual, custo diferente, quantidade diferente), título corrigido, aviso configurável,
- * permissões e período fechado.
+ * confirmação com a nota (igual, custo diferente, quantidade diferente), título corrigido (autorização mantida), nota
+ * confirmada antes da data da entrada prevista, aviso configurável, permissões e período fechado.
  */
 
 const MATRIZ_CNPJ = "11222333000181";
@@ -187,13 +187,117 @@ describe("§40 — entrada prevista (data futura)", () => {
     expect(logs).toHaveLength(1);
   });
 
-  it("entrada prevista pode ser cancelada (título previsto cancelado); a nota só é confirmada depois da entrada", async () => {
+  it("entrada prevista pode ser cancelada (título previsto cancelado)", async () => {
     const k = await product("pi-estojo", "Estojo PI", 1500);
     const r = await createPendingInvoiceEntry(stockist, { supplierId: refs.suppliers.papel.id, items: [{ skuId: k.id, qty: 2 * QTY, unitCost: 700 }], entryAt: ahead(2 * DAY), idemKey: "pi-cancel" });
-    await expect(analyzeInvoice(manager, r.id, { manual: { nfeNumber: "1", issueDate: today(), items: [{ idx: 1, qty: 2 * QTY, unitCost: 700 }] } })).rejects.toThrow(/PREVISTA/);
     await cancelScheduledEntry(stockist, r.id, "Fornecedor não vai mais entregar");
     expect((await store.getOrThrow("receipts", r.id)).status).toBe("cancelled");
     expect((await titleOf(r)).status).toBe("cancelled");
+  });
+});
+
+describe("§40 — nota confirmada ANTES da data da entrada (entrada prevista)", () => {
+  it("XML: substitui quantidade/custo previstos, corrige o título previsto (continua PREVISTO); a realização usa a nota sem ajuste de custo; idempotente", async () => {
+    const k = await product("pi-pre", "Resma PI", 2500, "7890000000024");
+    const entryAt = ahead(DAY);
+    const r = await createPendingInvoiceEntry(stockist, { supplierId: refs.suppliers.papel.id, warehouseId: princ.id, items: [{ skuId: k.id, qty: 10 * QTY, unitCost: 500 }], entryAt, idemKey: "pi-pre", paymentTermId: refs.terms["30-60"].id });
+    expect(r.status).toBe("scheduled");
+    const t0 = await titleOf(r);
+    expect(t0).toMatchObject({ forecast: true, provisional: true, total: 5000, installmentsCount: 2 });
+    // nota: 8 un a R$ 6,00 + frete R$ 4,00 = R$ 52,00, em 3 duplicatas
+    const dups = [{ dVenc: addDays(today(), 15) }, { dVenc: addDays(today(), 45) }, { dVenc: addDays(today(), 75) }];
+    const x = xml(70101, [{ cProd: "PC-RESMA", cEAN: "7890000000024", qty: 8 * QTY, unit: 600 }], { freight: 400, duplicatas: dups });
+    // estoquista não confirma (nem antes da data)
+    await expect(confirmPendingInvoice(stockist, r.id, { xml: x })).rejects.toThrow(/permissão/);
+    const a = await analyzeInvoice(manager, r.id, { xml: x });
+    expect(a.scheduled).toBe(true);
+    expect(a.problems).toEqual([]);
+    expect(a.lines[0]).toMatchObject({ qtyDiff: -2 * QTY, noteQty: 8 * QTY, noteLandedUnitCost: 650 });
+    // divergência de quantidade numa entrada prevista: sem decisão (só atualiza o previsto)
+    const c = await confirmPendingInvoice(manager, r.id, { xml: x });
+    expect(c.status).toBe("scheduled");
+    expect(c.documentStatus).toBe("confirmed");
+    expect(c.invoiceConfirmedBy).toBe(manager.user.id);
+    expect(c.nfeNumber).toBe("70101");
+    expect(c.nfeKey).toHaveLength(44);
+    expect(c.xmlFileId).toBeTruthy();
+    expect(c.items[0]).toMatchObject({ receivedQty: 8 * QTY, unitCost: 600, landedValue: 5200, landedUnitCost: 650, plannedQty: 10 * QTY, plannedUnitCost: 500, cProd: "PC-RESMA" });
+    expect(c.dueTotal).toBe(5200);
+    expect(pendingState(c).key).toBe("confirmed");
+    // nada entrou no estoque: sem movimentos, sem saldo/custo; "a chegar" passa a ser a quantidade da nota
+    expect(await movesOf(r.id)).toHaveLength(0);
+    expect((await bal(princ.id, k.id)).physical).toBe(0);
+    expect((await incomingMap(store, refs.company.id)).get(`${princ.id}|${k.id}`)?.qty).toBe(8 * QTY);
+    // título previsto corrigido para o valor/parcelas da nota: continua PREVISTO, deixa de ser provisório
+    const t = await titleOf(c);
+    expect(t.id).toBe(t0.id);
+    expect(t).toMatchObject({ forecast: true, provisional: false, total: 5200, installmentsCount: 3 });
+    const insts = (await instsOf(t.id)).filter((i) => i.status !== "cancelled");
+    expect(insts.map((i) => i.dueDate)).toEqual(dups.map((d) => d.dVenc));
+    expect(insts.reduce((acc, i) => acc + i.amount, 0)).toBe(5200);
+    await expect(settleInstallment(admin, { installmentId: insts[0].id, date: today(), principal: insts[0].amount, accountId: refs.accounts.banco.id, idemKey: "pi-pre-pay", skipApprovalCheck: true })).rejects.toThrow(/PREVISTO/);
+    // fora do livro de entradas até a realização
+    const book0 = await entriesBook(admin, { from: today(), to: addDays(today(), 3), branchId: refs.branches.matriz.id });
+    expect(book0.rows.some((row) => row.sourceId === r.id)).toBe(false);
+    // idempotente: confirmar de novo não muda nada
+    const again = await confirmPendingInvoice(manager, r.id, { xml: x });
+    expect(again.invoiceConfirmedAt).toBe(c.invoiceConfirmedAt);
+    const auditOf = async (action: string, entityId = r.id) => listAll(store, "audit_logs", { filters: [["eq", "entityId", entityId], ["eq", "action", action]] });
+    expect(await auditOf("receipt.invoice_confirm")).toHaveLength(1);
+    expect(await auditOf("title.invoice_revise", t.id)).toHaveLength(1);
+    // na data, a rotina realiza pelos valores da nota: estoque 8 un a R$ 6,50 (frete rateado), sem cost_adjust
+    expect((await runPendingInvoiceRoutine(store, refs.company.id, { now: Date.now() + 2 * DAY })).realized).toBe(1);
+    const done = await store.getOrThrow("receipts", r.id);
+    expect(done.status).toBe("confirmed");
+    expect(done.documentStatus).toBe("confirmed");
+    expect(done.confirmedAt).toBe(entryAt);
+    const movs = await movesOf(r.id);
+    expect(movs).toHaveLength(1);
+    expect(movs[0]).toMatchObject({ type: "purchase", qty: 8 * QTY, totalCost: 5200, occurredAt: entryAt });
+    expect(movs.filter((m) => m.type === "cost_adjust")).toHaveLength(0);
+    const b = await bal(princ.id, k.id);
+    expect(b.physical).toBe(8 * QTY);
+    expect(b.avgCost).toBe(650);
+    expect((await store.getOrThrow("skus", k.id)).costAcquisition).toBe(650);
+    const t1 = await titleOf(done);
+    expect(t1).toMatchObject({ id: t0.id, forecast: false, provisional: false, total: 5200 });
+    expect(await listAll(store, "titles", { filters: [["eq", "originId", r.id]] })).toHaveLength(1);
+    // livro de entradas pela data da entrada, com o XML
+    const book = await entriesBook(admin, { from: today(), to: addDays(today(), 3), branchId: refs.branches.matriz.id });
+    expect(book.rows.some((row) => row.sourceId === r.id)).toBe(true);
+    expect(book.xmlFiles.some((f) => f.fileId === c.xmlFileId)).toBe(true);
+    // idempotente: rodar de novo / abrir / confirmar de novo não lança nada
+    await runPendingInvoiceRoutine(store, refs.company.id, { now: Date.now() + 3 * DAY });
+    await realizeEntry(store, refs.company.id, r.id, Date.now() + 3 * DAY);
+    await confirmPendingInvoice(manager, r.id, { xml: x });
+    expect(await movesOf(r.id)).toHaveLength(1);
+    expect((await bal(princ.id, k.id)).physical).toBe(8 * QTY);
+    expect(await auditOf("receipt.pending_invoice_realize")).toHaveLength(1);
+    expect(await auditOf("receipt.invoice_confirm")).toHaveLength(1);
+  });
+
+  it("dados informados: item fora da nota sai do previsto; cancelar a prevista já confirmada mantém a nota no histórico", async () => {
+    const k1 = await product("pi-pre-a", "Grampeador PI", 4000);
+    const k2 = await product("pi-pre-b", "Perfurador PI", 5000);
+    const r = await createPendingInvoiceEntry(stockist, { supplierId: refs.suppliers.papel.id, warehouseId: princ.id, items: [{ skuId: k1.id, qty: 3 * QTY, unitCost: 2000 }, { skuId: k2.id, qty: 2 * QTY, unitCost: 2500 }], entryAt: ahead(2 * DAY), idemKey: "pi-pre-man" });
+    expect((await titleOf(r)).total).toBe(11000);
+    const c = await confirmPendingInvoice(manager, r.id, { manual: { nfeNumber: "4401", nfeSeries: "2", issueDate: today(), items: [{ idx: 1, qty: 3 * QTY, unitCost: 2100 }, { idx: 2, qty: 0, unitCost: 0 }] } });
+    expect(c).toMatchObject({ status: "scheduled", documentStatus: "confirmed", nfeNumber: "4401", nfeSeries: "2", dueTotal: 6300 });
+    const inc = await incomingMap(store, refs.company.id);
+    expect(inc.get(`${princ.id}|${k1.id}`)?.qty).toBe(3 * QTY);
+    expect(inc.get(`${princ.id}|${k2.id}`)).toBeUndefined();
+    expect(await titleOf(c)).toMatchObject({ forecast: true, provisional: false, total: 6300 });
+    // cancelar continua possível: nada entrou no estoque; a nota fica registrada no recebimento cancelado
+    await cancelScheduledEntry(stockist, r.id, "Pedido cancelado pelo fornecedor");
+    const x = await store.getOrThrow("receipts", r.id);
+    expect(x).toMatchObject({ status: "cancelled", documentStatus: "confirmed", nfeNumber: "4401" });
+    expect(x.invoiceConfirmation.state).toBe("done");
+    expect((await titleOf(x)).status).toBe("cancelled");
+    expect(await movesOf(r.id)).toHaveLength(0);
+    const logs = await listAll(store, "audit_logs", { filters: [["eq", "entityId", r.id], ["eq", "action", "receipt.pending_invoice_cancel"]] });
+    expect(logs[0].summary).toMatch(/histórico/);
+    // cancelada não é realizada na data
+    expect((await runPendingInvoiceRoutine(store, refs.company.id, { now: Date.now() + 3 * DAY })).realized).toBe(0);
   });
 });
 
@@ -301,6 +405,21 @@ describe("§40 — confirmação com a nota", () => {
     expect(insts[0]).toMatchObject({ paid: 500, balance: 0 });
     expect(insts[1]).toMatchObject({ amount: 700, balance: 700 });
     expect(t.balance).toBe(700);
+  });
+
+  it("conta a pagar já AUTORIZADA continua autorizada com o valor novo; auditoria registra anterior, novo e quem confirmou", async () => {
+    const k = await product("pi-aut", "Borracha PI", 300);
+    const r = await createPendingInvoiceEntry(stockist, { supplierId: refs.suppliers.papel.id, items: [{ skuId: k.id, qty: 10 * QTY, unitCost: 100 }], entryAt: ago(HOUR), idemKey: "pi-aut" });
+    await approvePayable(admin, r.payableTitleId);
+    expect((await titleOf(r)).approvalStatus).toBe("approved");
+    const c = await confirmPendingInvoice(manager, r.id, { manual: { nfeNumber: "8080", issueDate: today(), items: [{ idx: 1, qty: 10 * QTY, unitCost: 130 }] } });
+    const t = await titleOf(c);
+    expect(t).toMatchObject({ total: 1300, approvalStatus: "approved", approvedBy: admin.user.id, provisional: false });
+    const [log] = await listAll(store, "audit_logs", { filters: [["eq", "entityId", t.id], ["eq", "action", "title.invoice_revise"]] });
+    expect(log.userId).toBe(manager.user.id);
+    expect(log.before).toMatchObject({ total: 1000, approvalStatus: "approved" });
+    expect(log.after).toMatchObject({ total: 1300, approvalStatus: "approved", confirmedBy: manager.user.id });
+    expect(log.summary).toMatch(/continua autorizada/);
   });
 });
 

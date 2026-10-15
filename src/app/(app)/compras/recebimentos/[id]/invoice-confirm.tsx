@@ -27,6 +27,7 @@ export interface EnteredItem {
 
 interface Analysis {
   source: "xml" | "manual";
+  scheduled: boolean;
   doc: { key: string | null; number: string; series: string | null; issueDate: string; total: number; freight: number; otherExpenses: number; discount: number; supplierName: string; authorized: boolean | null };
   noteItems: Array<{ n: number; cProd: string | null; cEAN: string | null; xProd: string; qty: number; value: number; unitCost: number; match: number | null; matchBy: string | null }>;
   lines: Array<{ idx: number; description: string; enteredQty: number; enteredUnitCost: number; noteQty: number; noteLandedUnitCost: number; costDelta: number; qtyDiff: number; onHand: number; inNote: boolean }>;
@@ -42,9 +43,10 @@ const MATCH_LABEL: Record<string, string> = { supplier_code: "código do fornece
 /**
  * "Confirmar com a nota" (§40): importa o XML (ou dados da nota), casa os itens com o que entrou (código do fornecedor,
  * GTIN ou SKU, com ajuste manual), mostra as diferenças de custo e quantidade e confirma. A confirmação ajusta o custo
- * médio, a quantidade (conforme a decisão) e a conta a pagar pelo valor da nota.
+ * médio, a quantidade (conforme a decisão) e a conta a pagar pelo valor da nota. Na entrada PREVISTA (`scheduled`), a
+ * nota substitui o previsto: sem decisão de quantidade nem ajuste de custo.
  */
-export function InvoiceConfirm({ receiptId, items, defaults, returnHref }: { receiptId: string; items: EnteredItem[]; defaults: { nfeNumber: string | null; nfeSeries: string | null; nfeKey: string | null }; returnHref: string | null }) {
+export function InvoiceConfirm({ receiptId, items, defaults, returnHref, scheduled = false }: { receiptId: string; items: EnteredItem[]; defaults: { nfeNumber: string | null; nfeSeries: string | null; nfeKey: string | null }; returnHref: string | null; scheduled?: boolean }) {
   const [mode, setMode] = useState<"xml" | "manual">("xml");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [matches, setMatches] = useState<Record<string, number>>({});
@@ -90,7 +92,7 @@ export function InvoiceConfirm({ receiptId, items, defaults, returnHref }: { rec
               </FormGrid>
               <div className="-mx-5 overflow-x-auto">
                 <table className="table-base w-full text-sm">
-                  <thead><tr><th>Item que entrou</th><th className="text-right">Entrou</th><th className="w-32 text-right">Qtd. na nota</th><th className="w-36 text-right">Custo unit. na nota</th></tr></thead>
+                  <thead><tr><th>{scheduled ? "Item previsto" : "Item que entrou"}</th><th className="text-right">{scheduled ? "Previsto" : "Entrou"}</th><th className="w-32 text-right">Qtd. na nota</th><th className="w-36 text-right">Custo unit. na nota</th></tr></thead>
                   <tbody>
                     {items.map((i) => (
                       <tr key={i.idx}>
@@ -106,12 +108,12 @@ export function InvoiceConfirm({ receiptId, items, defaults, returnHref }: { rec
             </>
           )}
           {analysis && <Comparison a={analysis} itemOpts={itemOpts} matches={matches} setMatches={(m) => { setMatches(m); setAnalysis(null); }} actions={actions} setActions={setActions} returnHref={returnHref} />}
-          <Field label="Observações / justificativa" hint="Obrigatória para manter diferença de quantidade ou XML sem protocolo de autorização.">
+          <Field label="Observações / justificativa" hint={scheduled ? "Obrigatória para XML sem protocolo de autorização." : "Obrigatória para manter diferença de quantidade ou XML sem protocolo de autorização."}>
             <Textarea name="notes" rows={2} />
           </Field>
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           <div className="flex flex-wrap justify-end gap-2">
-            <SubmitButton pending={pending} name="intent" value="analyze"><Scale className="size-4" /> Comparar com a entrada</SubmitButton>
+            <SubmitButton pending={pending} name="intent" value="analyze"><Scale className="size-4" /> {scheduled ? "Comparar com o previsto" : "Comparar com a entrada"}</SubmitButton>
             <SubmitButton pending={pending} name="intent" value="confirm" variant="accent" disabled={!analysis || analysis.problems.length > 0}>Confirmar com a nota</SubmitButton>
           </div>
         </>
@@ -152,11 +154,11 @@ function Comparison({ a, itemOpts, matches, setMatches, actions, setActions, ret
       )}
       <div className="-mx-3 overflow-x-auto">
         <table className="table-base w-full text-sm">
-          <thead><tr><th>Produto</th><th className="text-right">Entrou</th><th className="text-right">Nota</th><th className="text-right">Custo previsto → nota</th><th className="text-right">Diferença de custo</th><th>Diferença de quantidade</th></tr></thead>
+          <thead><tr><th>Produto</th><th className="text-right">{a.scheduled ? "Previsto" : "Entrou"}</th><th className="text-right">Nota</th><th className="text-right">Custo previsto → nota</th><th className="text-right">Diferença de custo</th><th>Diferença de quantidade</th></tr></thead>
           <tbody>
             {a.lines.map((l) => (
               <tr key={l.idx}>
-                <td className="min-w-[160px]">{l.description}<span className="block text-xs text-slate-500">em estoque: {formatQty(l.onHand)}</span></td>
+                <td className="min-w-[160px]">{l.description}{!a.scheduled && <span className="block text-xs text-slate-500">em estoque: {formatQty(l.onHand)}</span>}</td>
                 <td className="tabular text-right">{formatQty(l.enteredQty)}</td>
                 <td className={cn("tabular text-right", l.qtyDiff !== 0 && "font-semibold text-red-700")}>{l.inNote ? formatQty(l.noteQty) : "não consta"}</td>
                 <td className="tabular text-right">{formatMoney(l.enteredUnitCost)} → {l.inNote ? formatMoney(l.noteLandedUnitCost) : "—"}</td>
@@ -164,6 +166,8 @@ function Comparison({ a, itemOpts, matches, setMatches, actions, setActions, ret
                 <td className="min-w-[220px]">
                   {l.qtyDiff === 0 ? (
                     <span className="text-emerald-700">Confere</span>
+                  ) : a.scheduled ? (
+                    <span className="text-slate-700">Previsto passa a {l.inNote ? formatQty(l.noteQty) : "zero (sai da entrada)"}</span>
                   ) : (
                     <Select
                       aria-label={`Diferença de quantidade de ${l.description}`}
@@ -184,7 +188,10 @@ function Comparison({ a, itemOpts, matches, setMatches, actions, setActions, ret
         </table>
       </div>
       <p className="text-xs text-slate-500">
-        Diferença de custo: ajuste do custo médio (sem quantidade) das unidades ainda em estoque; a parte das já vendidas fica registrada como não absorvida (mesma regra do CT-e). Parcelas: {a.installments.map((x) => `${formatDate(x.dueDate)} ${formatMoney(x.amount)}`).join(" · ") || "—"} ({a.installments[0]?.source === "xml" ? "duplicatas da nota" : "condição de pagamento a partir da emissão"}).
+        {a.scheduled
+          ? "Entrada prevista: nada entrou no estoque — quantidades e custos previstos passam a ser os da nota (sem ajuste de custo médio); na data, a entrada é realizada pelos valores da nota. A conta a pagar continua PREVISTA até a data."
+          : "Diferença de custo: ajuste do custo médio (sem quantidade) das unidades ainda em estoque; a parte das já vendidas fica registrada como não absorvida (mesma regra do CT-e)."}{" "}
+        Parcelas: {a.installments.map((x) => `${formatDate(x.dueDate)} ${formatMoney(x.amount)}`).join(" · ") || "—"} ({a.installments[0]?.source === "xml" ? "duplicatas da nota" : "condição de pagamento a partir da emissão"}).
       </p>
       {qtyLines.some((l) => actions[String(l.idx)] === "return") && returnHref && (
         <Notice tone="info">Devolução ao fornecedor: depois de confirmar, emita a NF-e de devolução pelo recebimento — <Link className="font-medium underline" href={returnHref}>Devolver ao fornecedor</Link>.</Notice>

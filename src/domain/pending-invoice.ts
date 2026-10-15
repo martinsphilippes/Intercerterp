@@ -37,7 +37,12 @@ import { convertCfop } from "./cfop-entry";
  *    (movimento `cost_adjust` de quantidade zero; a parte já vendida fica registrada como não absorvida — mesma regra
  *    do CT-e), trata a diferença de quantidade (ajuste de estoque, devolução ou manter com justificativa), corrige o
  *    título para o valor da nota (duplicatas do XML quando houver) e grava chave/XML no recebimento — que passa a
- *    entrar no livro de entradas e no pacote contábil como recebimento normal. Idempotente e auditado.
+ *    entrar no livro de entradas e no pacote contábil como recebimento normal. Idempotente e auditado. Conta a pagar
+ *    já AUTORIZADA continua autorizada (a auditoria registra o valor anterior, o novo e quem confirmou).
+ *  - "Confirmar com a nota" ANTES da data (entrada PREVISTA): nada entrou no estoque — grava a nota, substitui as
+ *    quantidades e custos previstos pelos da nota (divergência de quantidade só atualiza o previsto), corrige o título
+ *    previsto para o valor/parcelas da nota (continua PREVISTO, deixa de ser provisório) e marca a nota confirmada. Na
+ *    data, a realização usa os valores da nota (sem `cost_adjust`).
  */
 
 export const PENDING_INVOICE_FEATURE = "notaAConfirmar";
@@ -74,7 +79,7 @@ export async function pendingInvoiceSettings(store: Store, companyId: string, br
 
 /** Situação da entrada com nota a confirmar para as telas: prevista, aguardando (no prazo / vencendo / vencida) ou confirmada. */
 export function pendingState(r: Record<string, any>, ref = today(), leadDays = PI_DEFAULTS.leadDays) {
-  if (r.documentStatus === "confirmed") return { key: "confirmed" as const, label: "Nota confirmada", tone: "good" as const, daysOpen: null, daysToDue: null };
+  if (r.documentStatus === "confirmed") return { key: "confirmed" as const, label: r.status === "scheduled" ? "Nota confirmada (entrada prevista)" : "Nota confirmada", tone: "good" as const, daysOpen: null, daysToDue: null };
   const entryDate = r.entryAt ? toLocalDate(r.entryAt) : toLocalDate(r.createdAt);
   const daysOpen = r.status === "scheduled" ? 0 : Math.max(0, diffDays(entryDate, ref));
   const daysToDue = r.invoiceDueAt ? diffDays(ref, r.invoiceDueAt) : null;
@@ -214,7 +219,9 @@ function formatIso(iso: string) {
 
 /**
  * Realiza a entrada (idempotente): entrada prevista cuja data/hora chegou passa a valer — estoque e custo médio pelo
- * custo previsto, título a pagar de previsto para efetivo (continua provisório até a nota). Também conclui uma
+ * custo previsto, título a pagar de previsto para efetivo (continua provisório até a nota). Se a nota já foi
+ * confirmada antes da data, os itens já estão pelos valores da nota: estoque e custo médio entram pelo custo da nota
+ * (sem `cost_adjust`) e o título fica efetivo pelo valor da nota. Também conclui uma
  * realização interrompida (recebimento em "draft"/"confirming"). Executada com o contexto do sistema na filial do
  * recebimento (rotina diária, abertura do recebimento e do painel, lançamento).
  */
@@ -238,17 +245,18 @@ export async function realizeEntry(store: Store, companyId: string, receiptId: s
   if (r.status === "draft" || r.status === "confirming") r = await confirmReceiptEffects(ctx, receiptId);
   if (r.status !== "confirmed") return r;
   let flipped = false;
+  const noteFirst = r.documentStatus === "confirmed";
   if (r.payableTitleId) {
     const t = await ctx.store.get("titles", r.payableTitleId);
     if (t?.forecast) {
-      await ctx.store.update("titles", t.id, { forecast: false, notes: `${t.notes ? `${t.notes}\n` : ""}Entrada realizada em ${formatIso(r.entryAt ?? r.confirmedAt)}: título efetivo (valor provisório até a confirmação da nota).` });
+      await ctx.store.update("titles", t.id, { forecast: false, notes: `${t.notes ? `${t.notes}\n` : ""}Entrada realizada em ${formatIso(r.entryAt ?? r.confirmedAt)}: título efetivo${noteFirst ? " pelo valor da nota (confirmada antes da entrada)" : " (valor provisório até a confirmação da nota)"}.` });
       flipped = true;
     }
   }
   if (fromScheduled || flipped) {
     await audit(ctx, {
       module: "purchases", action: "receipt.pending_invoice_realize", entityType: "receipt", entityId: receiptId,
-      summary: `Recebimento nº ${r.number}: entrada PREVISTA realizada (data/hora ${formatIso(r.entryAt)}) — estoque e custo médio pelo custo previsto${r.payableTitleId ? "; título a pagar passou de previsto para efetivo (provisório até a nota)" : ""}`,
+      summary: `Recebimento nº ${r.number}: entrada PREVISTA realizada (data/hora ${formatIso(r.entryAt)}) — estoque e custo médio pelo ${noteFirst ? `custo da nota NF-e ${r.nfeNumber ?? ""} (confirmada antes da entrada; sem ajuste de custo)` : "custo previsto"}${r.payableTitleId ? `; título a pagar passou de previsto para efetivo${noteFirst ? " (valor da nota)" : " (provisório até a nota)"}` : ""}`,
       related: r.payableTitleId ? [`title:${r.payableTitleId}`] : [],
     });
   }
@@ -284,13 +292,15 @@ export async function cancelScheduledEntry(ctx: Ctx, receiptId: string, reason: 
   assert(r.companyId === ctx.companyId, "Recebimento de outra empresa.");
   assert(r.branchId === branchId, `Recebimento nº ${r.number} é de outra filial.`);
   assert(r.status === "scheduled", "Somente a entrada prevista (ainda não realizada) pode ser cancelada aqui. Entrada realizada é corrigida na confirmação da nota (ajuste ou devolução).");
+  // nota já confirmada antes da entrada: os dados da nota (e o XML em Arquivos) ficam no recebimento cancelado, como
+  // histórico; a chave é liberada (a mesma NF-e pode ser lançada em outro recebimento)
   await ctx.store.update("receipts", receiptId, { status: "cancelled", scopeKey: `${r.scopeKey}|cancelled|${Date.now()}` });
   if (r.payableTitleId) {
     const { cancelTitle } = await import("./finance");
     await cancelTitle(ctx, r.payableTitleId, `Entrada prevista do recebimento nº ${r.number} cancelada: ${reason.trim()}`);
   }
   await resolveOccurrence(ctx.store, occurrenceKeyFor(receiptId));
-  await audit(ctx, { module: "purchases", action: "receipt.pending_invoice_cancel", entityType: "receipt", entityId: receiptId, summary: `Recebimento nº ${r.number}: entrada prevista cancelada (nada foi lançado no estoque)`, reason: reason.trim() });
+  await audit(ctx, { module: "purchases", action: "receipt.pending_invoice_cancel", entityType: "receipt", entityId: receiptId, summary: `Recebimento nº ${r.number}: entrada prevista cancelada (nada foi lançado no estoque)${r.documentStatus === "confirmed" ? ` — a NF-e ${r.nfeNumber ?? ""}${r.nfeSeries ? `/${r.nfeSeries}` : ""} confirmada antes da entrada fica registrada no histórico do recebimento` : ""}`, reason: reason.trim() });
 }
 
 // ───────────────────────────── Confirmação com a nota
@@ -369,6 +379,8 @@ export interface InvoiceLine {
 
 export interface InvoiceAnalysis {
   source: "xml" | "manual";
+  /** entrada ainda PREVISTA: a nota substitui o previsto (sem estoque, sem ajuste de custo, sem decisão de quantidade) */
+  scheduled: boolean;
   doc: { key: string | null; number: string; series: string | null; issueDate: string; total: number; freight: number; otherExpenses: number; discount: number; supplierName: string; authorized: boolean | null; environment: string | null };
   noteItems: InvoiceNoteItem[];
   lines: InvoiceLine[];
@@ -386,6 +398,8 @@ async function requireConfirmInvoice(ctx: Ctx, receiptId: string) {
   const r = await ctx.store.getOrThrow("receipts", receiptId);
   assert(r.companyId === ctx.companyId, "Recebimento de outra empresa.");
   if (r.branchId !== branchId) throw new BusinessError(`Recebimento nº ${r.number} é de outra filial: selecione a filial do recebimento.`, "other_branch");
+  // entrada prevista cuja data/hora já chegou: realiza antes (a confirmação segue a regra da entrada realizada)
+  if (r.status === "scheduled" && r.documentStatus === "pending_invoice" && r.entryAt && Date.parse(r.entryAt) <= Date.now() + NOW_TOLERANCE_MS) return (await realizeEntry(ctx.store, ctx.companyId, r.id, Date.now(), ctx)) ?? r;
   return r;
 }
 
@@ -456,8 +470,8 @@ export async function analyzeInvoice(ctx: Ctx, receiptId: string, input: Invoice
 
 async function analyzeFor(ctx: Ctx, r: Doc, input: InvoiceDocInput & { allowHomologation?: boolean }): Promise<InvoiceAnalysis & { parsed: ParsedNfe | null }> {
   assert(r.documentStatus === "pending_invoice", r.documentStatus === "confirmed" ? `A nota do recebimento nº ${r.number} já foi confirmada.` : `Recebimento nº ${r.number} não é uma entrada com nota a confirmar.`);
-  assert(r.status !== "scheduled", `A entrada do recebimento nº ${r.number} ainda é PREVISTA (${r.entryAt ? formatIso(r.entryAt) : "—"}): a nota é confirmada depois que a mercadoria entrar.`);
-  assert(r.status === "confirmed", r.status === "cancelled" ? "Recebimento cancelado." : "A entrada ainda está sendo realizada — atualize a página e tente novamente.");
+  const scheduled = r.status === "scheduled";
+  assert(scheduled || r.status === "confirmed", r.status === "cancelled" ? "Recebimento cancelado." : "A entrada ainda está sendo realizada — atualize a página e tente novamente.");
   const supplier = await ctx.store.getOrThrow("suppliers", r.supplierId);
   const items: ReceiptItem[] = (r.items ?? []).filter((x: ReceiptItem) => !x.ignore && x.skuId && x.receivedQty > 0);
   const problems: string[] = [];
@@ -545,14 +559,18 @@ async function analyzeFor(ctx: Ctx, r: Doc, input: InvoiceDocInput & { allowHomo
       costDelta, qtyDiff: noteQty - it.receivedQty, onHand: Math.max(0, bal?.physical ?? 0), inNote: Boolean(nv),
     });
   }
-  for (const ni of noteItems) if (!ni.match) problems.push(`Item ${ni.n} da nota (${ni.cProd ?? "sem código"} — ${ni.xProd}) sem correspondência na entrada: associe a um item que entrou.`);
-  for (const l of lines) if (!l.inNote) warnings.push(`${l.description}: entrou ${formatQty(l.enteredQty)} e não consta na nota — trate a diferença de quantidade.`);
+  for (const ni of noteItems) if (!ni.match) problems.push(`Item ${ni.n} da nota (${ni.cProd ?? "sem código"} — ${ni.xProd}) sem correspondência na entrada: associe a um item ${scheduled ? "previsto" : "que entrou"}.`);
+  if (scheduled) {
+    if (!lines.some((l) => l.inNote)) problems.push("A nota não tem nenhum item da entrada prevista: confira a nota ou cancele a entrada prevista.");
+    for (const l of lines) if (!l.inNote) warnings.push(`${l.description}: previsto ${formatQty(l.enteredQty)} e não consta na nota — sai da entrada prevista.`);
+    for (const l of lines) if (l.inNote && l.qtyDiff !== 0) warnings.push(`${l.description}: previsto ${formatQty(l.enteredQty)}, nota ${formatQty(l.noteQty)} — a quantidade prevista passa a ser a da nota.`);
+  } else for (const l of lines) if (!l.inNote) warnings.push(`${l.description}: entrou ${formatQty(l.enteredQty)} e não consta na nota — trate a diferença de quantidade.`);
   const payable = doc.total;
   const term = r.paymentTermId ? await ctx.store.get("payment_terms", r.paymentTermId) : null;
   const inst = buildReceiptInstallments(payable, dups, term ? { installments: term.installments, firstDueDays: term.firstDueDays, intervalDays: term.intervalDays } : null, doc.issueDate);
   if (inst.rescaled) warnings.push("Duplicatas do XML não fecham com o total da nota: parcelas ajustadas ao total mantendo os vencimentos.");
   return {
-    source: input.xml ? "xml" : "manual", doc, noteItems, lines, previousPayable: (r.installments ?? []).reduce((a: number, x: any) => a + x.amount, 0), payable,
+    source: input.xml ? "xml" : "manual", scheduled, doc, noteItems, lines, previousPayable: (r.installments ?? []).reduce((a: number, x: any) => a + x.amount, 0), payable,
     installments: inst.installments.map((x) => ({ ...x, source: inst.source })), problems, warnings, parsed,
   };
 }
@@ -573,15 +591,17 @@ function qtyDecisionProblems(lines: InvoiceLine[], actions: Record<string, QtyAc
 /**
  * Confirma a entrada com a nota do fornecedor. Idempotente: a decisão é gravada no recebimento (`invoiceConfirmation`,
  * estado "applying") antes dos efeitos — uma retentativa reaplica a mesma decisão sem duplicar movimentos, ajuste de
- * custo ou título.
+ * custo ou título. Entrada ainda PREVISTA: a nota substitui o previsto (`applyScheduledPlan`).
  */
 export async function confirmPendingInvoice(ctx: Ctx, receiptId: string, input: ConfirmInvoiceInput) {
   let r = await requireConfirmInvoice(ctx, receiptId);
-  if (r.documentStatus === "confirmed") return r;
-  let plan = r.invoiceConfirmation?.state === "applying" ? (r.invoiceConfirmation as Plan) : null;
+  const applying = r.invoiceConfirmation?.state === "applying";
+  if (r.documentStatus === "confirmed" && !applying) return r;
+  let plan = applying ? (r.invoiceConfirmation as Plan) : null;
   if (!plan) {
     const a = await analyzeFor(ctx, r, input);
-    const problems = [...a.problems, ...qtyDecisionProblems(a.lines, input.qtyActions, input.notes)];
+    // entrada prevista: divergência de quantidade só atualiza o previsto (sem decisão de ajuste/devolução)
+    const problems = [...a.problems, ...(a.scheduled ? [] : qtyDecisionProblems(a.lines, input.qtyActions, input.notes))];
     if (a.parsed && !a.parsed.authorized && !input.notes?.trim()) problems.push("XML sem protocolo de autorização: confirme a autorização no portal da SEFAZ e registre a justificativa nas observações.");
     if (problems.length) throw new BusinessError(problems.join(" "), "invoice_blocked");
     // período financeiro: a conta a pagar (competência da entrada) muda de valor → precisa estar aberto
@@ -597,20 +617,20 @@ export async function confirmPendingInvoice(ctx: Ctx, receiptId: string, input: 
     for (const l of a.lines) {
       const bal = await ctx.store.get("stock_balances", balanceId(r.warehouseId, l.skuId));
       const onHand = Math.max(0, bal?.physical ?? 0);
-      let absorbed = l.costDelta ? roundDiv(l.costDelta * Math.min(onHand, l.enteredQty), l.enteredQty) : 0;
+      let absorbed = !a.scheduled && l.costDelta ? roundDiv(l.costDelta * Math.min(onHand, l.enteredQty), l.enteredQty) : 0;
       // redução nunca deixa o valor do estoque negativo
       if (absorbed < 0) absorbed = Math.max(absorbed, -Math.floor((onHand * (bal?.avgCost ?? 0)) / QTY));
-      lines.push({ ...l, plannedAbsorbed: absorbed, action: l.qtyDiff ? (input.qtyActions?.[String(l.idx)] ?? null) : null });
+      lines.push({ ...l, plannedAbsorbed: absorbed, action: l.qtyDiff && !a.scheduled ? (input.qtyActions?.[String(l.idx)] ?? null) : null });
     }
     plan = {
-      state: "applying", source: a.source, doc: a.doc, xmlFileId, xmlHash: input.xml ? sha256(Buffer.from(input.xml)) : null,
+      state: "applying", scheduled: a.scheduled, source: a.source, doc: a.doc, xmlFileId, xmlHash: input.xml ? sha256(Buffer.from(input.xml)) : null,
       emitter: a.parsed ? { ...a.parsed.emitter, duplicatas: a.parsed.duplicatas, protocol: a.parsed.protocol, authorized: a.parsed.authorized, environment: a.parsed.environment, protocolStatus: a.parsed.protocolStatus, protocolMessage: a.parsed.protocolMessage, homologationAccepted: a.parsed.environment === "homologacao", nature: a.parsed.nature, totals: a.parsed.totals } : null,
       noteItems: a.noteItems, lines, previousPayable: a.previousPayable, payable: a.payable, installments: a.installments, warnings: a.warnings, notes: input.notes?.trim() || null,
       startedAt: nowIso(), startedBy: ctx.user.id,
     };
     r = await ctx.store.update("receipts", r.id, { invoiceConfirmation: plan });
   }
-  return applyPlan(ctx, r, plan);
+  return plan.scheduled ? applyScheduledPlan(ctx, r, plan) : applyPlan(ctx, r, plan);
 }
 
 interface PlanLine extends InvoiceLine {
@@ -619,6 +639,8 @@ interface PlanLine extends InvoiceLine {
 }
 interface Plan {
   state: "applying" | "done";
+  /** confirmada com a entrada ainda PREVISTA (a nota substitui o previsto) */
+  scheduled?: boolean;
   source: "xml" | "manual";
   doc: InvoiceAnalysis["doc"];
   xmlFileId: string | null;
@@ -748,10 +770,103 @@ async function applyPlan(ctx: Ctx, r: Doc, plan: Plan) {
 }
 
 /**
+ * Nota confirmada ANTES da data da entrada (entrada PREVISTA, §40): nada entrou no estoque — não há ajuste de custo,
+ * ajuste de estoque nem devolução. (1) O recebimento passa a ter as quantidades e os custos da nota (casamento de
+ * itens da análise; item previsto que não consta na nota sai do previsto), frete/despesas/desconto, número/série/
+ * emissão/chave/XML, parcelas da nota e `documentStatus = "confirmed"` — e continua PREVISTO (`scheduled`). (2) O
+ * título previsto é corrigido para o valor/parcelas da nota (continua PREVISTO, deixa de ser provisório). Na data,
+ * `realizeEntry` realiza a entrada pelos valores da nota (custo de entrada = nota; sem `cost_adjust`).
+ * Idempotente: (1) só vale enquanto a entrada é prevista e a nota não foi gravada (transação); (2) só enquanto o título
+ * é provisório. Entrada realizada entre a análise e a gravação: a decisão é descartada (comparar de novo).
+ */
+async function applyScheduledPlan(ctx: Ctx, r0: Doc, plan: Plan) {
+  const ref = `NF-e ${plan.doc.number}${plan.doc.series ? `/${plan.doc.series}` : ""}`;
+  let r = r0;
+  if (r.documentStatus !== "confirmed") {
+    const realized = async () => {
+      await ctx.store.update("receipts", r0.id, { invoiceConfirmation: null });
+      return new BusinessError(`A entrada do recebimento nº ${r0.number} foi realizada enquanto a nota era confirmada: compare a nota de novo (agora pela regra da entrada realizada).`, "entry_realized");
+    };
+    if (r.status !== "scheduled") throw await realized();
+    // 1) itens pelos valores da nota (quantidade e custo; o previsto fica registrado no item)
+    const items: ReceiptItem[] = (r.items ?? []).map((x: ReceiptItem) => ({ ...x }));
+    for (const it of items) {
+      const l = plan.lines.find((x) => x.idx === it.idx);
+      if (!l) continue;
+      const ni = plan.noteItems.filter((n) => n.match === it.idx);
+      const planned = { plannedQty: it.receivedQty, plannedUnitCost: it.unitCost };
+      if (l.inNote) {
+        Object.assign(it, planned, {
+          receivedQty: l.noteQty, invoicedQty: l.noteQty, invoicedValue: l.noteValue, invoiceUnitCost: l.noteUnitCost, unitCost: l.noteUnitCost,
+          ...(ni[0]?.cProd ? { cProd: ni[0].cProd } : {}), ...(ni[0]?.cfop ? { entryCfop: ni[0].cfop } : {}), ...(ni[0]?.fiscal ? { fiscal: ni[0].fiscal } : {}),
+          ...(ni[0] && plan.source === "xml" ? { nItem: ni[0].n, xProd: ni[0].xProd, cEAN: ni[0].cEAN } : {}),
+        });
+      } else Object.assign(it, planned, { receivedQty: 0, invoicedQty: 0, invoicedValue: 0 });
+    }
+    const fields: Record<string, any> = {
+      items, freight: plan.doc.freight, otherExpenses: plan.doc.otherExpenses, discount: plan.doc.discount, invoicedTotal: plan.doc.total,
+      nfeNumber: plan.doc.number, nfeSeries: plan.doc.series, nfeIssueDate: `${plan.doc.issueDate}T12:00:00.000Z`,
+      ...(plan.xmlFileId ? { xmlFileId: plan.xmlFileId, xmlHash: plan.xmlHash, origin: "xml" } : {}),
+      ...(plan.emitter ? { emitter: plan.emitter } : {}),
+    };
+    // a conta a pagar segue o TOTAL da nota: se diferir da soma dos itens e encargos, paga-se o faturado (justificado)
+    let calc = await recompute(ctx, r, { ...fields, differenceAction: "adjust_to_due" });
+    const payInvoiced = calc.dueTotal !== plan.doc.total;
+    if (payInvoiced) calc = await recompute(ctx, r, { ...fields, differenceAction: "pay_invoiced" });
+    if (calc.payable !== plan.payable) throw new BusinessError(`Valor a pagar da nota (${formatMoney(plan.payable)}) não fecha com o recalculado (${formatMoney(calc.payable)}): compare a nota de novo.`, "invoice_mismatch");
+    const notes = [r.notes, plan.notes ? `Confirmação da nota: ${plan.notes}` : null, payInvoiced ? `Total da ${ref} ${formatMoney(plan.doc.total)} difere da soma dos itens e encargos (${formatMoney(calc.dueTotal)}): a conta a pagar segue o total da nota.` : null].filter(Boolean).join("\n") || null;
+    const divergences = plan.lines.filter((l) => l.qtyDiff !== 0 || l.costDelta !== 0).map((l) => ({ kind: "forecast", idx: l.idx, skuId: l.skuId, message: `${l.description}: previsto ${formatQty(l.enteredQty)} × ${formatMoney(l.enteredUnitCost)} → nota ${l.inNote ? `${formatQty(l.noteQty)} × ${formatMoney(l.noteLandedUnitCost)}` : "não consta"} (previsto atualizado pela nota)` }));
+    const patch: Record<string, any> = {
+      ...fields, ...omit(calc, "payable"), differenceAction: payInvoiced ? "pay_invoiced" : "adjust_to_due", notes,
+      divergences: [...(calc.divergences ?? []), ...divergences],
+      ...(plan.doc.key ? { nfeKey: plan.doc.key, scopeKey: scopeFor(ctx.companyId, plan.doc.key) } : {}),
+      orderLink: "without_order",
+      documentStatus: "confirmed", invoiceConfirmedAt: nowIso(), invoiceConfirmedBy: ctx.user.id,
+      searchText: searchable(String(r.number), plan.doc.number, plan.doc.key, r.searchText),
+    };
+    let saved: Doc | null;
+    try {
+      saved = await retryOnConflict(() =>
+        ctx.store.transaction(async (t) => {
+          const cur = await t.getOrThrow("receipts", r0.id);
+          if (cur.documentStatus === "confirmed") return cur;
+          if (cur.status !== "scheduled") return null;
+          return t.update("receipts", r0.id, patch);
+        }),
+      );
+    } catch (e) {
+      if (isConflict(e) && plan.doc.key) {
+        const ex = await findReceiptByKey(ctx.store, ctx.companyId, plan.doc.key);
+        throw new BusinessError(`A chave ${plan.doc.key} já está no recebimento nº ${ex?.number ?? "—"}.`, "duplicate", { id: ex?.id });
+      }
+      throw e;
+    }
+    if (!saved) throw await realized();
+    r = saved;
+  }
+  // 2) conta a pagar PREVISTA corrigida para o valor/parcelas da nota (continua prevista até a data)
+  const titleId = await reviseTitle(ctx, r, plan, ref);
+  const updated = await ctx.store.update("receipts", r.id, { payableTitleId: titleId, invoiceConfirmation: { ...plan, state: "done", results: [] } });
+  await resolveOccurrence(ctx.store, occurrenceKeyFor(r.id));
+  const qtyLines = plan.lines.filter((l) => l.qtyDiff !== 0);
+  await audit(ctx, {
+    module: "purchases", action: "receipt.invoice_confirm", entityType: "receipt", entityId: r.id,
+    summary: `Recebimento nº ${r.number}: nota ${ref}${plan.source === "xml" ? " (XML)" : " (dados informados)"} confirmada ANTES da entrada (prevista para ${r.entryAt ? formatIso(r.entryAt) : "—"}) — previsto substituído pela nota: valor ${formatMoney(plan.previousPayable)} → ${formatMoney(plan.payable)}${qtyLines.length ? `; quantidade prevista atualizada em ${qtyLines.length} item(ns)` : ""}; nada entrou no estoque (sem ajuste de custo); conta a pagar continua PREVISTA até a data`,
+    before: { payable: plan.previousPayable, items: plan.lines.map((l) => ({ idx: l.idx, qty: l.enteredQty, unitCost: l.enteredUnitCost })) },
+    after: { scheduled: true, payable: plan.payable, items: plan.lines.map((l) => ({ idx: l.idx, qty: l.noteQty, unitCost: l.noteLandedUnitCost })) },
+    reason: plan.notes,
+    related: [`supplier:${r.supplierId}`, ...(titleId ? [`title:${titleId}`] : [])],
+  });
+  return updated;
+}
+
+/**
  * Título a pagar corrigido para o valor da nota (parcelas da nota). Sem baixas: as parcelas são substituídas (as que
  * sobram são canceladas). Com baixas: as parcelas pagas ficam; a diferença vai para as parcelas em aberto (acréscimo
  * na última em aberto — ou parcela nova — e redução da última para a primeira). Valor já pago acima da nota é
- * recusado (registre a devolução/crédito no financeiro). Conta autorizada cujo valor muda volta para "a autorizar".
+ * recusado (registre a devolução/crédito no financeiro). Conta já AUTORIZADA continua autorizada com o valor novo
+ * (decisão do usuário): a auditoria registra o valor anterior, o novo e quem confirmou. Entrada prevista: o título
+ * continua PREVISTO (só deixa de ser provisório).
  */
 async function reviseTitle(ctx: Ctx, r: Doc, plan: Plan, ref: string): Promise<string | null> {
   const titleId: string | null = r.payableTitleId ?? null;
@@ -762,18 +877,21 @@ async function reviseTitle(ctx: Ctx, r: Doc, plan: Plan, ref: string): Promise<s
       kind: "payable", partyType: "supplier", partyId: supplier.id, partyName: supplierLabel(supplier), description: `Compra — recebimento nº ${r.number} / ${ref}`,
       documentNumber: `${plan.doc.number}${plan.doc.series ? `-${plan.doc.series}` : ""}`, originType: "purchase_receipt", originId: r.id, issueDate: r.entryAt ? toLocalDate(r.entryAt) : plan.doc.issueDate,
       categoryId: r.categoryId ?? null, costCenterId: r.costCenterId ?? null, installments: plan.installments.map((x) => ({ dueDate: x.dueDate, amount: x.amount })), idemKey: `purchase_receipt:${r.id}`, branchId: r.branchId,
+      // entrada ainda prevista: o título nasce PREVISTO (pelo valor da nota) e fica efetivo na realização
+      ...(plan.scheduled && r.status === "scheduled" ? { forecast: true, notes: `PREVISTO: entrada de mercadoria prevista para ${r.entryAt ? formatIso(r.entryAt) : "—"} (nota ${ref} confirmada antes da entrada).` } : {}),
     });
     return t.id;
   }
   const title = await ctx.store.getOrThrow("titles", titleId);
-  if (!title.provisional && !title.forecast) return titleId; // já corrigido (retentativa)
+  if (!title.provisional) return titleId; // já corrigido pela nota (retentativa)
   const insts = (await listAll(ctx.store, "installments", { filters: [["eq", "titleId", titleId]] })).sort((a, b) => a.number - b.number);
   const live = insts.filter((i) => i.status !== "cancelled" && i.status !== "renegotiated");
   const paidAny = live.some((i) => (i.paid ?? 0) > 0);
   const newTotal = plan.installments.reduce((a, x) => a + x.amount, 0);
   const oldTotal = live.reduce((a, i) => a + i.amount, 0);
   const docNumber = `${plan.doc.number}${plan.doc.series ? `-${plan.doc.series}` : ""}`;
-  const changed = newTotal !== oldTotal || !paidAny;
+  const approved = title.approvalStatus === "approved";
+  const keepForecast = Boolean(plan.scheduled && title.forecast);
   if (title.status === "cancelled") throw new BusinessError(`A conta a pagar nº ${title.number} desta entrada está cancelada: corrija no financeiro antes de confirmar a nota.`, "title_cancelled");
   await retryOnConflict(() =>
     ctx.store.transaction(async (t) => {
@@ -813,16 +931,24 @@ async function reviseTitle(ctx: Ctx, r: Doc, plan: Plan, ref: string): Promise<s
         }
       }
       const count = !paidAny ? plan.installments.length : live.length + (newTotal > oldTotal && !live.some((i) => i.balance > 0) ? 1 : 0);
+      // conta já autorizada continua autorizada com o valor da nota (a auditoria registra o anterior, o novo e quem confirmou)
       await t.update("titles", titleId!, {
-        total: newTotal, installmentsCount: count, documentNumber: docNumber, provisional: false, forecast: false,
+        total: newTotal, installmentsCount: count, documentNumber: docNumber, provisional: false,
+        // entrada prevista: o título continua PREVISTO até a realização
+        ...(keepForecast ? {} : { forecast: false }),
         description: `Compra — recebimento nº ${r.number} / ${ref}`,
-        ...(changed && title.approvalStatus === "approved" && newTotal !== oldTotal ? { approvalStatus: "pending", approvedBy: null, approvedAt: null } : {}),
-        notes: `${title.notes ? `${title.notes}\n` : ""}Valor corrigido pela ${ref}: ${formatMoney(oldTotal)} → ${formatMoney(newTotal)}${paidAny ? " (parcelas pagas mantidas; diferença nas parcelas em aberto)" : ""}.`,
+        notes: `${title.notes ? `${title.notes}\n` : ""}Valor corrigido pela ${ref}${keepForecast ? " (confirmada antes da entrada; continua PREVISTO até a data)" : ""}: ${formatMoney(oldTotal)} → ${formatMoney(newTotal)}${paidAny ? " (parcelas pagas mantidas; diferença nas parcelas em aberto)" : ""}${approved && newTotal !== oldTotal ? " — autorização mantida" : ""}.`,
       });
     }),
   );
   await refreshTitleStatus(ctx.store, titleId);
-  await audit(ctx, { module: "finance", action: "title.invoice_revise", entityType: "title", entityId: titleId, summary: `Conta a pagar nº ${title.number}: valor provisório corrigido pela ${ref} (${formatMoney(oldTotal)} → ${formatMoney(newTotal)}, ${plan.installments.length} parcela(s))`, related: [`receipt:${r.id}`] });
+  await audit(ctx, {
+    module: "finance", action: "title.invoice_revise", entityType: "title", entityId: titleId,
+    summary: `Conta a pagar nº ${title.number}: valor ${title.forecast ? "previsto" : "provisório"} corrigido pela ${ref} (${formatMoney(oldTotal)} → ${formatMoney(newTotal)}, ${plan.installments.length} parcela(s)) — confirmado por ${ctx.user.name ?? ctx.user.id}${approved ? `; conta já AUTORIZADA continua autorizada${newTotal !== oldTotal ? " com o valor novo" : ""}` : ""}`,
+    before: { total: oldTotal, installments: live.map((i) => ({ number: i.number, dueDate: i.dueDate, amount: i.amount, paid: i.paid ?? 0 })), approvalStatus: title.approvalStatus ?? null, approvedBy: title.approvedBy ?? null },
+    after: { total: newTotal, installments: plan.installments.map((x) => ({ number: x.number, dueDate: x.dueDate, amount: x.amount })), approvalStatus: title.approvalStatus ?? null, confirmedBy: ctx.user.id, confirmedByName: ctx.user.name ?? null },
+    related: [`receipt:${r.id}`],
+  });
   return titleId;
 }
 
@@ -857,10 +983,10 @@ export async function pendingInvoiceSkus(store: Store, companyId: string, branch
   return out;
 }
 
-/** Entradas com nota a confirmar e previstas de um produto (aba Estoque do produto). */
+/** Entradas com nota a confirmar e previstas (inclusive com a nota já confirmada antes da data) de um produto (aba Estoque do produto). */
 export async function pendingEntriesForSkus(store: Store, companyId: string, skuIds: string[]) {
   if (!skuIds.length) return [];
-  const list = await listAll(store, "receipts", { filters: [["eq", "companyId", companyId], ["eq", "documentStatus", "pending_invoice"], ["ne", "status", "cancelled"]] });
+  const list = (await listAll(store, "receipts", { filters: [["eq", "companyId", companyId], ["eq", "documentStatus", ["pending_invoice", "confirmed"]], ["ne", "status", "cancelled"]] })).filter((r) => r.documentStatus === "pending_invoice" || r.status === "scheduled");
   const set = new Set(skuIds);
   const out: Array<{ id: string; number: number; status: string; entryAt: string; invoiceDueAt: string | null; warehouseId: string; branchId: string; qty: number }> = [];
   for (const r of list) {

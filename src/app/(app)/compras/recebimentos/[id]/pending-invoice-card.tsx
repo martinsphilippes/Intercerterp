@@ -14,7 +14,8 @@ import { InvoiceConfirm } from "./invoice-confirm";
 
 /**
  * Quadro da entrada com nota a confirmar (§40) no recebimento: situação (prevista, aguardando nota, vencida, nota
- * confirmada), prazo, conta a pagar e a ação "Confirmar com a nota" (ou o resumo da confirmação).
+ * confirmada), prazo, conta a pagar e a ação "Confirmar com a nota" (ou o resumo da confirmação). A nota pode ser
+ * confirmada também na entrada PREVISTA (antes da data): substitui o previsto, sem estoque nem ajuste de custo.
  */
 export function PendingInvoiceCard({ r, title, leadDays, canConfirm, canCancel, canReturn, users, realizeError }: { r: Doc; title: Doc | null; leadDays: number; canConfirm: boolean; canCancel: boolean; canReturn: boolean; users: Map<string, string>; realizeError: string | null }) {
   const st = pendingState(r, undefined, leadDays);
@@ -29,13 +30,15 @@ export function PendingInvoiceCard({ r, title, leadDays, canConfirm, canCancel, 
       className="mb-5"
       title={
         <span className="inline-flex items-center gap-2">
-          <Icon className="size-5 text-brand-700" aria-hidden /> {confirmed ? "Entrada confirmada com a nota" : scheduled ? "Entrada prevista — nota a confirmar" : "Entrada aguardando a nota do fornecedor"}
+          <Icon className="size-5 text-brand-700" aria-hidden /> {confirmed ? (scheduled ? "Entrada prevista — nota confirmada" : "Entrada confirmada com a nota") : scheduled ? "Entrada prevista — nota a confirmar" : "Entrada aguardando a nota do fornecedor"}
         </span>
       }
       actions={<Badge tone={st.tone}>{st.label}</Badge>}
       description={
         confirmed
-          ? undefined
+          ? scheduled
+            ? "A nota foi confirmada antes da chegada: quantidades, custos e conta a pagar (ainda PREVISTA) já estão pelos valores da nota. Na data/hora da entrada, a rotina diária — ou a abertura deste recebimento — realiza a entrada pelo custo da nota (sem ajuste de custo). A entrada prevista ainda pode ser cancelada; a nota fica no histórico."
+            : undefined
           : scheduled
             ? "A mercadoria ainda não chegou: nada foi lançado no estoque nem no custo médio. A quantidade aparece como “a chegar” nos saldos e a conta a pagar como PREVISTA (fluxo de caixa previsto; não pode ser baixada). Na data/hora da entrada, a rotina diária — ou a abertura deste recebimento — realiza a entrada."
             : "O estoque já entrou pelo custo previsto e pode ser vendido normalmente (sempre com NFC-e/NF-e). A conta a pagar é PROVISÓRIA até a nota. Quando a nota chegar, confirme abaixo: custo, quantidade e conta a pagar são corrigidos pela nota."
@@ -52,7 +55,7 @@ export function PendingInvoiceCard({ r, title, leadDays, canConfirm, canCancel, 
             label: "Conta a pagar",
             value: title ? (
               <Link className="text-brand-700 hover:underline" href={`/financeiro/pagar/${title.id}`}>
-                nº {title.number} · {formatMoney(title.total)} {title.forecast ? <Badge tone="info">Prevista</Badge> : title.provisional ? <Badge tone="warn">Provisória</Badge> : <Badge tone="good">Pelo valor da nota</Badge>}
+                nº {title.number} · {formatMoney(title.total)} {title.forecast ? <Badge tone="info">{title.provisional ? "Prevista" : "Prevista · valor da nota"}</Badge> : title.provisional ? <Badge tone="warn">Provisória</Badge> : <Badge tone="good">Pelo valor da nota</Badge>}
               </Link>
             ) : (
               "—"
@@ -65,12 +68,14 @@ export function PendingInvoiceCard({ r, title, leadDays, canConfirm, canCancel, 
           <ActionButton variant="danger" action={cancelScheduledAction.bind(null, r.id)} label="Cancelar entrada prevista" askReason="Motivo do cancelamento da entrada prevista:" />
         </div>
       )}
-      {!scheduled && !confirmed && r.status === "confirmed" && (
+      {!confirmed && (scheduled || r.status === "confirmed") && (
         <div className="mt-5 border-t border-line pt-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Confirmar com a nota</h3>
+          <h3 className="mb-1 text-sm font-semibold text-ink">Confirmar com a nota</h3>
+          {scheduled && <p className="mb-3 text-xs text-slate-600">A nota já chegou? Confirme antes da entrada: as quantidades e custos previstos e a conta a pagar prevista passam a ser os da nota. Nada entra no estoque agora — na data, a entrada é realizada pelos valores da nota.</p>}
           {canConfirm ? (
             <InvoiceConfirm
               receiptId={r.id}
+              scheduled={scheduled}
               defaults={{ nfeNumber: r.nfeNumber ?? null, nfeSeries: r.nfeSeries ?? null, nfeKey: r.nfeKey ?? null }}
               returnHref={returnHref}
               items={items.map((i) => ({ idx: i.idx, description: i.description, sku: i.sku ?? null, unitCode: i.unitCode ?? null, qty: i.receivedQty, unitCost: i.landedUnitCost ?? i.unitCost, lineUnitCost: i.unitCost }))}
@@ -83,12 +88,12 @@ export function PendingInvoiceCard({ r, title, leadDays, canConfirm, canCancel, 
       {confirmed && conf && (
         <div className="mt-4 space-y-2 text-sm">
           <p>
-            {conf.source === "xml" ? "XML importado" : "Dados informados"} · NF-e {conf.doc?.number}
+            {conf.scheduled ? "Confirmada antes da entrada · " : ""}{conf.source === "xml" ? "XML importado" : "Dados informados"} · NF-e {conf.doc?.number}
             {conf.doc?.series ? `/${conf.doc.series}` : ""} · emissão {formatDate(conf.doc?.issueDate)} · conta a pagar {formatMoney(conf.previousPayable)} → <strong>{formatMoney(conf.payable)}</strong>
           </p>
           <div className="-mx-5 overflow-x-auto">
             <table className="table-base w-full text-sm">
-              <thead><tr><th>Produto</th><th className="text-right">Entrou</th><th className="text-right">Nota</th><th className="text-right">Custo previsto → nota</th><th className="text-right">Ajuste no custo médio</th><th className="text-right">Não absorvido (já vendido)</th><th>Quantidade</th></tr></thead>
+              <thead><tr><th>Produto</th><th className="text-right">{conf.scheduled ? "Previsto" : "Entrou"}</th><th className="text-right">Nota</th><th className="text-right">Custo previsto → nota</th><th className="text-right">Ajuste no custo médio</th><th className="text-right">Não absorvido (já vendido)</th><th>Quantidade</th></tr></thead>
               <tbody>
                 {(conf.lines ?? []).map((l: any) => {
                   const res = (conf.results ?? []).find((x: any) => x.idx === l.idx);
@@ -100,7 +105,7 @@ export function PendingInvoiceCard({ r, title, leadDays, canConfirm, canCancel, 
                       <td className="tabular text-right">{formatMoney(l.enteredUnitCost)} → {l.inNote ? formatMoney(l.noteLandedUnitCost) : "—"}</td>
                       <td className="tabular text-right">{res?.absorbed ? formatMoney(res.absorbed) : "—"}</td>
                       <td className="tabular text-right">{res?.notAbsorbed ? formatMoney(res.notAbsorbed) : "—"}</td>
-                      <td>{l.qtyDiff === 0 ? "Confere" : l.action === "adjust" ? "Estoque ajustado" : l.action === "return" ? (returnHref ? <Link className="text-brand-700 hover:underline" href={returnHref}>Devolver ao fornecedor</Link> : "Devolução ao fornecedor") : "Mantido (justificado)"}</td>
+                      <td>{l.qtyDiff === 0 ? "Confere" : conf.scheduled ? "Previsto atualizado pela nota" : l.action === "adjust" ? "Estoque ajustado" : l.action === "return" ? (returnHref ? <Link className="text-brand-700 hover:underline" href={returnHref}>Devolver ao fornecedor</Link> : "Devolução ao fornecedor") : "Mantido (justificado)"}</td>
                     </tr>
                   );
                 })}
