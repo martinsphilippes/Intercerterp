@@ -199,6 +199,7 @@ export async function invoiceConfirmAction(fd: FormData) {
     const input = await invoiceInput(fd);
     if (fstr(fd, "intent") === "confirm") {
       const r = await confirmPendingInvoice(s.ctx, id, input);
+      if (r.status === "scheduled") return { ok: true as const, message: `Recebimento nº ${r.number}: NF-e ${r.nfeNumber} confirmada antes da entrada — quantidades, custos e conta a pagar PREVISTA atualizados pela nota; a entrada será realizada na data prevista.` };
       return { ok: true as const, message: `Recebimento nº ${r.number} confirmado com a NF-e ${r.nfeNumber}: custo, estoque e conta a pagar ajustados pela nota.` };
     }
     const { parsed, ...data } = await analyzeInvoice(s.ctx, id, input);

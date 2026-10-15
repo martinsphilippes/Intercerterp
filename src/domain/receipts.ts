@@ -1272,14 +1272,17 @@ export async function confirmReceiptEffects(ctx: Ctx, id: string) {
     blockers.push(...(await receiptLotBlockers(ctx, r)));
     if (blockers.length) throw new BusinessError(blockers.join(" "), "receipt_blocked");
     // FIN-21: conta a pagar com competência em período financeiro fechado é recusada antes de qualquer efeito (estoque)
-    if (effectsOf(r).createPayable && payableAmount(r as any) > 0) await assertPeriodOpen(ctx.store, ctx.companyId, r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : r.entryAt ? toLocalDate(r.entryAt) : today(), r.nfeIssueDate || !r.entryAt ? "conta a pagar do recebimento (data de emissão da nota)" : "conta a pagar do recebimento (data da entrada)");
+    // §40 (nota a confirmar, inclusive a nota confirmada antes da entrada prevista): competência = data da entrada
+    const byEntry = Boolean(r.entryAt && r.documentStatus);
+    if (effectsOf(r).createPayable && payableAmount(r as any) > 0) await assertPeriodOpen(ctx.store, ctx.companyId, byEntry ? toLocalDate(r.entryAt) : r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : today(), byEntry ? "conta a pagar do recebimento (data da entrada)" : "conta a pagar do recebimento (data de emissão da nota)");
     r = await startConfirming(ctx, id);
     if (r.status === "confirmed") return r;
   }
   const items: ReceiptItem[] = r.items ?? [];
   const active = items.filter((i) => !i.ignore && i.skuId && i.receivedQty > 0);
-  // entrada com nota a confirmar (§40): os movimentos e a conclusão levam a data/hora da entrada informada
-  const occurredAt = r.entryAt && r.documentStatus === "pending_invoice" ? (r.entryAt as string) : nowIso();
+  // entrada com nota a confirmar (§40): os movimentos e a conclusão levam a data/hora da entrada informada (também
+  // quando a nota foi confirmada antes da entrada prevista — documentStatus "confirmed")
+  const occurredAt = r.entryAt && (r.documentStatus === "pending_invoice" || r.documentStatus === "confirmed") ? (r.entryAt as string) : nowIso();
   const pendingInvoice = r.documentStatus === "pending_invoice";
   const eff = effectsOf(r);
   // 1) estoque (custo de entrada com rateio → custo médio ponderado)
@@ -1331,7 +1334,7 @@ export async function confirmReceiptEffects(ctx: Ctx, id: string) {
       documentNumber: r.nfeNumber ? `${r.nfeNumber}${r.nfeSeries ? `-${r.nfeSeries}` : ""}` : `REC-${r.number}`,
       originType: "purchase_receipt",
       originId: id,
-      issueDate: r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : r.entryAt ? toLocalDate(r.entryAt) : today(),
+      issueDate: r.entryAt && r.documentStatus ? toLocalDate(r.entryAt) : r.nfeIssueDate ? toLocalDate(r.nfeIssueDate) : r.entryAt ? toLocalDate(r.entryAt) : today(),
       categoryId: r.categoryId ?? (await getSetting(ctx.store, ctx.companyId, null, "finance.category.purchases", null)),
       costCenterId: r.costCenterId ?? null,
       installments: (r.installments ?? []).map((x: any) => ({ dueDate: x.dueDate, amount: x.amount, methodKind: method?.kind ?? undefined })),
