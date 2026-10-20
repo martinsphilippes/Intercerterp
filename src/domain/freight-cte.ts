@@ -156,7 +156,7 @@ export async function importCteXml(ctx: Ctx, input: ImportCteInput): Promise<Doc
       {
         companyId: ctx.companyId, branchId, createdBy: ctx.user.id, number, cteKey: cte.key, cteNumber: cte.number, cteSeries: cte.series,
         issueDate: cte.issueDate ? new Date(cte.issueDate).toISOString() : null, scopeKey, carrierId: carrier.id,
-        emitter: { ...cte.emitter, duplicatas: cte.duplicatas, modal: cte.modal, ufStart: cte.ufStart, ufEnd: cte.ufEnd, type: cte.type, homologationAccepted, protocolStatus: cte.protocolStatus, protocolMessage: cte.protocolMessage },
+        emitter: { ...cte.emitter, duplicatas: cte.duplicatas, modal: cte.modal, ufStart: cte.ufStart, ufEnd: cte.ufEnd, munStart: cte.munStart ?? null, munEnd: cte.munEnd ?? null, type: cte.type, homologationAccepted, protocolStatus: cte.protocolStatus, protocolMessage: cte.protocolMessage },
         tomador: { role: cte.tomador.role, ...cte.tomador.party, sender: cte.sender, recipient: cte.recipient },
         cfop: cte.cfop, entryCfop, total: cte.total, received: cte.received || cte.total, icms: cte.icms, nfeKeys: cte.nfeKeys,
         receiptIds: receipts.map((r) => r.id), allocations, xmlFileId: null, xmlHash: sha256(Buffer.from(input.xml)), payableTitleId: null,

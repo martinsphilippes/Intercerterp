@@ -5,7 +5,8 @@ import { SCALE_CONTENTS, SCALE_DEFAULTS, SCALE_LAYOUTS } from "@/domain/scale-ba
 /** Catálogo de parâmetros editáveis (empresa e filial). Valores padrão vêm de DEFAULT_SETTINGS quando existem. */
 
 /** `cfopPairs`: tabela de pares CFOP de saída → entrada (objeto { "5102": "1102" }), editada como texto "5102=1102" por linha. */
-export type ParamType = "bool" | "int" | "bps" | "money" | "select" | "timezone" | "cfopPairs";
+/** `text`: texto curto (com `pattern`/`maxLength`); `ufCodes`: tabela "UF=CÓDIGO;DIA" por linha (recolhimento do ICMS por UF — §41). */
+export type ParamType = "bool" | "int" | "bps" | "money" | "select" | "timezone" | "cfopPairs" | "text" | "ufCodes";
 
 export interface ParamDef {
   key: string;
@@ -24,6 +25,10 @@ export interface ParamDef {
   usedBy: string;
   /** definido para toda a instalação (somente leitura na tela; não é gravado por empresa/filial) */
   installation?: boolean;
+  /** `text`: expressão regular (texto inteiro) e tamanho máximo; vazio é sempre aceito */
+  pattern?: string;
+  maxLength?: number;
+  placeholder?: string;
 }
 
 export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Financeiro", "Notificações", "Usuários", "Regional", "Fidelidade", "Fiscal", "Recursos"];
@@ -169,8 +174,8 @@ export const PARAMS: ParamDef[] = [
   },
   {
     key: "feature.arquivosFiscais", group: "Recursos", label: "Arquivos fiscais (Sintegra, SPED Fiscal e EFD Contribuições)", type: "bool", scopes: ["company", "branch"], default: true,
-    help: "Mostra Fiscal › Sintegra (e as telas de arquivos fiscais): por estabelecimento e mês, monta o arquivo do Convênio ICMS 57/95 a partir das NF-e emitidas, das entradas concluídas (recebimentos e CT-e) e, se pedido, do inventário em data-base e das NFC-e, com prévia, pendências (cadastros incompletos, notas a confirmar) e contagem por registro; o arquivo fica em Arquivos com histórico e entra no pacote da contabilidade do período. Exige a permissão “Gerar arquivos fiscais”. Valide no validador da UF e com a contabilidade antes do primeiro envio. Desligado, a tela e o menu somem; arquivos já gerados são mantidos.",
-    usedBy: "Fiscal (Sintegra) e pacote contábil",
+    help: "Mostra Fiscal › Arquivos fiscais (SPED): EFD ICMS/IPI por estabelecimento e EFD Contribuições da empresa, com prévia de pendências e totais, geração, histórico e o último arquivo do período no pacote contábil (§41); e Fiscal › Sintegra: por estabelecimento e mês, monta o arquivo do Convênio ICMS 57/95 a partir das NF-e emitidas, das entradas concluídas (recebimentos e CT-e) e, se pedido, do inventário em data-base e das NFC-e, com prévia, pendências (cadastros incompletos, notas a confirmar) e contagem por registro; o arquivo fica em Arquivos com histórico e entra no pacote da contabilidade do período. Exige a permissão “Gerar arquivos fiscais”. Valide no validador da UF e com a contabilidade antes do primeiro envio. Desligado, a tela e o menu somem; arquivos já gerados são mantidos.",
+    usedBy: "Fiscal (arquivos fiscais: SPED Fiscal, EFD Contribuições e Sintegra) e pacote contábil",
   },
   {
     key: "feature.cteEntrada", group: "Recursos", label: "CT-e de entrada (frete de compra)", type: "bool", scopes: ["company", "branch"], default: true,
@@ -259,6 +264,40 @@ export const PARAMS: ParamDef[] = [
     options: [{ value: "keep", label: "Manter a data gerada" }, { value: "next", label: "Levar para o próximo dia útil" }], usedBy: "PDV (venda a prazo) e Financeiro (novo título)",
   },
   { key: "users.inviteExpiryDays", group: "Usuários", label: "Validade do convite de primeiro acesso", help: "Depois deste prazo o link de convite deixa de funcionar e precisa ser reenviado.", type: "int", scopes: ["company"], default: 7, min: 1, max: 30, unit: "dias", usedBy: "Usuários e permissões (convites)" },
+  {
+    key: "fiscal.sped.profile", group: "Fiscal", label: "Perfil de apresentação da EFD ICMS/IPI", type: "select", scopes: ["company", "branch"], default: "A",
+    options: [{ value: "A", label: "Perfil A" }, { value: "B", label: "Perfil B" }, { value: "C", label: "Perfil C" }],
+    help: "Perfil definido pela SEFAZ do estado para o estabelecimento (campo IND_PERFIL do registro 0000). Confirme com a contabilidade: o perfil é determinado pelo fisco, não escolhido pela empresa.",
+    usedBy: "Arquivos fiscais (EFD ICMS/IPI — registro 0000)",
+  },
+  {
+    key: "fiscal.sped.activity", group: "Fiscal", label: "Indicador de atividade (EFD ICMS/IPI)", type: "select", scopes: ["company", "branch"], default: "1",
+    options: [{ value: "1", label: "1 — Outros (comércio, serviços)" }, { value: "0", label: "0 — Industrial ou equiparado a industrial" }],
+    help: "Campo IND_ATIV do registro 0000. Com “industrial”, o arquivo leva também o registro 0002 (classificação 00 — conferir).",
+    usedBy: "Arquivos fiscais (EFD ICMS/IPI — registro 0000)",
+  },
+  {
+    key: "fiscal.sped.recolhimento", group: "Fiscal", label: "Código de receita e vencimento do ICMS por UF", type: "ufCodes", scopes: ["company", "branch"], default: {},
+    help: "Uma linha por UF no formato UF=CÓDIGO;DIA (ex.: SP=046-2;20): código de receita da SEFAZ e dia do vencimento no mês seguinte, usados nas obrigações a recolher (E116 do ICMS próprio, E250 da ST e E316 do DIFAL/FCP). Sem o código da UF, a prévia mostra a pendência.",
+    usedBy: "Arquivos fiscais (EFD ICMS/IPI — E116/E250/E316)",
+  },
+  {
+    key: "fiscal.efd.activity", group: "Fiscal", label: "Indicador de atividade (EFD Contribuições)", type: "select", scopes: ["company"], default: "2",
+    options: [{ value: "2", label: "2 — Comércio" }, { value: "0", label: "0 — Industrial ou equiparado" }, { value: "1", label: "1 — Prestador de serviços" }, { value: "4", label: "4 — Atividade imobiliária" }, { value: "9", label: "9 — Outros" }],
+    help: "Campo IND_ATIV do registro 0000 da EFD Contribuições (a natureza jurídica sai como 00 — sociedade empresária em geral).",
+    usedBy: "Arquivos fiscais (EFD Contribuições — registro 0000)",
+  },
+  { key: "fiscal.files.accountantName", group: "Fiscal", label: "Contabilista — nome", help: "Nome do contabilista responsável (registro 0100). Vazio = contato da integração Área da contabilidade.", type: "text", scopes: ["company"], default: "", pattern: "", maxLength: 100, placeholder: "Nome completo", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantCpf", group: "Fiscal", label: "Contabilista — CPF", help: "CPF do contabilista (somente números).", type: "text", scopes: ["company"], default: "", pattern: "\\d{11}", maxLength: 11, placeholder: "00000000000", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantCrc", group: "Fiscal", label: "Contabilista — CRC", help: "Número do registro no Conselho Regional de Contabilidade (ex.: 1SP123456O0).", type: "text", scopes: ["company"], default: "", pattern: "[0-9A-Za-z/.-]{3,15}", maxLength: 15, placeholder: "1SP000000O0", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantCnpj", group: "Fiscal", label: "Escritório — CNPJ", help: "CNPJ do escritório de contabilidade. Vazio = o do escritório vinculado pelo Portal do Contador.", type: "text", scopes: ["company"], default: "", pattern: "\\d{14}", maxLength: 14, placeholder: "00000000000000", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantEmail", group: "Fiscal", label: "Contabilista — e-mail", help: "E-mail do contabilista. Vazio = e-mail da integração Área da contabilidade ou do escritório vinculado.", type: "text", scopes: ["company"], default: "", pattern: "[^\\s@]+@[^\\s@]+\\.[^\\s@]+", maxLength: 115, placeholder: "contador@escritorio.com.br", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantPhone", group: "Fiscal", label: "Escritório — telefone", help: "Telefone com DDD (somente números).", type: "text", scopes: ["company"], default: "", pattern: "\\d{10,11}", maxLength: 11, placeholder: "1133334444", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantZip", group: "Fiscal", label: "Escritório — CEP", help: "CEP do escritório (somente números).", type: "text", scopes: ["company"], default: "", pattern: "\\d{8}", maxLength: 8, placeholder: "01001000", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantStreet", group: "Fiscal", label: "Escritório — logradouro", help: "Logradouro do escritório.", type: "text", scopes: ["company"], default: "", pattern: "", maxLength: 60, placeholder: "Rua …", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantNumber", group: "Fiscal", label: "Escritório — número", help: "Número do endereço do escritório.", type: "text", scopes: ["company"], default: "", pattern: "", maxLength: 10, placeholder: "100", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantDistrict", group: "Fiscal", label: "Escritório — bairro", help: "Bairro do escritório.", type: "text", scopes: ["company"], default: "", pattern: "", maxLength: 60, placeholder: "Centro", usedBy: "Arquivos fiscais (registro 0100)" },
+  { key: "fiscal.files.accountantCityCode", group: "Fiscal", label: "Escritório — município (IBGE)", help: "Código IBGE de 7 dígitos do município do escritório.", type: "text", scopes: ["company"], default: "", pattern: "\\d{7}", maxLength: 7, placeholder: "3550308", usedBy: "Arquivos fiscais (registro 0100)" },
   {
     key: "timezone", group: "Regional", label: "Fuso horário", type: "timezone", scopes: ["company"], default: "America/Sao_Paulo", installation: true,
     help: "Único para toda a instalação (todas as empresas e filiais): define o dia de cada movimento nos recortes de período, o horário das rotinas e a agenda de backup. Para alterar, o responsável técnico define a variável de ambiente APP_TIMEZONE no servidor (ex.: America/Manaus) e reinicia a aplicação.",

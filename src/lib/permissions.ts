@@ -156,7 +156,7 @@ export const FIRM_ROLES: RoleTemplate[] = [
     name: "Sócio / Administrador do escritório",
     description: "Acesso integral: carteira, equipe, financeiro do escritório, fiscal de serviços e administração.",
     permissions: Object.fromEntries(FIRM_MODULES.map((m) => [m.key, all()])),
-    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
+    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "fiscal.files", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
     discountLimitBps: 10000,
   },
   {
