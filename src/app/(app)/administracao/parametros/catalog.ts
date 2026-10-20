@@ -26,7 +26,7 @@ export interface ParamDef {
   installation?: boolean;
 }
 
-export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Financeiro", "Notificações", "Usuários", "Regional", "Fidelidade", "Recursos"];
+export const PARAM_GROUPS = ["Vendas e PDV", "Caixa", "Estoque e reposição", "Curva ABC", "Compras", "Financeiro", "Notificações", "Usuários", "Regional", "Fidelidade", "Fiscal", "Recursos"];
 
 export const PARAMS: ParamDef[] = [
   {
@@ -103,6 +103,11 @@ export const PARAMS: ParamDef[] = [
   },
   { key: "purchase.pendingInvoice.alertLeadDays", group: "Compras", label: "Antecedência do aviso de nota a confirmar", help: "Quantos dias antes do prazo da nota o aviso é gerado. 0 = avisar só no vencimento.", type: "int", scopes: ["company", "branch"], default: 3, min: 0, max: 60, unit: "dias", usedBy: "Rotina diária de compras (aviso de nota a confirmar)" },
   { key: "purchase.monthlyBudget", group: "Compras", label: "Orçamento mensal de compras", help: "0 = sem orçamento. Usado nas aprovações para indicar consumo do orçamento.", type: "money", scopes: ["company", "branch"], default: 0, min: 0, usedBy: "Aprovação de compras" },
+  {
+    key: "sintegra.includeNfce", group: "Fiscal", label: "Sintegra: incluir NFC-e (registros 61 e 61R)", type: "bool", scopes: ["company", "branch"], default: false,
+    help: "Liga a inclusão das NFC-e (modelo 65) autorizadas no arquivo Sintegra, no registro 61 (resumo diário por série e alíquota) e 61R (resumo mensal por produto). Muitas UFs dispensam a NFC-e do Sintegra (o documento já está na SEFAZ) — confirme com a contabilidade e a legislação da sua UF. A opção também pode ser marcada na própria tela, a cada geração.",
+    usedBy: "Fiscal (Sintegra)",
+  },
   { key: "feature.precificacaoEntrada", group: "Recursos", label: "Precificação após a entrada de mercadorias", help: "Mostra a tela que sugere o novo preço de venda a partir do custo de cada recebimento concluído (com prévia antes de gravar). Desligado, o atalho e a tela ficam ocultos; nada é alterado nos preços.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Compras (recebimento concluído → Precificar)" },
   { key: "feature.alteracaoMassa", group: "Recursos", label: "Alteração de produtos em massa", help: "Mostra a tela de reajuste de preços e de alteração de categoria, marca, NCM, grupo tributário e situação de vários produtos de uma vez (sempre com prévia).", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Produtos (alteração em massa)" },
   { key: "feature.etiquetas", group: "Recursos", label: "Impressão de etiquetas de produtos", help: "Mostra a tela de etiquetas de gôndola e adesivas com preço e código de barras, inclusive a partir de um recebimento concluído.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Produtos (etiquetas) e Compras (recebimento)" },
@@ -161,6 +166,11 @@ export const PARAMS: ParamDef[] = [
     key: "feature.notaAConfirmar", group: "Recursos", label: "Entrada de mercadoria com nota a confirmar", type: "bool", scopes: ["company", "branch"], default: true,
     help: "Permite registrar a ENTRADA de mercadoria que chegou antes da nota fiscal do fornecedor (Receber mercadorias › Nota a confirmar): o estoque entra no depósito escolhido como entrada normal, marcada “aguardando nota”, com conta a pagar provisória. Data/hora futura = entrada PREVISTA (“a chegar”, sem saldo nem custo; conta a pagar prevista), realizada automaticamente na data. Depois, “Confirmar com a nota” (XML ou dados da nota) corrige custo (ajuste de custo médio), quantidade (ajuste ou devolução) e a conta a pagar, e a nota entra no livro de entradas. Toda venda continua com NFC-e/NF-e: não há venda sem documento fiscal nem estoque separado. Desligado, a opção e o painel somem; as entradas já lançadas continuam e podem ser confirmadas pelo recebimento.",
     usedBy: "Compras (recebimento e Compras aguardando nota), Estoque (a chegar), Financeiro (contas a pagar e fluxo previsto) e rotina diária",
+  },
+  {
+    key: "feature.arquivosFiscais", group: "Recursos", label: "Arquivos fiscais (Sintegra, SPED Fiscal e EFD Contribuições)", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Mostra Fiscal › Sintegra (e as telas de arquivos fiscais): por estabelecimento e mês, monta o arquivo do Convênio ICMS 57/95 a partir das NF-e emitidas, das entradas concluídas (recebimentos e CT-e) e, se pedido, do inventário em data-base e das NFC-e, com prévia, pendências (cadastros incompletos, notas a confirmar) e contagem por registro; o arquivo fica em Arquivos com histórico e entra no pacote da contabilidade do período. Exige a permissão “Gerar arquivos fiscais”. Valide no validador da UF e com a contabilidade antes do primeiro envio. Desligado, a tela e o menu somem; arquivos já gerados são mantidos.",
+    usedBy: "Fiscal (Sintegra) e pacote contábil",
   },
   {
     key: "feature.cteEntrada", group: "Recursos", label: "CT-e de entrada (frete de compra)", type: "bool", scopes: ["company", "branch"], default: true,
