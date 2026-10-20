@@ -39,6 +39,11 @@ export function fileAccessDenial(user: PermissionSubject, meta: Record<string, a
   if (meta.kind === "certificate_auth_evidence" || meta.entityType === "certificate_request") {
     return can(user, "accounting", "view") ? null : "Sem permissão para este arquivo";
   }
+  // arquivos fiscais (SPED Fiscal / EFD Contribuições — §41): consulta do fiscal + "Gerar arquivos fiscais"
+  if (meta.entityType === "fiscal_file" || meta.kind === "sped_fiscal" || meta.kind === "efd_contribuicoes") {
+    if (!can(user, "fiscal", "view")) return "Sem permissão para este arquivo";
+    return canDo(user, "fiscal.files") ? null : "Sem permissão para os arquivos fiscais (SPED)";
+  }
   if (meta.kind === "accounting_package" || meta.entityType === "fiscal_export") {
     if (!can(user, "fiscal", "view")) return "Sem permissão para este arquivo";
     return canDo(user, "data.export") ? null : "Sem permissão para exportar dados: o pacote contábil contém os XML e planilhas com CPF/CNPJ do período";

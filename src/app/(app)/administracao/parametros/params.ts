@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, setSetting } from "@/lib/core/settings";
 import { DEFAULT_TZ } from "@/lib/dates";
 import { TIMEZONES } from "@/domain/companies";
 import { parseCfopPairs } from "@/domain/cfop-entry";
+import { parseRecolhimento } from "@/domain/fiscal/files/settings";
 import { PARAMS, PARAM_MAP, type ParamDef } from "./catalog";
 
 const scopeKey = (companyId: string, branchId: string | null, key: string) => `${companyId}|${branchId ?? "*"}|${key}`;
@@ -75,6 +76,19 @@ function coerce(def: ParamDef, raw: string): unknown {
       } catch (e) {
         throw new BusinessError(`${def.label}: ${(e as Error).message}`, "invalid");
       }
+    case "text": {
+      const v = raw.trim();
+      if (!v) return "";
+      if (def.maxLength) assert(v.length <= def.maxLength, `${def.label}: até ${def.maxLength} caracteres.`);
+      if (def.pattern) assert(new RegExp(`^(?:${def.pattern})$`).test(v), `${def.label}: formato inválido${def.placeholder ? ` (ex.: ${def.placeholder})` : ""}.`);
+      return v;
+    }
+    case "ufCodes":
+      try {
+        return parseRecolhimento(raw);
+      } catch (e) {
+        throw new BusinessError(`${def.label}: ${(e as Error).message}`, "invalid");
+      }
   }
 }
 
@@ -110,7 +124,9 @@ export async function saveParameters(ctx: Ctx, branchId: string | null, values: 
     if (before && JSON.stringify(prev) === JSON.stringify(value)) continue;
     if (!before && branchId && JSON.stringify(current[key]) === JSON.stringify(value)) continue; // filial sem substituição e mesmo valor: não cria
     if (!before && !branchId && JSON.stringify(current[key]) === JSON.stringify(value)) continue;
-    await setSetting(ctx.store, ctx.companyId, branchId, key, value, ctx.user.id);
+    // texto (ex.: CPF/CEP só com dígitos): gravado como literal JSON para não virar número nem perder zeros à esquerda
+    // ao ser lido de volta do campo json — a leitura devolve o mesmo texto
+    await setSetting(ctx.store, ctx.companyId, branchId, key, PARAM_MAP[key].type === "text" && typeof value === "string" && value ? JSON.stringify(value) : value, ctx.user.id);
     changes.push(key);
     await audit(
       { ...ctx, branchId },

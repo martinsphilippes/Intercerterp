@@ -156,6 +156,8 @@ export interface PackageResult {
   entryXmlCount?: number;
   entryDocs?: number;
   missingEntryXml?: number;
+  /** §41: arquivos fiscais (SPED) incluídos na pasta sped/ — ausente quando nenhum foi gerado no período */
+  spedFiles?: number;
 }
 
 /** Gera o ZIP do período e grava no armazenamento (Arquivos), retornando o resumo real do conteúdo. */
@@ -236,6 +238,25 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
       "- Relatórios: relatorios/livro-registro-entradas.csv e relatorios/entradas-por-cfop.csv.",
     ];
   }
+  // §41: último arquivo fiscal gerado (EFD ICMS/IPI do estabelecimento e EFD Contribuições da empresa) de cada mês do
+  // período, na pasta sped/ — só quando existir; sem arquivo gerado (ou com o recurso desligado) o pacote é o de antes
+  let spedFiles = 0;
+  let spedLines: string[] = [];
+  if (await isFeatureOn(ctx.store, ctx.companyId, f.branchId ?? ctx.branchId, "arquivosFiscais", true)) {
+    const { latestFilesForPackage } = await import("./files/service");
+    const names: string[] = [];
+    for (const x of await latestFilesForPackage(ctx, { from: f.from, to: f.to, branchId: f.branchId ?? ctx.branchId ?? null })) {
+      try {
+        const { meta, data } = await readFile(ctx, x.id);
+        add(`sped/${meta.name}`, data);
+        names.push(meta.name);
+        spedFiles++;
+      } catch {
+        /* arquivo ilegível: fica fora (o histórico continua na tela Arquivos fiscais) */
+      }
+    }
+    if (names.length) spedLines = ["", "ARQUIVOS FISCAIS GERADOS NO SISTEMA (pasta sped — último arquivo de cada mês e estabelecimento)", ...names.map((n) => `- ${n}`), "- Gerados a partir dos documentos do sistema: VALIDAR NO PVA DA RECEITA E COM A CONTABILIDADE ANTES DO ENVIO."];
+  }
   const readme = [
     `PACOTE PARA A CONTABILIDADE — ${company.name} (CNPJ ${company.cnpj ?? "—"})`,
     `Filial: ${branchName ?? "—"}`,
@@ -258,6 +279,7 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
     missingXml.length ? `XML AUSENTES no armazenamento (${missingXml.length}): ${missingXml.map((m) => m.label).join("; ")}` : "Nenhum XML ausente.",
     summary.simulatedCount ? `ATENÇÃO: ${summary.simulatedCount} documento(s) do período foram emitidos pelo provedor de SIMULAÇÃO e não têm validade fiscal.` : "",
     ...entryLines,
+    ...spedLines,
   ]
     .filter((l) => l !== undefined)
     .join("\r\n");
@@ -267,7 +289,7 @@ export async function buildAccountingPackage(ctx: Ctx, f: FiscalReportFilter): P
   const fileName = `contabilidade-${f.from}-a-${f.to}${f.branchId || ctx.branchId ? "-filial" : ""}.zip`;
   const file = await saveFile(ctx, { bucket: "documents", name: fileName, mime: "application/zip", data: buf, entityType: "fiscal_export", entityId: `${f.from}:${f.to}`, kind: "accounting_package", branchId: f.branchId ?? ctx.branchId });
   await audit(ctx, { module: "fiscal", action: "export.package", entityType: "file", entityId: file.id, summary: `Pacote contábil ${formatDate(f.from)}–${formatDate(f.to)} gerado: ${xmlCount} XML, ${docs.length} documentos${missingXml.length ? `, ${missingXml.length} XML ausente(s)` : ""}`, after: { xmlCount, simulatedXml, missing: missingXml.length } });
-  const result: PackageResult = { fileId: file.id, fileName, sizeBytes: buf.length, xmlCount, simulatedXml, missingXml, docs: docs.length, period: { from: f.from, to: f.to }, ...(withEntries ? { entryXmlCount, entryDocs, missingEntryXml } : {}) };
+  const result: PackageResult = { fileId: file.id, fileName, sizeBytes: buf.length, xmlCount, simulatedXml, missingXml, docs: docs.length, period: { from: f.from, to: f.to }, ...(withEntries ? { entryXmlCount, entryDocs, missingEntryXml } : {}), ...(spedFiles ? { spedFiles } : {}) };
   // empresa vinculada a um escritório contábil no Intercert: o pacote entra na caixa de entrada dele automaticamente
   const { deliverPackageToFirm } = await import("../accounting/deliveries");
   const delivery = await deliverPackageToFirm(ctx, { ...result, missingXml: missingXml.length, branchId: f.branchId ?? ctx.branchId }).catch((e) => {

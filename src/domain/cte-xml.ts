@@ -34,6 +34,9 @@ export interface ParsedCte {
   modal: string | null;
   ufStart: string | null;
   ufEnd: string | null;
+  /** municípios (IBGE) de início e fim da prestação (cMunIni/cMunFim) — usados no registro D100 da EFD ICMS/IPI (§41) */
+  munStart?: string | null;
+  munEnd?: string | null;
   emitter: CteParty & { tradeName: string | null; address: Record<string, string | null> };
   sender: CteParty;
   recipient: CteParty;
@@ -130,6 +133,8 @@ export function parseCteXml(xml: string): ParsedCte {
     modal: str(ide.modal),
     ufStart: str(ide.UFIni),
     ufEnd: str(ide.UFFim),
+    munStart: str(ide.cMunIni),
+    munEnd: str(ide.cMunFim),
     emitter: {
       cnpj: str(emit.CNPJ),
       cpf: str(emit.CPF),

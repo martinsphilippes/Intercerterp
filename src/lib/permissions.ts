@@ -57,6 +57,7 @@ export const SPECIAL_ACTIONS = [
   { key: "fiscal.issue", label: "Emitir documentos fiscais" },
   { key: "fiscal.cancel", label: "Cancelar documento fiscal" },
   { key: "fiscal.configure", label: "Configurar fiscal e certificados" },
+  { key: "fiscal.files", label: "Gerar arquivos fiscais (SPED, EFD e Sintegra)" },
   { key: "data.export", label: "Exportar dados" },
   { key: "admin.users", label: "Gerenciar usuários e perfis" },
   { key: "admin.integrations", label: "Configurar integrações" },
@@ -140,7 +141,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     name: "Fiscal",
     description: "Documentos fiscais, configurações e relatórios fiscais.",
     permissions: { dashboard: ro(), fiscal: all(), sales: ro(), products: rw(), customers: ro(), suppliers: ro(), reports: ro(), support: rw() },
-    actions: ["fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export"],
+    actions: ["fiscal.issue", "fiscal.cancel", "fiscal.configure", "fiscal.files", "data.export"],
     discountLimitBps: 0,
   },
 ];
@@ -155,7 +156,7 @@ export const FIRM_ROLES: RoleTemplate[] = [
     name: "Sócio / Administrador do escritório",
     description: "Acesso integral: carteira, equipe, financeiro do escritório, fiscal de serviços e administração.",
     permissions: Object.fromEntries(FIRM_MODULES.map((m) => [m.key, all()])),
-    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
+    actions: ["accounting.all_clients", "accounting.link", "accounting.manage_team", "accounting.certificates", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "fiscal.files", "data.export", "admin.users", "admin.integrations", "admin.backup", "support.manage"],
     discountLimitBps: 10000,
   },
   {

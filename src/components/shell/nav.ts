@@ -94,6 +94,7 @@ export const NAV: NavGroup[] = [
       { href: "/fiscal/nfse", label: "NFS-e", module: "fiscal", icon: "FileSignature" },
       { href: "/fiscal/entradas", label: "Livro de entradas", module: "fiscal", icon: "BookOpen", feature: "livroEntradas" },
       { href: "/fiscal/relatorios", label: "Relatórios fiscais", module: "fiscal", icon: "FileBarChart" },
+      { href: "/fiscal/arquivos", label: "Arquivos fiscais (SPED)", module: "fiscal", icon: "FileText", action: "fiscal.files", feature: "arquivosFiscais" },
       { href: "/fiscal/configuracoes", label: "Configurações fiscais", module: "fiscal", icon: "Cog" },
     ],
   },
@@ -158,6 +159,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
     items: [
       { href: "/fiscal/nfse", label: "NFS-e", module: "fiscal", icon: "FileSignature" },
       { href: "/fiscal/relatorios", label: "Relatórios fiscais", module: "fiscal", icon: "FileBarChart" },
+      { href: "/fiscal/arquivos", label: "Arquivos fiscais (SPED)", module: "fiscal", icon: "FileText", action: "fiscal.files", feature: "arquivosFiscais" },
       { href: "/fiscal/configuracoes", label: "Configurações fiscais", module: "fiscal", icon: "Cog" },
     ],
   },

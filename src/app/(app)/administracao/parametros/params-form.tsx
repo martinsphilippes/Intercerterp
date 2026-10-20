@@ -68,6 +68,8 @@ export function ParamsForm({ scope, states, groups, readOnly }: { scope: string;
                           {d.type === "select" && <Select name={name} defaultValue={String(v ?? "")} options={d.options ?? []} disabled={cleared} aria-label={d.label} />}
                           {d.type === "timezone" && <span className="text-sm font-medium text-ink" aria-label={d.label}>{String(v ?? "")}</span>}
                           {d.type === "cfopPairs" && <CfopPairsInput name={name} value={v as Record<string, string> | null} disabled={cleared} label={d.label} />}
+                          {d.type === "text" && <Input name={name} defaultValue={String(v ?? "")} maxLength={d.maxLength} placeholder={d.placeholder} disabled={cleared} className="w-full" aria-label={d.label} />}
+                          {d.type === "ufCodes" && <Textarea name={name} rows={4} defaultValue={formatUfCodes(v as Record<string, { code: string; day: number }> | null)} placeholder="SP=046-2;20" disabled={cleared} aria-label={d.label} className="w-full font-mono text-xs" spellCheck={false} />}
                           {d.unit && <span className="text-sm text-slate-500">{d.unit}</span>}
                         </div>
                       </li>
@@ -112,4 +114,12 @@ function CfopPairsInput({ name, value, disabled, label }: { name: string; value:
       </p>
     </div>
   );
+}
+
+/** Tabela UF → { código, dia } como texto "UF=CÓDIGO;DIA" por linha. */
+function formatUfCodes(v: Record<string, { code: string; day: number }> | null): string {
+  return Object.entries(v ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([uf, x]) => `${uf}=${x.code};${x.day}`)
+    .join("\n");
 }
