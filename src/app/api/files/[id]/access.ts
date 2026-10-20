@@ -25,6 +25,7 @@ export const ENTITY_MODULE: Record<string, ModuleKey> = {
  *  - backups: operação "admin.backup";
  *  - certificado digital: "fiscal.configure";
  *  - pacote contábil (todos os XML e planilhas com CPF/CNPJ do período): consulta do fiscal + "data.export";
+ *  - arquivo Sintegra: consulta do fiscal + "fiscal.files";
  *  - demais: consulta do módulo de origem.
  */
 export function fileAccessDenial(user: PermissionSubject, meta: Record<string, any>): string | null {
@@ -42,6 +43,11 @@ export function fileAccessDenial(user: PermissionSubject, meta: Record<string, a
   if (meta.kind === "accounting_package" || meta.entityType === "fiscal_export") {
     if (!can(user, "fiscal", "view")) return "Sem permissão para este arquivo";
     return canDo(user, "data.export") ? null : "Sem permissão para exportar dados: o pacote contábil contém os XML e planilhas com CPF/CNPJ do período";
+  }
+  // arquivo Sintegra (§42): todas as operações do estabelecimento no mês — consulta do fiscal + "Gerar arquivos fiscais"
+  if (meta.kind === "sintegra" || meta.entityType === "sintegra") {
+    if (!can(user, "fiscal", "view")) return "Sem permissão para este arquivo";
+    return canDo(user, "fiscal.files") ? null : "Sem permissão para arquivos fiscais (Sintegra)";
   }
   const requiredModule = (meta.entityType && ENTITY_MODULE[meta.entityType]) || (meta.bucket === "images" ? "products" : null);
   if (!requiredModule || !can(user, requiredModule, "view")) return "Sem permissão para este arquivo";
