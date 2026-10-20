@@ -30,7 +30,7 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   "stock.warehouses",
   // entrada com nota a confirmar (§40): lançar (Gerente e Estoquista) e confirmar com a nota (Gerente)
   "purchase.receive_pending_invoice", "purchase.confirm_invoice",
-  // arquivos fiscais (§41): SPED Fiscal e EFD Contribuições — Fiscal, Administrador e Sócio/Administrador do escritório
+  // arquivos fiscais (§41 SPED Fiscal e EFD Contribuições, §42 Sintegra): Fiscal, Administrador e Sócio/Administrador do escritório
   "fiscal.files",
 ];
 

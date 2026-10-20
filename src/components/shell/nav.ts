@@ -95,6 +95,7 @@ export const NAV: NavGroup[] = [
       { href: "/fiscal/entradas", label: "Livro de entradas", module: "fiscal", icon: "BookOpen", feature: "livroEntradas" },
       { href: "/fiscal/relatorios", label: "Relatórios fiscais", module: "fiscal", icon: "FileBarChart" },
       { href: "/fiscal/arquivos", label: "Arquivos fiscais (SPED)", module: "fiscal", icon: "FileText", action: "fiscal.files", feature: "arquivosFiscais" },
+      { href: "/fiscal/arquivos/sintegra", label: "Sintegra", module: "fiscal", icon: "FileDown", action: "fiscal.files", feature: "arquivosFiscais" },
       { href: "/fiscal/configuracoes", label: "Configurações fiscais", module: "fiscal", icon: "Cog" },
     ],
   },
