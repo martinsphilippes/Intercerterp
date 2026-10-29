@@ -67,7 +67,11 @@ export function isPlatform(ctx: Pick<Ctx, "user">): boolean {
 
 export interface NetworkSettings {
   levelLabels: Record<NetworkLevel, string>;
+  /** §45: dias antes do vencimento para o alerta "ninguém agiu" na renovação (1 a 30; padrão 7) */
+  idleAlertDays: number;
 }
+
+export const DEFAULT_IDLE_ALERT_DAYS = 7;
 
 export async function networkSettings(store: Store): Promise<NetworkSettings> {
   const saved = await getSetting<Partial<NetworkSettings> | null>(unscoped(store), NETWORK_SCOPE, null, "network", null);
@@ -76,7 +80,8 @@ export async function networkSettings(store: Store): Promise<NetworkSettings> {
     const v = saved?.levelLabels?.[l];
     if (typeof v === "string" && v.trim()) labels[l] = v.trim();
   }
-  return { levelLabels: labels };
+  const idle = Math.round(Number(saved?.idleAlertDays));
+  return { levelLabels: labels, idleAlertDays: idle >= 1 && idle <= 30 ? idle : DEFAULT_IDLE_ALERT_DAYS };
 }
 
 /** Plataforma: rótulos exibidos dos níveis (as chaves internas não mudam). */
@@ -90,9 +95,21 @@ export async function saveLevelLabels(ctx: Ctx, input: Partial<Record<NetworkLev
     levelLabels[l] = v;
   }
   assert(new Set(Object.values(levelLabels).map((v) => v.toLowerCase())).size === NETWORK_LEVELS.length, "Os rótulos dos níveis precisam ser diferentes entre si.");
-  const value: NetworkSettings = { levelLabels };
+  const value: NetworkSettings = { levelLabels, idleAlertDays: before.idleAlertDays };
   await setSetting(unscoped(ctx.store), NETWORK_SCOPE, null, "network", value, ctx.user.id);
   await audit(ctx, { module: "admin", action: "network.level_labels", entityType: "cert_network", entityId: NETWORK_SCOPE, summary: `Rótulos dos níveis da rede de certificação alterados: ${NETWORK_LEVELS.map((l) => levelLabels[l]).join(" → ")}`, before: before.levelLabels, after: levelLabels });
+  return value;
+}
+
+/** Plataforma: dias antes do vencimento para o alerta "ninguém agiu" (§45). */
+export async function saveIdleAlertDays(ctx: Ctx, days: number): Promise<NetworkSettings> {
+  requireAction(ctx, "network.manage");
+  const before = await networkSettings(ctx.store);
+  const d = Math.round(Number(days));
+  assert(d >= 1 && d <= 30, "Informe de 1 a 30 dias para o alerta de renovação sem ação.");
+  const value: NetworkSettings = { ...before, idleAlertDays: d };
+  await setSetting(unscoped(ctx.store), NETWORK_SCOPE, null, "network", value, ctx.user.id);
+  await audit(ctx, { module: "admin", action: "network.idle_alert_days", entityType: "cert_network", entityId: NETWORK_SCOPE, summary: `Alerta de renovação sem ação: ${d} dia(s) antes do vencimento`, before: { idleAlertDays: before.idleAlertDays }, after: { idleAlertDays: d } });
   return value;
 }
 
@@ -152,4 +169,10 @@ export async function auditNode(ctx: Ctx, node: Doc, input: { action: string; su
       })
       .catch(() => undefined);
   }
+}
+
+/** Auditoria de um evento da rede ligado a um nó (ou à rede toda, quando `node` é null — ex.: cupom da plataforma). */
+export async function auditNetwork(ctx: Ctx, node: Doc | null | undefined, input: { action: string; summary: string; before?: unknown; after?: unknown; reason?: string | null; related?: string[] }) {
+  if (node) return auditNode(ctx, node, input);
+  await audit(ctx, { module: "admin", action: input.action, entityType: "cert_network", entityId: NETWORK_SCOPE, summary: input.summary, before: input.before, after: input.after, reason: input.reason ?? null, related: input.related });
 }

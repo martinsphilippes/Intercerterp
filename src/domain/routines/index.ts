@@ -5,3 +5,4 @@ import "./admin";
 import "./stock";
 import "./accounting";
 import "./sales";
+import "./network";

@@ -7,6 +7,7 @@ import { Field, Input, Textarea } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/empty";
+import type { ActionResult } from "@/lib/server/action";
 import { recordAuthorizationAction } from "../actions";
 
 /**
@@ -14,7 +15,7 @@ import { recordAuthorizationAction } from "../actions";
  * evidência opcional — termo assinado, e-mail do sócio). Envia `recordAuthorizationAction` (id, notes, evidence) em
  * multipart; o registro fica no histórico com autor, momento e o arquivo anexado.
  */
-export function AuthorizationForm({ id, holderName }: { id: string; holderName: string }) {
+export function AuthorizationForm({ id, holderName, action = recordAuthorizationAction }: { id: string; holderName: string; action?: (fd: FormData) => Promise<ActionResult<any>> }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -22,7 +23,7 @@ export function AuthorizationForm({ id, holderName }: { id: string; holderName: 
         <FileCheck2 className="size-4" aria-hidden /> Registrar autorização do titular
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)} title="Registrar autorização do titular">
-        <ActionForm action={recordAuthorizationAction} className="space-y-4" onSuccess={() => setOpen(false)}>
+        <ActionForm action={action} className="space-y-4" onSuccess={() => setOpen(false)}>
           {({ pending, error }) => (
             <>
               <input type="hidden" name="id" value={id} />

@@ -40,8 +40,27 @@ describe("demonstração da rede de certificação", () => {
     const rede = users.find((u) => u.login === "rede")!;
     const pctx = { store: scopeStore(store, rede.companyIds[0]), companyId: rede.companyIds[0], branchId: null, user: await toCtxUser(store, rede, rede.companyIds[0]) };
     expect((await networkViewer(pctx)).platform).toBe(true);
+    // §45: vendas da rede em cada revenda (aguardando, pagas/validação, emitidas), voucher, cupons, BirdID gratuito e renovações
+    const sales = (await listAll(store, "certificate_requests")).filter((r) => r.channel === "network");
+    for (const k of ["Juazeiro", "Fortaleza", "Salvador"]) {
+      const mine = sales.filter((r) => r.sellerNodeId === byName(k).id);
+      expect(mine.some((r) => r.status === "awaiting_payment")).toBe(true);
+      expect(mine.some((r) => r.status === "validation")).toBe(true);
+      expect(mine.some((r) => ["ready_to_download", "downloaded"].includes(r.status))).toBe(true);
+      for (const r of mine) expect(r.cascade.levels.at(-1).nodeId).toBe(byName(k).id);
+    }
+    expect(sales.filter((r) => r.free).length).toBeGreaterThanOrEqual(2);
+    expect(sales.filter((r) => r.voucherRedemptionId).length).toBe(2);
+    const lot = (await listAll(store, "cert_voucher_lots"))[0];
+    expect(lot).toMatchObject({ qty: 10, redeemed: 2, committed: 2, buyerNodeId: byName("Juazeiro").id });
+    expect((await listAll(store, "cert_coupons")).map((c) => c.code).sort()).toEqual(["CEARA20", "JUAZEIRO10"]);
+    const { renewalWorld } = await import("@/domain/network");
+    const sit = new Set((await renewalWorld(store)).rows.map((r) => r.situation));
+    for (const s of ["due_7", "due_30", "due_60", "expired", "lost"]) expect(sit.has(s as any)).toBe(true);
+    expect((await listAll(store, "cert_renewal_contacts")).length).toBe(2);
     // repetível
     await seedDemo(store, { historyDays: 1 });
     expect((await allNodes(store)).length).toBe(nodes.length);
+    expect((await listAll(store, "certificate_requests")).filter((r) => r.channel === "network").length).toBe(sales.length);
   }, 120000);
 });

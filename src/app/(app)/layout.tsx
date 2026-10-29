@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const s = await requireSession();
   const features = new Map<string, boolean>();
   for (const g of navFor(s.company.kind)) for (const i of g.items) if (i.feature && !features.has(i.feature)) features.set(i.feature, await isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, i.feature, featureDefaultFor(i.feature, s.company.kind)));
-  const groups = navFor(s.company.kind).map((g) => ({ ...g, items: g.items.filter((i) => can(s.user, i.module) && (!i.action || canDo(s.user, i.action)) && (!i.feature || features.get(i.feature))) })).filter((g) => g.items.length);
+  const groups = navFor(s.company.kind).map((g) => ({ ...g, items: g.items.filter((i) => can(s.user, i.module) && (!i.action || canDo(s.user, i.action)) && (!i.anyAction || i.anyAction.some((x) => canDo(s.user, x))) && (!i.feature || features.get(i.feature))) })).filter((g) => g.items.length);
   const [units, unread] = await Promise.all([
     getStore().get("users", s.user.id).then((userDoc) => accessibleUnits(getStore(), userDoc!)),
     s.ctx.store.list("notifications", { filters: [["eq", "userId", s.user.id], ["isNull", "readAt"], ["isNull", "archivedAt"], ["eq", "companyId", s.ctx.companyId]], limit: 1 }),

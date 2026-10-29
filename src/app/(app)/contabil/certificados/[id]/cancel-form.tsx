@@ -7,13 +7,14 @@ import { Field, Textarea } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/empty";
+import type { ActionResult } from "@/lib/server/action";
 import { cancelRequestAction } from "../actions";
 
 /**
  * Cancelamento da solicitação (só enquanto aguarda pagamento): link discreto → diálogo com o motivo obrigatório →
  * `cancelRequestAction` (id, reason). O cancelamento fica no histórico com autor e momento.
  */
-export function CancelForm({ id, protocol, holderName }: { id: string; protocol: string; holderName: string }) {
+export function CancelForm({ id, protocol, holderName, action = cancelRequestAction }: { id: string; protocol: string; holderName: string; action?: (fd: FormData) => Promise<ActionResult<any>> }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -21,7 +22,7 @@ export function CancelForm({ id, protocol, holderName }: { id: string; protocol:
         <XCircle className="size-4" aria-hidden /> Cancelar solicitação
       </button>
       <Dialog open={open} onClose={() => setOpen(false)} title={`Cancelar solicitação ${protocol}`} size="sm">
-        <ActionForm action={cancelRequestAction} className="space-y-4" onSuccess={() => setOpen(false)}>
+        <ActionForm action={action} className="space-y-4" onSuccess={() => setOpen(false)}>
           {({ pending, error }) => (
             <>
               <input type="hidden" name="id" value={id} />

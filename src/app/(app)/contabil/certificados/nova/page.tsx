@@ -5,6 +5,7 @@ import { Notice } from "@/components/ui/empty";
 import { addDays, today } from "@/lib/dates";
 import { canDo } from "@/lib/permissions";
 import { certificationSettings, clientTrackingAllowed } from "@/domain/accounting";
+import { firmNetworkTerms } from "@/domain/network";
 import { portfolioRefs, queryPortfolio } from "../../queries";
 import { knownByClient, openRequestsByClient } from "../queries";
 import { RequestForm, type ClientInfo, type ProductInfo } from "../request-form";
@@ -55,7 +56,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
       };
     }),
   );
-  const products: ProductInfo[] = settings.catalog.filter((p) => p.active).map((p) => ({ key: p.key, label: p.label, months: p.months, price: p.price }));
+  // §45: escritório que é nó contador da rede vende pelo preço da rede (padrão do nó, mínimo e custo); fora da rede, o catálogo
+  const network = await firmNetworkTerms(s.ctx.store, s.ctx.companyId);
+  const products: ProductInfo[] = settings.catalog
+    .filter((p) => p.active && !p.free && (!network || network.has(p.key)))
+    .map((p) => {
+      const n = network?.get(p.key) ?? null;
+      return { key: p.key, label: p.label, months: p.months, price: n ? n.defaultPrice : p.price, network: n ? { cost: n.cost, minPrice: n.minPrice, canEdit: n.canEdit } : null };
+    });
   const t = today();
 
   return (
