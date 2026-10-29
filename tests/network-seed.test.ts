@@ -58,6 +58,30 @@ describe("demonstração da rede de certificação", () => {
     const sit = new Set((await renewalWorld(store)).rows.map((r) => r.situation));
     for (const s of ["due_7", "due_30", "due_60", "expired", "lost"]) expect(sit.has(s as any)).toBe(true);
     expect((await listAll(store, "cert_renewal_contacts")).length).toBe(2);
+    // §46 — financeiro em camadas da demonstração
+    const { effectiveAgreement, walletIdOf, networkResult } = await import("@/domain/network");
+    expect((await effectiveAgreement(store, byName("Juazeiro").id)).terms.mode).toBe("prepaid");
+    expect((await effectiveAgreement(store, byName("Fortaleza").id)).terms).toMatchObject({ mode: "postpaid", period: "biweekly" });
+    expect((await effectiveAgreement(store, byName("Salvador").id)).terms).toMatchObject({ mode: "commission", commissionSettlement: "split" });
+    expect((await effectiveAgreement(store, byName("Ceará").id)).terms).toMatchObject({ mode: "postpaid", period: "monthly" });
+    const jua = byName("Juazeiro");
+    const w = (await store.get("cert_wallets", walletIdOf(jua.id, jua.parentNodeId)))!;
+    expect(w.balance).toBeLessThan(100000);
+    expect(w.held).toBeGreaterThan(0); // a venda aguardando pagamento reserva o custo
+    const fin = await listAll(store, "cert_sale_finance");
+    expect(fin.every((f) => !(f.issues ?? []).length)).toBe(true);
+    const entries = await listAll(store, "cert_fin_entries");
+    expect(entries.some((e) => e.settlement === "wallet")).toBe(true);
+    expect(entries.some((e) => e.settlement === "split" && e.payeeNodeId === byName("Salvador").id)).toBe(true);
+    expect(entries.some((e) => e.kind === "ac_cost" && e.status === "accrued")).toBe(true);
+    expect(entries.some((e) => e.kind === "referral")).toBe(true);
+    const ftzClosings = (await listAll(store, "cert_closings")).filter((c) => c.payerNodeId === byName("Fortaleza").id);
+    expect(ftzClosings).toHaveLength(1);
+    expect(entries.some((e) => e.payerNodeId === byName("Fortaleza").id && e.kind === "cost" && e.status === "accrued")).toBe(true);
+    const platCompany = (await listAll(store, "companies")).find((c) => String(c.name).includes("Intercert Certificação Digital"))!;
+    const platUser = (await listAll(store, "users")).find((u) => u.login === "rede")!;
+    const pctx2 = { store: scopeStore(store, platCompany.id), companyId: platCompany.id, branchId: null, user: await toCtxUser(store, platUser, platCompany.id) };
+    expect((await networkResult(pctx2)).totals.difference).toBe(0);
     // repetível
     await seedDemo(store, { historyDays: 1 });
     expect((await allNodes(store)).length).toBe(nodes.length);

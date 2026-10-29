@@ -79,6 +79,9 @@ export const SPECIAL_ACTIONS = [
   { key: "network.vouchers", label: "Criar, vender e atribuir pacotes de vouchers da rede" },
   { key: "network.coupons", label: "Criar e gerir cupons de desconto do próprio nó e dos parceiros abaixo" },
   { key: "network.renewals", label: "Acompanhar renovações e registrar contatos com os clientes" },
+  // rede de certificação — etapa 3 (§46): financeiro em camadas
+  { key: "network.billing", label: "Financeiro com os parceiros abaixo: definir a modalidade (pré/pós-pago, comissão), recarregar créditos, ajustar a carteira e fechar períodos" },
+  { key: "network.finance_view", label: "Ver o financeiro da rede: modalidade, carteira, fechamentos e resultado por camada do nó e dos parceiros abaixo" },
   // ── ajustes das telas 01–48 (§44): autorização no PDV e limite de devolução
   { key: "pdv.remove_item", label: "Remover item já registrado no atendimento do PDV (sem autorização do supervisor)" },
   { key: "pdv.cancel_cart", label: "Cancelar atendimento do PDV com itens (sem autorização do supervisor)" },
@@ -215,7 +218,7 @@ export const PARTNER_ROLES: RoleTemplate[] = [
     name: "Administrador do parceiro",
     description: "Acesso integral ao parceiro: rede abaixo, preços dos filhos, financeiro, usuários e administração.",
     permissions: Object.fromEntries(PARTNER_MODULES.map((m) => [m.key, all()])),
-    actions: ["network.children", "network.prices", "network.sell", "network.sales_all", "network.vouchers", "network.coupons", "network.renewals", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup"],
+    actions: ["network.children", "network.prices", "network.sell", "network.sales_all", "network.vouchers", "network.coupons", "network.renewals", "network.billing", "network.finance_view", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup"],
     discountLimitBps: 10000,
   },
   {
@@ -223,7 +226,7 @@ export const PARTNER_ROLES: RoleTemplate[] = [
     name: "Gestor",
     description: "Rede abaixo (cadastro de filhos e preços), vendas, vouchers, cupons e renovações do nó; financeiro em consulta.",
     permissions: { dashboard: all(), finance: ro(), fiscal: ro(), admin: ro(), support: rw() },
-    actions: ["network.children", "network.prices", "network.sell", "network.sales_all", "network.vouchers", "network.coupons", "network.renewals", "data.export"],
+    actions: ["network.children", "network.prices", "network.sell", "network.sales_all", "network.vouchers", "network.coupons", "network.renewals", "network.finance_view", "data.export"],
     discountLimitBps: 0,
   },
   {
@@ -239,7 +242,7 @@ export const PARTNER_ROLES: RoleTemplate[] = [
     name: "Financeiro",
     description: "Contas a pagar e a receber do parceiro, conciliação, fluxo de caixa e DRE.",
     permissions: { dashboard: ro(), finance: all(), fiscal: rw(), support: rw() },
-    actions: ["network.sales_all", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "data.export"],
+    actions: ["network.sales_all", "network.billing", "network.finance_view", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "data.export"],
     discountLimitBps: 0,
   },
 ];

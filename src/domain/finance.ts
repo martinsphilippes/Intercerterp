@@ -1268,7 +1268,9 @@ export async function savePaymentTerm(ctx: Ctx, id: string | null, input: Paymen
   return saveSimple(ctx, "payment_terms", id, { name: input.name.trim(), installments: input.installments, firstDueDays: input.firstDueDays, intervalDays: input.intervalDays, interestBps: input.interestBps, kind: input.kind, active: input.active !== false }, "Condição de parcelamento");
 }
 
-export const DRE_GROUPS = ["Receita bruta", "Deduções", "CMV", "Despesas operacionais", "Despesas com pessoal", "Despesas administrativas", "Despesas financeiras", "Receitas financeiras", "Outras receitas", "Outras despesas", "Investimentos"];
+// §46: "Custo dos serviços" (custo dos certificados pagos ao nível acima, comissões e custo AC — entra no lucro bruto) e
+// "Adiantamentos" (créditos pré-pagos da rede — fora do resultado: o custo é reconhecido a cada venda debitada)
+export const DRE_GROUPS = ["Receita bruta", "Deduções", "CMV", "Custo dos serviços", "Despesas operacionais", "Despesas com pessoal", "Despesas administrativas", "Despesas financeiras", "Receitas financeiras", "Outras receitas", "Outras despesas", "Investimentos", "Adiantamentos"];
 
 export interface FinCategoryInput {
   name: string;

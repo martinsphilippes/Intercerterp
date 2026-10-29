@@ -46,6 +46,19 @@ describe("sincronização de perfis de sistema com operações novas das fases",
     expect(ROLE_TEMPLATES.find((t) => t.key === "firm_admin")!.actions).toContain("accounting.certificates");
   });
 
+  it("operações do §46 (financeiro em camadas) chegam aos perfis de parceiro já gravados conforme o modelo", () => {
+    const NEW = ["network.billing", "network.finance_view"];
+    const expected: Record<string, string[]> = { partner_admin: NEW, partner_manager: ["network.finance_view"], partner_seller: [], partner_finance: NEW };
+    for (const [key, want] of Object.entries(expected)) {
+      const tpl = ROLE_TEMPLATES.find((t) => t.key === key)!;
+      const old = (tpl.actions as string[]).filter((a) => !NEW.includes(a));
+      const plan = templateSyncPlan({ system: true, key, actions: old, templateActions: old });
+      expect(plan?.missing.sort() ?? []).toEqual([...want].sort());
+    }
+    for (const a of NEW) expect(ACTIONS_ADDED_TO_TEMPLATES).toContain(a);
+    for (const key of ["admin", "manager", "firm_admin", "firm_manager"]) expect((ROLE_TEMPLATES.find((t) => t.key === key)!.actions as string[]).some((a) => NEW.includes(a))).toBe(false);
+  });
+
   it("perfil já sincronizado com o modelo atual não muda", () => {
     const tpl = ROLE_TEMPLATES.find((t) => t.key === "cashier")!;
     expect(templateSyncPlan({ system: true, key: "cashier", actions: [...tpl.actions], templateActions: [...tpl.actions] })).toBeNull();

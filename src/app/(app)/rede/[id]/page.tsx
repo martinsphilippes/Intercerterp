@@ -12,12 +12,13 @@ import { unscoped } from "@/lib/db/scoped-store";
 import { formatDate } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { formatDoc } from "@/lib/core/text";
-import { canDo } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
 import { sp, type SearchParams } from "@/lib/list";
 import {
   NETWORK_LEVELS, blockedAncestor, canCreateUnder, childLevelError, childLevelsOf, countByLevel, descendantsOf, getNode, levelPriceTable, networkSettings, networkViewer, nodeHistory, nodePriceTable,
-  nodeRuleHistory, nodeUsers, priceAlerts, type NetworkLevel,
+  nodeRuleHistory, nodeUsers, priceAlerts, relationFinance, type NetworkLevel,
 } from "@/domain/network";
+import { RelationFinanceView } from "../financeiro/relation-view";
 import { ClearRuleForm, MoveForm, PriceRuleForm, StatusForm } from "../forms";
 import { HistoryList, LevelBadge, LevelTableEditor, PriceTable, requireNetworkSession } from "../shared";
 
@@ -49,9 +50,12 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const canAddChild = node.level !== "contador" && node.status === "active" && canCreateUnder(s.ctx, v.myNode, node.id);
   const levelsBelow = childLevelsOf(node.level);
 
+  // §46: financeiro da relação deste nó com o pai (pai, níveis acima com consulta financeira, plataforma e o próprio nó)
+  const showFinance = v.platform || canDo(s.user, "network.finance_view") || canDo(s.user, "network.billing") || (v.myNode?.id === node.id && can(s.user, "finance", "view"));
   const tabs = [
     { key: "dados", label: "Dados e filhos", count: children.length },
     { key: "precos", label: "Preços" },
+    ...(showFinance ? [{ key: "financeiro", label: "Financeiro" }] : []),
     { key: "usuarios", label: "Usuários" },
     { key: "historico", label: "Histórico" },
   ];
@@ -144,6 +148,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       )}
 
       {tab === "precos" && <PricesTab nodeId={node.id} node={node} parentName={parentName} canPriceThis={canPriceThis} canPriceChildren={canPriceChildren} levelsBelow={levelsBelow} labels={levelLabels} storeOwner={s.ctx.store} />}
+
+      {tab === "financeiro" && showFinance && <RelationFinanceView f={await relationFinance(s.ctx, node.id)} />}
 
       {tab === "usuarios" && <UsersTab ctx={s.ctx} node={node} />}
 

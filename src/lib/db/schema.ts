@@ -1082,6 +1082,8 @@ export const COLLECTIONS: CollectionDef[] = [
       // do parceiro), cliente de certificado do parceiro, vendedor na rede e RETRATO IMUTÁVEL da cascata no momento da venda
       channel: s(20), customerId: id(), sellerNodeId: id(), sellerUserId: id(), sellerName: s(200), cascade: json, listPrice: money, minPrice: money, discount: money,
       couponId: id(), couponCode: s(20), voucherRedemptionId: id(), voucherCode: s(40), gift: bool, free: bool, duplicateAck: json, productType: s(20), holderType: s(4),
+      // etapa 3 (§46): contador que indicou o cliente (comissão de indicação) e estorno da venda paga (cancelamento após o pagamento)
+      referrerNodeId: id(), referrerName: s(200), reversedAt: dt, reversedBy: id(), reversalReason: s(300),
     },
     indexes: [k("i_company", "companyId", "status"), u("u_protocol", "companyId", "protocol"), k("i_client", "clientId"), k("i_linked", "linkedCompanyId"), k("i_file", "fileId"), k("i_holder", "holderDoc"), k("i_seller", "sellerNodeId")],
   },
@@ -1202,6 +1204,64 @@ export const COLLECTIONS: CollectionDef[] = [
     label: "Rede de certificação — contatos de renovação registrados pelo nó",
     fields: { ...ctx, certificateId: id(true), nodeId: id(), contactDate: date, channel: s(20), result: s(30), notes: s(500), nextAction: s(200), nextActionDate: date, userName: s(200) },
     indexes: [k("i_cert", "certificateId"), k("i_company", "companyId")],
+  },
+  // ── rede de certificação — etapa 3 (§46): financeiro em camadas. Registros da PLATAFORMA (companyId = "platform"):
+  // nenhuma empresa os lê pelo Store restrito; os títulos de cada camada vivem no financeiro da própria empresa.
+  {
+    id: "cert_billing_agreements",
+    label: "Rede de certificação — modalidade comercial de cada relação pai→filho (pré-pago, pós-pago, comissionado), com vigência",
+    fields: { ...ctx, childNodeId: id(true), parentNodeId: id(), mode: s(20), terms: json, validFrom: date, validTo: date, active: bool, supersededAt: dt, reason: s(300), byName: s(200) },
+    indexes: [k("i_child", "childNodeId"), k("i_parent", "parentNodeId")],
+  },
+  {
+    id: "cert_wallets",
+    label: "Rede de certificação — carteira de créditos pré-pagos do filho junto ao pai (saldo, reservado e disponível)",
+    fields: { ...ctx, childNodeId: id(true), parentNodeId: id(), childCompanyId: id(), parentCompanyId: id(), balance: money, held: money, available: money, rechargeCount: int, lastMoveAt: dt },
+    indexes: [k("i_child", "childNodeId"), k("i_parent", "parentNodeId"), k("i_child_company", "childCompanyId")],
+  },
+  {
+    id: "cert_wallet_moves",
+    label: "Rede de certificação — extrato da carteira pré-paga (recarga, reserva, débito, liberação, estorno e ajuste)",
+    fields: { ...ctx, walletId: id(true), kind: s(20), amount: money, heldDelta: money, availableDelta: money, requestId: id(), protocol: s(20), rechargeId: id(), reason: s(300), userName: s(200), date: date },
+    indexes: [k("i_wallet", "walletId"), k("i_request", "requestId")],
+  },
+  {
+    id: "cert_wallet_recharges",
+    label: "Rede de certificação — recargas de créditos pré-pagos (título a receber do pai e a pagar do filho)",
+    fields: {
+      ...ctx, code: s(20), walletId: id(true), childNodeId: id(), parentNodeId: id(), amount: money, dueDate: date, status: s(20), receivableTitleId: id(), payableTitleId: id(), receivableCompanyId: id(), payableCompanyId: id(),
+      confirmedAt: dt, confirmedBy: id(), confirmRef: s(120), cancelledAt: dt, cancelReason: s(300), financeNote: s(300), byName: s(200),
+    },
+    indexes: [k("i_wallet", "walletId"), k("i_child", "childNodeId")],
+  },
+  {
+    id: "cert_sale_finance",
+    label: "Rede de certificação — plano de liquidação de cada venda (quem cobra, fluxos por camada) e situação dos lançamentos",
+    fields: {
+      ...ctx, requestId: id(true), requestCompanyId: id(), protocol: s(20), productKey: s(40), productLabel: s(80), sellerNodeId: id(), pathNodeIds: strings, collectorNodeId: id(), collectorCompanyId: id(),
+      finalPrice: money, plan: json, status: s(20), clientTitleId: id(), referrerNodeId: id(), referrerName: s(200), openedAt: dt, paidDate: date, reversedAt: dt, reversalReason: s(300), issues: json,
+    },
+    indexes: [k("i_request", "requestId"), k("i_seller", "sellerNodeId"), k("i_status", "status"), k("i_paid", "paidDate")],
+  },
+  {
+    id: "cert_fin_entries",
+    label: "Rede de certificação — lançamentos idempotentes por venda, camada e evento (pago, estorno), base dos fechamentos",
+    fields: {
+      ...ctx, requestId: id(true), requestCompanyId: id(), protocol: s(20), productKey: s(40), productLabel: s(80), event: s(20), kind: s(20), settlement: s(20), amount: money, flowKey: s(200),
+      payerType: s(20), payerNodeId: id(), payerCompanyId: id(), payerName: s(200), payeeType: s(20), payeeNodeId: id(), payeeCompanyId: id(), payeeName: s(200), relationKey: s(200), agreementNodeId: id(),
+      date: date, status: s(20), closingId: id(), titleIds: json, reconcile: s(20), note: s(300),
+    },
+    indexes: [k("i_relation", "relationKey", "status"), k("i_request", "requestId"), k("i_payer_company", "payerCompanyId"), k("i_payee_company", "payeeCompanyId"), k("i_closing", "closingId")],
+  },
+  {
+    id: "cert_closings",
+    label: "Rede de certificação — fechamentos de período (pós-pago, comissão, custo AC e indicação) com o título gerado",
+    fields: {
+      ...ctx, code: s(20), relationKey: s(200, true), kind: s(20), payerType: s(20), payerNodeId: id(), payerCompanyId: id(), payerName: s(200), payeeType: s(20), payeeNodeId: id(), payeeCompanyId: id(), payeeName: s(200),
+      agreementNodeId: id(), periodFrom: date, periodTo: date, closedAt: dt, dueDate: date, total: money, count: int, entryIds: json, receivableTitleId: id(), payableTitleId: id(), receivableCompanyId: id(), payableCompanyId: id(),
+      status: s(20), manual: bool, notes: s(500), byName: s(200),
+    },
+    indexes: [k("i_relation", "relationKey"), k("i_payer", "payerNodeId"), k("i_payee", "payeeNodeId"), k("i_payer_company", "payerCompanyId")],
   },
   {
     id: "files",

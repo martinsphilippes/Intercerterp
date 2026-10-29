@@ -84,7 +84,7 @@ describe("rede de certificação — tipo de empresa e perfis", () => {
     // perfil de parceiro anterior às operações novas recebe-as na sincronização
     const tpl = ROLE_TEMPLATES.find((t) => t.key === "partner_manager")!;
     const plan = templateSyncPlan({ system: true, key: "partner_manager", actions: ["data.export"], templateActions: null })!;
-    expect(plan.missing.sort()).toEqual(["network.children", "network.coupons", "network.prices", "network.renewals", "network.sales_all", "network.sell", "network.vouchers"]);
+    expect(plan.missing.sort()).toEqual(["network.children", "network.coupons", "network.finance_view", "network.prices", "network.renewals", "network.sales_all", "network.sell", "network.vouchers"]);
     expect(plan.templateActions).toEqual([...tpl.actions]);
   });
 

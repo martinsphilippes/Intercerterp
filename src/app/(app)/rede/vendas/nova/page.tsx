@@ -5,7 +5,7 @@ import { addDays, today } from "@/lib/dates";
 import { unscoped } from "@/lib/db/scoped-store";
 import { BusinessError } from "@/lib/core/errors";
 import { certificationSettings } from "@/domain/accounting";
-import { cascadeChain, listCertCustomers, requireSellerNode, voucherBalances } from "@/domain/network";
+import { allNodes, cascadeChain, listCertCustomers, requireSellerNode, voucherBalances } from "@/domain/network";
 import { requireNetworkSession } from "../../shared";
 import { SaleForm, type SaleCustomer, type SaleProduct } from "./sale-form";
 
@@ -27,7 +27,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
       </>
     );
   }
-  const [settings, customers, balances] = await Promise.all([certificationSettings(s.ctx.store), listCertCustomers(s.ctx), voucherBalances(s.ctx.store, node.id)]);
+  const [settings, customers, balances, nodes] = await Promise.all([certificationSettings(s.ctx.store), listCertCustomers(s.ctx), voucherBalances(s.ctx.store, node.id), allNodes(s.ctx.store)]);
+  // §46: indicação — escritórios contadores ativos abaixo do vendedor
+  const referrers = nodes.filter((n) => n.level === "contador" && n.status === "active" && (n.path ?? []).includes(node.id)).map((n) => ({ id: n.id, name: n.name })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const products: SaleProduct[] = [];
   for (const p of settings.catalog.filter((x) => x.active)) {
     const chain = p.free ? null : await cascadeChain(s.ctx.store, node.id, p.key);
@@ -65,6 +67,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
           previous={previous}
           defaultDueDate={addDays(today(), 5)}
           minDueDate={today()}
+          referrers={referrers}
         />
       )}
     </>
