@@ -41,7 +41,7 @@ export function CompanyForm({ company, regimes, crts, ufs }: { company?: Record<
               {!c.id && <Field label="Nome da filial matriz"><Input name="branchName" defaultValue="Matriz" /></Field>}
               {!c.id && (
                 <Field label="Tipo de empresa" hint="Define a parametrização inicial e o menu. Não muda depois.">
-                  <Select name="kind" value={kind} onChange={(e) => setKind(e.target.value)} options={[{ value: "retail", label: "Empresa operacional (comércio, serviços)" }, { value: "accounting", label: "Escritório contábil (carteira de clientes)" }]} />
+                  <Select name="kind" value={kind} onChange={(e) => setKind(e.target.value)} options={[{ value: "retail", label: "Empresa operacional (comércio, serviços)" }, { value: "accounting", label: "Escritório contábil (carteira de clientes)" }, { value: "certification", label: "Parceiro da rede de certificação" }]} />
                 </Field>
               )}
             </FormGrid>
@@ -76,7 +76,8 @@ export function CompanyForm({ company, regimes, crts, ufs }: { company?: Record<
             <Field label="Observações" className="mt-4"><Textarea name="notes" defaultValue={c.notes ?? ""} /></Field>
           </FormSection>
           {!c.id && kind === "accounting" && <Notice tone="info">Escritório contábil: ao salvar, são criados a unidade matriz, os perfis do escritório (sócio, gestor, analista, financeiro), os departamentos (fiscal, contábil, pessoal, societário, BPO), contas caixa/banco, meios de recebimento de honorários e categorias financeiras. A carteira de clientes fica em Gestão contábil.</Notice>}
-          {!c.id && kind !== "accounting" && <Notice tone="info">Ao salvar, são criados a filial matriz, depósitos (principal e avarias), perfis padrão, tabela de preço Varejo, contas caixa/banco, meios e condições de pagamento e categorias financeiras. A configuração fiscal fica pendente.</Notice>}
+          {!c.id && kind === "certification" && <Notice tone="info">Parceiro da rede de certificação: ao salvar, são criados a unidade matriz, os perfis do parceiro (administrador, gestor, vendedor, financeiro), contas caixa/banco, meios de recebimento e categorias financeiras de certificação. O lugar na rede (Master, Regional ou Revenda) é definido em Rede de certificação › Novo parceiro — prefira cadastrar por lá.</Notice>}
+          {!c.id && kind === "retail" && <Notice tone="info">Ao salvar, são criados a filial matriz, depósitos (principal e avarias), perfis padrão, tabela de preço Varejo, contas caixa/banco, meios e condições de pagamento e categorias financeiras. A configuração fiscal fica pendente.</Notice>}
           {error && <Notice tone="bad">{error}</Notice>}
           <div className="sticky bottom-0 z-10 -mx-1 flex justify-end gap-2 border-t border-line bg-canvas/95 px-1 py-3 backdrop-blur">
             <SubmitButton pending={pending}>{c.id ? "Salvar empresa" : "Criar empresa"}</SubmitButton>

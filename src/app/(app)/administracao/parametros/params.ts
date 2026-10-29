@@ -4,7 +4,7 @@ import type { Store } from "@/lib/db/types";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
-import { DEFAULT_SETTINGS, setSetting } from "@/lib/core/settings";
+import { DEFAULT_SETTINGS, KIND_FEATURE_DEFAULTS, featureDefaultFor, setSetting } from "@/lib/core/settings";
 import { DEFAULT_TZ } from "@/lib/dates";
 import { TIMEZONES } from "@/domain/companies";
 import { parseCfopPairs } from "@/domain/cfop-entry";
@@ -24,7 +24,7 @@ export interface ParamState {
 }
 
 /** Valor efetivo e origem (padrão → empresa → filial) de cada parâmetro. */
-export async function loadParameters(store: Store, companyId: string, branchId: string | null): Promise<ParamState[]> {
+export async function loadParameters(store: Store, companyId: string, branchId: string | null, kind?: string | null): Promise<ParamState[]> {
   const out: ParamState[] = [];
   for (const def of PARAMS) {
     if (def.installation) {
@@ -34,7 +34,9 @@ export async function loadParameters(store: Store, companyId: string, branchId: 
     }
     const c = await store.get("settings", settingId(companyId, null, def.key));
     const b = branchId ? await store.get("settings", settingId(companyId, branchId, def.key)) : null;
-    const fallback = (DEFAULT_SETTINGS as Record<string, unknown>)[def.key] ?? def.default;
+    // recursos com padrão por tipo de empresa (ex.: rede de certificação — §43): o padrão exibido é o do tipo
+    const featureKey = def.key.startsWith("feature.") ? def.key.slice(8) : null;
+    const fallback = featureKey && KIND_FEATURE_DEFAULTS[featureKey] ? featureDefaultFor(featureKey, kind) : ((DEFAULT_SETTINGS as Record<string, unknown>)[def.key] ?? def.default);
     const effective = b ? b.value : c ? c.value : fallback;
     out.push({ def, company: c ? c.value : undefined, branch: b ? b.value : undefined, effective, source: b ? "filial" : c ? "empresa" : "padrão", updatedAt: (b ?? c)?.updatedAt ?? null });
   }

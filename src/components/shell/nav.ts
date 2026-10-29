@@ -119,6 +119,7 @@ export const NAV: NavGroup[] = [
       { href: "/administracao/historico", label: "Histórico e auditoria", module: "admin", icon: "History" },
       { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
       { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },
+      { href: "/rede", label: "Rede de certificação (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
     ],
   },
   {
@@ -141,6 +142,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/contabil/entregas", label: "Caixa de entrada (entregas)", module: "accounting", icon: "PackageCheck" },
       { href: "/contabil/certificados", label: "Certificados digitais", module: "accounting", icon: "BadgeCheck" },
       { href: "/contabil/equipe", label: "Departamentos e equipe", module: "accounting", icon: "ShieldCheck" },
+      { href: "/rede/minha", label: "Minha rede de certificação", module: "dashboard", icon: "Network", feature: "redeCertificacao" },
     ],
   },
   {
@@ -174,6 +176,59 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/administracao/historico", label: "Histórico e auditoria", module: "admin", icon: "History" },
       { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
       { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },
+      { href: "/rede", label: "Rede de certificação (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
+    ],
+  },
+  {
+    label: "Suporte",
+    items: [
+      { href: "/notificacoes", label: "Notificações", module: "dashboard", icon: "Bell" },
+      { href: "/ajuda", label: "Ajuda e suporte", module: "support", icon: "LifeBuoy" },
+    ],
+  },
+];
+
+/** Navegação do PARCEIRO DA REDE DE CERTIFICAÇÃO (Master, Regional, Revenda — §43): rede, financeiro próprio, fiscal de serviços e administração. */
+export const NAV_CERTIFICATION: NavGroup[] = [
+  { label: "Gestão", items: [{ href: "/rede/minha", label: "Minha rede", module: "dashboard", icon: "LayoutDashboard", feature: "redeCertificacao" }] },
+  {
+    label: "Rede de certificação",
+    items: [
+      { href: "/rede", label: "Rede (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/precos", label: "Preços da rede e catálogo", module: "dashboard", icon: "BadgePercent", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/parametros", label: "Rótulos dos níveis", module: "dashboard", icon: "SlidersHorizontal", action: "network.manage", feature: "redeCertificacao" },
+    ],
+  },
+  {
+    label: "Financeiro",
+    items: [
+      { href: "/financeiro/receber", label: "Contas a receber", module: "finance", icon: "ArrowDownCircle" },
+      { href: "/financeiro/pagar", label: "Contas a pagar", module: "finance", icon: "ArrowUpCircle" },
+      { href: "/financeiro/fluxo-caixa", label: "Fluxo de caixa", module: "finance", icon: "LineChart" },
+      { href: "/financeiro/conciliacao", label: "Conciliação bancária", module: "finance", icon: "Landmark" },
+      { href: "/relatorios/financeiros", label: "Relatórios financeiros (DRE e aging)", module: "finance", icon: "Calculator", feature: "dre" },
+      { href: "/financeiro/fechamento", label: "Fechamento de período", module: "finance", icon: "LockKeyhole", feature: "fechamentoPeriodo" },
+      { href: "/financeiro/cadastros", label: "Cadastros financeiros", module: "finance", icon: "Settings2" },
+    ],
+  },
+  {
+    label: "Fiscal (serviços)",
+    items: [
+      { href: "/fiscal/nfse", label: "NFS-e", module: "fiscal", icon: "FileSignature" },
+      { href: "/fiscal/relatorios", label: "Relatórios fiscais", module: "fiscal", icon: "FileBarChart" },
+      { href: "/fiscal/configuracoes", label: "Configurações fiscais", module: "fiscal", icon: "Cog" },
+    ],
+  },
+  {
+    label: "Administração",
+    items: [
+      { href: "/administracao/usuarios", label: "Usuários e permissões", module: "admin", icon: "ShieldCheck" },
+      { href: "/administracao/empresas", label: "Empresas e unidades", module: "admin", icon: "Building2" },
+      { href: "/administracao/integracoes", label: "Central de integrações", module: "admin", icon: "Plug" },
+      { href: "/administracao/backups", label: "Backup e restauração", module: "admin", icon: "DatabaseBackup" },
+      { href: "/administracao/historico", label: "Histórico e auditoria", module: "admin", icon: "History" },
+      { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
+      { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },
     ],
   },
   {
@@ -187,6 +242,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
 
 /** Menu conforme o tipo da empresa ativa. */
 export function navFor(kind: string | null | undefined): NavGroup[] {
+  if (kind === "certification") return NAV_CERTIFICATION;
   return kind === "accounting" ? NAV_ACCOUNTING : NAV;
 }
 

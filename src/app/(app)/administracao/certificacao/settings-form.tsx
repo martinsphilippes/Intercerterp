@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/empty";
 import { formatMoney } from "@/lib/money";
 import type { CertificationSettings, CertProduct } from "@/domain/accounting";
+import { CERT_HOLDERS, CERT_PRODUCT_TYPES, CERT_SUPPLIERS } from "@/domain/accounting/cert-catalog";
 import { saveCertificationSettingsAction } from "@/app/(app)/contabil/certificados/actions";
 
 /** Linha do catálogo em edição: preço digitado em reais (texto), convertido em centavos ao enviar. */
@@ -21,6 +22,12 @@ interface RowState {
   months: string;
   price: string;
   active: boolean;
+  // rede de certificação (§43)
+  acCost: string;
+  type: string;
+  holder: string;
+  supplier: string;
+  editable: boolean;
 }
 
 const fmtReais = (cents: number) => (cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,8 +41,12 @@ function toCents(text: string): number {
 const slug = (v: string) => v.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
 let seq = 0;
-const fromProduct = (p: CertProduct): RowState => ({ uid: ++seq, key: p.key, existing: true, label: p.label, months: String(p.months), price: fmtReais(p.price), active: p.active !== false });
-const blank = (): RowState => ({ uid: ++seq, key: "", existing: false, label: "", months: "12", price: "", active: true });
+const fromProduct = (p: CertProduct): RowState => ({
+  uid: ++seq, key: p.key, existing: true, label: p.label, months: String(p.months), price: fmtReais(p.price), active: p.active !== false,
+  acCost: p.acCost == null ? "" : fmtReais(p.acCost), type: p.type ?? "", holder: p.holder ?? "", supplier: p.supplier ?? "", editable: p.editable !== false,
+});
+const blank = (): RowState => ({ uid: ++seq, key: "", existing: false, label: "", months: "12", price: "", active: true, acCost: "", type: "a1", holder: "pj", supplier: "soluti", editable: true });
+const sel = "focus-ring h-9 rounded-md border border-line bg-white px-2 text-sm";
 
 /**
  * Parâmetros da certificação (equipe): catálogo editável em tabela, instruções de pagamento e base do link de pagamento.
@@ -45,7 +56,10 @@ export function SettingsForm({ settings }: { settings: CertificationSettings }) 
   const [rows, setRows] = useState<RowState[]>(() => settings.catalog.map(fromProduct));
   const update = (uid: number, patch: Partial<RowState>) => setRows((rs) => rs.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
   const remove = (uid: number) => setRows((rs) => rs.filter((r) => r.uid !== uid));
-  const catalog = rows.map((r) => ({ key: slug(r.key), label: r.label.trim(), months: Number(r.months) || 12, price: toCents(r.price), active: r.active }));
+  const catalog = rows.map((r) => ({
+    key: slug(r.key), label: r.label.trim(), months: Number(r.months) || 12, price: toCents(r.price), active: r.active,
+    acCost: r.acCost.trim() ? toCents(r.acCost) : null, type: r.type || null, holder: r.holder || null, supplier: r.supplier || null, editable: r.editable,
+  }));
   const activeCount = rows.filter((r) => r.active).length;
 
   return (
@@ -71,6 +85,9 @@ export function SettingsForm({ settings }: { settings: CertificationSettings }) 
                     <th className="px-3 py-2 text-left font-medium">Descrição</th>
                     <th className="px-3 py-2 text-left font-medium">Meses</th>
                     <th className="px-3 py-2 text-left font-medium">Preço (R$)</th>
+                    <th className="px-3 py-2 text-left font-medium">Custo AC (R$)</th>
+                    <th className="px-3 py-2 text-left font-medium">Tipo · titular · AC</th>
+                    <th className="px-3 py-2 text-left font-medium">Preço editável na rede</th>
                     <th className="px-3 py-2 text-left font-medium">Ativo</th>
                     <th className="px-3 py-2 text-right font-medium">
                       <span className="sr-only">Remover</span>
@@ -80,7 +97,7 @@ export function SettingsForm({ settings }: { settings: CertificationSettings }) 
                 <tbody className="divide-y divide-line">
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-3 py-4 text-center text-sm text-slate-500">
+                      <td colSpan={9} className="px-3 py-4 text-center text-sm text-slate-500">
                         Nenhum produto. Adicione ao menos um produto ativo.
                       </td>
                     </tr>
@@ -105,6 +122,31 @@ export function SettingsForm({ settings }: { settings: CertificationSettings }) 
                       </td>
                       <td className="px-3 py-2 align-top">
                         <Input inputMode="decimal" value={r.price} onChange={(e) => update(r.uid, { price: e.target.value })} onBlur={() => r.price.trim() && update(r.uid, { price: fmtReais(toCents(r.price)) })} placeholder="199,00" required aria-label="Preço em reais" className="tabular w-28 text-right" disabled={pending} />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Input inputMode="decimal" value={r.acCost} onChange={(e) => update(r.uid, { acCost: e.target.value })} onBlur={() => r.acCost.trim() && update(r.uid, { acCost: fmtReais(toCents(r.acCost)) })} placeholder="opcional" aria-label="Custo pago à AC em reais" className="tabular w-28 text-right" disabled={pending} />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <span className="flex flex-wrap gap-1">
+                          <select className={sel} value={r.type} onChange={(e) => update(r.uid, { type: e.target.value })} aria-label="Tipo" disabled={pending}>
+                            <option value="">—</option>
+                            {CERT_PRODUCT_TYPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                          <select className={sel} value={r.holder} onChange={(e) => update(r.uid, { holder: e.target.value })} aria-label="Titular" disabled={pending}>
+                            <option value="">—</option>
+                            {CERT_HOLDERS.map((o) => <option key={o.value} value={o.value}>{o.value.toUpperCase()}</option>)}
+                          </select>
+                          <select className={sel} value={r.supplier} onChange={(e) => update(r.uid, { supplier: e.target.value })} aria-label="AC de 1º nível" disabled={pending}>
+                            <option value="">—</option>
+                            {CERT_SUPPLIERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <label className="inline-flex h-9 items-center gap-2 text-sm">
+                          <input type="checkbox" checked={r.editable} onChange={(e) => update(r.uid, { editable: e.target.checked })} className="focus-ring size-4 rounded border-line accent-brand-700" disabled={pending} aria-label="Preço editável na rede" />
+                          {r.editable ? "Sim" : "Fixo"}
+                        </label>
                       </td>
                       <td className="px-3 py-2 align-top">
                         <label className="inline-flex h-9 items-center gap-2 text-sm">

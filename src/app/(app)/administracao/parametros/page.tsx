@@ -22,7 +22,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const requested = sp(params, "escopo");
   const scope = requested && requested !== "company" && branches.some((b) => b.id === requested) ? requested : "company";
   const tab = sp(params, "tab") || "valores";
-  const states = await loadParameters(s.ctx.store, s.ctx.companyId, scope === "company" ? null : scope);
+  const states = await loadParameters(s.ctx.store, s.ctx.companyId, scope === "company" ? null : scope, s.company.kind);
   const schedule = await getSchedule(s.ctx.store, s.ctx.companyId);
   const settingRefs = (await listAll(s.ctx.store, "settings", { filters: [["eq", "companyId", s.ctx.companyId]] }, 500)).map((x) => `setting:${x.id}`);
   const base = `/administracao/parametros${scope !== "company" ? `?escopo=${scope}` : ""}`;

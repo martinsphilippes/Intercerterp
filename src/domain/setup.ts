@@ -12,10 +12,12 @@ import { setSetting } from "@/lib/core/settings";
  */
 export async function createCompanyWithDefaults(
   store: Store,
-  input: { name: string; tradeName?: string; cnpj?: string; regime?: string; uf?: string; cityName?: string; cityCode?: string; branchName?: string; createdBy?: string; key?: string; kind?: "retail" | "accounting" },
+  input: { name: string; tradeName?: string; cnpj?: string; regime?: string; uf?: string; cityName?: string; cityCode?: string; branchName?: string; createdBy?: string; key?: string; kind?: "retail" | "accounting" | "certification" },
 ): Promise<{ company: Doc; branch: Doc; roles: Record<string, Doc> }> {
   const kind = input.kind ?? "retail";
   const firm = kind === "accounting";
+  // parceiro da rede de certificação (§43): nasce enxuto como o escritório, com categorias de certificação
+  const partner = kind === "certification";
   // chave dos ids: única por empresa nova (key) — CNPJ/nome só na instalação (retomável)
   const key = input.key ?? (onlyDigits(input.cnpj) || input.name);
   const put = async (collection: string, k: string, data: Record<string, any>) => {
@@ -54,8 +56,8 @@ export async function createCompanyWithDefaults(
   for (const r of roleTemplatesFor(kind)) roles[r.key] = await put("roles", r.key, { ...base, key: r.key, name: r.name, description: r.description, permissions: r.permissions, actions: r.actions, templateActions: r.actions, discountLimitBps: r.discountLimitBps, system: true, active: true });
   const cash = await put("financial_accounts", "caixa", { ...base, branchId: branch.id, name: "Caixa — Matriz", kind: "cash", initialBalance: 0, initialBalanceDate: today(), balance: 0, seq: 0, active: true });
   const bank = await put("financial_accounts", "banco", { ...base, name: "Conta bancária principal", kind: "bank", initialBalance: 0, initialBalanceDate: today(), balance: 0, seq: 0, active: true });
-  if (firm) {
-    // escritório contábil: sem depósitos, tabela de preço, unidades nem meios de PDV — só o que o financeiro próprio usa
+  if (firm || partner) {
+    // escritório contábil e parceiro da rede: sem depósitos, tabela de preço, unidades nem meios de PDV — só o que o financeiro próprio usa
     for (const [i, m] of [
       { k: "pix", name: "Pix", kind: "pix", accountId: bank.id },
       { k: "boleto", name: "Boleto", kind: "boleto", requiresCustomer: true, accountId: bank.id },
@@ -68,6 +70,16 @@ export async function createCompanyWithDefaults(
       await put("payment_terms", t[0], { ...base, name: t[1], installments: t[2], firstDueDays: t[3], intervalDays: 30, interestBps: 0, active: true, kind: "both" });
     }
     const cats: Record<string, Doc> = {};
+    if (partner) {
+      for (const c of [["certificados", "Receita de certificados digitais", "revenue"], ["vendas_rede", "Vendas aos parceiros abaixo na rede", "revenue"], ["custo_certificados", "Custo de certificados (compra do nível acima)", "expense"], ["comissoes", "Comissões de vendedores", "expense"], ["pessoal", "Pessoal e encargos", "expense"], ["despesas", "Despesas operacionais", "expense"], ["tarifas", "Tarifas e taxas", "expense"], ["impostos", "Impostos", "expense"]] as const) {
+        cats[c[0]] = await put("fin_categories", c[0], { ...base, name: c[1], type: c[2], active: true });
+      }
+      await put("cost_centers", "geral", { ...base, name: "Geral", code: "100", active: true });
+      await setSetting(store, company.id, null, "finance.category.sales", cats.certificados.id);
+      await setSetting(store, company.id, null, "finance.category.purchases", cats.custo_certificados.id);
+      await setSetting(store, company.id, null, "finance.category.fees", cats.tarifas.id);
+      return { company, branch, roles };
+    }
     for (const c of [["honorarios", "Receita de honorários", "revenue"], ["servicos", "Receita de serviços avulsos", "revenue"], ["pessoal", "Pessoal e encargos", "expense"], ["despesas", "Despesas operacionais", "expense"], ["sistemas", "Sistemas e assinaturas", "expense"], ["tarifas", "Tarifas e taxas", "expense"], ["impostos", "Impostos", "expense"]] as const) {
       cats[c[0]] = await put("fin_categories", c[0], { ...base, name: c[1], type: c[2], active: true });
     }

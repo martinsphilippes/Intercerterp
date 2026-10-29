@@ -18,11 +18,12 @@ import * as lots from "./modules/lots";
 import * as financeManagement from "./modules/finance-management";
 import * as warehouses from "./modules/warehouses";
 import * as pendingInvoice from "./modules/pending-invoice";
+import * as network from "./modules/network";
 
 /** Cenários de demonstração por módulo (ordem de dependência). */
 export async function seedModules(refs: DemoRefs, deadline = Infinity) {
   const out: Record<string, unknown> = {};
-  for (const [k, m] of Object.entries({ products, stock, sales, purchases, finance, fiscal, admin, reports, commissions, accounting, certificates, salesDocuments, scale, kits, promotions, lots, financeManagement, warehouses, pendingInvoice })) {
+  for (const [k, m] of Object.entries({ products, stock, sales, purchases, finance, fiscal, admin, reports, commissions, accounting, certificates, salesDocuments, scale, kits, promotions, lots, financeManagement, warehouses, pendingInvoice, network })) {
     if (Date.now() > deadline) return { out, done: false };
     out[k] = await m.seed(refs); // cada módulo é idempotente: reexecutar continua de onde parou
     console.log(`[demo] módulo ${k} pronto`);

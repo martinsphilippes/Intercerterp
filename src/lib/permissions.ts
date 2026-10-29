@@ -69,6 +69,10 @@ export const SPECIAL_ACTIONS = [
   { key: "accounting.manage_team", label: "Gerir departamentos e responsáveis da carteira" },
   { key: "accounting.certificates", label: "Solicitar, cobrar e baixar certificados digitais dos clientes" },
   { key: "certification.operate", label: "Operar a certificação digital (equipe de certificação Intercert)" },
+  // rede de certificação (§43): hierarquia comercial Master → Regional → Revenda → Contador e preço em cascata
+  { key: "network.manage", label: "Gerir toda a rede de certificação (plataforma Intercert: criar, mover, suspender e encerrar parceiros)" },
+  { key: "network.children", label: "Cadastrar parceiros abaixo do próprio nó da rede de certificação" },
+  { key: "network.prices", label: "Definir os preços (custo, mínimo e padrão) dos parceiros abaixo na rede" },
 ] as const;
 
 export type SpecialAction = (typeof SPECIAL_ACTIONS)[number]["key"];
@@ -87,8 +91,8 @@ export interface RoleTemplate {
 }
 
 const RETAIL_MODULES = MODULES.filter((m) => !ACCOUNTING_MODULES.includes(m.key));
-// perfis de loja: sem as operações do escritório e sem a da equipe de certificação (só administradores da plataforma ou perfil dedicado)
-const RETAIL_ACTIONS = SPECIAL_ACTIONS.filter((a) => !a.key.startsWith("accounting.") && !a.key.startsWith("certification."));
+// perfis de loja: sem as operações do escritório, da equipe de certificação e da rede de certificação (só administradores da plataforma ou perfil dedicado)
+const RETAIL_ACTIONS = SPECIAL_ACTIONS.filter((a) => !a.key.startsWith("accounting.") && !a.key.startsWith("certification.") && !a.key.startsWith("network."));
 const FIRM_MODULES = MODULES.filter((m) => !RETAIL_ONLY_MODULES.includes(m.key));
 
 /** Perfis padrão das EMPRESAS OPERACIONAIS (varejo). */
@@ -185,11 +189,55 @@ export const FIRM_ROLES: RoleTemplate[] = [
   },
 ];
 
-/** Todos os modelos de perfil (varejo + escritório), para sincronização e perfis equivalentes entre empresas. */
-export const ROLE_TEMPLATES: RoleTemplate[] = [...DEFAULT_ROLES, ...FIRM_ROLES];
+// ─── Rede de certificação (§43) ─────────────────────────────────────────────────────────────────────────────────────
+/** Módulos de um PARCEIRO DA REDE (kind "certification"): painel, financeiro próprio, fiscal de serviços, administração e suporte. */
+const PARTNER_MODULES = MODULES.filter((m) => !RETAIL_ONLY_MODULES.includes(m.key) && !ACCOUNTING_MODULES.includes(m.key));
+
+/**
+ * Perfis padrão dos PARCEIROS DA REDE DE CERTIFICAÇÃO (Master, Regional, Revenda). Chaves próprias (prefixo partner_).
+ * "Gerir toda a rede" (network.manage) é da plataforma: nenhum perfil de parceiro a recebe.
+ */
+export const PARTNER_ROLES: RoleTemplate[] = [
+  {
+    key: "partner_admin",
+    name: "Administrador do parceiro",
+    description: "Acesso integral ao parceiro: rede abaixo, preços dos filhos, financeiro, usuários e administração.",
+    permissions: Object.fromEntries(PARTNER_MODULES.map((m) => [m.key, all()])),
+    actions: ["network.children", "network.prices", "finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "fiscal.cancel", "fiscal.configure", "data.export", "admin.users", "admin.integrations", "admin.backup"],
+    discountLimitBps: 10000,
+  },
+  {
+    key: "partner_manager",
+    name: "Gestor",
+    description: "Rede abaixo (cadastro de filhos e preços), financeiro em consulta.",
+    permissions: { dashboard: all(), finance: ro(), fiscal: ro(), admin: ro(), support: rw() },
+    actions: ["network.children", "network.prices", "data.export"],
+    discountLimitBps: 0,
+  },
+  {
+    key: "partner_seller",
+    name: "Vendedor",
+    description: "Vendedor de cidade do parceiro: consulta da rede e dos preços.",
+    permissions: { dashboard: ro(), support: rw() },
+    actions: [],
+    discountLimitBps: 0,
+  },
+  {
+    key: "partner_finance",
+    name: "Financeiro",
+    description: "Contas a pagar e a receber do parceiro, conciliação, fluxo de caixa e DRE.",
+    permissions: { dashboard: ro(), finance: all(), fiscal: rw(), support: rw() },
+    actions: ["finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "fiscal.issue", "data.export"],
+    discountLimitBps: 0,
+  },
+];
+
+/** Todos os modelos de perfil (varejo + escritório + parceiro da rede), para sincronização e perfis equivalentes entre empresas. */
+export const ROLE_TEMPLATES: RoleTemplate[] = [...DEFAULT_ROLES, ...FIRM_ROLES, ...PARTNER_ROLES];
 
 /** Modelos de perfil conforme o tipo da empresa. */
 export function roleTemplatesFor(kind: string | null | undefined): RoleTemplate[] {
+  if (kind === "certification") return PARTNER_ROLES;
   return kind === "accounting" ? FIRM_ROLES : DEFAULT_ROLES;
 }
 

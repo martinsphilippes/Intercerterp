@@ -74,7 +74,8 @@ export const COLLECTIONS: CollectionDef[] = [
     fields: {
       name: s(200, true), tradeName: s(200), cnpj: s(20), ie: s(30), im: s(30), regime: s(20), crt: s(2),
       cnae: s(20), email: s(200), phone: s(40), address: json, status: s(20), isDemo: bool, notes: txt, createdBy: id(),
-      // tipo: "retail" (empresa operacional — padrão quando ausente) ou "accounting" (escritório contábil com carteira de clientes)
+      // tipo: "retail" (empresa operacional — padrão quando ausente), "accounting" (escritório contábil com carteira de clientes)
+      // ou "certification" (parceiro da rede de certificação — Master, Regional ou Revenda, §43)
       kind: s(20),
     },
     indexes: [u("u_cnpj", "cnpj")],
@@ -1061,6 +1062,27 @@ export const COLLECTIONS: CollectionDef[] = [
     label: "Certificados digitais conhecidos (carteira do escritório)",
     fields: { ...ctx, clientId: id(true), holderName: s(200), holderDoc: s(20), product: s(40), productLabel: s(80), serial: s(120), issuer: s(160), validFrom: date, validTo: date, source: s(20), requestId: id(), fileId: id(), notes: s(500), active: bool },
     indexes: [k("i_client", "clientId"), k("i_company", "companyId", "validTo"), k("i_request", "requestId")],
+  },
+  // ───────────────────────────── Rede de certificação (§43) — registros da PLATAFORMA (companyId = "platform"; só o domínio
+  // da rede lê e grava, sempre com unscoped() e a visibilidade de visibleNodeIds)
+  {
+    id: "cert_network_nodes",
+    label: "Rede de certificação — parceiros (nós da hierarquia comercial)",
+    fields: {
+      ...ctx, nodeCompanyId: id(true), parentNodeId: id(), level: s(20, true), path: strings, depth: int, code: s(20), name: s(200),
+      cityName: s(120), uf: s(2), region: s(80), status: s(20), statusReason: s(500), statusAt: dt, statusBy: id(), commercialResponsible: s(200),
+      startedAt: date, closedAt: date, notes: s(1000),
+    },
+    indexes: [u("u_node_company", "nodeCompanyId"), k("i_parent", "parentNodeId"), k("i_level", "level", "status"), u("u_code", "companyId", "code")],
+  },
+  {
+    id: "cert_price_rules",
+    label: "Rede de certificação — regras de preço em cascata (com vigência)",
+    fields: {
+      ...ctx, scope: s(10, true), nodeId: id(), ownerNodeId: id(), level: s(20), productKey: s(40, true), cost: money, minPrice: money, defaultPrice: money,
+      canEdit: bool, validFrom: date, validTo: date, active: bool, supersededAt: dt, reason: s(300),
+    },
+    indexes: [k("i_node", "nodeId", "productKey"), k("i_owner", "ownerNodeId", "level", "productKey")],
   },
   {
     id: "files",

@@ -32,6 +32,9 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   "purchase.receive_pending_invoice", "purchase.confirm_invoice",
   // arquivos fiscais (§41 SPED Fiscal e EFD Contribuições, §42 Sintegra): Fiscal, Administrador e Sócio/Administrador do escritório
   "fiscal.files",
+  // rede de certificação (§43): cadastro de filhos e preços dos filhos (Administrador do parceiro e Gestor); network.manage
+  // não entra em nenhum modelo (plataforma: administradores ou perfil dedicado), listado para a regra valer se um dia entrar
+  "network.children", "network.prices", "network.manage",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);

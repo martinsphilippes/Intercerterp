@@ -37,16 +37,34 @@ import { visibleClientIds } from "./team";
 export const PLATFORM_SCOPE = "platform";
 export const CERT_DUE_SOON_DAYS = 30;
 
+export { CERT_PRODUCT_TYPES, CERT_HOLDERS, CERT_SUPPLIERS } from "./cert-catalog";
+import { CERT_PRODUCT_TYPES, CERT_HOLDERS, CERT_SUPPLIERS } from "./cert-catalog";
+
 export interface CertProduct {
   key: string;
   label: string;
   months: number;
-  /** centavos */
+  /** centavos — preço da cobrança da Intercert ao escritório (Tela 67) */
   price: number;
   active: boolean;
+  // rede de certificação (§43) — campos opcionais (catálogos salvos antes continuam válidos)
+  /** centavos — custo pago pela Intercert à AC de 1º nível (base do preço em cascata e da DRE) */
+  acCost?: number | null;
+  type?: "a1" | "a3" | "birdid" | "outro" | null;
+  holder?: "pf" | "pj" | null;
+  supplier?: "soluti" | "serpro" | null;
+  /** padrão "a rede pode alterar o preço de venda" (false = preço fixo, como o BirdID) */
+  editable?: boolean | null;
 }
 
-export const DEFAULT_CERT_CATALOG: CertProduct[] = [{ key: "ecnpj_a1_12m", label: "e-CNPJ A1 · 12 meses", months: 12, price: 19900, active: true }];
+/** Catálogo padrão (vale só enquanto nenhum catálogo foi salvo): produtos parecidos com os do InterSuite. */
+export const DEFAULT_CERT_CATALOG: CertProduct[] = [
+  { key: "ecnpj_a1_12m", label: "e-CNPJ A1 · 12 meses", months: 12, price: 19900, active: true, acCost: 9000, type: "a1", holder: "pj", supplier: "soluti", editable: true },
+  { key: "ecnpj_a3_36m", label: "e-CNPJ A3 · 36 meses", months: 36, price: 33000, active: true, acCost: 15000, type: "a3", holder: "pj", supplier: "soluti", editable: true },
+  { key: "ecpf_a1_12m", label: "e-CPF A1 · 12 meses", months: 12, price: 15000, active: true, acCost: 6000, type: "a1", holder: "pf", supplier: "soluti", editable: true },
+  { key: "ecpf_a3_36m", label: "e-CPF A3 · 36 meses", months: 36, price: 25000, active: true, acCost: 11000, type: "a3", holder: "pf", supplier: "serpro", editable: true },
+  { key: "birdid_12m", label: "BirdID (nuvem) · 12 meses", months: 12, price: 9900, active: true, acCost: 4000, type: "birdid", holder: "pf", supplier: "soluti", editable: false },
+];
 
 export interface CertificationSettings {
   catalog: CertProduct[];
@@ -66,20 +84,36 @@ export async function certificationSettings(store: Store): Promise<Certification
 }
 
 export async function saveCertificationSettings(ctx: Ctx, input: Partial<CertificationSettings>): Promise<CertificationSettings> {
-  requireAction(ctx, "certification.operate");
+  // equipe de certificação ou plataforma da rede (o catálogo guarda o custo AC da rede de certificação — §43)
+  if (!canDo(ctx.user, "certification.operate")) requireAction(ctx, "network.manage");
   const before = await certificationSettings(ctx.store);
-  const catalog = (input.catalog ?? before.catalog).map((p) => ({
-    key: String(p.key ?? "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
-    label: String(p.label ?? "").trim(),
-    months: Math.max(1, Math.round(Number(p.months) || 12)),
-    price: Math.max(0, Math.round(Number(p.price) || 0)),
-    active: p.active !== false,
-  }));
+  const prevByKey = new Map(before.catalog.map((p) => [p.key, p]));
+  const pick = <T extends string>(v: unknown, allowed: readonly { value: T }[]): T | null => (allowed.some((a) => a.value === v) ? (v as T) : null);
+  const catalog = (input.catalog ?? before.catalog).map((p) => {
+    const key = String(p.key ?? "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    // campos da rede ausentes no envio (formulário antigo) mantêm o valor salvo do mesmo produto
+    const prev: Partial<CertProduct> = prevByKey.get(key) ?? {};
+    const has = (f: keyof CertProduct) => Object.prototype.hasOwnProperty.call(p, f);
+    const acRaw = has("acCost") ? p.acCost : prev.acCost;
+    return {
+      key,
+      label: String(p.label ?? "").trim(),
+      months: Math.max(1, Math.round(Number(p.months) || 12)),
+      price: Math.max(0, Math.round(Number(p.price) || 0)),
+      active: p.active !== false,
+      acCost: acRaw == null || (acRaw as unknown) === "" ? null : Math.max(0, Math.round(Number(acRaw) || 0)),
+      type: pick(has("type") ? p.type : prev.type, CERT_PRODUCT_TYPES),
+      holder: pick(has("holder") ? p.holder : prev.holder, CERT_HOLDERS),
+      supplier: pick(has("supplier") ? p.supplier : prev.supplier, CERT_SUPPLIERS),
+      editable: (has("editable") ? p.editable : prev.editable) !== false,
+    };
+  });
   assert(catalog.length > 0, "Informe ao menos um produto no catálogo.");
   for (const p of catalog) {
     assert(p.key, "Produto sem identificador.");
     assert(p.label, `Produto ${p.key} sem descrição.`);
     assert(p.price > 0, `Produto ${p.label}: informe o valor.`);
+    assert(p.acCost == null || p.acCost <= p.price, `Produto ${p.label}: o custo pago à AC não pode passar do preço de venda.`);
   }
   assert(new Set(catalog.map((p) => p.key)).size === catalog.length, "Identificadores de produto repetidos.");
   assert(catalog.some((p) => p.active), "Mantenha ao menos um produto ativo.");
