@@ -312,19 +312,21 @@ export async function createCertificateRequest(ctx: Ctx, input: CertRequestInput
   }
   const linked = client.linkStatus === "active" && client.linkedCompanyId ? client.linkedCompanyId : null;
   const seq = await nextNumber(ctx.store, `cert_request:${ctx.companyId}`);
-  const row = await ctx.store.create("certificate_requests", {
+  const data = {
     companyId: ctx.companyId, branchId: null, createdBy: ctx.user.id, clientId: client.id, protocol: pad(seq), kind: input.kind, product: product.key, productLabel: product.label, months: product.months,
     holderName: client.name, holderDoc: client.doc ?? null, linkedCompanyId: linked, contactEmail, contactPhone: input.contactPhone?.trim() || client.phone || null, amount, dueDate: input.dueDate,
     status: "awaiting_payment" satisfies CertStatus, responsibleUserId: input.responsibleUserId || client.responsibleUserId || ctx.user.id, previousCertificateId: input.previousCertificateId || null, notes: input.notes?.trim() || null,
     chargeSends: 0, emissionAttempts: 0, downloads: 0, downloadAuthorized: false, validationStatus: "pending",
     productType: product.type ?? null, holderType: product.holder ?? null,
     ...(net ? { channel: "firm", sellerNodeId: net.cascade.sellerNodeId, sellerUserId: ctx.user.id, sellerName: ctx.user.name, cascade: net.sellerView, listPrice: net.cascade.listPrice, minPrice: net.cascade.minPrice, discount: 0 } : {}),
-  });
+  };
+  // §46: na rede, a solicitação, o retrato completo (registro da plataforma — a solicitação guarda só a visão do
+  // escritório) e o plano de liquidação em camadas vão na mesma transação, com a reserva do saldo pré-pago
+  let row: Doc;
   if (net) {
-    // retrato completo da cascata: registro da plataforma (a solicitação do escritório guarda só a visão dele)
-    const { saveFirmSaleCascade } = await import("../network/sales");
-    await saveFirmSaleCascade(ctx.store, row, net.cascade, ctx.user.id);
-  }
+    const { createFirmNetworkRequest } = await import("../network/sales");
+    row = await createFirmNetworkRequest(ctx, data, net.cascade);
+  } else row = await ctx.store.create("certificate_requests", data);
   await audit(ctx, {
     module: "accounting", action: "certificate.request", entityType: "certificate_request", entityId: row.id, summary: `Solicitação ${row.protocol} criada: ${CERT_KIND_LABEL[input.kind]} de ${product.label} para ${client.name} — ${formatMoney(amount)}, vencimento ${formatDate(input.dueDate)}${net ? ` · preço da rede (custo ${formatMoney(net.cascade.sellerCost)}, margem ${formatMoney(amount - net.cascade.sellerCost)})` : ""}`,
     after: { kind: input.kind, product: product.key, amount, dueDate: input.dueDate, ...(net ? { sellerNodeId: net.cascade.sellerNodeId, cascade: net.sellerView } : {}) }, related: [`accounting_client:${client.id}`],
@@ -493,12 +495,19 @@ export async function confirmCertificatePayment(ctx: Ctx, id: string, input: { r
   assert(paymentRef, "Informe a referência da transação (comprovante, id do gateway ou número do Pix).");
   const paidAt = input.paidAt?.trim() || nowIso();
   const amount = input.amount != null && input.amount > 0 ? Math.round(input.amount) : r.amount;
+  // §46: venda com preço da rede tem o plano de liquidação calculado sobre o valor cobrado — não muda na confirmação
+  if (r.sellerNodeId && amount !== r.amount) throw new BusinessError(`Venda da rede: o valor pago (${formatMoney(amount)}) precisa ser o valor cobrado (${formatMoney(r.amount)}). Diferenças são tratadas pelo estorno e uma nova venda.`, "amount");
   const after = await patch(ctx, r, { status: "validation", validationStatus: "pending", paymentConfirmedAt: paidAt, paymentRef, paymentBy: ctx.user.id, amount });
   await logEvent(ctx, r, { action: "certificate.payment_confirmed", summary: `Pagamento confirmado — ${formatMoney(amount)} · referência ${paymentRef}`, after: { paymentRef, paidAt, amount } });
   if (r.couponId) {
     // §45: o uso do cupom reservado na venda passa a consumido (conta no limite de forma definitiva)
     const { consumeCouponUse } = await import("../network/coupons");
     await consumeCouponUse(ctx.store, r);
+  }
+  if (r.sellerNodeId) {
+    // §46: lançamentos de todas as camadas (baixa do cliente, carteira, acúmulo para o fechamento, split, custo AC)
+    const { onSalePaid } = await import("../network/ledger");
+    await onSalePaid(ctx, after);
   }
   await notifyFirm(ctx.store, after, { title: `Pagamento confirmado — ${r.protocol} (${r.holderName})`, body: `Referência ${paymentRef}. A solicitação segue para a validação do titular pela equipe de certificação.`, key: "paid" });
   return after;
@@ -720,6 +729,11 @@ export async function cancelCertificateRequest(ctx: Ctx, id: string, input: { re
   if (r.voucherRedemptionId || r.couponId || r.free) {
     const { onSaleCancelled } = await import("../network/sales");
     await onSaleCancelled(ctx, after);
+  }
+  if (r.sellerNodeId) {
+    // §46: libera as reservas da carteira pré-paga e cancela o título do cliente
+    const { onSaleCancelledFinance } = await import("../network/ledger");
+    await onSaleCancelledFinance(ctx, after);
   }
   return after;
 }

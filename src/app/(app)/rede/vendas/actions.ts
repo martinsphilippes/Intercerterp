@@ -39,7 +39,7 @@ function saleInput(fd: FormData): NetworkSaleInput {
   return {
     customerId: fstr(fd, "customerId"), productKey: fstr(fd, "productKey"), price: priceRaw === "" || fbool(fd, "useDefault") ? null : fint(fd, "price"), couponCode: fopt(fd, "couponCode"),
     voucher: (fstr(fd, "voucher") || "none") as NetworkSaleInput["voucher"], voucherCode: fopt(fd, "voucherCode"), dueDate: fopt(fd, "dueDate"), contactEmail: fopt(fd, "contactEmail"), contactPhone: fopt(fd, "contactPhone"),
-    notes: fopt(fd, "notes"), previousCertificateId: fopt(fd, "previousCertificateId"), duplicateReason: fopt(fd, "duplicateReason"), idemKey: fopt(fd, "saleKey") ?? fopt(fd, "_idem"),
+    notes: fopt(fd, "notes"), previousCertificateId: fopt(fd, "previousCertificateId"), duplicateReason: fopt(fd, "duplicateReason"), referrerNodeId: fopt(fd, "referrerNodeId"), idemKey: fopt(fd, "saleKey") ?? fopt(fd, "_idem"),
   };
 }
 

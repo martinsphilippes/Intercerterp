@@ -46,8 +46,10 @@ export interface SaleCustomer {
  * CENTAVOS inteiros (MoneyInput): nada de ×100 na tela. A conferência chama o servidor (mesma régua da gravação) e
  * mostra custo, margem, desconto, avisos e a possível venda repetida; mudar qualquer campo exige conferir de novo.
  */
-export function SaleForm({ products, customers, initialCustomerId, initialProduct, previous, defaultDueDate, minDueDate }: {
+export function SaleForm({ products, customers, initialCustomerId, initialProduct, previous, defaultDueDate, minDueDate, referrers = [] }: {
   products: SaleProduct[];
+  /** §46: escritórios contadores abaixo do vendedor que podem ter indicado o cliente */
+  referrers?: Array<{ id: string; name: string }>;
   customers: SaleCustomer[];
   initialCustomerId: string | null;
   initialProduct: string | null;
@@ -209,6 +211,11 @@ export function SaleForm({ products, customers, initialCustomerId, initialProduc
             <Field label="Telefone / WhatsApp"><Input name="contactPhone" defaultValue={customer?.phone ?? ""} key={`p-${customerId}`} /></Field>
           </FormGrid>
         </FormSection>
+      )}
+      {referrers.length > 0 && (
+        <Field label="Indicado por (contador)" hint="Escritório contador da sua rede que indicou o cliente: recebe a comissão de indicação definida na sua modalidade com o parceiro acima.">
+          <Select name="referrerNodeId" options={referrers.map((r) => ({ value: r.id, label: r.name }))} placeholder="Sem indicação" />
+        </Field>
       )}
       <Field label="Observações (internas)"><Textarea name="notes" rows={2} maxLength={1000} /></Field>
 

@@ -52,6 +52,7 @@ export default async function Page() {
         actions={
           <>
             <LinkButton href={`/rede/${me.id}`}>Detalhes e histórico</LinkButton>
+            {(canDo(s.user, "network.finance_view") || canDo(s.user, "network.billing")) && <LinkButton href="/rede/minha/financeiro">Meu financeiro com o nível acima</LinkButton>}
             {canAdd && <LinkButton href={`/rede/novo?pai=${me.id}`} variant="primary"><Plus className="size-4" aria-hidden /> Novo parceiro abaixo</LinkButton>}
           </>
         }

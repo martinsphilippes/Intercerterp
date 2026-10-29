@@ -69,6 +69,11 @@ export interface NetworkSettings {
   levelLabels: Record<NetworkLevel, string>;
   /** §45: dias antes do vencimento para o alerta "ninguém agiu" na renovação (1 a 30; padrão 7) */
   idleAlertDays: number;
+  /** §46: empresa da Intercert no ERP (recebe o que o nível direto paga, paga o custo AC; null = não configurada) */
+  platformCompanyId: string | null;
+  /** §46: dia do fechamento mensal do custo AC ao fornecedor (1 a 28; padrão 1) e vencimento em dias */
+  acClosingDay: number;
+  acDueDays: number;
 }
 
 export const DEFAULT_IDLE_ALERT_DAYS = 7;
@@ -81,7 +86,13 @@ export async function networkSettings(store: Store): Promise<NetworkSettings> {
     if (typeof v === "string" && v.trim()) labels[l] = v.trim();
   }
   const idle = Math.round(Number(saved?.idleAlertDays));
-  return { levelLabels: labels, idleAlertDays: idle >= 1 && idle <= 30 ? idle : DEFAULT_IDLE_ALERT_DAYS };
+  const acDay = Math.round(Number(saved?.acClosingDay));
+  const acDue = Math.round(Number(saved?.acDueDays));
+  return {
+    levelLabels: labels, idleAlertDays: idle >= 1 && idle <= 30 ? idle : DEFAULT_IDLE_ALERT_DAYS,
+    platformCompanyId: typeof saved?.platformCompanyId === "string" && saved.platformCompanyId ? saved.platformCompanyId : null,
+    acClosingDay: acDay >= 1 && acDay <= 28 ? acDay : 1, acDueDays: acDue >= 0 && acDue <= 60 ? acDue : 15,
+  };
 }
 
 /** Plataforma: rótulos exibidos dos níveis (as chaves internas não mudam). */
@@ -95,9 +106,29 @@ export async function saveLevelLabels(ctx: Ctx, input: Partial<Record<NetworkLev
     levelLabels[l] = v;
   }
   assert(new Set(Object.values(levelLabels).map((v) => v.toLowerCase())).size === NETWORK_LEVELS.length, "Os rótulos dos níveis precisam ser diferentes entre si.");
-  const value: NetworkSettings = { levelLabels, idleAlertDays: before.idleAlertDays };
+  const value: NetworkSettings = { ...before, levelLabels };
   await setSetting(unscoped(ctx.store), NETWORK_SCOPE, null, "network", value, ctx.user.id);
   await audit(ctx, { module: "admin", action: "network.level_labels", entityType: "cert_network", entityId: NETWORK_SCOPE, summary: `Rótulos dos níveis da rede de certificação alterados: ${NETWORK_LEVELS.map((l) => levelLabels[l]).join(" → ")}`, before: before.levelLabels, after: levelLabels });
+  return value;
+}
+
+/** Plataforma: empresa da Intercert no ERP e fechamento do custo AC (§46). */
+export async function savePlatformFinance(ctx: Ctx, input: { platformCompanyId: string | null; acClosingDay: number; acDueDays: number }): Promise<NetworkSettings> {
+  requireAction(ctx, "network.manage");
+  const before = await networkSettings(ctx.store);
+  const companyId = String(input.platformCompanyId ?? "").trim() || null;
+  if (companyId) {
+    const c = await unscoped(ctx.store).get("companies", companyId);
+    assert(c, "Empresa da plataforma não encontrada.");
+    assert(!(await nodeOfCompany(ctx.store, companyId)), "A empresa da plataforma não pode ser um parceiro (nó) da rede.");
+  }
+  const day = Math.round(Number(input.acClosingDay));
+  const due = Math.round(Number(input.acDueDays));
+  assert(day >= 1 && day <= 28, "Dia do fechamento do custo AC: de 1 a 28.");
+  assert(due >= 0 && due <= 60, "Vencimento do custo AC: de 0 a 60 dias.");
+  const value: NetworkSettings = { ...before, platformCompanyId: companyId, acClosingDay: day, acDueDays: due };
+  await setSetting(unscoped(ctx.store), NETWORK_SCOPE, null, "network", value, ctx.user.id);
+  await audit(ctx, { module: "admin", action: "network.platform_finance", entityType: "cert_network", entityId: NETWORK_SCOPE, summary: `Financeiro da plataforma: empresa ${companyId ?? "(não definida)"}, fechamento do custo AC no dia ${day}, vencimento em ${due} dia(s)`, before: { platformCompanyId: before.platformCompanyId, acClosingDay: before.acClosingDay, acDueDays: before.acDueDays }, after: { platformCompanyId: companyId, acClosingDay: day, acDueDays: due } });
   return value;
 }
 

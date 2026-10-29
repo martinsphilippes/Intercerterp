@@ -40,6 +40,9 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   // rede de certificação — etapa 2 (§45): vender (Vendedor, Gestor, Administrador do parceiro), ver tudo do nó (Gestor,
   // Administrador, Financeiro — consulta), vouchers e cupons (Gestor e Administrador), renovações (Vendedor, Gestor, Administrador)
   "network.sell", "network.sales_all", "network.vouchers", "network.coupons", "network.renewals",
+  // rede de certificação — etapa 3 (§46): financeiro em camadas — modalidade/recarga/ajuste/fechamento (Administrador e
+  // Financeiro do parceiro) e consulta do financeiro da rede (Administrador, Gestor e Financeiro)
+  "network.billing", "network.finance_view",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);

@@ -12,6 +12,7 @@ import { createCompanyWithDefaults } from "../../setup";
 import { addDays, today } from "@/lib/dates";
 import {
   NETWORK_SCOPE, createNode, nodeOfCompany, saveLevelPriceRule, saveCertCustomer, createNetworkSale, createCoupon, createVoucherPackage, purchaseVoucherPackage, registerRenewalContact, type NetworkLevel,
+  savePlatformFinance, saveBillingAgreement, requestRecharge, confirmRecharge, closeRelation, flowKey,
 } from "../../network";
 import { approveCertificateValidation, confirmCertificatePayment, recordCertificateAuthorization, registerCertificateEmission, requestCertificateEmission, sendCertificateCharge } from "../../accounting/certificates";
 
@@ -137,8 +138,36 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   }
 
   await setSetting(store, NETWORK_SCOPE, null, "demo.network.done", true);
+  const billing = await seedBilling(store, platform, plat.company.id, nodes, admins, ctxOf);
   const sales = await seedSales(store, platform, nodes, admins, ctxOf);
-  return { platformCompanyId: plat.company.id, partners: PARTNERS.length, contador: Boolean(firm), rules, sales };
+  return { platformCompanyId: plat.company.id, partners: PARTNERS.length, contador: Boolean(firm), rules, billing, sales };
+}
+
+// ------------------------------------------------------------------------------------------------ etapa 3 (§46)
+
+/**
+ * Financeiro em camadas da demonstração (§46; marcador "demo.network.billing.done", roda antes das vendas para que
+ * elas já nasçam com a modalidade): empresa da Intercert definida; Intercert → Master e Master → Regionais pós-pago
+ * mensal; Regional Ceará → Revenda Juazeiro PRÉ-PAGO (recarga de R$ 1.000 confirmada; aviso abaixo de R$ 200; indicação
+ * de 10% ao contador); Regional Ceará → Revenda Fortaleza PÓS-PAGO QUINZENAL (vencimento em 7 dias); Regional Bahia →
+ * Revenda Salvador COMISSIONADO POR SPLIT. As vendas da demonstração geram os débitos, os acúmulos, o split e o custo AC.
+ */
+async function seedBilling(store: Store, platform: Ctx, platformCompanyId: string, nodes: Record<string, Doc>, admins: Record<string, Doc>, ctxOf: (u: Doc, companyId: string) => Promise<Ctx>): Promise<unknown> {
+  if (await getSetting(store, NETWORK_SCOPE, null, "demo.network.billing.done", false)) return { skipped: true };
+  const adminCtx = async (k: string) => ctxOf(admins[k], nodes[k].nodeCompanyId);
+  await savePlatformFinance(platform, { platformCompanyId, acClosingDay: 1, acDueDays: 15 });
+  const reason = "Condição comercial de demonstração";
+  await saveBillingAgreement(platform, nodes.master.id, { mode: "postpaid", period: "monthly", monthDay: 1, dueDays: 10, reason });
+  const master = await adminCtx("master");
+  for (const k of ["ceara", "bahia"]) await saveBillingAgreement(master, nodes[k].id, { mode: "postpaid", period: "monthly", monthDay: 1, dueDays: 10, reason });
+  const ceara = await adminCtx("ceara");
+  await saveBillingAgreement(ceara, nodes.juazeiro.id, { mode: "prepaid", overdraftLimit: 0, lowBalanceAlert: 20000, referralKind: "percent", referralBps: 1000, reason });
+  await saveBillingAgreement(ceara, nodes.fortaleza.id, { mode: "postpaid", period: "biweekly", dueDays: 7, reason });
+  await saveBillingAgreement(await adminCtx("bahia"), nodes.salvador.id, { mode: "commission", commissionSettlement: "split", commissionRule: "margin", reason });
+  const rc = await requestRecharge(ceara, nodes.juazeiro.id, { amount: 100000, idemKey: "demo-recarga-juazeiro" });
+  await confirmRecharge(ceara, rc.id, { ref: "PIX-DEMO-RECARGA-01" });
+  await setSetting(store, NETWORK_SCOPE, null, "demo.network.billing.done", true);
+  return { agreements: 6, recharge: rc.code };
 }
 
 // ------------------------------------------------------------------------------------------------ etapa 2 (§45)
@@ -210,7 +239,9 @@ async function seedSales(store: Store, platform: Ctx, nodes: Record<string, Doc>
   await mkCustomer(jua, "carla", { personType: "PF", doc: cpf("345678903"), name: "Carla Padre Cícero (DEMO)", phone: "88988110004" });
   await sale(jua, "jua-1", customers.ana, "ecpf_a1_12m", "awaiting");
   await sale(jua, "jua-2", customers.bruno, "ecpf_a1_12m", "issued", { voucher: "balance" });
-  await sale(jua, "jua-3", customers.farmacia, "ecnpj_a1_12m", "paid", { couponCode: "JUAZEIRO10" });
+  // §46: o escritório contador abaixo de Juazeiro indicou a farmácia (comissão de indicação de 10%)
+  const firmNode = (await findOne(store, "cert_network_nodes", [["eq", "parentNodeId", nodes.juazeiro.id], ["eq", "level", "contador"]])) ?? null;
+  await sale(jua, "jua-3", customers.farmacia, "ecnpj_a1_12m", "paid", { couponCode: "JUAZEIRO10", ...(firmNode ? { referrerNodeId: firmNode.id } : {}) });
   await sale(jua, "jua-4", customers.carla, "birdid_free_60m", "issued");
   await sale(jua, "jua-5", customers.carla, "ecpf_a1_12m", "paid", { voucher: "balance" });
 
@@ -221,6 +252,9 @@ async function seedSales(store: Store, platform: Ctx, nodes: Record<string, Doc>
   await mkCustomer(ftz, "elisa", { personType: "PF", doc: cpf("567890125"), name: "Elisa Iracema (DEMO)", phone: "85988220003", hasBirdId: true, birdIdValidTo: addDays(t, 900) });
   await sale(ftz, "ftz-1", customers.diego, "ecpf_a1_12m", "awaiting", { couponCode: "CEARA20" });
   await sale(ftz, "ftz-2", customers.padaria, "ecnpj_a3_36m", "issued");
+  // §46: pós-pago quinzenal — um fechamento feito agora (a venda da padaria) e o período seguinte aberto (a da Elisa)
+  const cearaCtx = await adminCtx("ceara");
+  await closeRelation(cearaCtx, flowKey("cost", { type: "node", nodeId: nodes.fortaleza.id, name: "" }, { type: "node", nodeId: nodes.ceara.id, name: "" }), t, { manual: true });
   await sale(ftz, "ftz-3", customers.elisa, "ecpf_a3_36m", "paid");
 
   // Salvador

@@ -17,6 +17,7 @@ import { cascadeChain } from "./prices";
 import { maskCascade, quotePrice, sellerView, type CascadeSnapshot, type MaskedCascade, type PriceQuote } from "./cascade";
 import { applicableCoupon, ensureHolderCounter, releaseCouponUse, reserveCouponInTx } from "./coupons";
 import { redeemableLots, redeemInTx, reverseRedemption, usableVoucherCode, voucherBalances } from "./vouchers";
+import { afterSaleOpened, buildSalePlan, prepareSaleFinance, saleFinanceInTx, walletConflictMessage } from "./ledger";
 
 /**
  * Venda de certificado pela rede (§45).
@@ -216,6 +217,8 @@ export interface NetworkSaleInput {
   previousCertificateId?: string | null;
   /** confirmação da venda apesar do aviso de duplicidade (motivo auditado, ≥ 10 caracteres) */
   duplicateReason?: string | null;
+  /** §46: contador (nó abaixo do vendedor) que indicou o cliente — comissão de indicação */
+  referrerNodeId?: string | null;
   idemKey?: string | null;
 }
 
@@ -370,6 +373,15 @@ export async function createNetworkSale(ctx: Ctx, input: NetworkSaleInput): Prom
   if (contactEmail) assert(EMAIL_RE.test(contactEmail), "E-mail de contato inválido.");
   const v = await networkViewer(ctx);
   const issuerName = q.coupon?.issuerNodeId ? (v.nodes.find((n) => n.id === q.coupon!.issuerNodeId)?.name ?? null) : null;
+  // §46: indicação — um contador abaixo do vendedor, ativo
+  let referrer: { nodeId: string; name: string } | null = null;
+  if (input.referrerNodeId) {
+    const rn = v.nodes.find((n) => n.id === input.referrerNodeId);
+    if (!rn || !(rn.path ?? []).includes(node.id) || rn.level !== "contador") throw new BusinessError("Indicação: escolha um escritório contador da sua rede (abaixo do seu nó).", "referrer");
+    if (rn.status !== "active") throw new BusinessError(`${rn.name} não está ativo na rede: não pode receber comissão de indicação.`, "referrer");
+    referrer = { nodeId: rn.id, name: rn.name };
+  }
+  const settingsNet = await networkSettings(ctx.store);
   // contador por titular (criado antes; a reserva incrementa com o limite dentro da transação)
   const holderCounterId = q.coupon ? await ensureHolderCounter(ctx.store, q.coupon.id, customer.doc) : null;
   const seq = await nextNumber(ctx.store, `cert_request:${ctx.companyId}`);
@@ -381,6 +393,10 @@ export async function createNetworkSale(ctx: Ctx, input: NetworkSaleInput): Prom
     if (candidates[attempt]) q = { ...q, voucher: { lot: candidates[attempt]!, code: null } };
     const cascade = snapshotOf(node, q, { redemptionId, issuerName });
     const finalPrice = cascade.finalPrice;
+    // §46: plano de liquidação em camadas (modalidades vigentes) e conferência do saldo pré-pago antes da transação
+    const plan = await buildSalePlan(ctx.store, cascade, { referrer });
+    await prepareSaleFinance(ctx.store, plan, node.id);
+    const collectorCompanyId = plan.collectorNodeId ? (v.nodes.find((n) => n.id === plan.collectorNodeId)?.nodeCompanyId ?? null) : settingsNet.platformCompanyId;
     const claim = q.free ? await unscoped(ctx.store).get("cert_free_claims", freeClaimId(customer.doc)) : null;
     // outra venda gratuita pode ter sido gravada depois da cotação: reivindicação ativa recusa (a liberada/vencida é reaproveitada)
     if (claim && (await activeFreeClaim(ctx.store, customer.doc))) throw new BusinessError("Este CPF já tem um BirdID gratuito em andamento ou ativo. Limite: um BirdID gratuito ativo por titular.", "free_limit");
@@ -395,9 +411,10 @@ export async function createNetworkSale(ctx: Ctx, input: NetworkSaleInput): Prom
           channel: "network", sellerNodeId: node.id, sellerUserId: ctx.user.id, sellerName: ctx.user.name, cascade: sellerView(cascade), listPrice: cascade.listPrice, minPrice: cascade.minPrice, discount: cascade.coupon?.discount ?? 0,
           couponId: q.coupon?.id ?? null, couponCode: q.coupon?.code ?? null, voucherRedemptionId: redemptionId, voucherCode: q.voucher?.code?.code ?? null, gift: q.gift, free: q.free,
           duplicateAck: q.duplicates.length ? { reason, by: ctx.user.id, byName: ctx.user.name, at: nowIso(), matches: q.duplicates.map(describeDuplicate) } : null,
-          productType: q.product.type ?? null, holderType: q.product.holder ?? null,
+          productType: q.product.type ?? null, holderType: q.product.holder ?? null, referrerNodeId: referrer?.nodeId ?? null, referrerName: referrer?.name ?? null,
         }, id);
         await tx.create("cert_sale_cascades", { companyId: NETWORK_SCOPE, branchId: null, createdBy: ctx.user.id, requestId: id, requestCompanyId: ctx.companyId, sellerNodeId: node.id, snapshot: cascade }, cascadeId(id));
+        await saleFinanceInTx(tx, { request: { id, companyId: ctx.companyId, protocol: padProtocol(seq), productKey: q.product.key, productLabel: q.product.label, sellerNodeId: node.id }, pathNodeIds: cascade.levels.map((l) => l.nodeId), plan, collectorCompanyId, referrer, userId: ctx.user.id, userName: ctx.user.name });
         if (q.voucher) await redeemInTx(tx, { lot: q.voucher.lot, code: q.voucher.code, requestId: id, requestCompanyId: ctx.companyId, gift: q.gift, userId: ctx.user.id });
         if (q.coupon) await reserveCouponInTx(tx, q.coupon, { requestId: id, requestCompanyId: ctx.companyId, holderDoc: customer.doc, discount: cascade.coupon?.discount ?? 0, sellerNodeId: node.id, holderCounterId });
         if (q.free) {
@@ -416,6 +433,8 @@ export async function createNetworkSale(ctx: Ctx, input: NetworkSaleInput): Prom
         if (again) return again; // repetição do mesmo formulário
         if (e.collection === "cert_voucher_lots" && attempt + 1 < candidates.length) continue;
         if (e.collection === "cert_voucher_lots") throw new BusinessError(`Saldo de voucher esgotado para ${q.product.label}.`, "voucher");
+        const wmsg = walletConflictMessage(e);
+        if (wmsg) throw new BusinessError(wmsg, "wallet_insufficient");
         const msg = boundsMessage(e, q);
         if (msg) throw new BusinessError(msg, "limit");
       }
@@ -423,6 +442,8 @@ export async function createNetworkSale(ctx: Ctx, input: NetworkSaleInput): Prom
     }
   }
   if (!row) throw new BusinessError(`Saldo de voucher esgotado para ${q.product.label}.`, "voucher");
+  // §46: título do cliente na empresa de quem cobra (e, sem cobrança, os lançamentos de todas as camadas)
+  await afterSaleOpened(ctx, row);
   const c = (await saleCascade(ctx.store, row.id))!;
   await audit(ctx, {
     module: "admin", action: "network.sale", entityType: "certificate_request", entityId: row.id,
@@ -497,6 +518,33 @@ export async function firmNetworkPricing(ctx: Ctx, product: CertProduct, request
     coupon: null, voucher: null, costCovered: false, free: false,
   };
   return { amount: q.finalPrice, cascade, sellerView: sellerView(cascade) };
+}
+
+/**
+ * §46 — Tela 67 do escritório que é nó CONTADOR: grava a solicitação, o retrato completo e o plano de liquidação na
+ * MESMA transação, com a reserva do custo nas carteiras pré-pagas (sem saldo, a solicitação é recusada); depois, o
+ * título do cliente na empresa de quem cobra.
+ */
+export async function createFirmNetworkRequest(ctx: Ctx, data: Record<string, any>, cascade: CascadeSnapshot): Promise<Doc> {
+  const plan = await buildSalePlan(ctx.store, cascade);
+  await prepareSaleFinance(ctx.store, plan, cascade.sellerNodeId);
+  const v = await networkViewer(ctx);
+  const collectorCompanyId = plan.collectorNodeId ? (v.nodes.find((n) => n.id === plan.collectorNodeId)?.nodeCompanyId ?? null) : (await networkSettings(ctx.store)).platformCompanyId;
+  let row: Doc;
+  try {
+    row = await unscoped(ctx.store).transaction(async (tx) => {
+      const r = await tx.create("certificate_requests", data);
+      await tx.create("cert_sale_cascades", { companyId: NETWORK_SCOPE, branchId: null, createdBy: ctx.user.id, requestId: r.id, requestCompanyId: ctx.companyId, sellerNodeId: cascade.sellerNodeId, snapshot: cascade }, cascadeId(r.id));
+      await saleFinanceInTx(tx, { request: { id: r.id, companyId: ctx.companyId, protocol: String(data.protocol), productKey: cascade.productKey, productLabel: cascade.productLabel, sellerNodeId: cascade.sellerNodeId }, pathNodeIds: cascade.levels.map((l) => l.nodeId), plan, collectorCompanyId, userId: ctx.user.id, userName: ctx.user.name });
+      return r;
+    });
+  } catch (e) {
+    const msg = e instanceof ConflictError ? walletConflictMessage(e) : null;
+    if (msg) throw new BusinessError(msg, "wallet_insufficient");
+    throw e;
+  }
+  await afterSaleOpened(ctx, row);
+  return row;
 }
 
 /** Termos de preço da rede do escritório-contador para a tela (null = fora da rede). */

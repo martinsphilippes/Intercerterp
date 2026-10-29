@@ -124,6 +124,7 @@ export const NAV: NavGroup[] = [
       { href: "/rede", label: "Rede de certificação (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
       { href: "/rede/vendas", label: "Vendas da rede (plataforma)", module: "dashboard", icon: "ShoppingCart", action: "network.manage", feature: "redeCertificacao" },
       { href: "/rede/renovacoes", label: "Renovações da rede (plataforma)", module: "dashboard", icon: "RefreshCcw", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/financeiro", label: "Resultado da rede (plataforma)", module: "dashboard", icon: "Scale", action: "network.manage", feature: "redeCertificacao" },
     ],
   },
   {
@@ -148,6 +149,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/contabil/equipe", label: "Departamentos e equipe", module: "accounting", icon: "ShieldCheck" },
       { href: "/rede/minha", label: "Minha rede de certificação", module: "dashboard", icon: "Network", feature: "redeCertificacao" },
       { href: "/rede/renovacoes", label: "Renovações da rede", module: "dashboard", icon: "RefreshCcw", anyAction: ["accounting.certificates", "network.manage"], feature: "redeCertificacao" },
+      { href: "/rede/minha/financeiro", label: "Financeiro com a revenda (rede)", module: "finance", icon: "Wallet", feature: "redeCertificacao" },
     ],
   },
   {
@@ -184,6 +186,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/rede", label: "Rede de certificação (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
       { href: "/rede/vendas", label: "Vendas da rede (plataforma)", module: "dashboard", icon: "ShoppingCart", action: "network.manage", feature: "redeCertificacao" },
       { href: "/rede/renovacoes", label: "Renovações da rede (plataforma)", module: "dashboard", icon: "RefreshCcw", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/financeiro", label: "Resultado da rede (plataforma)", module: "dashboard", icon: "Scale", action: "network.manage", feature: "redeCertificacao" },
     ],
   },
   {
@@ -206,6 +209,8 @@ export const NAV_CERTIFICATION: NavGroup[] = [
       { href: "/rede/renovacoes", label: "Renovações", module: "dashboard", icon: "RefreshCcw", anyAction: ["network.renewals", "network.sales_all", "network.manage"], feature: "redeCertificacao" },
       { href: "/rede/vouchers", label: "Vouchers", module: "dashboard", icon: "Ticket", anyAction: ["network.vouchers", "network.sales_all", "network.manage"], feature: "redeCertificacao" },
       { href: "/rede/cupons", label: "Cupons", module: "dashboard", icon: "Percent", anyAction: ["network.coupons", "network.sales_all", "network.manage"], feature: "redeCertificacao" },
+      { href: "/rede/minha/financeiro", label: "Meu financeiro com o nível acima", module: "dashboard", icon: "Wallet", anyAction: ["network.finance_view", "network.billing"], feature: "redeCertificacao" },
+      { href: "/rede/financeiro", label: "Resultado da rede", module: "dashboard", icon: "Scale", anyAction: ["network.finance_view", "network.billing", "network.manage"], feature: "redeCertificacao" },
       { href: "/rede", label: "Rede (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
       { href: "/rede/precos", label: "Preços da rede e catálogo", module: "dashboard", icon: "BadgePercent", action: "network.manage", feature: "redeCertificacao" },
       { href: "/rede/parametros", label: "Parâmetros da rede", module: "dashboard", icon: "SlidersHorizontal", action: "network.manage", feature: "redeCertificacao" },

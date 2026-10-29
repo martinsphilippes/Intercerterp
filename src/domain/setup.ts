@@ -71,8 +71,10 @@ export async function createCompanyWithDefaults(
     }
     const cats: Record<string, Doc> = {};
     if (partner) {
-      for (const c of [["certificados", "Receita de certificados digitais", "revenue"], ["vendas_rede", "Vendas aos parceiros abaixo na rede", "revenue"], ["custo_certificados", "Custo de certificados (compra do nível acima)", "expense"], ["comissoes", "Comissões de vendedores", "expense"], ["pessoal", "Pessoal e encargos", "expense"], ["despesas", "Despesas operacionais", "expense"], ["tarifas", "Tarifas e taxas", "expense"], ["impostos", "Impostos", "expense"]] as const) {
-        cats[c[0]] = await put("fin_categories", c[0], { ...base, name: c[1], type: c[2], active: true });
+      // §46: grupos do DRE da certificação (receita de certificados e vendas aos de baixo = receita bruta; custo do nível acima =
+      // custo dos serviços); as demais categorias da rede (comissões, custo AC, créditos pré-pagos) nascem no primeiro lançamento
+      for (const c of [["certificados", "Receita de certificados digitais", "revenue", "Receita bruta"], ["vendas_rede", "Vendas aos parceiros abaixo na rede", "revenue", "Receita bruta"], ["custo_certificados", "Custo de certificados (compra do nível acima)", "expense", "Custo dos serviços"], ["comissoes", "Comissões de vendedores", "expense", null], ["pessoal", "Pessoal e encargos", "expense", null], ["despesas", "Despesas operacionais", "expense", null], ["tarifas", "Tarifas e taxas", "expense", null], ["impostos", "Impostos", "expense", null]] as const) {
+        cats[c[0]] = await put("fin_categories", c[0], { ...base, name: c[1], type: c[2], active: true, ...(c[3] ? { dreGroup: c[3] } : {}) });
       }
       await put("cost_centers", "geral", { ...base, name: "Geral", code: "100", active: true });
       await setSetting(store, company.id, null, "finance.category.sales", cats.certificados.id);

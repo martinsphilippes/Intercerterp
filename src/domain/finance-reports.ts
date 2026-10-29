@@ -18,6 +18,8 @@ export const DRE_SECTIONS = [
   { key: "Receita bruta", label: "Receita bruta", stage: "revenue" },
   { key: "Deduções", label: "(−) Deduções da receita", stage: "revenue" },
   { key: "CMV", label: "(−) CMV — custo das mercadorias vendidas", stage: "cost" },
+  // §46: custo dos serviços (certificados comprados do nível acima, comissões pagas na rede e custo AC)
+  { key: "Custo dos serviços", label: "(−) Custo dos serviços — certificados, comissões e custo AC", stage: "cost" },
   { key: "Despesas operacionais", label: "(−) Despesas operacionais", stage: "opex" },
   { key: "Despesas com pessoal", label: "(−) Despesas com pessoal", stage: "opex" },
   { key: "Despesas administrativas", label: "(−) Despesas administrativas", stage: "opex" },
@@ -31,6 +33,7 @@ export const DRE_SECTIONS = [
 export const DRE_OUTSIDE = [
   { key: "__purchases", label: "Compras de mercadorias (grupo CMV — entram no estoque)" },
   { key: "__investments", label: "Investimentos" },
+  { key: "__advances", label: "Adiantamentos — créditos pré-pagos da rede (o custo entra a cada venda debitada)" },
 ] as const;
 
 const SALE_ORIGINS = ["sale", "sale_card", "sale_payment", "sale_cancel"];
@@ -84,6 +87,7 @@ export function dreGroupOf(it: CompetenceItem, cats: Map<string, Doc>): { group:
   const g = effectiveDreGroup(it.categoryId, cats as Map<string, any>);
   if (g === "CMV") return { group: "__purchases", line: null };
   if (g === "Investimentos") return { group: "__investments", line: null };
+  if (g === "Adiantamentos") return { group: "__advances", line: null };
   if (g && DRE_SECTIONS.some((s) => s.key === g)) return { group: g, line: null };
   if (it.type === "revenue") return { group: SALE_ORIGINS.includes(it.originType ?? "") ? "Receita bruta" : "Outras receitas", line: null };
   if (it.fee) return { group: "Despesas financeiras", line: null };
@@ -150,6 +154,20 @@ export async function computeDre(ctx: Ctx, f: { from: string; to: string; branch
     cmvSec.total += v;
   }
   if (!returned.total && !Object.values(returned.months).some(Boolean)) cmvSec.lines = cmvSec.lines.filter((x) => x !== returned);
+  // §46: rede de certificação — débitos da carteira pré-paga (custo de quem vende / receita de quem está acima),
+  // reconhecidos na data de cada venda paga (a recarga é adiantamento, fora do resultado)
+  const { networkDreItems } = await import("./network/results");
+  let networkTotal = 0;
+  for (const it of await networkDreItems(ctx.store, ctx.companyId, f.from, f.to)) {
+    const sec = sections.get(it.group)!;
+    const l = lineOf(sec, it.lineKey, it.label, null);
+    const m = it.date.slice(0, 7);
+    addTo(l.months, m, it.amount);
+    l.total += it.amount;
+    addTo(sec.months, m, it.amount);
+    sec.total += it.amount;
+    networkTotal += it.amount;
+  }
   for (const s of sections.values()) s.lines.sort((a, b) => (a.key === RETURNS_LINE ? 1 : b.key === RETURNS_LINE ? -1 : Math.abs(b.total) - Math.abs(a.total)));
 
   const sum = (keys: string[]) => {
@@ -174,7 +192,7 @@ export async function computeDre(ctx: Ctx, f: { from: string; to: string; branch
   const competenceResult = items.reduce((a, i) => a + i.amount, 0);
   const outsideTotal = outside.reduce((a, s) => a + s.total, 0);
   const cmv = cmvSec.total;
-  const expected = competenceResult - outsideTotal + cmv;
+  const expected = competenceResult - outsideTotal + cmv + networkTotal;
   return {
     from: f.from,
     to: f.to,
@@ -197,7 +215,7 @@ export function dreRows(r: DreReport): Array<{ level: number; kind: "section" | 
   for (const s of r.sections) {
     push(s, "section");
     if (s.key === "Deduções") out.push({ level: 0, kind: "subtotal", label: r.subtotals.netRevenue.label, months: r.subtotals.netRevenue.months, total: r.subtotals.netRevenue.total });
-    if (s.key === "CMV") out.push({ level: 0, kind: "subtotal", label: r.subtotals.grossProfit.label, months: r.subtotals.grossProfit.months, total: r.subtotals.grossProfit.total });
+    if (s.key === "Custo dos serviços") out.push({ level: 0, kind: "subtotal", label: r.subtotals.grossProfit.label, months: r.subtotals.grossProfit.months, total: r.subtotals.grossProfit.total });
     if (s.key === "Outras despesas") out.push({ level: 0, kind: "subtotal", label: r.subtotals.operating.label, months: r.subtotals.operating.months, total: r.subtotals.operating.total });
   }
   out.push({ level: 0, kind: "subtotal", label: r.subtotals.result.label, months: r.subtotals.result.months, total: r.subtotals.result.total });

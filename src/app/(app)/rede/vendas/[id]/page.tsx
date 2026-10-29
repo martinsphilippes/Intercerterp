@@ -11,7 +11,9 @@ import { formatDoc, formatPhone } from "@/lib/core/text";
 import { scopeStore, unscoped } from "@/lib/db/scoped-store";
 import { BusinessError } from "@/lib/core/errors";
 import { CERT_KIND_LABEL, CHARGE_CHANNEL_LABEL, VALIDATION_MODE_LABEL, certificationSettings, chargeMessage, requestNextAction } from "@/domain/accounting";
-import { getNetworkSale, networkSettings } from "@/domain/network";
+import { FIN_KIND_LABEL, FIN_SETTLEMENT_LABEL, FIN_STATUS_LABEL, getNetworkSale, isPlatform, networkSettings, saleFinanceView } from "@/domain/network";
+import { canDo } from "@/lib/permissions";
+import { ReprocessForm, ReverseSaleForm } from "../../financeiro/forms";
 import { ChargeForm } from "@/app/(app)/contabil/certificados/[id]/charge-form";
 import { CancelForm } from "@/app/(app)/contabil/certificados/[id]/cancel-form";
 import { AuthorizationForm } from "@/app/(app)/contabil/certificados/[id]/authorization-form";
@@ -40,6 +42,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const firmSale = r.channel !== "network";
   const ack = r.duplicateAck as { reason: string; byName: string; at: string; matches: string[] } | null;
   const historyStore = own ? s.ctx.store : scopeStore(unscoped(s.ctx.store), r.companyId);
+  // §46: lançamentos da venda em cada camada (mascarados para quem olha) e estorno da venda paga pela plataforma
+  const finance = await saleFinanceView(s.ctx, r.id);
+  const platform = isPlatform(s.ctx);
+  const canReverse = (platform || canDo(s.user, "certification.operate")) && Boolean(r.paymentConfirmedAt) && ["validation", "ready_to_issue", "issue_failed"].includes(r.status) && Number(r.amount) > 0;
   return (
     <>
       <PageHeader
@@ -81,6 +87,38 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           {masked && (
             <Card title="Retrato da cascata" description="Gravado no momento da venda e imutável: base do financeiro em cascata e das comissões. Custos de níveis acima do seu parceiro não aparecem.">
               <CascadeView m={masked} labels={levelLabels} />
+            </Card>
+          )}
+          {finance && (
+            <Card title="Financeiro em camadas" description={`Quem cobra o cliente: ${finance.collectorName ?? "—"}${finance.referrerName ? ` · indicado por ${finance.referrerName}` : ""}. Cada fluxo vira títulos no financeiro de cada empresa (ou débito na carteira pré-paga).`}>
+              {finance.issues.length > 0 && <div className="mb-3"><Notice tone="warn" title="Lançamentos pendentes">{finance.issues.join(" ")}</Notice></div>}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-slate-500"><tr><th className="py-1 text-left font-medium">Fluxo</th><th className="py-1 text-left font-medium">De → para</th><th className="py-1 text-left font-medium">Liquidação</th><th className="py-1 text-right font-medium">Valor</th><th className="py-1 text-left font-medium pl-3">Situação</th></tr></thead>
+                  <tbody className="divide-y divide-line">
+                    {finance.plan!.flows.map((fl) => {
+                      const ents = finance.entries.filter((e) => e.flowKey === fl.key);
+                      const paid = ents.find((e) => e.event === "paid");
+                      const rev = ents.find((e) => e.event === "reversal");
+                      return (
+                        <tr key={fl.key}>
+                          <td className="py-1.5">{FIN_KIND_LABEL[fl.kind] ?? fl.kind}</td>
+                          <td className="py-1.5 text-xs">{fl.payer.name} → {fl.payee.name}</td>
+                          <td className="py-1.5 text-xs">{FIN_SETTLEMENT_LABEL[fl.settlement] ?? fl.settlement}</td>
+                          <td className="tabular py-1.5 text-right">{formatMoney(fl.amount)}</td>
+                          <td className="py-1.5 pl-3 text-xs">{rev ? <Badge tone="warn">estornado</Badge> : paid ? <Badge tone="good">{FIN_STATUS_LABEL[paid.status] ?? paid.status}</Badge> : <Badge>{r.status === "cancelled" ? "cancelado" : "aguardando pagamento"}</Badge>}{paid?.reconcile === "pending" && <span className="ml-1 text-amber-700">a conciliar</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {(canReverse || (platform && finance.issues.length > 0)) && (
+                <div className="mt-4 space-y-3 border-t border-line pt-3">
+                  {platform && finance.issues.length > 0 && <ReprocessForm id={r.id} />}
+                  {canReverse && <ReverseSaleForm id={r.id} protocol={r.protocol} amount={r.amount} />}
+                </div>
+              )}
             </Card>
           )}
           <Card title="Histórico">
