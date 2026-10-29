@@ -21,6 +21,8 @@ import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { submitOrderAction, cancelOrderAction, closeBalanceAction } from "../actions";
 import { SendOrder } from "./send-order";
+import { TransitButton } from "./transit-form";
+import { effectiveExpectedDate, isInTransit, TRANSIT_STATUSES } from "@/domain/purchase-calc";
 
 export const metadata = { title: "Pedido de compra" };
 const ORIGIN: Record<string, string> = { manual: "Manual", quotation: "Cotação", replenishment: "Planejamento de reposição" };
@@ -61,6 +63,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const confirmedReceipts = receipts.filter((r) => r.status === "confirmed");
   const received = (itemId: string) => confirmedReceipts.flatMap((r) => (r.items ?? []).flatMap((it: any) => (it.allocations ?? []).filter((a: any) => a.orderItemId === itemId).map((a: any) => ({ receipt: r, qty: a.qty }))));
   const proposalExpired = o.proposalRef?.validUntil && o.proposalRef.validUntil < t;
+  // §44: em trânsito (registro opcional entre enviado e recebido); a previsão do transporte vale para o atraso
+  const inTransit = isInTransit(o);
+  const expected = effectiveExpectedDate(o);
+  const transit = (o.transitInfo ?? null) as Record<string, any> | null;
+  const etaOverdue = Boolean(inTransit && expected && expected < t && remaining);
   return (
     <>
       <PageHeader
@@ -72,6 +79,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             {(o.revision ?? 1) > 1 && <Badge tone="info">Revisão {o.revision}</Badge>}
             <Badge>{ORIGIN[o.origin] ?? o.origin}</Badge>
             {orderNeedsSending(o) && o.status === "sent" && <Badge tone="warn">Revisão {o.revision} ainda não enviada</Badge>}
+            {inTransit && <Badge tone="info">Em trânsito</Badge>}
           </>
         }
         description={`${o.purpose ? `${o.purpose} · ` : ""}${label ?? "—"} · ${branch?.name ?? ""} · solicitado em ${formatDateTime(o.createdAt)} por ${users.get(o.createdBy) ?? "—"}${o.buyerId ? ` · comprador ${users.get(o.buyerId) ?? "—"}` : ""}`}
@@ -86,6 +94,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               )}
               {orderNeedsSending(o) && <SendOrder orderId={id} supplierEmail={supplier?.email ?? null} contacts={(supplier?.contacts ?? []).map((c: any) => c.name).filter(Boolean)} revision={o.revision ?? 1} emailConfigured={Boolean(email)} />}
               {REVISABLE.includes(o.status) && !items.some((i) => (i.receivedQty ?? 0) > 0) && <LinkButton href={`${base}/editar`}><Pencil className="size-4" /> Alterar (revisão)</LinkButton>}
+              {TRANSIT_STATUSES.includes(o.status) && <TransitButton orderId={id} current={transit} />}
               {["approved", "sent", "partial"].includes(o.status) && canDo(s.user, "purchase.receive") && <LinkButton variant="primary" href={`/compras/recebimentos/novo?pedido=${id}`}><PackageCheck className="size-4" /> Receber</LinkButton>}
               {o.status === "partial" && <ActionButton action={closeBalanceAction.bind(null, id)} label="Encerrar saldo" askReason="Motivo para encerrar o saldo pendente (o fornecedor não entregará o restante):" />}
               {["draft", "in_review", "adjust", "approved", "sent"].includes(o.status) && !items.some((i) => (i.receivedQty ?? 0) > 0) && <ActionButton variant="danger" action={cancelOrderAction.bind(null, id)} label="Cancelar" askReason="Motivo do cancelamento:" />}
@@ -97,6 +106,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       {o.status === "approved" && <Notice tone="info" title="Aprovado — ainda não enviado">A aprovação interna não envia o pedido ao fornecedor nem registra recebimento ou pagamento. Use “Registrar envio”.</Notice>}
       {o.status === "adjust" && currentReq && <Notice tone="warn" title="Devolvido para ajuste">{(decisionsByReq.get(currentReq.id) ?? []).filter((d) => d.decision === "adjust" && !d.revokedAt).pop()?.note ?? ""}</Notice>}
       {o.status === "rejected" && <Notice tone="bad" title="Pedido rejeitado">{o.rejectReason}</Notice>}
+      {etaOverdue && <Notice tone="bad" title="Entrega em trânsito atrasada">A previsão de entrega informada pelo transporte ({formatDate(expected)}) venceu e ainda há saldo a receber. Confirme com a transportadora{transit?.tracking ? ` (rastreio ${transit.tracking})` : ""} ou atualize a previsão.</Notice>}
       <div className="my-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat
           label="Total do pedido"
@@ -105,7 +115,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
         />
         <Stat label="Recebido" value={formatMoney(o.receivedValue)} hint={`${confirmedReceipts.length} recebimento(s) confirmado(s)`} href={`${base}?tab=recebimentos`} />
         <Stat label="Saldo a receber" value={formatMoney(remainingValue)} hint={`${formatQty(remaining)} un. pendentes`} tone={remainingValue && o.expectedDate && o.expectedDate < t ? "bad" : "default"} />
-        <Stat label="Previsão de entrega" value={formatDate(o.expectedDate)} hint={o.expectedDate && o.expectedDate < t && remaining ? "Atrasado" : wh?.name} tone={o.expectedDate && o.expectedDate < t && remaining && ["approved", "sent", "partial"].includes(o.status) ? "bad" : "default"} />
+        <Stat label="Previsão de entrega" value={formatDate(expected)} hint={expected && expected < t && remaining ? "Atrasado" : inTransit ? `Em trânsito${transit?.carrier ? ` · ${transit.carrier}` : ""}` : wh?.name} tone={expected && expected < t && remaining && ["approved", "sent", "partial"].includes(o.status) ? "bad" : "default"} />
         <Stat label="Aprovação" value={currentReq ? <StatusBadge kind="approval" status={currentReq.status} /> : "—"} hint={currentReq ? `Solicitação nº ${currentReq.number}` : "Não enviado para análise"} href={currentReq ? `/compras/aprovacoes/${currentReq.id}` : undefined} />
       </div>
       <LinkTabs
@@ -165,6 +175,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   { label: "Condição de pagamento", value: [o.paymentTermId ? terms.get(o.paymentTermId) : null, o.paymentTermsText].filter((x, i, a) => x && a.indexOf(x) === i).join(" · ") || "—" },
                   { label: "Forma de pagamento / centro de custo", value: [o.paymentMethodId ? methods.get(o.paymentMethodId) : null, o.costCenterId ? costCenters.get(o.costCenterId) : null].filter(Boolean).join(" · ") || "—" },
                   { label: "Parcelas previstas", value: (o.installmentsPlan ?? []).map((p: any) => `${p.days ? `${p.days}d` : "à vista"} ${formatMoney(p.amount)}`).join(" · ") || "—" },
+                  { label: "Em trânsito", value: transit ? [transit.shippedDate ? `despacho ${formatDate(transit.shippedDate)}` : null, transit.carrier, transit.tracking ? `rastreio ${transit.tracking}` : null, transit.eta ? `previsão ${formatDate(transit.eta)}` : null, `registrado por ${transit.by} em ${formatDateTime(transit.at)}`, transit.notes].filter(Boolean).join(" · ") : "Não registrado" },
                   { label: "Envio", value: o.sentInfo ? `${formatDateTime(o.sentInfo.at)} · ${o.sentInfo.method === "email" ? `e-mail para ${o.sentInfo.to} (${o.sentInfo.channel})` : `${o.sentInfo.channel}, contato ${o.sentInfo.contact}`} · por ${o.sentInfo.by} (rev. ${o.sentInfo.revision})` : "Não enviado" },
                   { label: "Observações", value: o.notes },
                 ]}

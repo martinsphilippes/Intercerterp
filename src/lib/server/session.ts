@@ -13,6 +13,8 @@ import { ScopedStore, scopeStore } from "../db/scoped-store";
 
 export const SESSION_COOKIE = "ic_session";
 export const UNIT_COOKIE = "ic_unit";
+/** §44: segunda etapa do login pendente (token do desafio; a sessão só é entregue depois do código) */
+export const MFA_COOKIE = "ic_2fa";
 
 export interface SessionInfo {
   ctx: Ctx;
@@ -49,6 +51,9 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   const consolidated = bid === "all" && canConsolidate;
   // perfil da empresa ativa (perfil por empresa)
   const user = await toCtxUser(store, userDoc, company?.id ?? null);
+  // §44: perfil passou a exigir a autenticação em duas etapas e o usuário ainda não cadastrou: a sessão deixa de valer
+  // (o próximo login leva ao cadastro do aplicativo autenticador antes de qualquer acesso)
+  if (user.twoFactorRequired && !userDoc.totpEnabled) return null;
   const h = await headers();
   if (!company || (!branch && !consolidated)) {
     // contexto incompleto: as páginas internas redirecionam para a seleção de unidade e as rotas /api recusam

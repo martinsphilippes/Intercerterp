@@ -50,6 +50,7 @@ export const ACTION_MODULE: Record<string, ModuleKey> = {
   admin: "admin",
   support: "support",
   customer: "customers",
+  pdv: "pdv",
 };
 
 export function actionModule(action: string): ModuleKey {
@@ -63,6 +64,8 @@ export interface RoleInput {
   actions: string[];
   discountLimitBps: number;
   active?: boolean;
+  /** §44: exige autenticação em duas etapas (TOTP) dos usuários do perfil */
+  requireTwoFactor?: boolean;
 }
 
 /** Mantém apenas módulos/operações conhecidos; qualquer operação implica "visualizar". */
@@ -103,6 +106,10 @@ export function roleDiff(before: Record<string, any>, after: Record<string, any>
   if ((before.active ?? true) !== (after.active ?? true)) {
     b["Situação"] = before.active === false ? "Inativo" : "Ativo";
     a["Situação"] = after.active === false ? "Inativo" : "Ativo";
+  }
+  if (Boolean(before.requireTwoFactor) !== Boolean(after.requireTwoFactor)) {
+    b["Exigir autenticação em duas etapas"] = before.requireTwoFactor ? "Sim" : "Não";
+    a["Exigir autenticação em duas etapas"] = after.requireTwoFactor ? "Sim" : "Não";
   }
   for (const m of MODULES) {
     for (const op of CRUD_OPS) {
@@ -216,13 +223,14 @@ export async function createRole(ctx: Ctx, input: RoleInput, opts: { idemKey?: s
       {
         companyId: ctx.companyId, key, name: input.name.trim(), description: input.description?.trim() || null, permissions: normalizeMatrix(input.permissions),
         actions: normalizeActions(input.actions), discountLimitBps: input.discountLimitBps, system: false, active: input.active ?? true, createdBy: ctx.user.id,
+        requireTwoFactor: Boolean(input.requireTwoFactor),
       },
       id,
     );
     await audit(ctx, {
       module: "admin", action: opts.duplicatedFrom ? "role.duplicate" : "role.create", entityType: "role", entityId: role.id,
       summary: opts.duplicatedFrom ? `Perfil "${role.name}" criado por duplicação` : `Perfil "${role.name}" criado`,
-      after: { name: role.name, permissions: role.permissions, actions: role.actions, discountLimitBps: role.discountLimitBps },
+      after: { name: role.name, permissions: role.permissions, actions: role.actions, discountLimitBps: role.discountLimitBps, requireTwoFactor: Boolean(role.requireTwoFactor) },
       related: opts.duplicatedFrom ? [`role:${opts.duplicatedFrom}`] : [],
     });
     return role;
@@ -239,7 +247,7 @@ export async function duplicateRole(ctx: Ctx, id: string, name?: string, idemKey
   let n = name?.trim() || `${src.name} (cópia)`;
   let i = 2;
   while (roles.some((r) => searchable(r.name) === searchable(n))) n = `${src.name} (cópia ${i++})`;
-  return createRole(ctx, { name: n, description: src.description, permissions: src.permissions, actions: src.actions, discountLimitBps: src.discountLimitBps ?? 0 }, { idemKey, duplicatedFrom: id });
+  return createRole(ctx, { name: n, description: src.description, permissions: src.permissions, actions: src.actions, discountLimitBps: src.discountLimitBps ?? 0, requireTwoFactor: Boolean(src.requireTwoFactor) }, { idemKey, duplicatedFrom: id });
 }
 
 export async function updateRole(ctx: Ctx, id: string, input: RoleInput, reason?: string | null) {
@@ -256,6 +264,7 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, reason?
   const after = await ctx.store.update("roles", id, {
     name: input.name.trim(), description: input.description?.trim() || null, permissions: normalizeMatrix(input.permissions), actions: normalizeActions(input.actions),
     discountLimitBps: input.discountLimitBps, active: input.active ?? before.active ?? true,
+    ...(input.requireTwoFactor !== undefined ? { requireTwoFactor: Boolean(input.requireTwoFactor) } : {}),
   });
   const d = roleDiff(before, after);
   const n = Object.keys(d.after).length;

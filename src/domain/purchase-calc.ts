@@ -50,6 +50,33 @@ export function assertTransition(from: OrderStatus, to: OrderStatus) {
   if (!canTransition(from, to)) throw new BusinessError(`Transição inválida do pedido: ${ORDER_STATUS_LABEL[from] ?? from} → ${ORDER_STATUS_LABEL[to] ?? to}.`, "invalid_transition");
 }
 
+/**
+ * §44 — "Em trânsito": registro opcional entre "Enviado" e "Recebido" (despacho, transportadora, rastreio, previsão).
+ * Não é um estado novo da máquina: o pedido continua enviado/parcial (o recebimento funciona igual) e a tela mostra
+ * a etapa "Em trânsito". A previsão de entrega do transporte, quando informada, substitui a do pedido nos alertas.
+ */
+export interface TransitInfo {
+  shippedDate: string | null;
+  carrier: string | null;
+  tracking: string | null;
+  eta: string | null;
+  notes: string | null;
+  at: string;
+  by: string;
+  byId: string;
+}
+
+export const TRANSIT_STATUSES: OrderStatus[] = ["sent", "partial"];
+
+export function isInTransit(o: Record<string, any>): boolean {
+  return Boolean(o.transitAt) && TRANSIT_STATUSES.includes(o.status as OrderStatus);
+}
+
+/** Previsão de entrega efetiva: a do transporte (em trânsito) ou a do pedido. */
+export function effectiveExpectedDate(o: Record<string, any>): string | null {
+  return (isInTransit(o) ? o.transitInfo?.eta : null) || o.expectedDate || null;
+}
+
 /** Edição livre (sem revisão). */
 export const EDITABLE: OrderStatus[] = ["draft", "adjust"];
 /** Alteração comercial gera revisão formal. */

@@ -9,7 +9,7 @@ import { listAll } from "@/lib/db";
 import { canDo } from "@/lib/permissions";
 import { lookups, nameMap } from "@/lib/server/lookups";
 import { formatDateTime } from "@/lib/dates";
-import { resolveCashSession, returnableItems, returnCompensationPlan } from "@/domain/sales";
+import { resolveCashSession, returnableItems, returnCompensationPlan, returnLimit } from "@/domain/sales";
 import { resolveTerminal } from "../../../pdv/terminal";
 import { ReturnForm } from "./return-form";
 
@@ -56,6 +56,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const plan = await returnCompensationPlan(s.ctx, sale, 0, previous);
   const deferred = plan.titles.length ? { open: plan.open, paidAvailable: plan.paidAvailable, forgivenAvailable: plan.forgivenAvailable } : null;
   const pixMethod = (await listAll(store, "payment_methods", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "kind", "pix"]] }))[0];
+  // §44: valor máximo sem autorização do gerente (0 = sem limite); quem tem a permissão não precisa de autorização
+  const limit = canDo(s.user, "sale.return_over_limit") ? 0 : await returnLimit(store, s.ctx.companyId, sale.branchId);
   return (
     <>
       {header}
@@ -68,6 +70,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         defaultPixAccountId={pixMethod?.accountId ?? null}
         cashSession={mySession ? { id: mySession.id, number: mySession.number, terminalName: terminal?.id === mySession.terminalId ? terminal?.name ?? "" : "" } : null}
         deferred={deferred}
+        approvalLimit={limit}
       />
     </>
   );

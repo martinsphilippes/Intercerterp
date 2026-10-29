@@ -891,7 +891,7 @@ export async function importDocumentToCart(ctx: Ctx, terminalId: string, documen
     notes: `${docLabel(doc)}${doc.notes ? ` — ${doc.notes}` : ""}`.slice(0, 500),
     salesDocumentId: doc.id,
     salesDocumentLabel: `${docLabel(doc)}${doc.customerSnapshot?.name ? ` — ${doc.customerSnapshot.name}` : ""}`.slice(0, 120),
-  });
+  }, { replaceItems: true });
   await audit(ctx, { module: "sales", action: "sales_document.import_pdv", entityType: "sales_document", entityId: doc.id, summary: `${docLabel(doc)} importado no PDV (${items.length} itens)`, related: [`cart:${saved.id}`] });
   return saved;
 }

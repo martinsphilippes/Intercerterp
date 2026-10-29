@@ -24,6 +24,9 @@ export function UserMenu({ name, role }: { name: string; role: string }) {
           <Link href="/notificacoes?tab=preferencias" className="block rounded px-3 py-2 text-sm hover:bg-slate-50">
             Preferências de notificação
           </Link>
+          <Link href="/conta/seguranca" className="block rounded px-3 py-2 text-sm hover:bg-slate-50">
+            Segurança (duas etapas)
+          </Link>
           <form action={logoutAction}>
             <button type="submit" className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50">
               <LogOut className="size-4" /> Sair

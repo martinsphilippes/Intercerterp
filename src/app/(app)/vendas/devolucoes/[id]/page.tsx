@@ -126,6 +126,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               { label: "Venda de origem", value: <Link className="text-brand-700 hover:underline" href={`/vendas/${sale.id}`}>nº {sale.number} — {formatDateTime(sale.completedAt)}</Link> },
               { label: "Cliente", value: sale.customerId ? <Link className="text-brand-700 hover:underline" href={`/clientes/${sale.customerId}`}>{sale.customerSnapshot?.name}</Link> : (sale.customerSnapshot?.name ?? "Consumidor final") },
               { label: "Motivo", value: ret.reason },
+              ret.approvedByName && { label: "Autorização (acima do valor máximo)", value: ret.approvedByName },
               ret.cashSessionId && { label: "Caixa (saída em dinheiro)", value: <Link className="text-brand-700 hover:underline" href={`/caixa/${ret.cashSessionId}`}>Sessão de caixa</Link> },
               exSale && { label: "Nova venda da troca", value: <Link className="text-brand-700 hover:underline" href={`/vendas/${exSale.id}`}>nº {exSale.number} — {formatMoney(exSale.total)}</Link> },
               doc && { label: "Documento de devolução", value: <Link className="text-brand-700 hover:underline" href={`/fiscal/${doc.model}/${doc.id}`}>{MODEL_NAME[doc.model] ?? doc.model} {doc.number ? `nº ${doc.number}` : "(rascunho)"} <SimBadge show={Boolean(doc.isSimulated)} /></Link> },

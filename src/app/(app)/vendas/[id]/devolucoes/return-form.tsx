@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "@/components/ui/link";
-import { ArrowLeftRight, CheckCircle2, FileText, Gift, History, Package, Receipt, Undo2, Wallet } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, FileText, Gift, History, Package, Receipt, ShieldCheck, Undo2, Wallet } from "lucide-react";
 import { ActionForm } from "@/components/ui/action-form";
 import { buttonClass } from "@/components/ui/button";
-import { Field, Select, Textarea } from "@/components/ui/form";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { cn } from "@/components/ui/cn";
 import { formatMoney, formatQty, roundDiv, QTY } from "@/lib/money";
 import { processReturnAction } from "../../actions";
@@ -28,6 +28,8 @@ export function ReturnForm(props: {
   cashSession: { id: string; number: number; terminalName: string } | null;
   /** venda a prazo: saldo em aberto do título e valor pago ainda não devolvido */
   deferred?: { open: number; paidAvailable: number; forgivenAvailable?: number } | null;
+  /** §44: valor máximo sem autorização do gerente (0 = sem limite ou usuário com a permissão) */
+  approvalLimit?: number;
 }) {
   const [sel, setSel] = useState<Record<string, { on: boolean; qty: string; reason: string; condition: "resellable" | "damaged" }>>(() =>
     Object.fromEntries(props.items.map((i) => [i.id, { on: false, qty: String(Math.min(1, i.returnable / QTY)).replace(".", ","), reason: "", condition: "resellable" as const }])),
@@ -40,6 +42,7 @@ export function ReturnForm(props: {
   const [accountId, setAccountId] = useState<string>(props.defaultPixAccountId ?? props.accounts[0]?.value ?? "");
   const [notes, setNotes] = useState("");
   const [done, setDone] = useState<{ id: string } | null>(null);
+  const [approval, setApproval] = useState({ login: "", password: "" });
 
   const lines = useMemo(
     () =>
@@ -67,6 +70,8 @@ export function ReturnForm(props: {
   const overPaid = Boolean(props.deferred) && compensate > (props.deferred?.paidAvailable ?? 0);
   const needsCustomer = compensation === "store_credit" && !props.sale.customerId;
   const cashBlocked = compensation === "refund" && refundMethod === "cash" && !props.cashSession && compensate > 0;
+  const needsApproval = Boolean(props.approvalLimit) && estimated > (props.approvalLimit ?? 0);
+  const approvalMissing = needsApproval && (!approval.login.trim() || !approval.password);
   const damaged = chosen.some((l) => l.condition === "damaged");
   const resellable = chosen.some((l) => l.condition === "resellable" && !l.item.service);
 
@@ -226,8 +231,18 @@ export function ReturnForm(props: {
               <input type="hidden" name="notes" value={notes} />
               {chosen.some((l) => !l.reason) && <p className="mt-2 text-xs text-amber-800">Informe o motivo de cada item selecionado.</p>}
               {needsCustomer && <p className="mt-2 text-xs text-red-700">Vale-crédito exige cliente identificado.</p>}
+              {needsApproval && (
+                <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-amber-900"><ShieldCheck className="size-4" /> Autorização do gerente</p>
+                  <p className="text-xs text-amber-900">Devolução de {formatMoney(estimated)} acima do valor máximo sem autorização ({formatMoney(props.approvalLimit)}): um usuário com a permissão “Registrar devolução acima do valor máximo” informa login e senha. Quem autorizou fica registrado.</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <Input name="approvalLogin" placeholder="Login do gerente" autoComplete="off" value={approval.login} onChange={(e) => setApproval({ ...approval, login: e.target.value })} aria-label="Login do gerente" />
+                    <Input name="approvalPassword" type="password" placeholder="Senha" autoComplete="new-password" value={approval.password} onChange={(e) => setApproval({ ...approval, password: e.target.value })} aria-label="Senha do gerente" />
+                  </div>
+                </div>
+              )}
               {overPaid && <p className="mt-2 text-xs text-red-700">O valor a devolver excede o que o cliente pagou: o título a prazo foi alterado no Financeiro (renegociado/cancelado). Regularize o título antes da devolução.</p>}
-              <button type="submit" disabled={pending || invalid || needsCustomer || cashBlocked || overPaid} aria-busy={pending || undefined} className={buttonClass("accent", "md", "mt-3 w-full")}>
+              <button type="submit" disabled={pending || invalid || needsCustomer || cashBlocked || overPaid || approvalMissing} aria-busy={pending || undefined} className={buttonClass("accent", "md", "mt-3 w-full")}>
                 {pending ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden /> : <CheckCircle2 className="size-4" />} Confirmar {compensation === "exchange" ? "troca" : "devolução"}
               </button>
               {(invalid || needsCustomer || cashBlocked) && <p className="mt-2 text-xs text-slate-500">O servidor valida novamente quantidades, permissões e caixa antes de registrar.</p>}

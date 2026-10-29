@@ -6,15 +6,15 @@ import { getStore } from "@/lib/db";
 import { getAuth } from "@/lib/auth/provider";
 import { accessibleUnits, findUserByLogin, findUserByAuthId, toCtxUser, unitBlockReason } from "@/lib/auth/users";
 import { safeNextPath } from "@/lib/auth/redirect";
-import { SESSION_COOKIE, UNIT_COOKIE, getSession } from "@/lib/server/session";
+import { MFA_COOKIE, SESSION_COOKIE, UNIT_COOKIE, getSession } from "@/lib/server/session";
 import { audit } from "@/lib/core/audit";
 import { nowIso } from "@/lib/dates";
 import type { ActionResult } from "@/lib/server/action";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
+import { CHALLENGE_TTL_MIN, LOCK_WINDOW_MIN, MAX_LOGIN_FAILURES, completeLoginChallenge, createLoginChallenge, dropChallenge, loadLoginChallenge, logLoginAttempt, loginKeyFor, recentLoginFailures } from "@/domain/two-factor";
 
 const secure = process.env.NODE_ENV === "production";
-const MAX_FAILED = 5;
-const LOCK_WINDOW_MIN = 15;
+const MAX_FAILED = MAX_LOGIN_FAILURES;
 
 async function rememberUnit(userId: string, value: string) {
   const store = getStore();
@@ -34,23 +34,14 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
   const store = getStore();
   const h0 = await headers();
   const ip = h0.get("x-forwarded-for")?.split(",")[0] ?? undefined;
-  // Bloqueio temporário após tentativas inválidas (registradas no histórico de auditoria)
-  const { detId } = await import("@/lib/db");
-  // contador único por usuário (qualquer apelido: login ou e-mail); texto normalizado quando o usuário não existe
+  // Bloqueio temporário após tentativas inválidas (registradas no histórico de auditoria): contador único por usuário
+  // (qualquer apelido: login ou e-mail; texto normalizado quando o usuário não existe), compartilhado com a segunda etapa
   const userForKey = await findUserByLogin(store, login);
-  const loginKey = userForKey ? detId("login", "user", userForKey.id) : detId("login", "text", login.toLowerCase());
-  const since = new Date(Date.now() - LOCK_WINDOW_MIN * 60000).toISOString();
-  const recent = await store.list("audit_logs", { filters: [["eq", "entityType", "login"], ["eq", "entityId", loginKey], ["gte", "occurredAt", since]], orderBy: [{ field: "occurredAt", dir: "desc" }], limit: MAX_FAILED + 1 });
-  const lastSuccess = recent.items.findIndex((e) => e.result === "success");
-  const failures = (lastSuccess === -1 ? recent.items : recent.items.slice(0, lastSuccess)).filter((e) => e.result === "failure").length;
+  const loginKey = loginKeyFor(userForKey, login);
+  const failures = await recentLoginFailures(store, loginKey);
   if (failures >= MAX_FAILED) return { ok: false, error: `Acesso temporariamente bloqueado após ${MAX_FAILED} tentativas inválidas. Tente novamente em ${LOCK_WINDOW_MIN} minutos ou recupere a senha.` };
   const logAttempt = async (result: "success" | "failure", summary: string, u?: any) =>
-    store
-      .create("audit_logs", {
-        companyId: u?.companyIds?.[0] ?? null, userId: u?.id ?? null, userName: u?.name ?? login, module: "admin", action: result === "success" ? "auth.login" : "auth.login_failed",
-        entityType: "login", entityId: loginKey, summary, result, ip: ip ?? null, occurredAt: new Date().toISOString(), related: u ? [`user:${u.id}`] : [],
-      })
-      .catch(() => undefined);
+    logLoginAttempt(store, { loginKey, result, action: result === "success" ? "auth.login" : "auth.login_failed", summary, user: u ?? null, loginText: login, ip: ip ?? null });
   const user = userForKey;
   if (!user) {
     await logAttempt("failure", `Tentativa de login inválida (usuário inexistente: ${login.slice(0, 60)})`);
@@ -76,10 +67,24 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
     console.error("[login]", e);
     return { ok: false, error: "Serviço de autenticação indisponível. Tente novamente em instantes." };
   }
+  // §44: autenticação em duas etapas — a sessão fica guardada (cifrada) até o código; "manter conectado" não pula a etapa
+  const challenge = await createLoginChallenge(store, { user, session, persistent, next: String(fd.get("next") ?? ""), loginKey, ip: ip ?? null });
+  if (challenge) {
+    await logLoginAttempt(store, { loginKey, result: "pending", action: "auth.password_ok", summary: `Senha correta de ${user.name} — aguardando ${challenge.kind === "enroll" ? "o cadastro do aplicativo autenticador (exigido pelo perfil)" : "o código de verificação"}`, user, ip: ip ?? null });
+    const jar = await cookies();
+    jar.set(MFA_COOKIE, challenge.token, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: CHALLENGE_TTL_MIN * 60 });
+    return { ok: true, redirect: "/login/duas-etapas" };
+  }
+  return { ok: true, redirect: await finishLogin(user, session, persistent, fd.get("next"), logAttempt) };
+}
+
+/** Sessão aceita (senha e, se houver, segunda etapa): cookies de sessão e de unidade, último acesso e registro do login. */
+async function finishLogin(user: Record<string, any>, session: { secret: string; expiresAt: string }, persistent: boolean, next: unknown, logAttempt: (result: "success", summary: string, u?: any) => Promise<unknown>, summary?: string) {
+  const store = getStore();
   const jar = await cookies();
   jar.set(SESSION_COOKIE, session.secret, { httpOnly: true, sameSite: "lax", secure, path: "/", ...(persistent ? { expires: new Date(session.expiresAt) } : {}) });
   await store.update("users", user.id, { lastAccessAt: nowIso(), ...(user.firstAccessAt ? {} : { firstAccessAt: nowIso() }) });
-  const { companies, branches } = await accessibleUnits(store, user);
+  const { companies, branches } = await accessibleUnits(store, user as any);
   const pref = await store.get("user_prefs", (await import("@/lib/db")).detId("pref", user.id, "lastUnit"));
   let unit: string | null = null;
   // unidade lembrada ou única: somente empresa e filial ativas (inativas não são contexto de trabalho)
@@ -91,14 +96,54 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
     if (activeCompanies.some((x) => x.id === c) && ((b === "all" && canAll) || activeBranches.some((x) => x.id === b && x.companyId === c))) unit = pref.value;
   }
   if (!unit && activeCompanies.length === 1 && activeBranches.length === 1) unit = `${activeCompanies[0].id}:${activeBranches[0].id}`;
-  await logAttempt("success", `Login de ${user.name}`, user);
+  await logAttempt("success", summary ?? `Login de ${user.name}`, user);
   void toCtxUser;
   void audit;
   if (unit) {
     jar.set(UNIT_COOKIE, unit, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: 60 * 60 * 24 * 365 });
-    return { ok: true, redirect: safeNextPath(fd.get("next")) };
+    return safeNextPath(next);
   }
-  return { ok: true, redirect: "/selecionar-unidade" };
+  return "/selecionar-unidade";
+}
+
+/**
+ * §44 — segunda etapa do login: código do aplicativo autenticador (ou de recuperação) ou confirmação do cadastro
+ * exigido pelo perfil. Código errado conta nas tentativas do bloqueio temporário.
+ */
+export async function verifyTwoFactorLoginAction(fd: FormData): Promise<ActionResult<{ recoveryCodes?: string[]; next?: string; remaining?: number }>> {
+  await ensureBootstrap();
+  const jar = await cookies();
+  const token = jar.get(MFA_COOKIE)?.value;
+  const code = String(fd.get("code") ?? "");
+  if (!code.trim()) return { ok: false, error: "Informe o código." };
+  const h = await headers();
+  const ip = h.get("x-forwarded-for")?.split(",")[0] ?? null;
+  const store = getStore();
+  const { loginBlockReason } = await import("@/domain/users");
+  const r = await completeLoginChallenge(store, token ?? "", code, { ip, blockReason: loginBlockReason });
+  if (r.status === "invalid") return { ok: false, error: `Código inválido. ${r.left} tentativa(s) restante(s) antes do bloqueio temporário.`, code: "invalid_code" };
+  if (r.status !== "ok") {
+    jar.delete(MFA_COOKIE);
+    return { ok: false, error: r.message, code: r.status };
+  }
+  jar.delete(MFA_COOKIE);
+  const loginKey = loginKeyFor(r.user as any, r.user.email);
+  const logAttempt = (result: "success", summary: string, u?: any) => logLoginAttempt(store, { loginKey, result, action: "auth.login", summary, user: u ?? r.user, ip });
+  const how = r.method === "enroll" ? "cadastro do autenticador confirmado" : r.method === "recovery" ? `código de recuperação (restam ${r.remaining ?? 0})` : "código do autenticador";
+  const target = await finishLogin(r.user, r.session, r.persistent, r.next, logAttempt, `Login de ${r.user.name} (duas etapas: ${how})`);
+  // cadastro: os códigos de recuperação aparecem uma única vez antes de seguir para o sistema
+  if (r.recoveryCodes) return { ok: true, data: { recoveryCodes: r.recoveryCodes, next: target } };
+  return { ok: true, redirect: target, ...(r.method === "recovery" ? { message: `Código de recuperação usado. Restam ${r.remaining ?? 0}.` } : {}) };
+}
+
+/** Volta ao login: descarta a segunda etapa pendente (a sessão guardada é encerrada). */
+export async function cancelTwoFactorLoginAction(): Promise<ActionResult> {
+  const jar = await cookies();
+  const token = jar.get(MFA_COOKIE)?.value;
+  const ch = await loadLoginChallenge(getStore(), token);
+  if (ch) await dropChallenge(getStore(), ch);
+  jar.delete(MFA_COOKIE);
+  return { ok: true, redirect: "/login" };
 }
 
 export async function logoutAction() {

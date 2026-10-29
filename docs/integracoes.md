@@ -24,6 +24,7 @@ Princípios: contratos independentes de fornecedor, adaptador real + adaptador d
 | Variável | Uso |
 |---|---|
 | `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_API_KEY`, `APPWRITE_DATABASE_ID`, `APPWRITE_BUCKET_ID` (opcional) | Banco, Auth e Storage |
+| `AUTH_ENCRYPTION_KEY` (recomendada; texto longo aleatório, sensível) | Cifra do segredo da autenticação em duas etapas e da sessão pendente do login (§44). Sem ela, derivada de `APPWRITE_API_KEY`; trocar a chave obriga os usuários a recadastrar o autenticador |
 | `FOCUSNFE_TOKEN` (nome configurável em Fiscal → Configurações) | NF-e/NFC-e/NFS-e |
 | `NFCE_CSC` (nome configurável) | CSC da NFC-e |
 | `MERCADOPAGO_ACCESS_TOKEN` (nome configurável) | Pix |

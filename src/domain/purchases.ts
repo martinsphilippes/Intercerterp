@@ -15,6 +15,7 @@ import { assertSupplierUsable, supplierLabel, supplierSnapshot } from "./supplie
 import {
   ORDER_STATUS_LABEL, EDITABLE, REVISABLE, assertTransition, buildInstallmentPlan, computeOrderTotals, isRelevantChange,
   type InstallmentPlan, type OrderItemInput, type OrderStatus, type OrderTotals,
+  TRANSIT_STATUSES, type TransitInfo,
 } from "./purchase-calc";
 
 /**
@@ -535,6 +536,38 @@ export async function registerOrderSent(ctx: Ctx, id: string, input: { method: "
   if (viaRequest) await afterOrdersStatus(ctx, viaRequest.changed, "sent", statusOpts);
   else await setOrdersStatus(ctx, [id], "sent", sentPatch, statusOpts);
   return ctx.store.getOrThrow("purchase_orders", id);
+}
+
+// ───────────────────────────── §44 — em trânsito
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Registra (ou atualiza) o pedido como "Em trânsito": data de despacho, transportadora, código de rastreio e previsão de
+ * entrega, todos opcionais. Só para pedido enviado ou parcialmente recebido; o recebimento segue funcionando igual.
+ */
+export async function registerOrderInTransit(ctx: Ctx, id: string, input: { shippedDate?: string | null; carrier?: string | null; tracking?: string | null; eta?: string | null; notes?: string | null }) {
+  requirePerm(ctx, "purchases", "edit");
+  const o = await getOrderForWrite(ctx, id);
+  assert(TRANSIT_STATUSES.includes(o.status as OrderStatus), o.status === "approved" ? "Registre o envio ao fornecedor antes de marcar o pedido como em trânsito." : `Pedido ${ORDER_STATUS_LABEL[o.status as OrderStatus] ?? o.status} não pode ser marcado como em trânsito.`, "invalid_state");
+  const clean = (v: string | null | undefined, max: number) => (v?.trim() ? v.trim().slice(0, max) : null);
+  const shippedDate = clean(input.shippedDate, 10);
+  const eta = clean(input.eta, 10);
+  assert(!shippedDate || ISO_DATE.test(shippedDate), "Data de despacho inválida.");
+  assert(!eta || ISO_DATE.test(eta), "Previsão de entrega inválida.");
+  assert(!shippedDate || shippedDate <= today(), "A data de despacho não pode ser futura.");
+  assert(!shippedDate || !eta || eta >= shippedDate, "A previsão de entrega não pode ser anterior ao despacho.");
+  const info: TransitInfo = { shippedDate, carrier: clean(input.carrier, 120), tracking: clean(input.tracking, 120), eta, notes: clean(input.notes, 500), at: nowIso(), by: ctx.user.name, byId: ctx.user.id };
+  const first = !o.transitAt;
+  const after = await ctx.store.update<Record<string, any>>("purchase_orders", id, { transitAt: o.transitAt ?? info.at, transitInfo: info });
+  // previsão nova no futuro: o aviso de atraso anterior deixa de valer (a rotina avisa de novo se vencer)
+  if (eta && eta >= today()) await resolveOccurrence(ctx.store, `po_late:${id}`).catch(() => 0);
+  await audit(ctx, {
+    module: "purchases", action: first ? "purchase_order.in_transit" : "purchase_order.transit_update", entityType: "purchase_order", entityId: id,
+    summary: `Pedido nº ${o.number} ${first ? "em trânsito" : "— transporte atualizado"}${info.carrier ? ` · ${info.carrier}` : ""}${info.tracking ? ` · rastreio ${info.tracking}` : ""}${info.shippedDate ? ` · despacho ${info.shippedDate.split("-").reverse().join("/")}` : ""}${info.eta ? ` · previsão ${info.eta.split("-").reverse().join("/")}` : ""}`,
+    before: o.transitInfo ?? null, after: info,
+  });
+  return after;
 }
 
 // ───────────────────────────── Recebimento → saldo do pedido

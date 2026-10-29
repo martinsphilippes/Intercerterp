@@ -1,7 +1,7 @@
 "use server";
 
 import { runAction, fstr, fopt, fint, fjson } from "@/lib/server/action";
-import { createOrder, updateOrder, cancelOrder, closeOrderBalance, registerOrderSent, type OrderInput } from "@/domain/purchases";
+import { createOrder, updateOrder, cancelOrder, closeOrderBalance, registerOrderInTransit, registerOrderSent, type OrderInput } from "@/domain/purchases";
 import { submitForApproval } from "@/domain/approvals";
 import { computeBranchReplenishment } from "@/domain/replenishment";
 import { createQuotation } from "@/domain/quotations";
@@ -101,5 +101,14 @@ export async function quotationFromFormAction(fd: FormData) {
     const expected = fopt(fd, "expectedDate");
     const q = await createQuotation(s.ctx, { title: fopt(fd, "purpose") ?? "Cotação a partir do pedido", items: items.map((i) => ({ skuId: i.skuId, qty: i.qty, neededBy: expected ?? addDays(today(), 15) })), supplierIds: ids, origin: "need", idemKey: `order-form:${fstr(fd, "_idem")}` });
     return { ok: true as const, message: `Cotação nº ${q.number} criada com ${ids.length} fornecedor(es). Registre as propostas.`, redirect: `/compras/cotacoes/${q.id}?tab=propostas` };
+  });
+}
+
+/** §44 — registra/atualiza o pedido como em trânsito (despacho, transportadora, rastreio, previsão de entrega). */
+export async function registerTransitAction(fd: FormData) {
+  const id = fstr(fd, "id");
+  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: ["/compras/pedidos", `/compras/pedidos/${id}`] }, async (s) => {
+    const o = await registerOrderInTransit(s.ctx, id, { shippedDate: fopt(fd, "shippedDate"), carrier: fopt(fd, "carrier"), tracking: fopt(fd, "tracking"), eta: fopt(fd, "eta"), notes: fopt(fd, "notes") });
+    return { ok: true as const, message: `Pedido nº ${o.number} em trânsito${o.transitInfo?.eta ? ` — previsão ${String(o.transitInfo.eta).split("-").reverse().join("/")}` : ""}.` };
   });
 }

@@ -1,5 +1,5 @@
 import Link from "@/components/ui/link";
-import { BadgeCheck, CheckSquare, ClipboardList, Eye, FileInput, PackageCheck, Pencil, Plus, Send, Truck } from "lucide-react";
+import { BadgeCheck, CheckSquare, ClipboardList, Eye, FileInput, PackageCheck, Pencil, Plus, Route, Send, Truck } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -25,7 +25,7 @@ const ORIGIN: Record<string, string> = { manual: "Manual", quotation: "Cotação
 
 function relative(r: Row) {
   if (r.status === "received") return "Recebido";
-  if (!r.expectedDate) return ["draft", "in_review", "adjust"].includes(r.status) ? "Não definida" : "—";
+  if (!r.effectiveExpected) return ["draft", "in_review", "adjust"].includes(r.status) ? "Não definida" : "—";
   const d = r.daysToExpected ?? 0;
   if (["cancelled", "rejected"].includes(r.status)) return "—";
   if (d < 0) return `Atrasado ${-d} dia(s)`;
@@ -63,8 +63,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const stages = [
     { key: "drafting", label: "Em elaboração", hint: "Rascunho e ajuste", icon: ClipboardList, list: base.filter((r) => ["draft", "adjust"].includes(r.status)) },
     { key: "in_review", label: "Em análise", hint: "Aguardando aprovação", icon: BadgeCheck, list: inReview },
-    { key: "to_send", label: "Aprovados a enviar", hint: "Registrar envio", icon: Send, list: base.filter((r) => r.status === "approved") },
-    { key: "sent", label: "Enviados", hint: "Aguardando entrega", icon: Truck, list: base.filter((r) => r.status === "sent") },
+    { key: "to_send", label: "Aprovados a enviar", hint: "Registrar envio", icon: Route, list: base.filter((r) => r.status === "approved") },
+    { key: "sent", label: "Enviados", hint: "Aguardando despacho", icon: Send, list: base.filter((r) => r.status === "sent" && !r.inTransit) },
+    { key: "in_transit", label: "Em trânsito", hint: "Despachados pelo fornecedor", icon: Truck, list: base.filter((r) => r.inTransit) },
     { key: "partial", label: "Parcialmente recebidos", hint: "Saldo a receber", icon: PackageCheck, list: base.filter((r) => r.status === "partial") },
     { key: "received", label: "Recebidos", hint: "Concluídos", icon: CheckSquare, list: base.filter((r) => r.status === "received") },
   ];
@@ -76,13 +77,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     { key: "origin", label: "Origem", hidden: true, cell: (r) => (r.quotationId ? <Link className="hover:underline" href={`/compras/cotacoes/${r.quotationId}`}>{ORIGIN[r.origin] ?? r.origin}</Link> : ORIGIN[r.origin] ?? r.origin) },
     { key: "createdAt", label: "Solicitado", sortable: true, cell: (r) => formatDate(r.createdAt) },
     { key: "itemsCount", label: "Itens", align: "right", sortable: true, cell: (r) => <span className="whitespace-nowrap">{r.itemsCount} prod.<span className="block text-xs text-slate-500">{formatQty(r.unitsQty)} un.</span></span> },
-    { key: "expectedDate", label: "Previsão", sortable: true, cell: (r) => <span>{formatDate(r.expectedDate)}<span className={cn("block text-xs", r.overdue ? "text-red-700" : "text-slate-500")}>{relative(r)}</span></span> },
+    { key: "expectedDate", label: "Previsão", sortable: true, cell: (r) => <span title={r.inTransit && r.effectiveExpected !== r.expectedDate ? `Previsão do transporte (pedido: ${formatDate(r.expectedDate)})` : undefined}>{formatDate(r.effectiveExpected)}<span className={cn("block text-xs", r.overdue ? "text-red-700" : "text-slate-500")}>{relative(r)}</span></span> },
     { key: "paymentTermsText", label: "Pagamento", hidden: true, cell: (r) => r.paymentTermsText ?? "—" },
     { key: "freight", label: "Frete", align: "right", sortable: true, hidden: true, cell: (r) => formatMoney(r.freight) },
     { key: "total", label: "Valor total", align: "right", sortable: true, cell: (r) => formatMoney(r.total) },
     { key: "remainingValue", label: "Saldo a receber", align: "right", sortable: true, hidden: true, cell: (r) => (r.remainingValue ? formatMoney(r.remainingValue) : "—") },
     { key: "buyerName", label: "Comprador", sortable: true, cell: (r) => <span title={r.buyerName}>{r.buyerName.split(" ")[0]}</span> },
-    { key: "status", label: "Situação", cell: (r) => <span className="flex flex-wrap gap-1"><StatusBadge kind="purchase" status={r.status} />{r.awaitingSend && r.status === "sent" && <Badge tone="warn">revisão não enviada</Badge>}</span> },
+    { key: "status", label: "Situação", cell: (r) => <span className="flex flex-wrap gap-1"><StatusBadge kind="purchase" status={r.status} />{r.awaitingSend && r.status === "sent" && <Badge tone="warn">revisão não enviada</Badge>}{r.inTransit && <Badge tone="info">em trânsito</Badge>}{r.inTransit && r.overdue && <Badge tone="bad">previsão vencida</Badge>}</span> },
     {
       key: "actions",
       label: "Ações",
@@ -126,7 +127,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <Stat label="A receber" value={formatMoney(sum(open, "remainingValue"))} hint={`${next7.length} entrega(s) previstas nos próximos 7 dias${late.length ? ` · ${late.length} atrasada(s)` : ""}`} href={href({ status: "open" })} tone={late.length ? "bad" : "default"} />
         <Stat label="Recebidos no mês" value={receivedMonth.length} hint={receivedMonth.length ? `${Math.round((onTime * 100) / receivedMonth.length)}% concluídos até a previsão` : "Nenhum concluído no mês"} href={href({ status: "received" })} tone="good" />
       </div>
-      <nav aria-label="Etapas do pedido" className="no-print mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+      <nav aria-label="Etapas do pedido" className="no-print mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
         {stages.map((st) => {
           const active = p.f.status === st.key;
           const Icon = st.icon;

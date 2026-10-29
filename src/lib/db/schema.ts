@@ -104,6 +104,9 @@ export const COLLECTIONS: CollectionDef[] = [
       // vendedores (CAD-05/VEN-05): sem acesso ao sistema (cadastro só para atribuir vendas; login sempre recusado),
       // percentual de comissão (bps) e percentuais por categoria de produto { [categoryId]: bps } que substituem o geral
       loginDisabled: bool, commissionBps: int, commissionByCategory: json,
+      // §44 — autenticação em duas etapas (TOTP): segredo cifrado (AES-256-GCM), cadastro pendente (antes da confirmação),
+      // códigos de recuperação só como hash (uso único) e último intervalo aceito (impede reaproveitar o mesmo código)
+      totpEnabled: bool, totpSecretEnc: s(400), totpPendingEnc: s(400), totpEnabledAt: dt, totpRecoveryHashes: strings, totpLastStep: int,
     },
     indexes: [u("u_email", "email"), k("i_login", "login"), k("i_auth", "authId")],
   },
@@ -115,6 +118,8 @@ export const COLLECTIONS: CollectionDef[] = [
       discountLimitBps: int, system: bool, active: bool, isDemo: bool, createdBy: id(),
       // perfis de sistema: operações do modelo padrão já aplicadas (sincronização de operações novas do modelo)
       templateActions: strings,
+      // §44: usuários do perfil precisam da autenticação em duas etapas
+      requireTwoFactor: bool,
     },
     indexes: [k("i_company", "companyId")],
   },
@@ -123,6 +128,18 @@ export const COLLECTIONS: CollectionDef[] = [
     label: "Sessões",
     ephemeral: true,
     fields: { userId: id(true), tokenHash: s(128, true), expiresAt: dt, persistent: bool, userAgent: s(300), ip: s(60) },
+    indexes: [u("u_token", "tokenHash"), k("i_user", "userId")],
+  },
+  {
+    // §44 — segunda etapa do login (código do autenticador ou cadastro obrigatório): a sessão do provedor fica guardada
+    // cifrada até o código ser confirmado; o navegador só recebe o cookie de sessão depois disso
+    id: "auth_challenges",
+    label: "Login em duas etapas (pendentes)",
+    ephemeral: true,
+    fields: {
+      tokenHash: s(128, true), userId: id(true), kind: s(20), sessionEnc: s(2000), sessionExpiresAt: dt, persistent: bool, next: s(300),
+      expiresAt: dt, loginKey: s(128), pendingSecretEnc: s(400), ip: s(60),
+    },
     indexes: [u("u_token", "tokenHash"), k("i_user", "userId")],
   },
   {
@@ -418,6 +435,9 @@ export const COLLECTIONS: CollectionDef[] = [
       customerName: s(200), total: money, itemsCount: int, revision: int, emitFiscal: bool,
       // orçamento/pedido importado no PDV (PDV-12): a venda concluída fatura o documento
       salesDocumentId: id(), salesDocumentLabel: s(120),
+      // §44: itens já registrados removidos (produto, quantidade, valor, quem, quem autorizou, motivo), última inclusão por SKU
+      // (exceção de N segundos para remover item recém-lançado) e quem autorizou o cancelamento
+      removedItems: json, lastAddedAt: json, cancelledBy: id(), cancelApprovedBy: id(), cancelApprovedByName: s(200),
     },
     indexes: [k("i_terminal", "terminalId", "status"), k("i_branch_status", "branchId", "status")],
   },
@@ -526,6 +546,8 @@ export const COLLECTIONS: CollectionDef[] = [
       completedAt: dt, notes: txt, cashSessionId: id(),
       // linhas devolvidas (fonte do saldo devolvível), abatimento do título a prazo e valor compensado (vale/reembolso)
       lines: json, abatedAmount: money, compensatedAmount: money, effectsStatus: s(20), confirmedBy: id(), confirmationRef: s(120),
+      // §44: devolução acima do valor máximo autorizada por gerente/supervisor (login e senha no ato)
+      approvedById: id(), approvedByName: s(200),
     },
     indexes: [k("i_sale", "saleId"), u("u_idem", "idemKey")],
   },
@@ -721,6 +743,8 @@ export const COLLECTIONS: CollectionDef[] = [
       receivedValue: money, cancelledAt: dt, rejectReason: s(500), idemKey: s(120),
       proposalRef: json, originData: json, sentInfo: json, searchText: s(1000),
       purpose: s(200), buyerId: id(), paymentMethodId: id(), costCenterId: id(), insurance: money, ipiTotal: money,
+      // §44: registro opcional "Em trânsito" (despacho, transportadora, rastreio, previsão de entrega) entre enviado e recebido
+      transitAt: dt, transitInfo: json,
     },
     indexes: [k("i_supplier", "supplierId"), k("i_status", "companyId", "status"), u("u_idem", "idemKey")],
   },

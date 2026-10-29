@@ -304,6 +304,27 @@ export const PARAMS: ParamDef[] = [
   { key: "fiscal.files.accountantNumber", group: "Fiscal", label: "Escritório — número", help: "Número do endereço do escritório.", type: "text", scopes: ["company"], default: "", pattern: "", maxLength: 10, placeholder: "100", usedBy: "Arquivos fiscais (registro 0100)" },
   { key: "fiscal.files.accountantDistrict", group: "Fiscal", label: "Escritório — bairro", help: "Bairro do escritório.", type: "text", scopes: ["company"], default: "", pattern: "", maxLength: 60, placeholder: "Centro", usedBy: "Arquivos fiscais (registro 0100)" },
   { key: "fiscal.files.accountantCityCode", group: "Fiscal", label: "Escritório — município (IBGE)", help: "Código IBGE de 7 dígitos do município do escritório.", type: "text", scopes: ["company"], default: "", pattern: "\\d{7}", maxLength: 7, placeholder: "3550308", usedBy: "Arquivos fiscais (registro 0100)" },
+  // ── §44 — ajustes das telas 01–48: autorização no PDV (tela 04) e limite de devolução (tela 11)
+  {
+    key: "pdv.removeItemRequiresAuth", group: "Vendas e PDV", label: "Exigir autorização para remover item já registrado", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Ligado, remover do atendimento (ou diminuir a quantidade de) um item já registrado exige a permissão “Remover item já registrado no atendimento do PDV” ou o login e a senha de um supervisor que a tenha, no próprio terminal. Toda remoção fica no histórico (produto, quantidade, valor, operador, quem autorizou e motivo) e no relatório do caixa. Desligado, o operador remove sem autorização (a remoção continua registrada).",
+    usedBy: "PDV (remover item) e Caixa (relatório da sessão)",
+  },
+  {
+    key: "pdv.removeItemGraceSeconds", group: "Vendas e PDV", label: "Remover item recém-lançado sem autorização (segundos)", type: "int", scopes: ["company", "branch"], default: 0, min: 0, max: 600, unit: "segundos",
+    help: "Exceção para corrigir uma leitura errada: o item cuja última inclusão no atendimento foi há até este número de segundos pode ser removido sem autorização (a remoção continua registrada). 0 = sem exceção.",
+    usedBy: "PDV (remover item)",
+  },
+  {
+    key: "pdv.cancelCartRequiresAuth", group: "Vendas e PDV", label: "Exigir autorização para cancelar o atendimento", type: "bool", scopes: ["company", "branch"], default: true,
+    help: "Ligado, cancelar um atendimento com itens (inclusive descartar uma pré-venda) exige a permissão “Cancelar atendimento do PDV com itens” ou a autorização de um supervisor no terminal. Atendimento vazio é descartado sem autorização. O cancelamento fica no histórico e no relatório do caixa.",
+    usedBy: "PDV (cancelar atendimento e descartar pré-venda) e Caixa (relatório da sessão)",
+  },
+  {
+    key: "sales.returnMaxWithoutManager", group: "Vendas e PDV", label: "Valor máximo de devolução sem autorização do gerente", type: "money", scopes: ["company", "branch"], default: 0, min: 0,
+    help: "Devolução ou troca com valor acima deste limite exige a permissão “Registrar devolução acima do valor máximo sem autorização do gerente” ou o login e a senha de quem a tenha, na própria tela da devolução (fica registrado quem autorizou). 0 = sem limite.",
+    usedBy: "Vendas (trocas e devoluções)",
+  },
   {
     key: "timezone", group: "Regional", label: "Fuso horário", type: "timezone", scopes: ["company"], default: "America/Sao_Paulo", installation: true,
     help: "Único para toda a instalação (todas as empresas e filiais): define o dia de cada movimento nos recortes de período, o horário das rotinas e a agenda de backup. Para alterar, o responsável técnico define a variável de ambiente APP_TIMEZONE no servidor (ex.: America/Manaus) e reinicia a aplicação.",

@@ -17,6 +17,18 @@ describe("sincronização de perfis de sistema com operações novas das fases",
     }
   });
 
+  it("operações do §44 (remover item, cancelar atendimento, devolução acima do limite) chegam ao Gerente e ao Administrador já gravados, não ao Caixa", () => {
+    for (const key of ["manager", "admin"]) {
+      const tpl = ROLE_TEMPLATES.find((t) => t.key === key)!;
+      const old = (tpl.actions as string[]).filter((a) => !["pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit"].includes(a));
+      const plan = templateSyncPlan({ system: true, key, actions: old, templateActions: old })!;
+      expect(plan.missing.sort()).toEqual(["pdv.cancel_cart", "pdv.remove_item", "sale.return_over_limit"]);
+    }
+    const cashier = ROLE_TEMPLATES.find((t) => t.key === "cashier")!;
+    expect(cashier.actions).not.toContain("pdv.remove_item");
+    for (const a of ["pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit"]) expect(ACTIONS_ADDED_TO_TEMPLATES).toContain(a);
+  });
+
   it("perfil já sincronizado com o modelo atual não muda", () => {
     const tpl = ROLE_TEMPLATES.find((t) => t.key === "cashier")!;
     expect(templateSyncPlan({ system: true, key: "cashier", actions: [...tpl.actions], templateActions: [...tpl.actions] })).toBeNull();

@@ -35,6 +35,8 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   // rede de certificação (§43): cadastro de filhos e preços dos filhos (Administrador do parceiro e Gestor); network.manage
   // não entra em nenhum modelo (plataforma: administradores ou perfil dedicado), listado para a regra valer se um dia entrar
   "network.children", "network.prices", "network.manage",
+  // ajustes das telas 01–48 (§44): remover item e cancelar atendimento no PDV, devolução acima do limite (Gerente e Administrador)
+  "pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);

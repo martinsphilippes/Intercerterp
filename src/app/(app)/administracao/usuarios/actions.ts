@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { runAction, fstr, fopt, fbool } from "@/lib/server/action";
-import { createUser, updateUser, setUserStatus, resendInvite, cancelInvite, adminSetPassword, type UserInput } from "@/domain/users";
+import { createUser, updateUser, setUserStatus, resendInvite, cancelInvite, adminSetPassword, adminResetTwoFactor, type UserInput } from "@/domain/users";
 import { createRole, updateRole, duplicateRole, deleteRole, matrixFromForm } from "@/domain/roles";
 import { BusinessError } from "@/lib/core/errors";
 
@@ -85,13 +85,21 @@ export async function setPasswordAction(fd: FormData) {
   });
 }
 
+/** §44 — redefine a autenticação em duas etapas do usuário (auditado, com motivo). */
+export async function resetTwoFactorAction(id: string, fd: FormData) {
+  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/usuarios/${id}`] }, async (s) => {
+    await adminResetTwoFactor(s.ctx, id, fstr(fd, "reason"));
+    return { ok: true as const, message: "Autenticação em duas etapas redefinida. Se o perfil exigir, o usuário cadastra um novo aparelho no próximo login." };
+  });
+}
+
 // ───────────────────────────── perfis
 
 export async function saveRoleAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/usuarios/perfis"] }, async (s) => {
     const { permissions, actions } = matrixFromForm(fd);
-    const input = { name: fstr(fd, "name"), description: fopt(fd, "description"), permissions, actions, discountLimitBps: pctToBps(fstr(fd, "discountPct")) ?? 0, active: fstr(fd, "active") !== "0" };
+    const input = { name: fstr(fd, "name"), description: fopt(fd, "description"), permissions, actions, discountLimitBps: pctToBps(fstr(fd, "discountPct")) ?? 0, active: fstr(fd, "active") !== "0", requireTwoFactor: fbool(fd, "requireTwoFactor") };
     const r = id ? await updateRole(s.ctx, id, input, fopt(fd, "reason")) : await createRole(s.ctx, input, { idemKey: fstr(fd, "_idem") || undefined });
     return { ok: true as const, message: id ? "Perfil atualizado. As permissões valem a partir da próxima ação de cada usuário." : "Perfil criado.", redirect: `/administracao/usuarios/perfis/${r.id}` };
   });
