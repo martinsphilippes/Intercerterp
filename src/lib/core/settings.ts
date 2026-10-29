@@ -74,6 +74,21 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
   creditoSimples: false,
 };
 
+/**
+ * Padrão por TIPO de empresa (sobrepõe FEATURE_DEFAULTS): a rede de certificação (§43) nasce ligada nos parceiros da
+ * rede e nos escritórios contábeis (nó contador) e desligada no varejo — a plataforma pode ligá-la em Parâmetros.
+ */
+export const KIND_FEATURE_DEFAULTS: Record<string, Record<string, boolean>> = {
+  redeCertificacao: { certification: true, accounting: true, retail: false },
+};
+
+/** Padrão do recurso para o tipo da empresa (sem regra por tipo: o padrão geral). */
+export function featureDefaultFor(key: string, kind: string | null | undefined, fallback = true): boolean {
+  const byKind = KIND_FEATURE_DEFAULTS[key];
+  if (byKind) return byKind[kind || "retail"] ?? byKind.retail ?? false;
+  return featureDefault(key, fallback);
+}
+
 /** Recursos novos desligados por padrão (derivado de FEATURE_DEFAULTS). */
 export const FEATURES_OFF_BY_DEFAULT = Object.entries(FEATURE_DEFAULTS).filter(([, on]) => !on).map(([k]) => k);
 

@@ -75,10 +75,11 @@ beforeAll(async () => {
 describe("certificados digitais — catálogo e autorização de acompanhamento", () => {
   it("catálogo padrão tem e-CNPJ A1; a equipe inclui e-CPF; o escritório não altera parâmetros da plataforma", async () => {
     const s0 = await certificationSettings(store);
-    expect(s0.catalog.map((p) => p.key)).toEqual(["ecnpj_a1_12m"]);
+    // catálogo padrão da rede de certificação (§43): e-CNPJ A1 continua o primeiro, com o preço da Tela 67
+    expect(s0.catalog[0]).toMatchObject({ key: "ecnpj_a1_12m", price: 19900 });
     await expect(saveCertificationSettings(owner, { paymentInstructions: "x" })).rejects.toThrow();
-    const s1 = await saveCertificationSettings(team, { catalog: [...s0.catalog, { key: "ecpf_a1_12m", label: "e-CPF A1 · 12 meses", months: 12, price: 15900, active: true }], paymentInstructions: "Pix: pagamentos@intercert.example (CNPJ)" });
-    expect(s1.catalog).toHaveLength(2);
+    const s1 = await saveCertificationSettings(team, { catalog: [...s0.catalog, { key: "ecpf_a1_teste", label: "e-CPF A1 · 12 meses (teste)", months: 12, price: 15900, active: true }], paymentInstructions: "Pix: pagamentos@intercert.example (CNPJ)" });
+    expect(s1.catalog).toHaveLength(s0.catalog.length + 1);
     expect((await certificationSettings(store)).paymentInstructions).toContain("Pix");
   });
 

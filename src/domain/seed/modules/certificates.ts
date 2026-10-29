@@ -12,13 +12,13 @@ import { addDays, today } from "@/lib/dates";
 import { createRole } from "../../roles";
 import {
   saveCertificationSettings, setCertificateTracking, registerKnownCertificate, createCertificateRequest, sendCertificateCharge, confirmCertificatePayment, scheduleCertificateValidation,
-  approveCertificateValidation, requestCertificateEmission, registerCertificateEmission, recordCertificateAuthorization, createClient,
+  approveCertificateValidation, requestCertificateEmission, registerCertificateEmission, recordCertificateAuthorization, createClient, DEFAULT_CERT_CATALOG,
 } from "../../accounting";
 
 /**
  * Demonstração da Tela 67 (certificados digitais) no escritório de demonstração — depende do módulo "accounting":
  *  - usuário "certificacao" (equipe de certificação Intercert, perfil próprio com a operação certification.operate);
- *  - catálogo com e-CNPJ e e-CPF A1 e instruções de pagamento de demonstração;
+ *  - catálogo padrão (e-CNPJ/e-CPF A1 e A3, BirdID, com custo AC — §43) e instruções de pagamento de demonstração;
  *  - loja de demonstração autoriza o acompanhamento; certificados conhecidos (loja a vencer em 19 dias, holding vencido há 8);
  *  - 4 protocolos em etapas diferentes: cobrança enviada, validação agendada, pronto para baixar (arquivo .pfx de demonstração
  *    emitido de verdade, autorização registrada) e pronto para emitir.
@@ -45,10 +45,8 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   const team = await ctxFor(teamUser);
 
   await saveCertificationSettings(team, {
-    catalog: [
-      { key: "ecnpj_a1_12m", label: "e-CNPJ A1 · 12 meses", months: 12, price: 19900, active: true },
-      { key: "ecpf_a1_12m", label: "e-CPF A1 · 12 meses", months: 12, price: 15900, active: true },
-    ],
+    // catálogo padrão da rede de certificação (§43): produtos do InterSuite com custo AC, tipo, titular e AC de 1º nível
+    catalog: DEFAULT_CERT_CATALOG,
     paymentInstructions: "Pagamento único à Intercert Certificação (DEMO): Pix para a chave pagamentos@intercert.example, informando o protocolo. A cobrança é separada da mensalidade do ERP.",
   });
 

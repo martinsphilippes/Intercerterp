@@ -197,6 +197,12 @@ export const PARAMS: ParamDef[] = [
     help: "Mostra Administração › Importação: assistente por CSV (modelo para baixar, mapeamento de colunas, prévia linha a linha) para clientes, fornecedores, saldos iniciais de estoque (movimento “Saldo inicial” com custo) e títulos a receber/pagar em aberto. Aplica em lotes de até 100 linhas, com relatório de erros por linha; reimportar o mesmo arquivo não duplica nada. Só administradores importam. Desligado, a tela some; o que já foi importado continua como está.",
     usedBy: "Administração (importação), Clientes, Fornecedores, Estoque e Financeiro",
   },
+  // rede de certificação (§43) — padrão por tipo de empresa: ligado em parceiros da rede e escritórios, desligado no varejo
+  {
+    key: "feature.redeCertificacao", group: "Recursos", label: "Rede de certificação (parceiros, hierarquia e preços em cascata)", type: "bool", scopes: ["company"], default: false,
+    help: "Mostra a Rede de certificação: na plataforma Intercert, a árvore Master → Regional → Revenda → Contador com cadastro, mudança de posição, suspensão e encerramento de parceiros, a tabela padrão de preços por nível e o catálogo com o custo pago à AC; no parceiro, o painel “Minha rede” (nível, parceiro acima, filhos e descendentes), o cadastro de filhos e os preços dos filhos com a margem da camada; no escritório que é contador da rede, o cartão “Minha rede” com a revenda acima e os seus preços. Padrão: ligado nos parceiros da rede e nos escritórios contábeis, desligado nas empresas de varejo. Desligado, a tela e o menu somem; nada é apagado.",
+    usedBy: "Rede de certificação (plataforma, parceiros e escritórios contadores)",
+  },
   { key: "feature.baixaLote", group: "Recursos", label: "Baixa de títulos em lote", help: "Mostra a seleção múltipla de parcelas em Contas a receber e Contas a pagar com “Baixar selecionadas” (prévia por parcela, multa e juros sugeridos opcionais, resultado com o que foi baixado e o que falhou). Desligado, a baixa continua parcela a parcela.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber e a pagar)" },
   { key: "feature.carne", group: "Recursos", label: "Impressão de carnê", help: "Mostra “Imprimir carnê” no título a receber, na lista de contas a receber e na venda a prazo: uma lâmina por parcela com canhoto (3 por folha A4), multa e juros informativos e Pix copia e cola quando a conta tem chave Pix.", type: "bool", scopes: ["company", "branch"], default: true, usedBy: "Financeiro (contas a receber) e Vendas (venda a prazo)" },
   {

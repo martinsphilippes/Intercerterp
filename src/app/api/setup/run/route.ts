@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   if (step === "demo-update") {
     // atualização da DEMONSTRAÇÃO após uma nova versão (módulos novos, idempotente): só quando a empresa de demonstração existe
     const { listAll } = await import("@/lib/db");
-    const demo = (await listAll(store, "companies", { filters: [["eq", "isDemo", true]] })).find((c) => c.kind !== "accounting");
+    const demo = (await listAll(store, "companies", { filters: [["eq", "isDemo", true]] })).find((c) => (c.kind ?? "retail") === "retail"); // a loja de demonstração (não o escritório nem os parceiros da rede)
     if (!demo) return NextResponse.json({ ok: false, error: "Não há empresa de demonstração nesta instalação." }, { status: 404 });
     const { seedDemo } = await import("@/domain/seed");
     const r = await seedDemo(store, { historyDays: 1, deadline: started + 150000 });

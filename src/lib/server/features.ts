@@ -1,17 +1,17 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { BusinessError } from "@/lib/core/errors";
-import { featureDefault, isFeatureOn } from "@/lib/core/settings";
+import { featureDefaultFor, isFeatureOn } from "@/lib/core/settings";
 import type { SessionInfo } from "./session";
 
 /**
  * Recursos novos (telas aditivas) controlados por `feature.<chave>` em Parâmetros — ligados por padrão, exceto os de
  * `FEATURE_DEFAULTS` em src/lib/core/settings.ts (fidelidade, lotes, reserva na pré-venda, reforma tributária e os recursos de tributação da Fase 7 nascem desligados).
  */
-export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "inadimplencia" | "cobrancaWhatsapp" | "baixaLote" | "carne" | "comissoes" | "documentoComercial" | "balanca" | "kits" | "promocoes" | "fidelidade" | "lotes" | "reservaPreVenda" | "bipagemContagem" | "livroEntradas" | "cteEntrada" | "exportacaoDominio" | "inventarioFiscal" | "importacaoCadastros" | "taxasCartao" | "dre" | "fechamentoPeriodo" | "reformaTributaria" | "tributacaoCompleta" | "naturezasOperacao" | "creditoSimples" | "notaAConfirmar" | "arquivosFiscais";
+export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "inadimplencia" | "cobrancaWhatsapp" | "baixaLote" | "carne" | "comissoes" | "documentoComercial" | "balanca" | "kits" | "promocoes" | "fidelidade" | "lotes" | "reservaPreVenda" | "bipagemContagem" | "livroEntradas" | "cteEntrada" | "exportacaoDominio" | "inventarioFiscal" | "importacaoCadastros" | "taxasCartao" | "dre" | "fechamentoPeriodo" | "reformaTributaria" | "tributacaoCompleta" | "naturezasOperacao" | "creditoSimples" | "notaAConfirmar" | "arquivosFiscais" | "redeCertificacao";
 
 export function featureOn(s: SessionInfo, key: FeatureKey): Promise<boolean> {
-  return isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, key, featureDefault(key));
+  return isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, key, featureDefaultFor(key, s.company.kind));
 }
 
 /** Página de recurso desligado: responde como inexistente. */

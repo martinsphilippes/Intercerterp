@@ -68,6 +68,7 @@ export const STATUS: Record<string, Record<string, [string, Tone]>> = {
     issuing: ["Emissão em andamento", "info"], issue_failed: ["Falha na emissão", "bad"], awaiting_authorization: ["Aguardando autorização", "warn"], ready_to_download: ["Pronto para baixar", "good"],
     downloaded: ["Download realizado", "good"], cancelled: ["Cancelada", "neutral"],
   },
+  network_node: { active: ["Ativo", "good"], suspended: ["Suspenso", "warn"], closed: ["Encerrado", "neutral"] },
   certificate_validity: { expired: ["Vencido", "bad"], due_soon: ["Vence em breve", "warn"], ok: ["Válido", "good"], unknown: ["Validade não informada", "neutral"] },
   generic: { active: ["Ativo", "good"], inactive: ["Inativo", "neutral"], draft: ["Rascunho", "neutral"], completed: ["Concluído", "good"], cancelled: ["Cancelado", "neutral"], pending: ["Pendente", "warn"], processing: ["Processando", "info"], reconciled: ["Conciliado", "good"], ignored: ["Ignorado", "neutral"] },
 };

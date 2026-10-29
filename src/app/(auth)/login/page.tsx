@@ -20,6 +20,17 @@ const SECTORS: Record<string, { sector: string; order: number }> = {
   contador: { sector: "Escritório contábil — sócio", order: 8 },
   analista: { sector: "Escritório contábil — analista", order: 9 },
   certificacao: { sector: "Equipe de certificação Intercert", order: 10 },
+  // rede de certificação (§43)
+  rede: { sector: "Rede de certificação — plataforma Intercert", order: 11 },
+  master: { sector: "Rede — Master (Rede Nordeste)", order: 12 },
+  "regional.ce": { sector: "Rede — Regional Ceará", order: 13 },
+  "regional.ba": { sector: "Rede — Regional Bahia", order: 14 },
+  "revenda.juazeiro": { sector: "Rede — Revenda Juazeiro do Norte", order: 15 },
+  "revenda.fortaleza": { sector: "Rede — Revenda Fortaleza", order: 16 },
+  "revenda.salvador": { sector: "Rede — Revenda Salvador", order: 17 },
+  "vendedor.juazeiro": { sector: "Rede — vendedor (Juazeiro do Norte)", order: 18 },
+  "vendedor.fortaleza": { sector: "Rede — vendedor (Fortaleza)", order: 19 },
+  "vendedor.salvador": { sector: "Rede — vendedor (Salvador)", order: 20 },
 };
 
 /** Somente usuários da empresa de demonstração, ativos e com acesso criado — nunca contas reais. */

@@ -11,6 +11,7 @@ import { can, canDo } from "@/lib/permissions";
 import { formatDateTime, formatMonth } from "@/lib/dates";
 import { CERT_DUE_SOON_DAYS, certificateOverview, CLIENT_STATUS } from "@/domain/accounting";
 import { portfolioOverview } from "./queries";
+import { FirmNetworkCard } from "./network-card";
 
 export const metadata = { title: "Painel da carteira" };
 
@@ -79,6 +80,8 @@ export default async function Page() {
           <Stat label="Solicitações em atendimento" value={cert.open.toLocaleString("pt-BR")} href="/contabil/certificados?status=open" hint="Do pagamento à entrega do certificado" />
         </div>
       </section>
+
+      <FirmNetworkCard s={s} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">

@@ -54,6 +54,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const s = await requireSession("dashboard");
   // escritório contábil: o painel é o da carteira
   if (s.company.kind === "accounting") redirect("/contabil");
+  // parceiro da rede de certificação (§43): o painel é "Minha rede"
+  if (s.company.kind === "certification") redirect("/rede/minha");
   const params = await searchParams;
   const rp = resolveReportParams(s, params, "mes");
   const canSales = can(s.user, "sales") || can(s.user, "reports");

@@ -28,7 +28,7 @@ export interface AddressInput {
 }
 
 export interface CompanyInput {
-  /** "retail" (padrão) ou "accounting" (escritório contábil) */
+  /** "retail" (padrão), "accounting" (escritório contábil) ou "certification" (parceiro da rede de certificação) */
   kind?: string | null;
   name: string;
   tradeName?: string | null;
@@ -62,6 +62,7 @@ export interface BranchInput {
 export const COMPANY_KINDS = [
   { value: "retail", label: "Empresa operacional (comércio, serviços)" },
   { value: "accounting", label: "Escritório contábil (carteira de clientes)" },
+  { value: "certification", label: "Parceiro da rede de certificação (Master, Regional ou Revenda)" },
 ];
 
 export const REGIMES = [
@@ -103,7 +104,8 @@ export function validateAddress(a: ReturnType<typeof cleanAddress>) {
   if (a.zip) assert(/^\d{8}$/.test(a.zip), "CEP deve ter 8 dígitos.");
 }
 
-function companyData(input: CompanyInput) {
+/** Validação e normalização do cadastro da empresa (também usada pelo cadastro de parceiros da rede de certificação — §43). */
+export function companyData(input: CompanyInput) {
   assert(input.name?.trim(), "Informe a razão social.");
   const cnpj = onlyDigits(input.cnpj) || null;
   if (cnpj) assert(isValidCnpj(cnpj), "CNPJ inválido.");
@@ -147,7 +149,7 @@ export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName
   const { company, branch, roles } = await createCompanyWithDefaults(unscoped(ctx.store), {
     key: newId(),
     name: data.name, tradeName: data.tradeName, cnpj: data.cnpj ?? undefined, regime: data.regime, uf: data.address.uf, cityName: data.address.cityName,
-    cityCode: data.address.cityCode, branchName: input.branchName?.trim() || "Matriz", createdBy: ctx.user.id, kind: data.kind as "retail" | "accounting",
+    cityCode: data.address.cityCode, branchName: input.branchName?.trim() || "Matriz", createdBy: ctx.user.id, kind: data.kind as "retail" | "accounting" | "certification",
   });
   const store = unscoped(ctx.store);
   const updated = await store.update("companies", company.id, { ...data, status: "active" });

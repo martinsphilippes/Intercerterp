@@ -130,3 +130,4 @@ Cada tela tem a lista de inconsistências do protótipo em `docs/referencia/tela
 | `/dashboard/metas` | Cadastro de metas usadas no painel. |
 | `/api/jobs` | Executor de tarefas duráveis (Vercel Cron) — emissão/consulta fiscal, efeitos de venda, rotinas. |
 | `/api/files/[id]`, `/api/export/[key]` | Download controlado de arquivos e exportações CSV. |
+| `/rede`, `/rede/[id]`, `/rede/novo`, `/rede/precos`, `/rede/parametros`, `/rede/minha` | Rede de certificação — etapa 1 (§43): hierarquia comercial Master → Regional → Revenda → Contador, preço em cascata e painel do parceiro (substitui o InterSuite). |
