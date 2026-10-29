@@ -35,9 +35,19 @@ export interface ProductInfo {
   key: string;
   label: string;
   months: number;
-  /** centavos */
+  /** centavos — preço de catálogo ou, no escritório que é nó da rede, o preço padrão do nó (§45) */
   price: number;
+  /** §45: termos da rede do escritório-contador (null = fora da rede: catálogo) */
+  network?: { cost: number; minPrice: number; canEdit: boolean } | null;
 }
+
+/** "1.234,56" / "199,00" / "199.5" → centavos (NaN quando ilegível). */
+const cents = (v: string) => {
+  const t = v.trim();
+  if (!t) return NaN;
+  const n = t.includes(",") ? Number(t.replace(/\./g, "").replace(",", ".")) : Number(t);
+  return Number.isFinite(n) ? Math.round(n * 100) : NaN;
+};
 
 /** centavos → "199,00" (o campo de valor é texto em reais, como o usuário digita). */
 const toReais = (cents: number) => (cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -183,13 +193,13 @@ export function RequestForm({
                 <Field label="Solicitação" required hint={kind === "renewal" ? (previousId ? "Renova o certificado atual do cliente; o anterior fica no histórico com a validade original." : "Renovação sem certificado anterior registrado na carteira.") : "Primeira emissão para este titular."}>
                   <Select name="kind" value={kind} onChange={(e) => setKind(e.target.value === "renewal" ? "renewal" : "new")} options={CERT_KIND.map((k) => ({ value: k.value, label: k.label }))} disabled={pending} />
                 </Field>
-                <Field label="Produto" required hint={product ? `${product.months} ${product.months === 1 ? "mês" : "meses"} de validade · valor de catálogo ${formatMoney(product.price)}` : undefined}>
+                <Field label="Produto" required hint={product ? `${product.months} ${product.months === 1 ? "mês" : "meses"} de validade · ${product.network ? `preço da rede ${formatMoney(product.price)} · mínimo ${formatMoney(product.network.minPrice)} · seu custo ${formatMoney(product.network.cost)}${product.network.canEdit ? "" : " (preço fixo)"}` : `valor de catálogo ${formatMoney(product.price)}`}` : undefined}>
                   <Select name="product" value={productKey} onChange={(e) => pickProduct(e.target.value)} options={products.map((p) => ({ value: p.key, label: p.label }))} disabled={pending} />
                 </Field>
-                <Field label="Valor da cobrança (R$)" required hint="Pagamento único, separado da mensalidade do ERP.">
+                <Field label="Valor da cobrança (R$)" required hint={product?.network ? `Sua margem: ${Number.isFinite(cents(amount)) ? formatMoney(cents(amount) - product.network.cost) : "—"} · nunca abaixo do mínimo da rede.` : "Pagamento único, separado da mensalidade do ERP."}>
                   {/* só números em reais ("199,00", "1.234,56" ou "1234.56"): o navegador barra outro formato antes do envio;
                       "1.234" sem centavos é ambíguo (parseMoney leria R$ 1,23) e por isso não é aceito */}
-                  <Input name="amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="199,00" required pattern="[0-9]{1,3}(\.[0-9]{3})+,[0-9]{1,2}|[0-9]+([.,][0-9]{1,2})?" title="Informe o valor em reais, por exemplo 199,00 ou 1.234,56" disabled={pending} className="tabular" />
+                  <Input name="amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="199,00" required pattern="[0-9]{1,3}(\.[0-9]{3})+,[0-9]{1,2}|[0-9]+([.,][0-9]{1,2})?" title="Informe o valor em reais, por exemplo 199,00 ou 1.234,56" disabled={pending} readOnly={Boolean(product?.network && !product.network.canEdit)} className="tabular" />
                 </Field>
               </FormGrid>
             </FormSection>

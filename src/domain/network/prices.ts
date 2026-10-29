@@ -135,6 +135,39 @@ export async function effectivePrice(store: Store, nodeId: string, productKey: s
   return effectiveIn(await world(store), nodeId, productKey, date);
 }
 
+export interface ChainLevel {
+  nodeId: string;
+  name: string;
+  level: string;
+  /** quanto o nó paga ao de cima (ao pai; para quem está direto abaixo da Intercert, à Intercert) */
+  cost: number;
+  /** margem da camada de cima = cost(nó) − cost(pai) (ou − custo AC) */
+  parentMargin: number | null;
+  minPrice: number;
+  defaultPrice: number;
+  canEdit: boolean;
+}
+
+/**
+ * Cascata de um nó para um produto (base do retrato da venda — §45): do nível mais alto até o nó, cada um com o custo
+ * pago ao de cima, e o custo AC da Intercert. `null` quando algum nível do caminho não tem preço definido.
+ */
+export async function cascadeChain(store: Store, nodeId: string, productKey: string, date: string = today()): Promise<{ acCost: number | null; levels: ChainLevel[] } | null> {
+  const w = await world(store);
+  const node = w.nodes.find((n) => n.id === nodeId);
+  if (!node) return null;
+  const ids = [...(node.path ?? []), node.id];
+  const levels: ChainLevel[] = [];
+  for (const id of ids) {
+    const n = w.nodes.find((x) => x.id === id);
+    const p = n ? effectiveIn(w, id, productKey, date) : null;
+    if (!n || !p) return null;
+    levels.push({ nodeId: id, name: n.name, level: n.level, cost: p.cost, parentMargin: p.parentMargin, minPrice: p.minPrice, defaultPrice: p.defaultPrice, canEdit: p.canEdit });
+  }
+  const ac = w.catalog.find((p) => p.key === productKey)?.acCost;
+  return { acCost: ac == null ? null : Number(ac), levels };
+}
+
 /**
  * Confere que os termos novos de um nó não deixam a camada de baixo inválida: os filhos diretos (pela regra própria
  * ou pela tabela padrão que o nó definiu) e a própria tabela padrão do nó precisam continuar acima.

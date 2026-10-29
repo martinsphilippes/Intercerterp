@@ -55,6 +55,11 @@ export interface CertProduct {
   supplier?: "soluti" | "serpro" | null;
   /** padrão "a rede pode alterar o preço de venda" (false = preço fixo, como o BirdID) */
   editable?: boolean | null;
+  /**
+   * §45: produto GRATUITO (preço R$ 0, sem cobrança — vai direto à validação). Uso: BirdID gratuito com validade longa
+   * (o titular passa a ter BirdID e depois renova sem nova videoconferência). Só pela venda gratuita da rede.
+   */
+  free?: boolean | null;
 }
 
 /** Catálogo padrão (vale só enquanto nenhum catálogo foi salvo): produtos parecidos com os do InterSuite. */
@@ -64,6 +69,8 @@ export const DEFAULT_CERT_CATALOG: CertProduct[] = [
   { key: "ecpf_a1_12m", label: "e-CPF A1 · 12 meses", months: 12, price: 15000, active: true, acCost: 6000, type: "a1", holder: "pf", supplier: "soluti", editable: true },
   { key: "ecpf_a3_36m", label: "e-CPF A3 · 36 meses", months: 36, price: 25000, active: true, acCost: 11000, type: "a3", holder: "pf", supplier: "serpro", editable: true },
   { key: "birdid_12m", label: "BirdID (nuvem) · 12 meses", months: 12, price: 9900, active: true, acCost: 4000, type: "birdid", holder: "pf", supplier: "soluti", editable: false },
+  // §45: BirdID gratuito (R$ 0, validade de 5 anos) — só pela venda gratuita da rede, um ativo por CPF
+  { key: "birdid_free_60m", label: "BirdID gratuito · 5 anos", months: 60, price: 0, active: true, acCost: 0, type: "birdid", holder: "pf", supplier: "soluti", editable: false, free: true },
 ];
 
 export interface CertificationSettings {
@@ -106,13 +113,15 @@ export async function saveCertificationSettings(ctx: Ctx, input: Partial<Certifi
       holder: pick(has("holder") ? p.holder : prev.holder, CERT_HOLDERS),
       supplier: pick(has("supplier") ? p.supplier : prev.supplier, CERT_SUPPLIERS),
       editable: (has("editable") ? p.editable : prev.editable) !== false,
+      free: (has("free") ? p.free : prev.free) === true,
     };
   });
   assert(catalog.length > 0, "Informe ao menos um produto no catálogo.");
   for (const p of catalog) {
     assert(p.key, "Produto sem identificador.");
     assert(p.label, `Produto ${p.key} sem descrição.`);
-    assert(p.price > 0, `Produto ${p.label}: informe o valor.`);
+    if (p.free) assert(p.price === 0 && !p.acCost, `Produto ${p.label}: produto gratuito tem preço e custo AC zerados.`);
+    else assert(p.price > 0, `Produto ${p.label}: informe o valor.`);
     assert(p.acCost == null || p.acCost <= p.price, `Produto ${p.label}: o custo pago à AC não pode passar do preço de venda.`);
   }
   assert(new Set(catalog.map((p) => p.key)).size === catalog.length, "Identificadores de produto repetidos.");
@@ -240,6 +249,18 @@ export function requestIsOpen(r: Doc): boolean {
   return CERT_OPEN_STATUSES.includes(r.status);
 }
 
+/** §45: venda de um parceiro da rede (Master/Regional/Revenda e vendedores) — o mesmo ciclo da Tela 67, outro "lado". */
+export function isNetworkSale(r: Doc | Record<string, any>): boolean {
+  return r.channel === "network";
+}
+
+/** Lado "dono" da solicitação: o escritório (Tela 67) ou o parceiro que vendeu (vendedor ou quem vê todo o nó). */
+export function isOwnerActor(ctx: Ctx, r: Doc): boolean {
+  if (r.companyId !== ctx.companyId) return false;
+  if (!isNetworkSale(r)) return canDo(ctx.user, "accounting.certificates");
+  return canDo(ctx.user, "network.sell") && (canDo(ctx.user, "network.sales_all") || r.sellerUserId === ctx.user.id);
+}
+
 /** Próxima ação e responsável por ela, conforme a etapa — a mesma régua das telas. */
 export function requestNextAction(r: Doc, ref = today()): { label: string; owner: "firm" | "team" | "company" | "none" } {
   const display = requestDisplayStatus(r, ref);
@@ -275,7 +296,12 @@ export async function createCertificateRequest(ctx: Ctx, input: CertRequestInput
   const settings = await certificationSettings(ctx.store);
   const product = productByKey(settings, input.product);
   if (!product || !product.active) throw new BusinessError("Produto inválido ou inativo no catálogo.", "product");
-  const amount = input.amount == null || input.amount === 0 ? product.price : Math.round(input.amount);
+  if (product.free) throw new BusinessError("Produto gratuito: a emissão gratuita é feita pela venda gratuita da rede de certificação, não pela cobrança do escritório.", "product");
+  // §45: escritório que é nó CONTADOR da rede vende pelo preço da rede (padrão do nó; alterável só se a regra permitir,
+  // nunca abaixo do mínimo) e a solicitação guarda o retrato da cascata; fora da rede, o catálogo como antes
+  const { firmNetworkPricing } = await import("../network/sales");
+  const net = await firmNetworkPricing(ctx, product, input.amount == null || input.amount === 0 ? null : Math.round(input.amount));
+  const amount = net ? net.amount : input.amount == null || input.amount === 0 ? product.price : Math.round(input.amount);
   assert(amount > 0, "Informe o valor da cobrança.");
   assert(/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) && input.dueDate >= today(), "O vencimento da cobrança não pode ser anterior a hoje.");
   const contactEmail = (input.contactEmail ?? client.email ?? "").trim().toLowerCase() || null;
@@ -291,10 +317,17 @@ export async function createCertificateRequest(ctx: Ctx, input: CertRequestInput
     holderName: client.name, holderDoc: client.doc ?? null, linkedCompanyId: linked, contactEmail, contactPhone: input.contactPhone?.trim() || client.phone || null, amount, dueDate: input.dueDate,
     status: "awaiting_payment" satisfies CertStatus, responsibleUserId: input.responsibleUserId || client.responsibleUserId || ctx.user.id, previousCertificateId: input.previousCertificateId || null, notes: input.notes?.trim() || null,
     chargeSends: 0, emissionAttempts: 0, downloads: 0, downloadAuthorized: false, validationStatus: "pending",
+    productType: product.type ?? null, holderType: product.holder ?? null,
+    ...(net ? { channel: "firm", sellerNodeId: net.cascade.sellerNodeId, sellerUserId: ctx.user.id, sellerName: ctx.user.name, cascade: net.sellerView, listPrice: net.cascade.listPrice, minPrice: net.cascade.minPrice, discount: 0 } : {}),
   });
+  if (net) {
+    // retrato completo da cascata: registro da plataforma (a solicitação do escritório guarda só a visão dele)
+    const { saveFirmSaleCascade } = await import("../network/sales");
+    await saveFirmSaleCascade(ctx.store, row, net.cascade, ctx.user.id);
+  }
   await audit(ctx, {
-    module: "accounting", action: "certificate.request", entityType: "certificate_request", entityId: row.id, summary: `Solicitação ${row.protocol} criada: ${CERT_KIND_LABEL[input.kind]} de ${product.label} para ${client.name} — ${formatMoney(amount)}, vencimento ${formatDate(input.dueDate)}`,
-    after: { kind: input.kind, product: product.key, amount, dueDate: input.dueDate }, related: [`accounting_client:${client.id}`],
+    module: "accounting", action: "certificate.request", entityType: "certificate_request", entityId: row.id, summary: `Solicitação ${row.protocol} criada: ${CERT_KIND_LABEL[input.kind]} de ${product.label} para ${client.name} — ${formatMoney(amount)}, vencimento ${formatDate(input.dueDate)}${net ? ` · preço da rede (custo ${formatMoney(net.cascade.sellerCost)}, margem ${formatMoney(amount - net.cascade.sellerCost)})` : ""}`,
+    after: { kind: input.kind, product: product.key, amount, dueDate: input.dueDate, ...(net ? { sellerNodeId: net.cascade.sellerNodeId, cascade: net.sellerView } : {}) }, related: [`accounting_client:${client.id}`],
   });
   return row;
 }
@@ -302,7 +335,7 @@ export async function createCertificateRequest(ctx: Ctx, input: CertRequestInput
 export async function getCertificateRequest(ctx: Ctx, id: string): Promise<Doc> {
   requirePerm(ctx, "accounting", "view");
   const r = await ctx.store.get("certificate_requests", id);
-  if (!r || r.companyId !== ctx.companyId) throw new BusinessError("Solicitação não encontrada.", "not_found");
+  if (!r || r.companyId !== ctx.companyId || isNetworkSale(r)) throw new BusinessError("Solicitação não encontrada.", "not_found");
   const visible = await visibleClientIds(ctx);
   if (visible && !visible.has(r.clientId)) throw new BusinessError("Esta solicitação não está na sua carteira.", "forbidden");
   return r;
@@ -318,7 +351,7 @@ export async function listCertificateRequests(ctx: Ctx, f: CertRequestFilter = {
   requirePerm(ctx, "accounting", "view");
   const filters: any[] = [["eq", "companyId", ctx.companyId]];
   if (f.clientId) filters.push(["eq", "clientId", f.clientId]);
-  const rows = await listAll(ctx.store, "certificate_requests", { filters, orderBy: [{ field: "createdAt", dir: "desc" }] }, 5000);
+  const rows = (await listAll(ctx.store, "certificate_requests", { filters, orderBy: [{ field: "createdAt", dir: "desc" }] }, 5000)).filter((r) => !isNetworkSale(r));
   const visible = await visibleClientIds(ctx);
   const ref = today();
   return rows
@@ -340,13 +373,13 @@ interface EventInput {
 }
 
 async function logEvent(ctx: Ctx, r: Doc, input: EventInput) {
-  const related = [`accounting_client:${r.clientId}`, ...(input.related ?? [])];
+  const related = [isNetworkSale(r) ? `cert_customer:${r.clientId}` : `accounting_client:${r.clientId}`, ...(input.related ?? [])];
   if (ctx.companyId === r.companyId) {
-    await audit(ctx, { module: "accounting", action: input.action, entityType: "certificate_request", entityId: r.id, summary: input.summary, before: input.before, after: input.after, reason: input.reason ?? null, related });
+    await audit(ctx, { module: isNetworkSale(r) ? "admin" : "accounting", action: input.action, entityType: "certificate_request", entityId: r.id, summary: input.summary, before: input.before, after: input.after, reason: input.reason ?? null, related });
     return;
   }
   await unscoped(ctx.store).create("audit_logs", {
-    companyId: r.companyId, branchId: null, userId: ctx.user.id, userName: ctx.user.name, userRole: input.role ?? "Equipe de certificação", module: "accounting", action: input.action,
+    companyId: r.companyId, branchId: null, userId: ctx.user.id, userName: ctx.user.name, userRole: input.role ?? "Equipe de certificação", module: isNetworkSale(r) ? "admin" : "accounting", action: input.action,
     entityType: "certificate_request", entityId: r.id, summary: input.summary, before: input.before ?? null, after: input.after ?? null, reason: input.reason ?? null, result: "success",
     ip: ctx.ip ?? null, occurredAt: nowIso(), operationId: null, related,
   }).catch(() => undefined);
@@ -354,9 +387,9 @@ async function logEvent(ctx: Ctx, r: Doc, input: EventInput) {
 
 async function notifyFirm(store: Store, r: Doc, input: { title: string; body?: string; priority?: "low" | "normal" | "high" | "critical"; key: string }) {
   await notify(unscoped(store), {
-    companyId: r.companyId, type: "info", priority: input.priority ?? "normal", title: input.title, body: input.body, link: `/contabil/certificados/${r.id}`,
+    companyId: r.companyId, type: "info", priority: input.priority ?? "normal", title: input.title, body: input.body, link: isNetworkSale(r) ? `/rede/vendas/${r.id}` : `/contabil/certificados/${r.id}`,
     originType: "certificate_request", originId: r.id, occurrenceKey: `cert:${r.id}:${input.key}`,
-    audience: r.responsibleUserId ? { userIds: [r.responsibleUserId] } : { module: "accounting" },
+    audience: r.responsibleUserId ? { userIds: [r.responsibleUserId] } : isNetworkSale(r) ? { action: "network.sales_all" } : { module: "accounting" },
   }).catch(() => 0);
 }
 
@@ -372,11 +405,12 @@ async function loadForActor(ctx: Ctx, id: string, actor: "firm" | "team" | "firm
   const r = await unscoped(ctx.store).get("certificate_requests", id);
   if (!r) throw new BusinessError("Solicitação não encontrada.", "not_found");
   const isTeam = canDo(ctx.user, "certification.operate");
-  const isFirm = r.companyId === ctx.companyId && canDo(ctx.user, "accounting.certificates");
+  // "firm" = o lado dono: o escritório (Tela 67) ou o parceiro que vendeu (§45)
+  const isFirm = isOwnerActor(ctx, r);
   if (actor === "team" && !isTeam) throw new PermissionError();
   if (actor === "firm" && !isFirm) throw new PermissionError();
   if (actor === "firm_or_team" && !isTeam && !isFirm) throw new PermissionError();
-  if (isFirm && !isTeam) await getCertificateRequest(ctx, id); // carteira visível
+  if (isFirm && !isTeam && !isNetworkSale(r)) await getCertificateRequest(ctx, id); // carteira visível
   return r;
 }
 
@@ -461,6 +495,11 @@ export async function confirmCertificatePayment(ctx: Ctx, id: string, input: { r
   const amount = input.amount != null && input.amount > 0 ? Math.round(input.amount) : r.amount;
   const after = await patch(ctx, r, { status: "validation", validationStatus: "pending", paymentConfirmedAt: paidAt, paymentRef, paymentBy: ctx.user.id, amount });
   await logEvent(ctx, r, { action: "certificate.payment_confirmed", summary: `Pagamento confirmado — ${formatMoney(amount)} · referência ${paymentRef}`, after: { paymentRef, paidAt, amount } });
+  if (r.couponId) {
+    // §45: o uso do cupom reservado na venda passa a consumido (conta no limite de forma definitiva)
+    const { consumeCouponUse } = await import("../network/coupons");
+    await consumeCouponUse(ctx.store, r);
+  }
   await notifyFirm(ctx.store, after, { title: `Pagamento confirmado — ${r.protocol} (${r.holderName})`, body: `Referência ${paymentRef}. A solicitação segue para a validação do titular pela equipe de certificação.`, key: "paid" });
   return after;
 }
@@ -550,7 +589,12 @@ export async function registerCertificateEmission(ctx: Ctx, id: string, input: E
   const cert = await firmCtx.store.create("accounting_certificates", {
     companyId: r.companyId, branchId: null, createdBy: ctx.user.id, clientId: r.clientId, holderName: r.holderName, holderDoc: r.holderDoc ?? null, product: r.product, productLabel: r.productLabel,
     serial, issuer, validFrom, validTo, source: "issued", requestId: r.id, fileId: file.id, notes: null, active: true,
+    channel: isNetworkSale(r) ? "network" : "firm", customerId: isNetworkSale(r) ? r.clientId : null, sellerNodeId: r.sellerNodeId ?? null, sellerUserId: r.sellerUserId ?? null, productType: r.productType ?? null, holderType: r.holderType ?? null,
   });
+  if (isNetworkSale(r)) {
+    const { onNetworkSaleIssued } = await import("../network/sales");
+    await onNetworkSaleIssued(ctx.store, r, { validTo });
+  }
   // a renovação substitui o anterior no acompanhamento; o histórico do anterior permanece
   if (r.previousCertificateId) await firmCtx.store.update("accounting_certificates", r.previousCertificateId, { active: false }).catch(() => undefined);
   const status: CertStatus = r.downloadAuthorized ? "ready_to_download" : "awaiting_authorization";
@@ -648,10 +692,10 @@ async function confirmPassword(ctx: Ctx, password: string) {
 export async function downloadIssuedCertificate(ctx: Ctx, id: string, input: { password: string }): Promise<{ request: Doc; name: string; data: Buffer }> {
   const r = await unscoped(ctx.store).get("certificate_requests", id);
   if (!r) throw new BusinessError("Solicitação não encontrada.", "not_found");
-  const asFirm = r.companyId === ctx.companyId && canDo(ctx.user, "accounting.certificates");
+  const asFirm = isOwnerActor(ctx, r);
   const asHolder = Boolean(r.linkedCompanyId) && r.linkedCompanyId === ctx.companyId && canDo(ctx.user, "fiscal.configure");
   if (!asFirm && !asHolder) throw new PermissionError();
-  if (asFirm) await getCertificateRequest(ctx, id);
+  if (asFirm && !isNetworkSale(r)) await getCertificateRequest(ctx, id);
   if (!r.fileId || !["awaiting_authorization", "ready_to_download", "downloaded"].includes(r.status)) throw new BusinessError("O certificado ainda não foi emitido.", "not_issued");
   if (asFirm && !r.downloadAuthorized) throw new BusinessError("O titular ainda não autorizou o download pelo escritório. A entrega permanece disponível ao próprio titular.", "not_authorized");
   await confirmPassword(ctx, input.password);
@@ -665,11 +709,18 @@ export async function downloadIssuedCertificate(ctx: Ctx, id: string, input: { p
 
 export async function cancelCertificateRequest(ctx: Ctx, id: string, input: { reason: string }): Promise<Doc> {
   const r = await loadForActor(ctx, id, "firm_or_team");
-  if (r.status !== "awaiting_payment") throw new BusinessError("Só solicitações ainda não pagas podem ser canceladas. Com pagamento confirmado, fale com a equipe de certificação.", "status");
+  // venda sem cobrança (gratuita ou voucher presente — §45) pode ser cancelada enquanto o titular não foi validado
+  const noCharge = Number(r.amount ?? 0) === 0 && Boolean(r.free || r.gift) && r.status === "validation";
+  if (r.status !== "awaiting_payment" && !noCharge) throw new BusinessError("Só solicitações ainda não pagas podem ser canceladas. Com pagamento confirmado, fale com a equipe de certificação.", "status");
   const reason = String(input.reason ?? "").trim();
   assert(reason, "Informe o motivo do cancelamento.");
   const after = await patch(ctx, r, { status: "cancelled", cancelledAt: nowIso(), cancelledBy: ctx.user.id, cancelReason: reason });
   await logEvent(ctx, r, { action: "certificate.cancelled", summary: `Solicitação ${r.protocol} cancelada: ${reason}`, reason, after: { reason }, role: ctx.companyId === r.companyId ? undefined : "Equipe de certificação" });
+  // §45: estorno do resgate de voucher, liberação do cupom reservado e do BirdID gratuito (idempotentes)
+  if (r.voucherRedemptionId || r.couponId || r.free) {
+    const { onSaleCancelled } = await import("../network/sales");
+    await onSaleCancelled(ctx, after);
+  }
   return after;
 }
 

@@ -9,7 +9,11 @@ import type { Ctx } from "@/lib/core/ctx";
 import { getSetting, setSetting } from "@/lib/core/settings";
 import { PARTNER_ROLES } from "@/lib/permissions";
 import { createCompanyWithDefaults } from "../../setup";
-import { NETWORK_SCOPE, createNode, nodeOfCompany, saveLevelPriceRule, type NetworkLevel } from "../../network";
+import { addDays, today } from "@/lib/dates";
+import {
+  NETWORK_SCOPE, createNode, nodeOfCompany, saveLevelPriceRule, saveCertCustomer, createNetworkSale, createCoupon, createVoucherPackage, purchaseVoucherPackage, registerRenewalContact, type NetworkLevel,
+} from "../../network";
+import { approveCertificateValidation, confirmCertificatePayment, recordCertificateAuthorization, registerCertificateEmission, requestCertificateEmission, sendCertificateCharge } from "../../accounting/certificates";
 
 /**
  * Demonstração da REDE DE CERTIFICAÇÃO (§43) — depende dos módulos "accounting" e "certificates":
@@ -133,5 +137,124 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   }
 
   await setSetting(store, NETWORK_SCOPE, null, "demo.network.done", true);
-  return { platformCompanyId: plat.company.id, partners: PARTNERS.length, contador: Boolean(firm), rules };
+  const sales = await seedSales(store, platform, nodes, admins, ctxOf);
+  return { platformCompanyId: plat.company.id, partners: PARTNERS.length, contador: Boolean(firm), rules, sales };
+}
+
+// ------------------------------------------------------------------------------------------------ etapa 2 (§45)
+
+/** CPF/CNPJ válidos a partir da base (dígitos verificadores calculados). */
+function withCheckDigits(base: string, weights: number[][]): string {
+  let doc = base;
+  for (const w of weights) {
+    const sum = w.reduce((a, k, i) => a + k * Number(doc[i]), 0);
+    const r = sum % 11;
+    doc += String(r < 2 ? 0 : 11 - r);
+  }
+  return doc;
+}
+const cpf = (base9: string) => withCheckDigits(base9, [[10, 9, 8, 7, 6, 5, 4, 3, 2], [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]]);
+const cnpj = (base12: string) => withCheckDigits(base12, [[5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]]);
+
+/**
+ * Vendas da rede para a demonstração (§45; marcador "demo.network.sales.done"): clientes de certificado em cada
+ * revenda; vendas pagas, em validação e emitidas; um pacote de vouchers da Regional Ceará comprado pela Revenda
+ * Juazeiro com parte resgatada; dois cupons (um do próprio nó, outro de nível acima); BirdID gratuitos; e
+ * certificados vencendo em 7/30/60 dias, vencido e perdido, com e sem contato registrado.
+ */
+async function seedSales(store: Store, platform: Ctx, nodes: Record<string, Doc>, admins: Record<string, Doc>, ctxOf: (u: Doc, companyId: string) => Promise<Ctx>): Promise<unknown> {
+  if (await getSetting(store, NETWORK_SCOPE, null, "demo.network.sales.done", false)) return { skipped: true };
+  const t = today();
+  const user = async (login: string) => (await findOne(store, "users", [["eq", "login", login]]))!;
+  const adminCtx = async (k: string) => ctxOf(admins[k], nodes[k].nodeCompanyId);
+  const sellerCtx = async (k: string, login: string) => ctxOf(await user(login), nodes[k].nodeCompanyId);
+  const team = platform; // a plataforma de demonstração também opera a certificação
+
+  // cupons: um da própria revenda (10%, 1 por titular) e um da Regional Ceará para Fortaleza (R$ 20 — nível acima absorve)
+  const juaAdmin = await adminCtx("juazeiro");
+  await createCoupon(juaAdmin, { code: "JUAZEIRO10", kind: "percent", valueBps: 1000, validTo: addDays(t, 90), maxUses: 50, maxPerHolder: 1, notes: "Campanha do Cariri (DEMO)" });
+  await createCoupon(await adminCtx("ceara"), { code: "CEARA20", kind: "fixed", valueCents: 2000, nodeId: nodes.fortaleza.id, validTo: addDays(t, 60), maxUses: 20, notes: "Desconto da Regional para Fortaleza (DEMO)" });
+
+  // pacote de vouchers: Regional Ceará → Revenda Juazeiro (10 e-CPF A1 a R$ 105, abaixo do custo normal de R$ 110)
+  const pkg = await createVoucherPackage(await adminCtx("ceara"), { name: "Pacote Cariri — 10 e-CPF A1 (DEMO)", validTo: addDays(t, 180), items: [{ productKey: "ecpf_a1_12m", qty: 10, unitPrice: 10500 }], recipientNodeId: nodes.juazeiro.id });
+  await purchaseVoucherPackage(juaAdmin, pkg.id, { idemKey: "demo-pacote-cariri" });
+
+  const demoFile = { name: "certificado_DEMO.pfx", data: Buffer.from("DEMO — arquivo de demonstração, sem validade") };
+  const customers: Record<string, Doc> = {};
+  const mkCustomer = async (ctx: Ctx, key: string, input: Parameters<typeof saveCertCustomer>[2]) => {
+    customers[key] = await saveCertCustomer(ctx, null, input);
+    return customers[key];
+  };
+  type Step = "awaiting" | "paid" | "issued";
+  const sale = async (ctx: Ctx, key: string, customer: Doc, productKey: string, step: Step, extra: Record<string, any> = {}) => {
+    let r = await createNetworkSale(ctx, { customerId: customer.id, productKey, idemKey: `demo-${key}`, dueDate: addDays(t, 5), ...extra });
+    if (r.status === "awaiting_payment") {
+      await sendCertificateCharge(ctx, r.id, { channel: "whatsapp", to: customer.phone ?? "88999990000" });
+      if (step === "awaiting") return r;
+      r = await confirmCertificatePayment(team, r.id, { ref: `PIX-DEMO-${key.toUpperCase()}` });
+    }
+    if (step === "paid") return r;
+    await approveCertificateValidation(team, r.id, { notes: "Videoconferência (DEMO)" });
+    await requestCertificateEmission(ctx, r.id);
+    const months = Number(r.months ?? 12);
+    r = await registerCertificateEmission(team, r.id, { file: demoFile, validFrom: t, validTo: addDays(t, Math.round(months * 30.4)), serial: `DEMO-${key.toUpperCase()}` });
+    r = await recordCertificateAuthorization(ctx, r.id, { notes: "Titular autorizou a entrega pelo WhatsApp (DEMO)" });
+    return r;
+  };
+
+  // Juazeiro do Norte
+  const jua = await sellerCtx("juazeiro", "vendedor.juazeiro");
+  await mkCustomer(jua, "ana", { personType: "PF", doc: cpf("123456781"), name: "Ana Beatriz Lima (DEMO)", email: "ana.lima@demo.local", phone: "88988110001", address: { cityName: "Juazeiro do Norte", uf: "CE" } });
+  await mkCustomer(jua, "bruno", { personType: "PF", doc: cpf("234567892"), name: "Bruno Cariri Souza (DEMO)", phone: "88988110002" });
+  await mkCustomer(jua, "farmacia", { personType: "PJ", doc: cnpj("123456780001"), name: "Farmácia do Romeiro Ltda (DEMO)", email: "contato@farmaciaromeiro.local", phone: "8835110003" });
+  await mkCustomer(jua, "carla", { personType: "PF", doc: cpf("345678903"), name: "Carla Padre Cícero (DEMO)", phone: "88988110004" });
+  await sale(jua, "jua-1", customers.ana, "ecpf_a1_12m", "awaiting");
+  await sale(jua, "jua-2", customers.bruno, "ecpf_a1_12m", "issued", { voucher: "balance" });
+  await sale(jua, "jua-3", customers.farmacia, "ecnpj_a1_12m", "paid", { couponCode: "JUAZEIRO10" });
+  await sale(jua, "jua-4", customers.carla, "birdid_free_60m", "issued");
+  await sale(jua, "jua-5", customers.carla, "ecpf_a1_12m", "paid", { voucher: "balance" });
+
+  // Fortaleza
+  const ftz = await sellerCtx("fortaleza", "vendedor.fortaleza");
+  await mkCustomer(ftz, "diego", { personType: "PF", doc: cpf("456789014"), name: "Diego Beira-Mar (DEMO)", phone: "85988220001" });
+  await mkCustomer(ftz, "padaria", { personType: "PJ", doc: cnpj("234567890001"), name: "Padaria Aldeota Ltda (DEMO)", phone: "8532220002", email: "fiscal@padariaaldeota.local" });
+  await mkCustomer(ftz, "elisa", { personType: "PF", doc: cpf("567890125"), name: "Elisa Iracema (DEMO)", phone: "85988220003", hasBirdId: true, birdIdValidTo: addDays(t, 900) });
+  await sale(ftz, "ftz-1", customers.diego, "ecpf_a1_12m", "awaiting", { couponCode: "CEARA20" });
+  await sale(ftz, "ftz-2", customers.padaria, "ecnpj_a3_36m", "issued");
+  await sale(ftz, "ftz-3", customers.elisa, "ecpf_a3_36m", "paid");
+
+  // Salvador
+  const ssa = await sellerCtx("salvador", "vendedor.salvador");
+  await mkCustomer(ssa, "fabio", { personType: "PF", doc: cpf("678901236"), name: "Fábio Pelourinho (DEMO)", phone: "71988330001" });
+  await mkCustomer(ssa, "acaraje", { personType: "PJ", doc: cnpj("345678900001"), name: "Acarajé da Barra Ltda (DEMO)", phone: "7133330002" });
+  await mkCustomer(ssa, "gabi", { personType: "PF", doc: cpf("789012347"), name: "Gabriela Itapuã (DEMO)", phone: "71988330003" });
+  await sale(ssa, "ssa-1", customers.fabio, "ecpf_a1_12m", "awaiting");
+  await sale(ssa, "ssa-2", customers.acaraje, "ecnpj_a1_12m", "issued");
+  await sale(ssa, "ssa-3", customers.gabi, "birdid_free_60m", "paid");
+
+  // certificados de vendas anteriores (renovações): vencendo em 7/30/60 dias, vencido e perdido; com e sem contato
+  const old = async (node: Doc, c: Doc, productKey: string, productLabel: string, validTo: string, sellerLogin: string) => {
+    const seller = await user(sellerLogin);
+    return store.create("accounting_certificates", {
+      companyId: node.nodeCompanyId, branchId: null, createdBy: seller.id, clientId: c.id, customerId: c.id, holderName: c.name, holderDoc: c.doc, product: productKey, productLabel,
+      serial: null, issuer: "AC Intercert (DEMO)", validFrom: addDays(validTo, -365), validTo, source: "issued", requestId: null, fileId: null, notes: "Venda anterior (DEMO)", active: true,
+      channel: "network", sellerNodeId: node.id, sellerUserId: seller.id, productType: productKey.includes("a3") ? "a3" : "a1", holderType: c.personType === "PF" ? "pf" : "pj", isDemo: true,
+    });
+  };
+  await mkCustomer(jua, "hugo", { personType: "PF", doc: cpf("890123458"), name: "Hugo Crato (DEMO)", phone: "88988110005" });
+  await mkCustomer(jua, "iris", { personType: "PF", doc: cpf("901234569"), name: "Íris Barbalha (DEMO)", phone: "88988110006" });
+  await mkCustomer(ftz, "joao", { personType: "PF", doc: cpf("112233445"), name: "João Mucuripe (DEMO)", phone: "85988220004" });
+  await mkCustomer(ftz, "mercado", { personType: "PJ", doc: cnpj("456789010001"), name: "Mercadinho Benfica Ltda (DEMO)", phone: "8532220005" });
+  await mkCustomer(ssa, "karla", { personType: "PF", doc: cpf("223344556"), name: "Karla Rio Vermelho (DEMO)", phone: "71988330004" });
+  await old(nodes.juazeiro, customers.hugo, "ecpf_a1_12m", "e-CPF A1 · 12 meses", addDays(t, 7), "vendedor.juazeiro");
+  const c30 = await old(nodes.juazeiro, customers.iris, "ecpf_a1_12m", "e-CPF A1 · 12 meses", addDays(t, 30), "vendedor.juazeiro");
+  await old(nodes.fortaleza, customers.joao, "ecpf_a1_12m", "e-CPF A1 · 12 meses", addDays(t, 60), "vendedor.fortaleza");
+  const vencido = await old(nodes.fortaleza, customers.mercado, "ecnpj_a1_12m", "e-CNPJ A1 · 12 meses", addDays(t, -10), "vendedor.fortaleza");
+  await old(nodes.salvador, customers.karla, "ecpf_a1_12m", "e-CPF A1 · 12 meses", addDays(t, -45), "vendedor.salvador");
+  await old(nodes.salvador, customers.fabio, "ecpf_a1_12m", "e-CPF A1 · 12 meses", addDays(t, 5), "vendedor.salvador");
+  // contato registrado no de 30 dias e no vencido; o de 7 dias (Hugo) fica sem ação — alerta "ninguém agiu"
+  await registerRenewalContact(jua, c30.id, { channel: "whatsapp", result: "will_renew", nextAction: "Enviar o link da renovação", nextActionDate: addDays(t, 3) });
+  await registerRenewalContact(ftz, vencido.id, { channel: "phone", result: "thinking", notes: "Pediu para ligar na próxima semana" });
+  await setSetting(store, NETWORK_SCOPE, null, "demo.network.sales.done", true);
+  return { customers: Object.keys(customers).length, sales: 11 };
 }

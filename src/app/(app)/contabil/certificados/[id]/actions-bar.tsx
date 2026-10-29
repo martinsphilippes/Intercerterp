@@ -2,6 +2,7 @@
 
 import { BellRing, RefreshCw, Send } from "lucide-react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
+import type { ActionResult } from "@/lib/server/action";
 import { requestEmissionAction, requestDownloadAuthorizationAction } from "../actions";
 
 /**
@@ -10,10 +11,11 @@ import { requestEmissionAction, requestDownloadAuthorizationAction } from "../ac
  */
 
 /** Pede a emissão do certificado (pagamento confirmado e titular validado) ou uma nova tentativa após falha. */
-export function RequestEmissionButton({ id, holderName, retry }: { id: string; holderName: string; retry: boolean }) {
+/** `action`: padrão = a ação do escritório (Tela 67); a venda da rede (§45) passa a dela — mesma regra no domínio. */
+export function RequestEmissionButton({ id, holderName, retry, action = requestEmissionAction }: { id: string; holderName: string; retry: boolean; action?: (fd: FormData) => Promise<ActionResult<any>> }) {
   return (
     <ActionForm
-      action={requestEmissionAction}
+      action={action}
       confirm={retry ? `Pedir nova tentativa de emissão para ${holderName}? O mesmo protocolo é usado, sem gerar outra cobrança.` : `Pedir a emissão do certificado de ${holderName}? A certificadora é acionada neste protocolo.`}
     >
       {({ pending }) => (

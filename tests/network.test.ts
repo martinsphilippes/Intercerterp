@@ -78,12 +78,13 @@ describe("rede de certificação — tipo de empresa e perfis", () => {
     for (const r of [...DEFAULT_ROLES, ...FIRM_ROLES]) expect((r.actions as string[]).some((a) => a.startsWith("network."))).toBe(false);
     for (const r of PARTNER_ROLES) expect(r.actions as string[]).not.toContain("network.manage");
     for (const k of ["partner_admin", "partner_manager"]) expect(PARTNER_ROLES.find((r) => r.key === k)!.actions).toEqual(expect.arrayContaining(["network.children", "network.prices"]));
-    expect(PARTNER_ROLES.find((r) => r.key === "partner_seller")!.actions).toEqual([]);
+    // §45: o vendedor vende e acompanha as próprias renovações (não cadastra filhos nem define preços)
+    expect(PARTNER_ROLES.find((r) => r.key === "partner_seller")!.actions).toEqual(["network.sell", "network.renewals"]);
     for (const a of ["network.children", "network.prices", "network.manage"]) expect(ACTIONS_ADDED_TO_TEMPLATES).toContain(a);
     // perfil de parceiro anterior às operações novas recebe-as na sincronização
     const tpl = ROLE_TEMPLATES.find((t) => t.key === "partner_manager")!;
     const plan = templateSyncPlan({ system: true, key: "partner_manager", actions: ["data.export"], templateActions: null })!;
-    expect(plan.missing.sort()).toEqual(["network.children", "network.prices"]);
+    expect(plan.missing.sort()).toEqual(["network.children", "network.coupons", "network.prices", "network.renewals", "network.sales_all", "network.sell", "network.vouchers"]);
     expect(plan.templateActions).toEqual([...tpl.actions]);
   });
 

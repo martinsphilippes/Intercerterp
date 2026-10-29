@@ -1078,14 +1078,22 @@ export const COLLECTIONS: CollectionDef[] = [
       emissionRequestedAt: dt, emissionAttempts: int, emissionFailedAt: dt, emissionFailure: s(500), issuedAt: dt, issuedBy: id(), serial: s(120), issuer: s(160), validFrom: date, validTo: date, fileId: id(), fileName: s(250), certificateId: id(),
       downloadAuthorized: bool, downloadAuthorizedAt: dt, downloadAuthorizedBy: s(20), downloadAuthEvidenceFileId: id(), downloadAuthNotes: s(300), downloads: int, lastDownloadAt: dt, lastDownloadBy: id(),
       cancelledAt: dt, cancelledBy: id(), cancelReason: s(300),
+      // rede de certificação — etapa 2 (§45): canal ("firm" = escritório da Tela 67, padrão quando ausente; "network" = venda
+      // do parceiro), cliente de certificado do parceiro, vendedor na rede e RETRATO IMUTÁVEL da cascata no momento da venda
+      channel: s(20), customerId: id(), sellerNodeId: id(), sellerUserId: id(), sellerName: s(200), cascade: json, listPrice: money, minPrice: money, discount: money,
+      couponId: id(), couponCode: s(20), voucherRedemptionId: id(), voucherCode: s(40), gift: bool, free: bool, duplicateAck: json, productType: s(20), holderType: s(4),
     },
-    indexes: [k("i_company", "companyId", "status"), u("u_protocol", "companyId", "protocol"), k("i_client", "clientId"), k("i_linked", "linkedCompanyId"), k("i_file", "fileId")],
+    indexes: [k("i_company", "companyId", "status"), u("u_protocol", "companyId", "protocol"), k("i_client", "clientId"), k("i_linked", "linkedCompanyId"), k("i_file", "fileId"), k("i_holder", "holderDoc"), k("i_seller", "sellerNodeId")],
   },
   {
     id: "accounting_certificates",
     label: "Certificados digitais conhecidos (carteira do escritório)",
-    fields: { ...ctx, clientId: id(true), holderName: s(200), holderDoc: s(20), product: s(40), productLabel: s(80), serial: s(120), issuer: s(160), validFrom: date, validTo: date, source: s(20), requestId: id(), fileId: id(), notes: s(500), active: bool },
-    indexes: [k("i_client", "clientId"), k("i_company", "companyId", "validTo"), k("i_request", "requestId")],
+    fields: {
+      ...ctx, clientId: id(true), holderName: s(200), holderDoc: s(20), product: s(40), productLabel: s(80), serial: s(120), issuer: s(160), validFrom: date, validTo: date, source: s(20), requestId: id(), fileId: id(), notes: s(500), active: bool,
+      // §45: certificados emitidos pelas vendas da rede (canal "network": clientId = cliente de certificado do parceiro)
+      channel: s(20), customerId: id(), sellerNodeId: id(), sellerUserId: id(), productType: s(20), holderType: s(4),
+    },
+    indexes: [k("i_client", "clientId"), k("i_company", "companyId", "validTo"), k("i_request", "requestId"), k("i_holder", "holderDoc")],
   },
   // ───────────────────────────── Rede de certificação (§43) — registros da PLATAFORMA (companyId = "platform"; só o domínio
   // da rede lê e grava, sempre com unscoped() e a visibilidade de visibleNodeIds)
@@ -1107,6 +1115,93 @@ export const COLLECTIONS: CollectionDef[] = [
       canEdit: bool, validFrom: date, validTo: date, active: bool, supersededAt: dt, reason: s(300),
     },
     indexes: [k("i_node", "nodeId", "productKey"), k("i_owner", "ownerNodeId", "level", "productKey")],
+  },
+  // ───────────────────────────── Rede de certificação — etapa 2 (§45)
+  {
+    id: "cert_customers",
+    label: "Rede de certificação — clientes de certificado do parceiro (titulares PF/PJ)",
+    fields: {
+      ...ctx, code: s(20), personType: s(2), doc: s(20, true), name: s(200, true), email: s(200), phone: s(40), address: json, hasBirdId: bool, birdIdValidTo: date,
+      ownerUserId: id(), nodeId: id(), notes: s(1000), active: bool,
+    },
+    indexes: [u("u_doc", "companyId", "doc"), k("i_owner", "companyId", "ownerUserId")],
+  },
+  {
+    id: "cert_voucher_packages",
+    label: "Rede de certificação — pacotes de vouchers (oferta de um nó ou da plataforma aos nós abaixo)",
+    fields: { ...ctx, code: s(20), ownerNodeId: id(), sellerCompanyId: id(), name: s(120, true), validFrom: date, validTo: date, items: json, total: money, recipientNodeId: id(), active: bool, notes: s(500) },
+    indexes: [k("i_owner", "ownerNodeId"), k("i_recipient", "recipientNodeId")],
+  },
+  {
+    id: "cert_voucher_purchases",
+    label: "Rede de certificação — compras de pacotes de vouchers",
+    fields: {
+      ...ctx, packageId: id(true), packageName: s(120), sellerNodeId: id(), sellerCompanyId: id(), buyerNodeId: id(true), buyerCompanyId: id(), total: money, validTo: date, items: json,
+      receivableTitleId: id(), payableTitleId: id(), financeNote: s(300), notes: s(500),
+    },
+    indexes: [k("i_buyer", "buyerNodeId"), k("i_package", "packageId"), k("i_seller", "sellerNodeId")],
+  },
+  {
+    id: "cert_voucher_lots",
+    label: "Rede de certificação — saldo de vouchers por produto (comprado, comprometido, resgatado)",
+    fields: {
+      ...ctx, purchaseId: id(true), packageId: id(), packageName: s(120), sellerNodeId: id(), buyerNodeId: id(true), productKey: s(40, true), qty: int, committed: int, redeemed: int, reserved: int,
+      unitPrice: money, validTo: date,
+    },
+    indexes: [k("i_buyer", "buyerNodeId", "productKey"), k("i_purchase", "purchaseId")],
+  },
+  {
+    id: "cert_voucher_codes",
+    label: "Rede de certificação — códigos individuais de voucher (inclusive presente ao cliente final)",
+    fields: { ...ctx, lotId: id(true), buyerNodeId: id(), code: s(40, true), productKey: s(40), gift: bool, status: s(20), requestId: id(), issuedAt: dt, redeemedAt: dt, cancelledAt: dt, notes: s(300) },
+    indexes: [u("u_code", "code"), k("i_lot", "lotId"), k("i_buyer", "buyerNodeId")],
+  },
+  {
+    id: "cert_voucher_redemptions",
+    label: "Rede de certificação — resgates de voucher nas vendas",
+    fields: { ...ctx, lotId: id(true), codeId: id(), buyerNodeId: id(), requestId: id(true), requestCompanyId: id(), productKey: s(40), unitPrice: money, gift: bool, status: s(20), reversedAt: dt, reversedBy: id() },
+    indexes: [k("i_lot", "lotId"), k("i_request", "requestId")],
+  },
+  {
+    id: "cert_coupons",
+    label: "Rede de certificação — cupons de desconto",
+    fields: {
+      ...ctx, code: s(20, true), issuerNodeId: id(), issuerLevel: s(20), nodeId: id(), sellerUserId: id(), sellerName: s(200), productKey: s(40), kind: s(10), valueBps: int, valueCents: money,
+      validFrom: date, validTo: date, maxUses: int, maxPerHolder: int, usedCount: int, active: bool, notes: s(300),
+    },
+    indexes: [u("u_code", "code"), k("i_node", "nodeId"), k("i_issuer", "issuerNodeId")],
+  },
+  {
+    id: "cert_coupon_uses",
+    label: "Rede de certificação — usos de cupom (reservado na venda, consumido no pagamento, liberado no cancelamento)",
+    fields: { ...ctx, couponId: id(true), couponCode: s(20), requestId: id(true), requestCompanyId: id(), holderDoc: s(20), discount: money, sellerNodeId: id(), status: s(20), consumedAt: dt, releasedAt: dt },
+    indexes: [k("i_coupon", "couponId"), k("i_request", "requestId")],
+  },
+  {
+    id: "cert_coupon_holders",
+    label: "Rede de certificação — contador de usos de cupom por titular",
+    fields: { ...ctx, couponId: id(true), holderDoc: s(20), count: int },
+    indexes: [k("i_coupon", "couponId")],
+  },
+  {
+    id: "cert_free_claims",
+    label: "Rede de certificação — BirdID gratuito por titular (um ativo por CPF)",
+    fields: { ...ctx, holderDoc: s(20, true), productType: s(20), requestId: id(), requestCompanyId: id(), validTo: date, status: s(20) },
+    indexes: [k("i_holder", "holderDoc")],
+  },
+  {
+    // retrato COMPLETO da cascata (custo AC e todos os níveis): registro da PLATAFORMA — nenhuma empresa o enxerga pelo
+    // Store restrito, não entra no backup de uma empresa; a solicitação guarda só a visão do vendedor (sem os custos acima do pai)
+    id: "cert_sale_cascades",
+    label: "Rede de certificação — retrato completo da cascata de cada venda (imutável)",
+    fields: { ...ctx, requestId: id(true), requestCompanyId: id(), sellerNodeId: id(), snapshot: json },
+    indexes: [k("i_request", "requestId"), k("i_seller", "sellerNodeId")],
+  },
+  {
+    id: "cert_renewal_contacts",
+    label: "Rede de certificação — contatos de renovação registrados pelo nó",
+    fields: { ...ctx, certificateId: id(true), nodeId: id(), contactDate: date, channel: s(20), result: s(30), notes: s(500), nextAction: s(200), nextActionDate: date, userName: s(200) },
+    indexes: [k("i_cert", "certificateId"), k("i_company", "companyId")],
   },
   {
     id: "files",

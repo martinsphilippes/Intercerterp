@@ -7,6 +7,8 @@ export interface NavItem {
   icon: string;
   /** operação especial exigida além do módulo (ex.: fila da certificação só para quem opera a certificação) */
   action?: SpecialAction;
+  /** basta UMA destas operações (ex.: vendas da rede: vendedor, quem vê todo o nó ou a plataforma) */
+  anyAction?: SpecialAction[];
   /** recurso novo controlado por `feature.<chave>` em Parâmetros (ligado por padrão) */
   feature?: string;
 }
@@ -120,6 +122,8 @@ export const NAV: NavGroup[] = [
       { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
       { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },
       { href: "/rede", label: "Rede de certificação (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/vendas", label: "Vendas da rede (plataforma)", module: "dashboard", icon: "ShoppingCart", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/renovacoes", label: "Renovações da rede (plataforma)", module: "dashboard", icon: "RefreshCcw", action: "network.manage", feature: "redeCertificacao" },
     ],
   },
   {
@@ -143,6 +147,7 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/contabil/certificados", label: "Certificados digitais", module: "accounting", icon: "BadgeCheck" },
       { href: "/contabil/equipe", label: "Departamentos e equipe", module: "accounting", icon: "ShieldCheck" },
       { href: "/rede/minha", label: "Minha rede de certificação", module: "dashboard", icon: "Network", feature: "redeCertificacao" },
+      { href: "/rede/renovacoes", label: "Renovações da rede", module: "dashboard", icon: "RefreshCcw", anyAction: ["accounting.certificates", "network.manage"], feature: "redeCertificacao" },
     ],
   },
   {
@@ -177,6 +182,8 @@ export const NAV_ACCOUNTING: NavGroup[] = [
       { href: "/administracao/parametros", label: "Parâmetros", module: "admin", icon: "SlidersHorizontal" },
       { href: "/administracao/certificacao", label: "Certificação digital (equipe)", module: "admin", icon: "BadgeCheck", action: "certification.operate" },
       { href: "/rede", label: "Rede de certificação (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/vendas", label: "Vendas da rede (plataforma)", module: "dashboard", icon: "ShoppingCart", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/renovacoes", label: "Renovações da rede (plataforma)", module: "dashboard", icon: "RefreshCcw", action: "network.manage", feature: "redeCertificacao" },
     ],
   },
   {
@@ -194,9 +201,14 @@ export const NAV_CERTIFICATION: NavGroup[] = [
   {
     label: "Rede de certificação",
     items: [
+      { href: "/rede/vendas", label: "Vendas de certificados", module: "dashboard", icon: "ShoppingCart", anyAction: ["network.sell", "network.sales_all", "network.manage"], feature: "redeCertificacao" },
+      { href: "/rede/clientes", label: "Clientes de certificado", module: "dashboard", icon: "Users", anyAction: ["network.sell", "network.sales_all"], feature: "redeCertificacao" },
+      { href: "/rede/renovacoes", label: "Renovações", module: "dashboard", icon: "RefreshCcw", anyAction: ["network.renewals", "network.sales_all", "network.manage"], feature: "redeCertificacao" },
+      { href: "/rede/vouchers", label: "Vouchers", module: "dashboard", icon: "Ticket", anyAction: ["network.vouchers", "network.sales_all", "network.manage"], feature: "redeCertificacao" },
+      { href: "/rede/cupons", label: "Cupons", module: "dashboard", icon: "Percent", anyAction: ["network.coupons", "network.sales_all", "network.manage"], feature: "redeCertificacao" },
       { href: "/rede", label: "Rede (plataforma)", module: "dashboard", icon: "Network", action: "network.manage", feature: "redeCertificacao" },
       { href: "/rede/precos", label: "Preços da rede e catálogo", module: "dashboard", icon: "BadgePercent", action: "network.manage", feature: "redeCertificacao" },
-      { href: "/rede/parametros", label: "Rótulos dos níveis", module: "dashboard", icon: "SlidersHorizontal", action: "network.manage", feature: "redeCertificacao" },
+      { href: "/rede/parametros", label: "Parâmetros da rede", module: "dashboard", icon: "SlidersHorizontal", action: "network.manage", feature: "redeCertificacao" },
     ],
   },
   {

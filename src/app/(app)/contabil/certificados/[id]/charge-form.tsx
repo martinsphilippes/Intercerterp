@@ -9,6 +9,7 @@ import { Notice } from "@/components/ui/empty";
 import { useToast } from "@/components/ui/toast";
 import { formatDate, today } from "@/lib/dates";
 import { CHARGE_CHANNEL } from "@/domain/accounting/common";
+import type { ActionResult } from "@/lib/server/action";
 import { sendChargeAction } from "../actions";
 
 export interface ChargeFormProps {
@@ -23,6 +24,8 @@ export interface ChargeFormProps {
   chargeTo: string | null;
   /** prévia idêntica ao texto enviado (chargeMessage do domínio, para o vencimento atual) */
   preview: { subject: string; text: string; link: string | null };
+  /** padrão = ação do escritório (Tela 67); a venda da rede (§45) passa a dela */
+  action?: (fd: FormData) => Promise<ActionResult<any>>;
 }
 
 const CHANNEL_HINT: Record<string, string> = {
@@ -60,7 +63,7 @@ export function ChargeForm(p: ChargeFormProps) {
   };
 
   return (
-    <ActionForm action={sendChargeAction} className="space-y-4" onSuccess={() => setMessage("")}>
+    <ActionForm action={p.action ?? sendChargeAction} className="space-y-4" onSuccess={() => setMessage("")}>
       {({ pending, error }) => (
         <>
           <input type="hidden" name="id" value={p.id} />

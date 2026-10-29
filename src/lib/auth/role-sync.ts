@@ -37,6 +37,9 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   "network.children", "network.prices", "network.manage",
   // ajustes das telas 01–48 (§44): remover item e cancelar atendimento no PDV, devolução acima do limite (Gerente e Administrador)
   "pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit",
+  // rede de certificação — etapa 2 (§45): vender (Vendedor, Gestor, Administrador do parceiro), ver tudo do nó (Gestor,
+  // Administrador, Financeiro — consulta), vouchers e cupons (Gestor e Administrador), renovações (Vendedor, Gestor, Administrador)
+  "network.sell", "network.sales_all", "network.vouchers", "network.coupons", "network.renewals",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);
