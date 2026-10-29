@@ -32,6 +32,8 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   "purchase.receive_pending_invoice", "purchase.confirm_invoice",
   // arquivos fiscais (§41 SPED Fiscal e EFD Contribuições, §42 Sintegra): Fiscal, Administrador e Sócio/Administrador do escritório
   "fiscal.files",
+  // ajustes das telas 01–48 (§44): remover item e cancelar atendimento no PDV, devolução acima do limite (Gerente e Administrador)
+  "pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);

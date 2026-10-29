@@ -2,16 +2,18 @@ import { detId, listAll, newId } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import { DEFAULT_TZ, nowIso } from "@/lib/dates";
 import { BusinessError, assert } from "@/lib/core/errors";
-import { requireBranch, requirePerm, type Ctx } from "@/lib/core/ctx";
+import { requireBranch, requirePerm, type Ctx, type CtxUser } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { getSetting, isFeatureOn } from "@/lib/core/settings";
-import { formatMoney, QTY } from "@/lib/money";
+import { formatMoney, formatQty, roundDiv, QTY } from "@/lib/money";
+import { canDo } from "@/lib/permissions";
 import type { Store } from "@/lib/db/types";
 import { defaultWarehouse, ensureBalance, releaseReservations, reserve } from "./stock";
 import { cartTotals, type CartItem } from "./cart-calc";
 import { cancelIntentAtProvider, maybePayable } from "./payments/intents";
 import { livePromotionRules } from "./promotions";
 import type { FinalizeSaleInput, SalePaymentInput } from "./sales";
+import { verifySupervisor, type SupervisorCredentials } from "./supervisor";
 
 export { cartTotals, effectiveUnitPrice, type CartItem } from "./cart-calc";
 
@@ -134,15 +136,41 @@ export async function createCart(ctx: Ctx, terminalId: string, patch: CartPatch 
   );
 }
 
-/** Grava o estado do atendimento (autosalvamento do PDV). */
-export async function saveCart(ctx: Ctx, cartId: string, patch: CartPatch) {
+/** Quantidade por SKU (soma das linhas) — base da regra de remoção de item já registrado (§44). */
+function qtyBySku(items: CartItem[] | null | undefined): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const i of items ?? []) if (i?.skuId) m.set(i.skuId, (m.get(i.skuId) ?? 0) + (i.qty ?? 0));
+  return m;
+}
+
+/**
+ * Grava o estado do atendimento (autosalvamento do PDV).
+ * Diminuir a quantidade de um SKU já registrado no servidor (remover item) não passa pelo autosalvamento: usa
+ * `removeCartItem`, que confere a permissão/autorização e registra a remoção (§44). `opts.replaceItems` é só para
+ * a reimportação do mesmo orçamento/pedido (o documento define os itens).
+ */
+export async function saveCart(ctx: Ctx, cartId: string, patch: CartPatch, opts: { replaceItems?: boolean } = {}) {
   requirePerm(ctx, "pdv", "create");
   const cart = await ctx.store.getOrThrow("carts", cartId);
   assertCartAccess(ctx, cart);
   if (cart.status === "converted") throw new BusinessError("Este atendimento já virou venda. Inicie um novo atendimento.", "cart_converted", { saleId: cart.saleId });
   assert(cart.status === "open", cart.status === "cancelled" ? "Atendimento cancelado." : "Atendimento salvo como pré-venda: retome-o antes de editar.", "cart_not_open");
   const data: Record<string, any> = { revision: (cart.revision ?? 0) + 1 };
-  if (patch.items !== undefined) data.items = clampItems(patch.items);
+  if (patch.items !== undefined) {
+    data.items = clampItems(patch.items);
+    const before = qtyBySku(cart.items);
+    const after = qtyBySku(data.items);
+    if (!opts.replaceItems) {
+      for (const [skuId, q] of before) {
+        if ((after.get(skuId) ?? 0) < q) {
+          throw new BusinessError("Para remover ou diminuir um item já registrado, use a remoção de item do PDV (fica registrada no histórico e pode exigir autorização do supervisor).", "remove_item_required", { skuId });
+        }
+      }
+    }
+    // última inclusão por SKU (exceção de N segundos para remover item recém-lançado sem autorização)
+    const added = Object.fromEntries([...after].filter(([skuId, q]) => q > (before.get(skuId) ?? 0)).map(([skuId]) => [skuId, nowIso()]));
+    if (Object.keys(added).length) data.lastAddedAt = { ...Object.fromEntries(Object.entries((cart.lastAddedAt ?? {}) as Record<string, string>).filter(([k]) => after.has(k))), ...added };
+  }
   if (patch.customerId !== undefined) {
     if (patch.customerId) {
       const c = await ctx.store.getOrThrow("customers", patch.customerId);
@@ -290,12 +318,18 @@ export async function unusedConfirmedPix(ctx: Ctx, cartId: string) {
  * Cancela o atendimento (não apaga: fica registrado com motivo). Cobranças Pix em aberto são canceladas NO PROVEDOR
  * antes (consulta → cancelamento confirmado); se o provedor não confirmar, o atendimento não é cancelado.
  */
-export async function cancelCart(ctx: Ctx, cartId: string, reason?: string | null) {
+export async function cancelCart(ctx: Ctx, cartId: string, reason?: string | null, opts: { approval?: SupervisorCredentials | null } = {}) {
   requirePerm(ctx, "pdv", "create");
   const cart = await ctx.store.getOrThrow("carts", cartId);
   assertCartAccess(ctx, cart);
   if (cart.status === "cancelled") return cart;
   assert(cart.status !== "converted", "Atendimento já concluído como venda.");
+  // §44: atendimento com itens exige a permissão ou a autorização do supervisor (parâmetro pdv.cancelCartRequiresAuth)
+  let approver: CtxUser | null = null;
+  if ((cart.items ?? []).length && (await pdvAuthPolicy(ctx, cart.branchId)).cancelRequiresAuth && !canDo(ctx.user, "pdv.cancel_cart")) {
+    if (!opts.approval?.login) throw new BusinessError("Cancelar o atendimento exige autorização do supervisor: informe login e senha de quem tem a permissão “Cancelar atendimento do PDV com itens”.", "approval_required");
+    approver = await verifySupervisor(ctx, opts.approval, "pdv.cancel_cart", `cancelamento do atendimento de ${formatMoney(cart.total)}`);
+  }
   const pixConfirmedMsg = (amount: number) => `Há Pix confirmado neste atendimento (${formatMoney(amount)}). Conclua a venda ou providencie a devolução do Pix antes de cancelar.`;
   const confirmed = await unusedConfirmedPix(ctx, cartId);
   assert(!confirmed, pixConfirmedMsg(confirmed?.amount), "pix_confirmed");
@@ -304,13 +338,165 @@ export async function cancelCart(ctx: Ctx, cartId: string, reason?: string | nul
   // a consulta ao provedor pode revelar pagamento feito enquanto o atendimento era cancelado
   const paidMeanwhile = await unusedConfirmedPix(ctx, cartId);
   assert(!paidMeanwhile, pixConfirmedMsg(paidMeanwhile?.amount), "pix_confirmed");
-  const updated = await ctx.store.update("carts", cartId, { status: "cancelled", cancelReason: reason?.trim() || "Cancelado pelo operador", payments: [] });
+  const updated = await ctx.store.update("carts", cartId, {
+    status: "cancelled", cancelReason: reason?.trim() || "Cancelado pelo operador", payments: [], cancelledBy: ctx.user.id,
+    cancelApprovedBy: approver?.id ?? null, cancelApprovedByName: approver?.name ?? null,
+  });
   // reserva da pré-venda (VEN-03): cancelar o atendimento libera o estoque reservado
   await releaseReservations({ ...ctx, branchId: cart.branchId }, "cart", cartId, "released");
   if ((cart.items ?? []).length) {
-    await audit(ctx, { module: "pdv", action: "cart.cancel", entityType: "cart", entityId: cartId, summary: `Atendimento cancelado — ${formatMoney(cart.total)} (${(cart.items ?? []).length} itens)`, reason: reason ?? null });
+    const session = await terminalSession(ctx, cart.terminalId);
+    await audit(ctx, {
+      module: "pdv", action: "cart.cancel", entityType: "cart", entityId: cartId,
+      summary: `Atendimento cancelado — ${formatMoney(cart.total)} (${(cart.items ?? []).length} itens)${cart.status === "parked" ? " (pré-venda descartada)" : ""}${approver ? ` · autorizado por ${approver.name}` : ""}`,
+      reason: reason ?? null, branchId: cart.branchId,
+      after: { total: cart.total ?? 0, itemsCount: (cart.items ?? []).length, operatorId: ctx.user.id, operatorName: ctx.user.name, approvedById: approver?.id ?? null, approvedByName: approver?.name ?? null },
+      related: [cart.terminalId ? `terminal:${cart.terminalId}` : "", session ? `cash_session:${session.id}` : "", approver ? `user:${approver.id}` : ""].filter(Boolean),
+    });
   }
   return updated;
+}
+
+// ───────────────────────────── §44 — remoção de item e cancelamento com permissão/autorização
+
+/** Política do PDV para remover item já registrado e cancelar atendimento (parâmetros por empresa/filial). */
+export async function pdvAuthPolicy(ctx: Pick<Ctx, "store" | "companyId">, branchId: string | null) {
+  const [remove, cancel, grace] = await Promise.all([
+    getSetting(ctx.store, ctx.companyId, branchId, "pdv.removeItemRequiresAuth", true),
+    getSetting(ctx.store, ctx.companyId, branchId, "pdv.cancelCartRequiresAuth", true),
+    getSetting(ctx.store, ctx.companyId, branchId, "pdv.removeItemGraceSeconds", 0),
+  ]);
+  return { removeRequiresAuth: remove !== false, cancelRequiresAuth: cancel !== false, graceSeconds: Math.max(0, Math.round(Number(grace) || 0)) };
+}
+
+/** Sessão de caixa aberta do terminal (liga remoções/cancelamentos ao relatório do caixa). */
+async function terminalSession(ctx: Ctx, terminalId: string | null | undefined) {
+  if (!terminalId) return null;
+  const { currentSession } = await import("./cash");
+  return currentSession(ctx, terminalId).catch(() => null);
+}
+
+export interface RemoveCartItemInput {
+  /** posição da linha no atendimento (conferida com o SKU) */
+  index: number;
+  skuId: string;
+  /** nova quantidade da linha (milésimos); ausente ou 0 = remove a linha */
+  qty?: number | null;
+  reason?: string | null;
+  approval?: SupervisorCredentials | null;
+}
+
+export interface RemovedItemRecord {
+  at: string;
+  skuId: string;
+  sku: string | null;
+  name: string | null;
+  qty: number;
+  remainingQty: number;
+  value: number;
+  byId: string;
+  byName: string;
+  approvedById: string | null;
+  approvedByName: string | null;
+  reason: string | null;
+  graceException: boolean;
+}
+
+/**
+ * Remove (ou diminui a quantidade de) um item já registrado no atendimento. Com o parâmetro
+ * `pdv.removeItemRequiresAuth` ligado (padrão), exige a operação `pdv.remove_item` ou login/senha de um supervisor que a
+ * tenha (mesmo mecanismo do desconto acima do limite); item cuja última inclusão foi há até `pdv.removeItemGraceSeconds`
+ * segundos é liberado. Toda remoção é registrada no atendimento e na auditoria (produto, quantidade, valor, quem,
+ * quem autorizou, motivo), ligada à sessão de caixa do terminal.
+ */
+export async function removeCartItem(ctx: Ctx, cartId: string, input: RemoveCartItemInput) {
+  requirePerm(ctx, "pdv", "create");
+  const cart = await ctx.store.getOrThrow("carts", cartId);
+  assertCartAccess(ctx, cart);
+  if (cart.status === "converted") throw new BusinessError("Este atendimento já virou venda. Inicie um novo atendimento.", "cart_converted", { saleId: cart.saleId });
+  assert(cart.status === "open", cart.status === "cancelled" ? "Atendimento cancelado." : "Atendimento salvo como pré-venda: retome-o antes de editar.", "cart_not_open");
+  const items = (cart.items ?? []) as CartItem[];
+  let idx = Number.isInteger(input.index) ? input.index : -1;
+  if (items[idx]?.skuId !== input.skuId) idx = items.findIndex((i) => i.skuId === input.skuId);
+  assert(idx >= 0, "Item não encontrado no atendimento (ele pode ter sido alterado em outra aba). Atualize a tela.", "item_not_found");
+  const line = items[idx];
+  const newQty = Math.max(0, Math.round(input.qty ?? 0));
+  assert(newQty < line.qty, "Informe uma quantidade menor que a atual para remover.");
+  const removedQty = line.qty - newQty;
+  const policy = await pdvAuthPolicy(ctx, cart.branchId);
+  const lastAdded = ((cart.lastAddedAt ?? {}) as Record<string, string>)[line.skuId];
+  const graceException = policy.graceSeconds > 0 && Boolean(lastAdded) && Date.now() - Date.parse(lastAdded) <= policy.graceSeconds * 1000;
+  let approver: CtxUser | null = null;
+  if (policy.removeRequiresAuth && !canDo(ctx.user, "pdv.remove_item") && !graceException) {
+    if (!input.approval?.login) throw new BusinessError("Remover item já registrado exige autorização do supervisor: informe login e senha de quem tem a permissão “Remover item já registrado”.", "approval_required");
+    approver = await verifySupervisor(ctx, input.approval, "pdv.remove_item", `remoção de ${line.name ?? line.sku ?? "item"} do atendimento`);
+  }
+  // valor removido: proporcional ao total da linha (preço efetivo, descontos e acréscimos do item; sem promoções)
+  const lineTotal = cartTotals({ ...cart, items }, null).items[idx]?.total ?? 0;
+  const value = roundDiv(lineTotal * removedQty, line.qty);
+  const reason = input.reason?.trim().slice(0, 300) || null;
+  const record: RemovedItemRecord = {
+    at: nowIso(), skuId: line.skuId, sku: line.sku ?? null, name: line.name ?? null, qty: removedQty, remainingQty: newQty, value,
+    byId: ctx.user.id, byName: ctx.user.name, approvedById: approver?.id ?? null, approvedByName: approver?.name ?? null, reason, graceException,
+  };
+  const nextItems = newQty ? items.map((l, i) => (i === idx ? { ...l, qty: newQty, scale: null } : l)) : items.filter((_, i) => i !== idx);
+  const merged = { ...cart, items: nextItems };
+  const rules = merged.salesDocumentId ? [] : await livePromotionRules(ctx.store, ctx.companyId, cart.branchId);
+  const totals = cartTotals(merged, rules.length ? { rules, tz: DEFAULT_TZ, branchId: cart.branchId } : null);
+  const updated = await ctx.store.update("carts", cartId, {
+    items: nextItems, revision: (cart.revision ?? 0) + 1, total: totals.total, itemsCount: nextItems.length,
+    removedItems: [...((cart.removedItems ?? []) as RemovedItemRecord[]), record].slice(-200),
+  });
+  const session = await terminalSession(ctx, cart.terminalId);
+  await audit(ctx, {
+    module: "pdv", action: "cart.item_remove", entityType: "cart", entityId: cartId, branchId: cart.branchId,
+    summary: `Item removido do atendimento: ${line.name ?? line.sku ?? line.skuId}${line.sku ? ` (${line.sku})` : ""} — ${formatQty(removedQty, line.unitCode)} · ${formatMoney(value)}${newQty ? ` (restam ${formatQty(newQty, line.unitCode)})` : ""}${approver ? ` · autorizado por ${approver.name}` : graceException ? " · recém-lançado (sem autorização)" : ""}`,
+    reason, after: record,
+    related: [cart.terminalId ? `terminal:${cart.terminalId}` : "", session ? `cash_session:${session.id}` : "", approver ? `user:${approver.id}` : ""].filter(Boolean),
+  });
+  return { cart: updated, record };
+}
+
+export interface PdvControlsByOperator {
+  operatorName: string;
+  removed: number;
+  removedValue: number;
+  cancelled: number;
+  cancelledValue: number;
+  authorized: number;
+}
+
+/**
+ * Remoções de item e cancelamentos de atendimento ligados à sessão de caixa (relatório do caixa), com a contagem por
+ * operador. Fonte: auditoria (`cart.item_remove`, `cart.cancel`) com a referência da sessão.
+ */
+export async function sessionPdvControls(ctx: Ctx, sessionId: string) {
+  const rows = await listAll(ctx.store, "audit_logs", { filters: [["contains", "related", `cash_session:${sessionId}`], ["eq", "action", ["cart.item_remove", "cart.cancel"]]], orderBy: [{ field: "occurredAt", dir: "asc" }] }, 2000);
+  const byOperator = new Map<string, PdvControlsByOperator>();
+  const out = { removed: 0, removedValue: 0, cancelled: 0, cancelledValue: 0, authorized: 0, byOperator: [] as PdvControlsByOperator[], events: [] as Array<{ id: string; at: string; action: string; summary: string; userName: string; reason: string | null }> };
+  for (const r of rows) {
+    const key = r.userId ?? r.userName ?? "?";
+    const op = byOperator.get(key) ?? { operatorName: r.userName ?? "—", removed: 0, removedValue: 0, cancelled: 0, cancelledValue: 0, authorized: 0 };
+    if (r.action === "cart.item_remove") {
+      op.removed += 1;
+      op.removedValue += Number(r.after?.value ?? 0);
+      out.removed += 1;
+      out.removedValue += Number(r.after?.value ?? 0);
+    } else {
+      op.cancelled += 1;
+      op.cancelledValue += Number(r.after?.total ?? 0);
+      out.cancelled += 1;
+      out.cancelledValue += Number(r.after?.total ?? 0);
+    }
+    if (r.after?.approvedById) {
+      op.authorized += 1;
+      out.authorized += 1;
+    }
+    byOperator.set(key, op);
+    out.events.push({ id: r.id, at: r.occurredAt, action: r.action, summary: r.summary, userName: r.userName ?? "—", reason: r.reason ?? null });
+  }
+  out.byOperator = [...byOperator.values()].sort((a, b) => a.operatorName.localeCompare(b.operatorName, "pt-BR"));
+  return out;
 }
 
 /** Pré-vendas em espera da filial. */

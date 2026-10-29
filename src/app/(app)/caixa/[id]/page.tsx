@@ -16,8 +16,9 @@ import { formatDateTime } from "@/lib/dates";
 import { can, canDo } from "@/lib/permissions";
 import { nameMap } from "@/lib/server/lookups";
 import { CASH_MOVEMENT_LABEL, expectedVisible, pendingCloseTransfer, sessionSummary } from "@/domain/cash";
+import { sessionPdvControls } from "@/domain/carts";
 import { reopenSessionAction, retryCloseTransferAction } from "../actions";
-import { ClosureTable, METHOD_LABEL, SessionVersions } from "../session-views";
+import { ClosureTable, METHOD_LABEL, PdvControlsTable, SessionVersions } from "../session-views";
 
 export const metadata = { title: "Sessão de caixa" };
 
@@ -188,6 +189,11 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               </tbody>
             </table>
           )}
+        </Card>
+      )}
+      {tab === "vendas" && (
+        <Card title="Itens removidos e atendimentos cancelados" description="Remoções de item já registrado e cancelamentos de atendimento no terminal desta sessão, por operador (com quem autorizou)." className="mt-4">
+          <PdvControlsTable controls={await sessionPdvControls(s.ctx, id)} />
         </Card>
       )}
       {tab === "versoes" && (

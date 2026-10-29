@@ -297,7 +297,10 @@ describe("vendas (PDV)", () => {
     // cancelamento de atendimento preserva registro e motivo
     const other = await createCart(cashier, terminalId);
     await saveCart(cashier, other.id, { items: [{ skuId: refs.skus["bone-u"].id, qty: 1000, listPrice: 4490 }] });
-    const cancelled = await cancelCart(cashier, other.id, "Cliente desistiu");
+    // §44: atendimento com itens — o Caixa não tem "pdv.cancel_cart": autorização do supervisor no terminal
+    await expect(cancelCart(cashier, other.id, "Cliente desistiu")).rejects.toMatchObject({ code: "approval_required" });
+    const cancelled = await cancelCart(cashier, other.id, "Cliente desistiu", { approval: { login: "gerente", password: "Intercert@2026" } });
+    expect(cancelled.cancelApprovedByName).toBeTruthy();
     expect(cancelled.status).toBe("cancelled");
     expect(cancelled.cancelReason).toBe("Cliente desistiu");
   });

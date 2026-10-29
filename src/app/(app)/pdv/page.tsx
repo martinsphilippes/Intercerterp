@@ -9,7 +9,7 @@ import { getSetting } from "@/lib/core/settings";
 import { pdvReceivableEnabled, receivableMethods } from "@/domain/pdv-receivables";
 import { salesDocsEnabled } from "@/domain/sales-documents";
 import { lookups, nameMap } from "@/lib/server/lookups";
-import { ensureOpenCart, listParkedCarts, saveCart } from "@/domain/carts";
+import { ensureOpenCart, listParkedCarts, pdvAuthPolicy, saveCart } from "@/domain/carts";
 import { resolveTerminal } from "./terminal";
 import { getFiscalConfig } from "@/domain/fiscal/service";
 import { overdueParams } from "@/domain/delinquency";
@@ -127,12 +127,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const salesDocs = can(s.user, "sales") && (await salesDocsEnabled(s.ctx)) ? { importId: sp(params, "importar") || null } : null;
   // promoções vigentes (CAD-15): o PDV calcula na hora com a mesma função do servidor; documento importado não tem promoção
   const promoRules = cart.salesDocumentId ? [] : await livePromotionRules(store, s.ctx.companyId, s.ctx.branchId);
+  // §44: cancelar atendimento com itens sem a permissão pede a autorização do supervisor (o servidor confere de novo)
+  const pdvPolicy = await pdvAuthPolicy(s.ctx, s.ctx.branchId);
   return (
     <PdvApp
       key={cart.id}
       branch={{ id: s.branch.id, name: s.branch.name }}
       companyName={s.company.tradeName || s.company.name}
-      operator={{ id: s.user.id, name: s.user.name, discountLimitBps: s.user.discountLimitBps ?? 0, canOverLimit: canDo(s.user, "sale.discount_over_limit"), canCreateCustomer: can(s.user, "customers", "create"), canViewFinance: can(s.user, "finance") }}
+      operator={{ id: s.user.id, name: s.user.name, discountLimitBps: s.user.discountLimitBps ?? 0, canOverLimit: canDo(s.user, "sale.discount_over_limit"), canCreateCustomer: can(s.user, "customers", "create"), canViewFinance: can(s.user, "finance"), canCancelCart: !pdvPolicy.cancelRequiresAuth || canDo(s.user, "pdv.cancel_cart") }}
       terminal={{ id: terminal.id, name: terminal.name, code: terminal.code, printerMode: terminal.printerMode ?? null, scannerMode: terminal.scannerMode ?? null }}
       terminals={terminals.map((t) => ({ id: t.id, name: t.name, code: t.code, status: t.status }))}
       session={session ? { id: session.id, number: session.number, openedAt: session.openedAt, operatorName: users.get(session.operatorId) ?? "—", status: session.status, operatorMismatch: mismatchPolicy === "allow" ? null : (mismatchPolicy as "warn" | "block") } : null}

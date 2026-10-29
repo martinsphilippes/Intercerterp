@@ -64,6 +64,7 @@ export async function toCtxUser(store: Store, u: Doc, companyId?: string | null)
     discountLimitBps: u.discountLimitBps ?? role?.discountLimitBps ?? 0,
     branchIds: u.branchIds ?? [],
     companyIds: u.companyIds ?? [],
+    twoFactorRequired: !u.isAdmin && Boolean(role?.requireTwoFactor),
   };
 }
 

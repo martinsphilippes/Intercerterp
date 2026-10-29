@@ -514,6 +514,23 @@ export async function adminSetPassword(ctx: Ctx, id: string, password: string) {
   await audit(ctx, { module: "admin", action: "user.password_reset", entityType: "user", entityId: id, summary: `Senha de ${u.name} redefinida pelo administrador (sessões encerradas)` });
 }
 
+/**
+ * §44 — redefine a autenticação em duas etapas de um usuário (perdeu o celular): apaga segredo e códigos de recuperação
+ * e encerra as sessões locais. Se o perfil exige, o usuário cadastra um aparelho novo no próximo login. Auditado.
+ */
+export async function adminResetTwoFactor(ctx: Ctx, id: string, reason: string) {
+  await guard(ctx, "edit", "redefinir autenticação em duas etapas de usuário", id);
+  assert(reason?.trim(), "Informe o motivo da redefinição.");
+  const u = await loadManagedUser(ctx, id);
+  assert(u.id !== ctx.user.id, "Você não pode redefinir a sua própria autenticação em duas etapas por aqui: use Minha conta › Segurança.");
+  await assertManagesWholeUser(ctx, u, "Redefinir a autenticação em duas etapas");
+  assert(u.totpEnabled || u.totpPendingEnc, "O usuário não tem autenticação em duas etapas cadastrada.");
+  const { TWO_FACTOR_RESET_PATCH } = await import("./two-factor");
+  await unscoped(ctx.store).update("users", id, TWO_FACTOR_RESET_PATCH);
+  const ended = await endLocalSessions(ctx.store, id);
+  await audit(ctx, { module: "admin", action: "user.2fa_reset", entityType: "user", entityId: id, summary: `Autenticação em duas etapas de ${u.name} redefinida pelo administrador${ended ? ` (${ended} sessão(ões) encerrada(s))` : ""}`, reason: reason.trim() });
+}
+
 /** Primeiro acesso por convite: valida o token, cria a credencial e ativa o usuário. */
 export async function acceptInvite(store: Store, token: string, password: string) {
   assert(password.length >= 8, "A senha deve ter ao menos 8 caracteres.");

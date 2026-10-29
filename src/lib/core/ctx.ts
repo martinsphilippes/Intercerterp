@@ -16,6 +16,8 @@ export interface CtxUser {
   discountLimitBps: number;
   branchIds: string[];
   companyIds: string[];
+  /** §44: o perfil na empresa ativa exige autenticação em duas etapas */
+  twoFactorRequired?: boolean;
 }
 
 /** Contexto de execução de qualquer serviço de domínio. */

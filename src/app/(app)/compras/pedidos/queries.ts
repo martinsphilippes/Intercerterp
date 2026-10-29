@@ -8,12 +8,15 @@ import { supplierLabel, supplierPerformance } from "@/domain/suppliers";
 import { policyPreview } from "@/domain/approvals";
 import { purchaseBudget } from "@/domain/purchases";
 import { receivesGoods, warehouseOptionLabel } from "@/domain/warehouse-rules";
+import { effectiveExpectedDate, isInTransit, TRANSIT_STATUSES } from "@/domain/purchase-calc";
 
 export const ORDER_STATUS_GROUPS: Record<string, string[]> = {
   pending: ["draft", "in_review", "adjust"],
   drafting: ["draft", "adjust"],
   open: ["approved", "sent", "partial"],
   to_send: ["approved"],
+  // §44: em trânsito = enviado/parcial com registro de transporte (filtrado abaixo)
+  in_transit: TRANSIT_STATUSES,
 };
 
 /** Consulta única da listagem de pedidos de compra (tela e exportação). */
@@ -46,6 +49,7 @@ export async function queryOrders(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
   const t = today();
   let rows = orders.map((o) => {
     const its = items.get(o.id) ?? [];
+    const expected = effectiveExpectedDate(o);
     return {
       ...o,
       supplierName: supplierLabel(o.supplierSnapshot),
@@ -57,8 +61,10 @@ export async function queryOrders(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
       itemsText: its.map((i) => i.description).join(" "),
       remainingValue: ["approved", "sent", "partial"].includes(o.status) ? Math.max(0, o.total - (o.receivedValue ?? 0)) : 0,
       awaitingSend: o.status === "approved" || (o.status === "sent" && (o.sentInfo?.revision ?? o.revision) < (o.revision ?? 1)),
-      overdue: Boolean(["approved", "sent", "partial"].includes(o.status) && o.expectedDate && o.expectedDate < t),
-      daysToExpected: o.expectedDate ? diffDays(t, o.expectedDate) : null,
+      overdue: Boolean(["approved", "sent", "partial"].includes(o.status) && expected && expected < t),
+      daysToExpected: expected ? diffDays(t, expected) : null,
+      inTransit: isInTransit(o),
+      effectiveExpected: expected,
     };
   });
   if (p.q) {
@@ -67,6 +73,8 @@ export async function queryOrders(ctx: Ctx, p: Pick<ListParams, "q" | "f">) {
     rows = rows.filter((r) => r.number === num || normalizeSearch(`${r.searchText ?? ""} ${r.supplierName} ${r.purpose ?? ""} ${r.buyerName} ${r.itemsText}`).includes(term));
   }
   if (p.f.late === "1") rows = rows.filter((r) => r.overdue);
+  if (st === "in_transit") rows = rows.filter((r) => r.inTransit);
+  else if (st === "sent") rows = rows.filter((r) => !r.inTransit);
   return rows;
 }
 

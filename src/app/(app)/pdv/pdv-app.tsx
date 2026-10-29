@@ -20,7 +20,7 @@ import { cartTotals, effectiveUnitPrice, tablePrice, type CartItem, type CartPro
 import { ProductSearch, type ProductHit, type ProductSearchHandle, type ScaleHit } from "./product-search";
 import { CustomerPicker, type CustomerInfo } from "./customer-picker";
 import { OverdueAlert } from "./overdue-alert";
-import { cancelCartAction, importDocumentAction, parkCartAction, resumeCartAction, saveCartAction, startExchangeAction, type PlainCart } from "./actions";
+import { cancelCartAction, importDocumentAction, parkCartAction, removeCartItemAction, resumeCartAction, saveCartAction, startExchangeAction, type PlainCart } from "./actions";
 import { ImportDocumentDialog } from "./import-document-dialog";
 import { ReceivablesDialog, type ReceiveMethod } from "./receivables-dialog";
 
@@ -29,7 +29,7 @@ type Line = CartItem & { key?: string };
 export interface PdvProps {
   branch: { id: string; name: string };
   companyName: string;
-  operator: { id: string; name: string; discountLimitBps: number; canOverLimit: boolean; canCreateCustomer: boolean; canViewFinance?: boolean };
+  operator: { id: string; name: string; discountLimitBps: number; canOverLimit: boolean; canCreateCustomer: boolean; canViewFinance?: boolean; canCancelCart?: boolean };
   terminal: { id: string; name: string; code: string; printerMode: string | null; scannerMode: string | null };
   terminals: Array<{ id: string; name: string; code: string; status: string }>;
   session: { id: string; number: number; openedAt: string; operatorName: string; status: string; operatorMismatch?: "warn" | "block" | null } | null;
@@ -78,7 +78,10 @@ export function PdvApp(props: PdvProps) {
   const [customer, setCustomer] = useState<CustomerInfo | null>(props.customer);
   const [selected, setSelected] = useState(props.cart.items.length ? props.cart.items.length - 1 : -1);
   const [saveState, setSaveState] = useState<{ state: "saved" | "saving" | "error"; at?: string; error?: string }>({ state: "saved", at: props.cart.updatedAt });
-  const [dialog, setDialog] = useState<null | "customer" | "discount" | "line" | "park" | "cancel" | "new" | "parked" | "receive" | "import">(props.salesDocs?.importId ? "import" : null);
+  const [dialog, setDialog] = useState<null | "customer" | "discount" | "line" | "park" | "cancel" | "new" | "parked" | "receive" | "import" | "remove">(props.salesDocs?.importId ? "import" : null);
+  // §44: item já registrado a remover que exige autorização do supervisor; atendimento/pré-venda a cancelar
+  const [removal, setRemoval] = useState<{ index: number; skuId: string; name: string; qty: number; removedQty: number; unitCode?: string; error?: string; after?: () => void } | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; total: number; parked: boolean } | null>(null);
   const [pending, start] = useTransition();
   const searchRef = useRef<ProductSearchHandle>(null);
   const dirty = useRef(false);
@@ -141,6 +144,15 @@ export function PdvApp(props: PdvProps) {
       if (res.code === "cart_converted" || res.code === "cart_not_open") {
         toast("error", res.error);
         router.refresh();
+      } else if (res.code === "remove_item_required") {
+        // cópia local com menos itens que o servidor: a remoção precisa passar pela autorização — recarrega do servidor
+        toast("error", res.error);
+        try {
+          localStorage.removeItem(lsKey(c.id));
+        } catch {
+          /* ignore */
+        }
+        window.location.reload();
       } else dirty.current = true;
       return false;
     }
@@ -238,6 +250,8 @@ export function PdvApp(props: PdvProps) {
     const line = items[idx];
     if (!line) return;
     if (qty <= 0) return removeLine(idx);
+    // diminuir a quantidade de item já lançado = remoção parcial (registrada; pode exigir autorização — §44)
+    if (qty < line.qty) return requestRemoval(idx, qty);
     const block = stockBlocks(line, qty, idx);
     if (block && qty > line.qty) {
       toast("error", block);
@@ -247,13 +261,47 @@ export function PdvApp(props: PdvProps) {
     update((c) => ({ ...c, items: (c.items as Line[]).map((l, i) => (i === idx ? { ...l, qty, scale: null } : l)) }));
   };
 
-  const removeLine = (idx: number) => {
-    const line = items[idx];
-    if (!line) return;
-    update((c) => ({ ...c, items: (c.items as Line[]).filter((_, i) => i !== idx) }));
-    setSelected((s) => Math.max(-1, Math.min(s, items.length - 2)));
-    toast("info", `Item removido: ${line.name ?? line.sku}`);
-  };
+  const removeLine = (idx: number) => requestRemoval(idx, 0);
+
+  /**
+   * Remoção de item (§44): grava o que estiver pendente e pede ao servidor, que confere permissão, parâmetro e a exceção
+   * de item recém-lançado. Sem permissão, abre a autorização do supervisor (login e senha, como no desconto acima do limite).
+   */
+  const requestRemoval = (idx: number, newQty: number, approval?: { login: string; password: string } | null, reason?: string | null, after?: () => void) =>
+    !pending &&
+    start(async () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      const saved = await persist();
+      if (!saved && dirty.current) return toast("error", "Não foi possível gravar o atendimento. Verifique a conexão e tente novamente.");
+      const c = cartRef.current;
+      const line = (c.items as Line[])[idx];
+      if (!line) return;
+      const res = await removeCartItemAction(c.id, { index: idx, skuId: line.skuId, qty: newQty, reason: reason ?? null, approval: approval ?? null });
+      if (!res.ok) {
+        if (res.code === "approval_required" || res.code === "approval_denied") {
+          setRemoval({ index: idx, skuId: line.skuId, name: line.name ?? line.sku ?? "Item", qty: newQty, removedQty: line.qty - newQty, unitCode: line.unitCode, error: res.code === "approval_denied" ? res.error : undefined, after });
+          setDialog("remove");
+          return;
+        }
+        return toast("error", res.error);
+      }
+      const server = res.data!;
+      setCart((x) => {
+        const next = { ...x, items: server.items, total: server.total, revision: server.revision, updatedAt: server.updatedAt };
+        try {
+          localStorage.setItem(lsKey(next.id), JSON.stringify({ cart: next, savedAt: new Date().toISOString(), synced: true }));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+      setSaveState({ state: "saved", at: server.updatedAt });
+      if (!newQty) setSelected((s) => Math.max(-1, Math.min(s, server.items.length - 1)));
+      setRemoval(null);
+      setDialog((d) => (d === "remove" ? null : d));
+      toast("info", res.message ?? `Item removido: ${line.name ?? line.sku}`);
+      after?.();
+    });
 
   // ── tabela de preço: reconsulta preços dos itens
   const changeTable = async (priceTableId: string) => {
@@ -728,8 +776,14 @@ export function PdvApp(props: PdvProps) {
               const block = stockBlocks(line, patch.qty, selected);
               if (block && patch.qty > line.qty) return toast("error", block);
             }
-            update((c) => ({ ...c, items: (c.items as Line[]).map((l, i) => (i === selected ? { ...l, ...patch } : l)) }));
+            // quantidade menor: a redução passa pela remoção registrada (§44) e o restante da edição é aplicado depois dela
+            const idx = selected;
+            const apply = (p: Partial<Line>) => update((c) => ({ ...c, items: (c.items as Line[]).map((l, i) => (i === idx ? { ...l, ...p } : l)) }));
             setDialog(null);
+            if (patch.qty !== undefined && patch.qty < line.qty) {
+              const { qty: _qty, ...rest } = patch;
+              requestRemoval(idx, patch.qty, null, null, () => apply(rest));
+            } else apply(patch);
           }}
           onRemove={() => {
             removeLine(selected);
@@ -751,7 +805,30 @@ export function PdvApp(props: PdvProps) {
         />
       )}
       {dialog === "park" && <ParkDialog defaultName={customer?.name ?? ""} pending={pending} onClose={() => setDialog(null)} onConfirm={(name) => run(() => parkCartAction(cart.id, name || null))} />}
-      {dialog === "cancel" && <CancelDialog pending={pending} total={totals.total} onClose={() => setDialog(null)} onConfirm={(reason) => run(() => cancelCartAction(cart.id, reason))} />}
+      {dialog === "cancel" && (
+        <CancelDialog
+          pending={pending}
+          total={cancelTarget?.total ?? totals.total}
+          parked={Boolean(cancelTarget?.parked)}
+          needsApproval={props.operator.canCancelCart === false}
+          onClose={() => {
+            setDialog(null);
+            setCancelTarget(null);
+          }}
+          onConfirm={(reason, approval) => run(() => cancelCartAction(cancelTarget?.id ?? cart.id, reason || (cancelTarget?.parked ? "Pré-venda descartada" : null), approval), () => setCancelTarget(null))}
+        />
+      )}
+      {dialog === "remove" && removal && (
+        <RemoveItemDialog
+          pending={pending}
+          removal={removal}
+          onClose={() => {
+            setDialog(null);
+            setRemoval(null);
+          }}
+          onConfirm={(reason, approval) => requestRemoval(removal.index, removal.qty, approval, reason, removal.after)}
+        />
+      )}
       <Dialog open={dialog === "new"} onClose={() => setDialog(null)} title="Iniciar nova venda" size="sm" footer={<Button onClick={() => setDialog(null)}>Voltar ao atendimento</Button>}>
         <p className="text-sm text-slate-600">O atendimento atual tem {items.length} item(ns) — {formatMoney(totals.total)}. O que fazer com ele?</p>
         <div className="mt-4 grid gap-2">
@@ -797,7 +874,7 @@ export function PdvApp(props: PdvProps) {
                 </div>
                 <div className="mt-2 flex gap-2">
                   <Button size="sm" variant="primary" loading={pending} onClick={() => run(() => resumeCartAction(p.id, props.terminal.id))}>Retomar neste terminal</Button>
-                  <Button size="sm" variant="ghost" className="text-red-700" disabled={pending} onClick={() => { if (window.confirm("Descartar esta pré-venda? Ela fica registrada como cancelada.")) run(() => cancelCartAction(p.id, "Pré-venda descartada")); }}>Descartar</Button>
+                  <Button size="sm" variant="ghost" className="text-red-700" disabled={pending} onClick={() => { setCancelTarget({ id: p.id, total: p.total, parked: true }); setDialog("cancel"); }}>Descartar</Button>
                 </div>
               </li>
             ))}
@@ -954,15 +1031,61 @@ function ParkDialog({ defaultName, pending, onClose, onConfirm }: { defaultName:
   );
 }
 
-function CancelDialog({ pending, total, onClose, onConfirm }: { pending: boolean; total: number; onClose: () => void; onConfirm: (reason: string) => void }) {
-  const [reason, setReason] = useState("");
+/** Login e senha do supervisor no próprio terminal (mesmo padrão do desconto acima do limite). */
+function SupervisorFields({ approval, setApproval, text }: { approval: { login: string; password: string }; setApproval: (a: { login: string; password: string }) => void; text: string }) {
   return (
-    <Dialog open onClose={onClose} title="Cancelar atendimento" size="sm" footer={<><Button onClick={onClose}>Voltar</Button><Button variant="danger" loading={pending} onClick={() => onConfirm(reason)}>Cancelar atendimento</Button></>}>
-      <form onSubmit={(e) => { e.preventDefault(); onConfirm(reason); }}>
-        <p className="mb-3 text-sm text-slate-600">O atendimento de {formatMoney(total)} será encerrado sem venda (fica registrado como cancelado). Cobranças Pix pendentes deste atendimento são canceladas.</p>
+    <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+      <p className="font-medium text-amber-900"><AlertTriangle className="mr-1 inline size-4" />Autorização do supervisor</p>
+      <p className="text-xs text-amber-900">{text}</p>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Input placeholder="Login do supervisor" value={approval.login} onChange={(e) => setApproval({ ...approval, login: e.target.value })} autoComplete="off" aria-label="Login do supervisor" />
+        <Input placeholder="Senha" type="password" value={approval.password} onChange={(e) => setApproval({ ...approval, password: e.target.value })} autoComplete="new-password" aria-label="Senha do supervisor" />
+      </div>
+    </div>
+  );
+}
+
+function CancelDialog({ pending, total, parked, needsApproval, onClose, onConfirm }: { pending: boolean; total: number; parked?: boolean; needsApproval?: boolean; onClose: () => void; onConfirm: (reason: string, approval: { login: string; password: string } | null) => void }) {
+  const [reason, setReason] = useState("");
+  const [approval, setApproval] = useState({ login: "", password: "" });
+  const blocked = Boolean(needsApproval) && (!approval.login || !approval.password);
+  const confirm = () => {
+    if (!blocked) onConfirm(reason, needsApproval ? approval : null);
+  };
+  const title = parked ? "Descartar pré-venda" : "Cancelar atendimento";
+  return (
+    <Dialog open onClose={onClose} title={title} size="sm" footer={<><Button onClick={onClose}>Voltar</Button><Button variant="danger" loading={pending} disabled={blocked} onClick={confirm}>{title}</Button></>}>
+      <form onSubmit={(e) => { e.preventDefault(); confirm(); }}>
+        <p className="mb-3 text-sm text-slate-600">{parked ? "A pré-venda" : "O atendimento"} de {formatMoney(total)} será encerrado sem venda (fica registrado como cancelado, no histórico e no relatório do caixa). Cobranças Pix pendentes deste atendimento são canceladas.</p>
         <Field label="Motivo (opcional)">
           <Input value={reason} onChange={(e) => setReason(e.target.value)} autoFocus maxLength={300} />
         </Field>
+        {needsApproval && <SupervisorFields approval={approval} setApproval={setApproval} text="Seu perfil não cancela atendimentos com itens: um usuário com a permissão “Cancelar atendimento do PDV com itens” informa login e senha. Quem autorizou fica registrado." />}
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
+  );
+}
+
+function RemoveItemDialog({ pending, removal, onClose, onConfirm }: { pending: boolean; removal: { name: string; qty: number; removedQty: number; unitCode?: string; error?: string }; onClose: () => void; onConfirm: (reason: string, approval: { login: string; password: string }) => void }) {
+  const [reason, setReason] = useState("");
+  const [approval, setApproval] = useState({ login: "", password: "" });
+  const blocked = !approval.login || !approval.password;
+  const confirm = () => {
+    if (!blocked) onConfirm(reason, approval);
+  };
+  return (
+    <Dialog open onClose={onClose} title={removal.qty ? "Diminuir quantidade" : "Remover item"} size="sm" footer={<><Button onClick={onClose}>Manter o item</Button><Button variant="danger" loading={pending} disabled={blocked} onClick={confirm}>{removal.qty ? "Diminuir" : "Remover"}</Button></>}>
+      <form onSubmit={(e) => { e.preventDefault(); confirm(); }}>
+        <p className="mb-3 text-sm text-slate-600">
+          <b>{removal.name}</b> — {removal.qty ? `remover ${formatQty(removal.removedQty, removal.unitCode)} (restam ${formatQty(removal.qty, removal.unitCode)})` : `remover ${formatQty(removal.removedQty, removal.unitCode)} do atendimento`}. A remoção fica registrada no histórico e no relatório do caixa.
+        </p>
+        <Field label="Motivo (opcional)">
+          <Input value={reason} onChange={(e) => setReason(e.target.value)} autoFocus maxLength={300} placeholder="Ex.: cliente desistiu, leitura em duplicidade" />
+        </Field>
+        <SupervisorFields approval={approval} setApproval={setApproval} text="Item já registrado: um usuário com a permissão “Remover item já registrado” informa login e senha para autorizar. Quem autorizou fica registrado." />
+        {removal.error && <p className="mt-2 text-sm text-red-700" role="alert">{removal.error}</p>}
+        <button type="submit" hidden />
       </form>
     </Dialog>
   );

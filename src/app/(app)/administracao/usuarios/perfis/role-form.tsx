@@ -71,6 +71,13 @@ export function RoleForm({ role, modules, ops, actions, na, readOnly, usersCount
               <Field label="Descrição" className="sm:col-span-2 lg:col-span-4">
                 <Textarea name="description" rows={2} defaultValue={r.description ?? ""} />
               </Field>
+              <label className="flex items-start gap-2 text-sm sm:col-span-2 lg:col-span-4">
+                <input type="checkbox" name="requireTwoFactor" defaultChecked={Boolean(r.requireTwoFactor)} className="focus-ring mt-0.5 size-4 shrink-0 accent-brand-700" />
+                <span>
+                  <span className="font-medium">Exigir autenticação em duas etapas</span>
+                  <span className="block text-xs text-slate-500">Depois da senha, o usuário informa o código do aplicativo autenticador (Google Authenticator, Microsoft Authenticator, 1Password…). Quem ainda não cadastrou o aplicativo é levado ao cadastro no próximo login, sem acesso ao restante do sistema até concluir.</span>
+                </span>
+              </label>
             </FormGrid>
           </FormSection>
 

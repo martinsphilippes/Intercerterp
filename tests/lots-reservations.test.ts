@@ -277,7 +277,7 @@ describe("VEN-03 — reserva de estoque na pré-venda", () => {
     const before = await available();
     const p1 = await parkedCart(2 * QTY);
     expect(await available()).toBe(before - 2 * QTY);
-    await cancelCart(cashier, p1.id, "desistiu");
+    await cancelCart(cashier, p1.id, "desistiu", { approval: { login: "gerente", password: "Intercert@2026" } });
     expect(await active(p1.id)).toHaveLength(0);
     expect(await available()).toBe(before);
 

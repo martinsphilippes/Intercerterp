@@ -3,6 +3,7 @@ import { notify } from "@/lib/core/notify";
 import { today, diffDays } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { registerRoutine } from "../scheduler";
+import { effectiveExpectedDate, isInTransit } from "../purchase-calc";
 
 /**
  * Rotina diária de acompanhamento de compras (idempotente: uma ocorrência por pedido, deduplicada):
@@ -26,11 +27,14 @@ registerRoutine("purchases.followup", async (store, companyId) => {
         audience: { module: "purchases" },
       });
     }
-    if (["sent", "partial"].includes(o.status) && o.expectedDate && o.expectedDate < t) {
+    // §44: em trânsito, vale a previsão de entrega do transporte
+    const expected = effectiveExpectedDate(o);
+    if (["sent", "partial"].includes(o.status) && expected && expected < t) {
+      const transit = isInTransit(o);
       late += await notify(store, {
         companyId, branchId: o.branchId, type: "deadline", priority: "high",
-        title: `Entrega atrasada: pedido nº ${o.number}`,
-        body: `${supplier} · previsão ${o.expectedDate.split("-").reverse().join("/")} · saldo ${formatMoney(Math.max(0, o.total - (o.receivedValue ?? 0)))}.`,
+        title: transit ? `Entrega em trânsito atrasada: pedido nº ${o.number}` : `Entrega atrasada: pedido nº ${o.number}`,
+        body: `${supplier} · previsão ${expected.split("-").reverse().join("/")}${transit && o.transitInfo?.carrier ? ` · ${o.transitInfo.carrier}` : ""}${transit && o.transitInfo?.tracking ? ` · rastreio ${o.transitInfo.tracking}` : ""} · saldo ${formatMoney(Math.max(0, o.total - (o.receivedValue ?? 0)))}.`,
         link: `/compras/pedidos/${o.id}`, originType: "purchase_order", originId: o.id, occurrenceKey: `po_late:${o.id}`,
         audience: { action: "purchase.receive" },
       });

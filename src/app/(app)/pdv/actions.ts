@@ -2,7 +2,7 @@
 
 import { runAction } from "@/lib/server/action";
 import { BusinessError } from "@/lib/core/errors";
-import { cancelCart, cartToSaleInput, createCart, ensureOpenCart, parkCart, resumeCart, saveCart, type CartPatch } from "@/domain/carts";
+import { cancelCart, cartToSaleInput, createCart, ensureOpenCart, parkCart, removeCartItem, resumeCart, saveCart, type CartPatch } from "@/domain/carts";
 import { finalizeSale, type SalePaymentInput } from "@/domain/sales";
 import { cancelIntent, createPixIntent, simulateIntent } from "@/domain/payments/intents";
 import { formatMoney } from "@/lib/money";
@@ -57,11 +57,25 @@ export async function resumeCartAction(cartId: string, terminalId: string) {
   });
 }
 
-export async function cancelCartAction(cartId: string, reason: string | null) {
+export async function cancelCartAction(cartId: string, reason: string | null, approval?: { login: string; password: string } | null) {
   return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
-    const c = await cancelCart(s.ctx, cartId, reason);
+    const c = await cancelCart(s.ctx, cartId, reason, { approval: approval?.login?.trim() ? approval : null });
     const current = await ensureOpenCart(s.ctx, c.terminalId);
     return { ok: true as const, message: "Atendimento cancelado.", data: plainCart(current!) };
+  });
+}
+
+/**
+ * Remove (ou diminui) um item já registrado no atendimento (§44): permissão do operador ou autorização do supervisor
+ * no terminal, conforme os parâmetros do PDV. Devolve o atendimento gravado (fonte de verdade para a tela).
+ */
+export async function removeCartItemAction(cartId: string, input: { index: number; skuId: string; qty?: number | null; reason?: string | null; approval?: { login: string; password: string } | null }) {
+  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+    const r = await removeCartItem(s.ctx, cartId, {
+      index: input.index, skuId: input.skuId, qty: input.qty ?? null, reason: input.reason ?? null, approval: input.approval?.login?.trim() ? input.approval : null,
+    });
+    const what = r.record.remainingQty ? "Quantidade reduzida" : "Item removido";
+    return { ok: true as const, message: `${what}: ${r.record.name ?? r.record.sku ?? ""}${r.record.approvedByName ? ` (autorizado por ${r.record.approvedByName})` : ""}.`, data: plainCart(r.cart) };
   });
 }
 

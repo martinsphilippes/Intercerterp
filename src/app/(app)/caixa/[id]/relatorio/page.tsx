@@ -8,7 +8,8 @@ import { nameMap } from "@/lib/server/lookups";
 import { CASH_MOVEMENT_LABEL, expectedVisible, sessionSummary } from "@/domain/cash";
 import { AutoPrint } from "../../../vendas/sale-widgets";
 import { PrintStyles } from "../../../vendas/print-styles";
-import { ClosureTable, METHOD_LABEL, SessionVersions } from "../../session-views";
+import { ClosureTable, METHOD_LABEL, PdvControlsTable, SessionVersions } from "../../session-views";
+import { sessionPdvControls } from "@/domain/carts";
 
 export const metadata = { title: "Relatório de caixa" };
 
@@ -27,6 +28,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const [users, terminals, branches] = await Promise.all([nameMap(s.ctx, "users"), nameMap(s.ctx, "terminals"), nameMap(s.ctx, "branches")]);
   const sales = await listAll(store, "sales", { filters: [["eq", "cashSessionId", id]], orderBy: [{ field: "completedAt", dir: "asc" }] });
   const company = await store.get("companies", session.companyId);
+  const pdvControls = await sessionPdvControls(s.ctx, id);
   const open = ["open", "reopened"].includes(session.status);
   const live: Record<string, number> = { cash: sum.expected.cash };
   for (const [k, v] of Object.entries(sum.byMethod)) if (k !== "cash") live[k] = v.expected;
@@ -83,6 +85,10 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <table className="table-base w-full"><thead><tr><th>Venda</th><th>Hora</th><th>Cliente</th><th>Situação</th><th className="text-right">Total</th></tr></thead>
             <tbody>{sales.map((x) => <tr key={x.id}><td>nº {x.number}</td><td>{formatDateTime(x.completedAt)}</td><td>{x.customerSnapshot?.name ?? "Consumidor final"}</td><td>{x.status === "cancelled" ? "Cancelada" : "Concluída"}</td><td className="text-right">{formatMoney(x.total)}</td></tr>)}</tbody>
           </table>
+        </section>
+        <section>
+          <h2 className="mb-1 font-semibold">Itens removidos e atendimentos cancelados</h2>
+          <PdvControlsTable controls={pdvControls} />
         </section>
         <section>
           <h2 className="mb-1 font-semibold">Histórico de versões</h2>

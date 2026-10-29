@@ -1232,6 +1232,14 @@ export interface ReturnInput {
   notes?: string;
   /** terminal de onde sai o dinheiro (devolução em espécie) */
   terminalId?: string | null;
+  /** §44: login e senha de quem autoriza devolução acima do valor máximo (parâmetro sales.returnMaxWithoutManager) */
+  approval?: SupervisorCredentials | null;
+}
+
+/** Valor máximo de devolução sem autorização do gerente (0 = sem limite) — §44. */
+export async function returnLimit(store: Store, companyId: string, branchId: string | null) {
+  const v = Number(await getSetting(store, companyId, branchId, "sales.returnMaxWithoutManager", 0));
+  return Number.isFinite(v) && v > 0 ? Math.round(v) : 0;
 }
 
 export const COMPENSATION_LABEL: Record<string, string> = { store_credit: "Vale-crédito", refund: "Reembolso", exchange: "Troca" };
@@ -1411,6 +1419,15 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
   };
 
   let plan = await build(false);
+  // §44: devolução acima do valor máximo exige a operação sale.return_over_limit ou a autorização de quem a tenha
+  const limit = await returnLimit(ctx.store, ctx.companyId, branchId);
+  let approver: CtxUser | null = null;
+  if (limit > 0 && plan.itemsTotal > limit && !canDo(ctx.user, "sale.return_over_limit")) {
+    if (!input.approval?.login?.trim()) {
+      throw new BusinessError(`Devolução de ${formatMoney(plan.itemsTotal)} acima do valor máximo sem autorização (${formatMoney(limit)}): informe login e senha de um gerente com a permissão “Registrar devolução acima do valor máximo”.`, "approval_required", { limit, total: plan.itemsTotal });
+    }
+    approver = await verifySupervisor(ctx, input.approval, "sale.return_over_limit", `devolução de ${formatMoney(plan.itemsTotal)} da venda nº ${sale.number}`);
+  }
   const refundCash = input.compensation === "refund" && input.refundMethod === "cash";
   const session = refundCash && plan.fin.compensate > 0 ? await resolveCashSession(ctx, branchId, [input.terminalId, sale.terminalId]) : null;
   if (refundCash && plan.fin.compensate > 0) assert(session, "Devolução em dinheiro: abra o caixa (Caixa → Abertura) nesta filial, com o seu usuário, para registrar a saída do valor.", "cash_closed");
@@ -1476,6 +1493,7 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
             compensation: input.compensation, itemsTotal, costTotal, refundMethod: input.compensation === "refund" ? (input.refundMethod ?? null) : null, refundAccountId: input.refundAccountId ?? null,
             creditVoucherId: voucherId, difference: 0, idemKey: input.idemKey, completedAt: status === "completed" ? nowIso() : null, notes: input.notes ?? null, cashSessionId: refundCash && compensate > 0 ? session!.id : null,
             lines, abatedAmount: fin.abate, compensatedAmount: compensate, effectsStatus: "pending",
+            approvedById: approver?.id ?? null, approvedByName: approver?.name ?? null,
           },
           returnId,
         );
@@ -1498,8 +1516,9 @@ export async function processReturn(ctx: Ctx, input: ReturnInput) {
   const compensationText = fin.compensate > 0 ? `${COMPENSATION_LABEL[input.compensation]}${input.compensation === "refund" && input.refundMethod ? " — " + REFUND_METHOD_LABEL[input.refundMethod] : ""} ${formatMoney(fin.compensate)}` : "sem reembolso/vale";
   await audit(ctx, {
     module: "sales", action: "sale.return", entityType: "return", entityId: returnId,
-    summary: `Devolução nº ${number} da venda nº ${sale.number} — ${formatMoney(itemsTotal)}${fin.abate > 0 ? ` (abatido do título a prazo ${formatMoney(fin.abate)}; ${compensationText})` : ` (${compensationText})`}${fin.absorbed > 0 ? ` — ${formatMoney(fin.absorbed)} cobertos por desconto concedido no recebimento, não reembolsados` : ""}`,
-    reason: input.reason, related: [`sale:${sale.id}`, voucherId ? `credit_voucher:${voucherId}` : "", session ? `cash_session:${session.id}` : "", sale.customerId ? `customer:${sale.customerId}` : "", ...fin.titles.map((t) => `title:${t.id}`)].filter(Boolean),
+    summary: `Devolução nº ${number} da venda nº ${sale.number} — ${formatMoney(itemsTotal)}${fin.abate > 0 ? ` (abatido do título a prazo ${formatMoney(fin.abate)}; ${compensationText})` : ` (${compensationText})`}${fin.absorbed > 0 ? ` — ${formatMoney(fin.absorbed)} cobertos por desconto concedido no recebimento, não reembolsados` : ""}${approver ? ` · acima do valor máximo (${formatMoney(limit)}), autorizada por ${approver.name}` : ""}`,
+    ...(approver ? { after: { limit, total: itemsTotal, approvedById: approver.id, approvedByName: approver.name } } : {}),
+    reason: input.reason, related: [approver ? `user:${approver.id}` : "", `sale:${sale.id}`, voucherId ? `credit_voucher:${voucherId}` : "", session ? `cash_session:${session.id}` : "", sale.customerId ? `customer:${sale.customerId}` : "", ...fin.titles.map((t) => `title:${t.id}`)].filter(Boolean),
   });
   return ret;
 }

@@ -69,6 +69,10 @@ export const SPECIAL_ACTIONS = [
   { key: "accounting.manage_team", label: "Gerir departamentos e responsáveis da carteira" },
   { key: "accounting.certificates", label: "Solicitar, cobrar e baixar certificados digitais dos clientes" },
   { key: "certification.operate", label: "Operar a certificação digital (equipe de certificação Intercert)" },
+  // ── ajustes das telas 01–48 (§44): autorização no PDV e limite de devolução
+  { key: "pdv.remove_item", label: "Remover item já registrado no atendimento do PDV (sem autorização do supervisor)" },
+  { key: "pdv.cancel_cart", label: "Cancelar atendimento do PDV com itens (sem autorização do supervisor)" },
+  { key: "sale.return_over_limit", label: "Registrar devolução acima do valor máximo sem autorização do gerente" },
 ] as const;
 
 export type SpecialAction = (typeof SPECIAL_ACTIONS)[number]["key"];
@@ -109,7 +113,9 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
       dashboard: all(), pdv: all(), sales: all(), cash: all(), products: all(), stock: all(), customers: all(),
       suppliers: all(), finance: rw(), purchases: all(), fiscal: rw(), reports: all(), admin: ro(), support: rw(),
     },
-    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "stock.warehouses", "finance.settle", "purchase.approve", "purchase.receive", "purchase.receive_pending_invoice", "purchase.confirm_invoice", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override", "sales.commissions", "sales_doc.quote", "sales_doc.order", "sales_doc.cancel"],
+    actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "stock.warehouses", "finance.settle", "purchase.approve", "purchase.receive", "purchase.receive_pending_invoice", "purchase.confirm_invoice", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override", "sales.commissions", "sales_doc.quote", "sales_doc.order", "sales_doc.cancel",
+      // §44: remover item, cancelar atendimento e devolução acima do limite sem autorização
+      "pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit"],
     discountLimitBps: 2000,
   },
   {

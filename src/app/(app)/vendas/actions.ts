@@ -66,6 +66,8 @@ export async function processReturnAction(saleId: string, fd: FormData) {
       refundAccountId: fopt(fd, "refundAccountId"),
       notes: fopt(fd, "notes") ?? undefined,
       terminalId: await browserTerminal(s.ctx.branchId),
+      // §44: autorização do gerente para devolução acima do valor máximo
+      approval: fstr(fd, "approvalLogin") ? { login: fstr(fd, "approvalLogin"), password: String(fd.get("approvalPassword") ?? "") } : null,
     });
     const abated = ret.abatedAmount ?? 0;
     const absorbed = Math.max(0, ret.itemsTotal - abated - (ret.compensatedAmount ?? ret.itemsTotal));

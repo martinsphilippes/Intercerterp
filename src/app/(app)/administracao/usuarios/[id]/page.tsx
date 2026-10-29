@@ -18,7 +18,7 @@ import { inviteState, manageableCompanyIds } from "@/domain/users";
 import { userRoleIn } from "@/lib/auth/users";
 import { unscoped } from "@/lib/db/scoped-store";
 import { MatrixView } from "../perfis/matrix-view";
-import { setUserStatusAction, cancelInviteAction } from "../actions";
+import { setUserStatusAction, cancelInviteAction, resetTwoFactorAction } from "../actions";
 import { ResendInviteButton } from "../invite-link";
 import { SetPasswordButton } from "../password-dialog";
 
@@ -80,6 +80,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             )}
             {manageAll && !self && (u.status === "suspended" || u.status === "inactive") && u.authId && <ActionButton action={setUserStatusAction.bind(null, id, "active")} label="Reativar acesso" variant="primary" />}
             {manageAll && !self && u.status === "invited" && <ActionButton action={cancelInviteAction.bind(null, id)} label="Cancelar convite" confirm="Cancelar o convite? O link deixará de funcionar." />}
+            {manageAll && !self && (u.totpEnabled || u.totpPendingEnc) && <ActionButton action={resetTwoFactorAction.bind(null, id)} label="Redefinir duas etapas" askReason="Motivo da redefinição da autenticação em duas etapas (ex.: perdeu o celular):" />}
           </>
         }
       />
@@ -130,6 +131,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 { label: "Filiais", value: branchNames },
                 { label: "Primeiro acesso", value: u.firstAccessAt ? formatDateTime(u.firstAccessAt) : "Ainda não acessou" },
                 { label: "Último acesso", value: u.lastAccessAt ? formatDateTime(u.lastAccessAt) : "Nunca" },
+                { label: "Autenticação em duas etapas", value: u.totpEnabled ? `Ativa desde ${formatDateTime(u.totpEnabledAt)} · ${(u.totpRecoveryHashes ?? []).length} código(s) de recuperação` : role?.requireTwoFactor ? "Exigida pelo perfil — cadastro pendente (pedido no próximo login)" : "Desativada" },
               ]}
             />
           </Card>

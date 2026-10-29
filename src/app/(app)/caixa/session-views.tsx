@@ -80,3 +80,26 @@ export function SessionVersions({ history }: { history: any[] }) {
     </ol>
   );
 }
+
+/** §44 — itens removidos e atendimentos cancelados na sessão, por operador (relatório e tela da sessão). */
+export function PdvControlsTable({ controls }: { controls: { removed: number; removedValue: number; cancelled: number; cancelledValue: number; authorized: number; byOperator: Array<{ operatorName: string; removed: number; removedValue: number; cancelled: number; cancelledValue: number; authorized: number }>; events: Array<{ id: string; at: string; action: string; summary: string; userName: string; reason: string | null }> } }) {
+  if (!controls.removed && !controls.cancelled) return <p className="px-1 py-2 text-sm text-slate-500">Nenhum item removido nem atendimento cancelado nesta sessão.</p>;
+  return (
+    <div className="space-y-2">
+      <table className="table-base w-full text-sm">
+        <thead><tr><th>Operador</th><th className="text-right">Itens removidos</th><th className="text-right">Valor removido</th><th className="text-right">Atendimentos cancelados</th><th className="text-right">Valor cancelado</th><th className="text-right">Com autorização</th></tr></thead>
+        <tbody>
+          {controls.byOperator.map((o) => (
+            <tr key={o.operatorName}><td>{o.operatorName}</td><td className="tabular text-right">{o.removed}</td><td className="tabular text-right">{formatMoney(o.removedValue)}</td><td className="tabular text-right">{o.cancelled}</td><td className="tabular text-right">{formatMoney(o.cancelledValue)}</td><td className="tabular text-right">{o.authorized}</td></tr>
+          ))}
+          <tr className="font-semibold"><td>Total</td><td className="tabular text-right">{controls.removed}</td><td className="tabular text-right">{formatMoney(controls.removedValue)}</td><td className="tabular text-right">{controls.cancelled}</td><td className="tabular text-right">{formatMoney(controls.cancelledValue)}</td><td className="tabular text-right">{controls.authorized}</td></tr>
+        </tbody>
+      </table>
+      <ul className="space-y-0.5 px-1 pb-2 text-xs text-slate-600">
+        {controls.events.map((e) => (
+          <li key={e.id}>{formatDateTime(e.at)} · {e.userName} · {e.summary}{e.reason ? ` — motivo: ${e.reason}` : ""}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
