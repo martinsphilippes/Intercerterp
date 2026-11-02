@@ -107,3 +107,19 @@ describe("demonstração da rede sobre catálogo já salvo", () => {
     expect(after.paymentInstructions).toBe("Pix X");
   });
 });
+
+describe("demonstração da rede retomável", () => {
+  it("carga repetida depois de interrompida nas vendas não duplica nem falha", async () => {
+    const { setSetting } = await import("@/lib/core/settings");
+    const store = freshStore();
+    await seedDemo(store, { historyDays: 1 });
+    const before = (await listAll(store, "certificate_requests")).length;
+    const coupons = (await listAll(store, "cert_coupons")).length;
+    // simula a interrupção: a marca das vendas não chegou a ser gravada
+    await setSetting(store, "platform", null, "demo.network.sales.done", false);
+    const { seed } = await import("@/domain/seed/modules/network");
+    await expect(seed({ seeder: { store } } as never)).resolves.toBeTruthy();
+    expect((await listAll(store, "certificate_requests")).length).toBe(before);
+    expect((await listAll(store, "cert_coupons")).length).toBe(coupons);
+  }, 180000);
+});

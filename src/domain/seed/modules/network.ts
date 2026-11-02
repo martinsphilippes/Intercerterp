@@ -252,6 +252,9 @@ async function seedSales(store: Store, platform: Ctx, nodes: Record<string, Doc>
   };
   type Step = "awaiting" | "paid" | "issued";
   const sale = async (ctx: Ctx, key: string, customer: Doc, productKey: string, step: Step, extra: Record<string, any> = {}) => {
+    // retomável: venda de exemplo já criada numa carga anterior fica como está (não repete as etapas)
+    const prev = await unscoped(store).get("certificate_requests", detId("cert_sale", ctx.companyId, `demo-${key}`));
+    if (prev) return prev;
     let r = await createNetworkSale(ctx, { customerId: customer.id, productKey, idemKey: `demo-${key}`, dueDate: addDays(t, 5), duplicateReason: "Venda de exemplo da demonstração", ...extra });
     if (r.status === "awaiting_payment") {
       await sendCertificateCharge(ctx, r.id, { channel: "whatsapp", to: customer.phone ?? "88999990000" });
