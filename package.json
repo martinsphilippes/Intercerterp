@@ -16,7 +16,7 @@
     "e2e": "playwright test"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "dependencies": {
     "clsx": "^2.1.1",
