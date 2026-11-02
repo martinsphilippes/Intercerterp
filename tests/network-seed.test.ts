@@ -88,3 +88,22 @@ describe("demonstração da rede de certificação", () => {
     expect((await listAll(store, "certificate_requests")).filter((r) => r.channel === "network").length).toBe(sales.length);
   }, 120000);
 });
+
+describe("demonstração da rede sobre catálogo já salvo", () => {
+  it("acrescenta ao catálogo salvo (só e-CNPJ A1) os produtos que a demonstração usa, sem tirar nem alterar o salvo", async () => {
+    const { setSetting, getSetting } = await import("@/lib/core/settings");
+    const { unscoped } = await import("@/lib/db/scoped-store");
+    const { PLATFORM_SCOPE } = await import("@/domain/accounting/certificates");
+    const { ensureDemoCatalog } = await import("@/domain/seed/modules/network");
+    const store = freshStore();
+    const saved = { catalog: [{ key: "ecnpj_a1_12m", label: "e-CNPJ A1 (preço próprio)", months: 12, price: 21000, active: true }], paymentInstructions: "Pix X", paymentUrlBase: null };
+    await setSetting(unscoped(store), PLATFORM_SCOPE, null, "certification", saved);
+    await ensureDemoCatalog(store);
+    await ensureDemoCatalog(store); // repetível
+    const after = await getSetting<{ catalog: { key: string; price: number; label: string }[]; paymentInstructions: string }>(unscoped(store), PLATFORM_SCOPE, null, "certification", null as never);
+    expect(after.catalog[0]).toMatchObject({ key: "ecnpj_a1_12m", price: 21000, label: "e-CNPJ A1 (preço próprio)" });
+    expect(after.catalog.map((p) => p.key)).toEqual(expect.arrayContaining(["ecpf_a1_12m", "birdid_12m", "birdid_free_60m"]));
+    expect(new Set(after.catalog.map((p) => p.key)).size).toBe(after.catalog.length);
+    expect(after.paymentInstructions).toBe("Pix X");
+  });
+});

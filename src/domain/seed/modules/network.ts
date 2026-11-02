@@ -2,7 +2,7 @@ import type { DemoRefs } from "../base";
 import { DEMO_PASSWORD, Seeder } from "../base";
 import { findOne } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
-import { scopeStore } from "@/lib/db/scoped-store";
+import { scopeStore, unscoped } from "@/lib/db/scoped-store";
 import { getAuth } from "@/lib/auth/provider";
 import { toCtxUser } from "@/lib/auth/users";
 import type { Ctx } from "@/lib/core/ctx";
@@ -14,7 +14,7 @@ import {
   NETWORK_SCOPE, createNode, nodeOfCompany, saveLevelPriceRule, saveCertCustomer, createNetworkSale, createCoupon, createVoucherPackage, purchaseVoucherPackage, registerRenewalContact, type NetworkLevel,
   savePlatformFinance, saveBillingAgreement, requestRecharge, confirmRecharge, closeRelation, flowKey,
 } from "../../network";
-import { approveCertificateValidation, confirmCertificatePayment, recordCertificateAuthorization, registerCertificateEmission, requestCertificateEmission, sendCertificateCharge } from "../../accounting/certificates";
+import { DEFAULT_CERT_CATALOG, PLATFORM_SCOPE, type CertProduct, approveCertificateValidation, confirmCertificatePayment, recordCertificateAuthorization, registerCertificateEmission, requestCertificateEmission, sendCertificateCharge } from "../../accounting/certificates";
 
 /**
  * Demonstração da REDE DE CERTIFICAÇÃO (§43) — depende dos módulos "accounting" e "certificates":
@@ -60,6 +60,20 @@ const PARTNERS: PartnerDef[] = [
   { key: "salvador", parent: "bahia", level: "revenda", name: "Revenda Salvador Ltda (DEMO)", tradeName: "Revenda Salvador (DEMO)", cnpj: "20302176000105", city: "Salvador", uf: "BA", region: "Metropolitana", admin: { name: "Sara Revenda", login: "revenda.salvador" }, seller: { name: "Valter Vendedor (Salvador)", login: "vendedor.salvador" } },
 ];
 
+/**
+ * Instalações que já salvaram o catálogo da certificação antes da rede (ex.: só e-CNPJ A1) não têm os produtos que a
+ * demonstração da rede usa: acrescenta os produtos padrão que faltam, sem alterar nem remover os já salvos.
+ */
+export async function ensureDemoCatalog(store: Store): Promise<void> {
+  const base = unscoped(store);
+  const saved = await getSetting<{ catalog?: CertProduct[] } | null>(base, PLATFORM_SCOPE, null, "certification", null);
+  if (!saved || !Array.isArray(saved.catalog) || !saved.catalog.length) return; // sem catálogo salvo: vale o padrão completo
+  const have = new Set(saved.catalog.map((p) => p.key));
+  const missing = DEFAULT_CERT_CATALOG.filter((p) => !have.has(p.key));
+  if (!missing.length) return;
+  await setSetting(base, PLATFORM_SCOPE, null, "certification", { ...saved, catalog: [...saved.catalog, ...missing] });
+}
+
 async function activateDemoUser(store: Store, u: Doc, login: string): Promise<Doc> {
   let doc = u;
   if (!doc.authId) doc = await store.update("users", doc.id, { authId: await getAuth().createUser(doc.email, DEMO_PASSWORD, doc.name) });
@@ -70,6 +84,7 @@ async function activateDemoUser(store: Store, u: Doc, login: string): Promise<Do
 export async function seed(refs: DemoRefs): Promise<unknown> {
   const store = refs.seeder.store;
   const sd = new Seeder(store);
+  await ensureDemoCatalog(store);
   if (await getSetting(store, NETWORK_SCOPE, null, "demo.network.done", false)) return { skipped: true };
 
   // empresa da plataforma e usuário com "Gerir toda a rede"
