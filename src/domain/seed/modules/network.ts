@@ -1,6 +1,6 @@
 import type { DemoRefs } from "../base";
 import { DEMO_PASSWORD, Seeder } from "../base";
-import { findOne } from "@/lib/db";
+import { detId, findOne } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { scopeStore, unscoped } from "@/lib/db/scoped-store";
 import { getAuth } from "@/lib/auth/provider";
@@ -216,22 +216,26 @@ async function seedSales(store: Store, platform: Ctx, nodes: Record<string, Doc>
 
   // cupons: um da própria revenda (10%, 1 por titular) e um da Regional Ceará para Fortaleza (R$ 20 — nível acima absorve)
   const juaAdmin = await adminCtx("juazeiro");
-  await createCoupon(juaAdmin, { code: "JUAZEIRO10", kind: "percent", valueBps: 1000, validTo: addDays(t, 90), maxUses: 50, maxPerHolder: 1, notes: "Campanha do Cariri (DEMO)" });
-  await createCoupon(await adminCtx("ceara"), { code: "CEARA20", kind: "fixed", valueCents: 2000, nodeId: nodes.fortaleza.id, validTo: addDays(t, 60), maxUses: 20, notes: "Desconto da Regional para Fortaleza (DEMO)" });
+  // retomável: uma carga interrompida no meio (tempo esgotado, banco pausado) continua sem duplicar cupons, pacotes e clientes
+  const couponExists = async (code: string) => !!(await findOne(store, "cert_coupons", [["eq", "code", code]]));
+  if (!(await couponExists("JUAZEIRO10"))) await createCoupon(juaAdmin, { code: "JUAZEIRO10", kind: "percent", valueBps: 1000, validTo: addDays(t, 90), maxUses: 50, maxPerHolder: 1, notes: "Campanha do Cariri (DEMO)" });
+  if (!(await couponExists("CEARA20"))) await createCoupon(await adminCtx("ceara"), { code: "CEARA20", kind: "fixed", valueCents: 2000, nodeId: nodes.fortaleza.id, validTo: addDays(t, 60), maxUses: 20, notes: "Desconto da Regional para Fortaleza (DEMO)" });
 
   // pacote de vouchers: Regional Ceará → Revenda Juazeiro (10 e-CPF A1 a R$ 105, abaixo do custo normal de R$ 110)
-  const pkg = await createVoucherPackage(await adminCtx("ceara"), { name: "Pacote Cariri — 10 e-CPF A1 (DEMO)", validTo: addDays(t, 180), items: [{ productKey: "ecpf_a1_12m", qty: 10, unitPrice: 10500 }], recipientNodeId: nodes.juazeiro.id });
+  const pkgName = "Pacote Cariri — 10 e-CPF A1 (DEMO)";
+  const pkg = (await findOne(store, "cert_voucher_packages", [["eq", "ownerNodeId", nodes.ceara.id], ["eq", "name", pkgName]])) ?? await createVoucherPackage(await adminCtx("ceara"), { name: "Pacote Cariri — 10 e-CPF A1 (DEMO)", validTo: addDays(t, 180), items: [{ productKey: "ecpf_a1_12m", qty: 10, unitPrice: 10500 }], recipientNodeId: nodes.juazeiro.id });
   await purchaseVoucherPackage(juaAdmin, pkg.id, { idemKey: "demo-pacote-cariri" });
 
   const demoFile = { name: "certificado_DEMO.pfx", data: Buffer.from("DEMO — arquivo de demonstração, sem validade") };
   const customers: Record<string, Doc> = {};
   const mkCustomer = async (ctx: Ctx, key: string, input: Parameters<typeof saveCertCustomer>[2]) => {
-    customers[key] = await saveCertCustomer(ctx, null, input);
+    const existing = await findOne(store, "cert_customers", [["eq", "companyId", ctx.companyId], ["eq", "doc", String(input.doc ?? "").replace(/\D/g, "")]]);
+    customers[key] = existing ?? await saveCertCustomer(ctx, null, input);
     return customers[key];
   };
   type Step = "awaiting" | "paid" | "issued";
   const sale = async (ctx: Ctx, key: string, customer: Doc, productKey: string, step: Step, extra: Record<string, any> = {}) => {
-    let r = await createNetworkSale(ctx, { customerId: customer.id, productKey, idemKey: `demo-${key}`, dueDate: addDays(t, 5), ...extra });
+    let r = await createNetworkSale(ctx, { customerId: customer.id, productKey, idemKey: `demo-${key}`, dueDate: addDays(t, 5), duplicateReason: "Venda de exemplo da demonstração", ...extra });
     if (r.status === "awaiting_payment") {
       await sendCertificateCharge(ctx, r.id, { channel: "whatsapp", to: customer.phone ?? "88999990000" });
       if (step === "awaiting") return r;
@@ -284,11 +288,14 @@ async function seedSales(store: Store, platform: Ctx, nodes: Record<string, Doc>
   // certificados de vendas anteriores (renovações): vencendo em 7/30/60 dias, vencido e perdido; com e sem contato
   const old = async (node: Doc, c: Doc, productKey: string, productLabel: string, validTo: string, sellerLogin: string) => {
     const seller = await user(sellerLogin);
+    const oldId = detId("demo_old_cert", node.id, c.id, productKey);
+    const prev = await store.get("accounting_certificates", oldId);
+    if (prev) return prev;
     return store.create("accounting_certificates", {
       companyId: node.nodeCompanyId, branchId: null, createdBy: seller.id, clientId: c.id, customerId: c.id, holderName: c.name, holderDoc: c.doc, product: productKey, productLabel,
       serial: null, issuer: "AC Intercert (DEMO)", validFrom: addDays(validTo, -365), validTo, source: "issued", requestId: null, fileId: null, notes: "Venda anterior (DEMO)", active: true,
       channel: "network", sellerNodeId: node.id, sellerUserId: seller.id, productType: productKey.includes("a3") ? "a3" : "a1", holderType: c.personType === "PF" ? "pf" : "pj", isDemo: true,
-    });
+    }, oldId);
   };
   await mkCustomer(jua, "hugo", { personType: "PF", doc: cpf("890123458"), name: "Hugo Crato (DEMO)", phone: "88988110005" });
   await mkCustomer(jua, "iris", { personType: "PF", doc: cpf("901234569"), name: "Íris Barbalha (DEMO)", phone: "88988110006" });
