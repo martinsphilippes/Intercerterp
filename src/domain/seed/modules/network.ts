@@ -70,8 +70,20 @@ export async function ensureDemoCatalog(store: Store): Promise<void> {
   if (!saved || !Array.isArray(saved.catalog) || !saved.catalog.length) return; // sem catálogo salvo: vale o padrão completo
   const have = new Set(saved.catalog.map((p) => p.key));
   const missing = DEFAULT_CERT_CATALOG.filter((p) => !have.has(p.key));
-  if (!missing.length) return;
-  await setSetting(base, PLATFORM_SCOPE, null, "certification", { ...saved, catalog: [...saved.catalog, ...missing] });
+  // produtos já salvos sem os dados da rede (custo AC, tipo, titular, AC, editável): completa só o que falta,
+  // sem mexer em preço, descrição, validade nem situação
+  const META = ["acCost", "type", "holder", "supplier", "editable"] as const;
+  let filled = 0;
+  const catalog = saved.catalog.map((p) => {
+    const def = DEFAULT_CERT_CATALOG.find((d) => d.key === p.key);
+    if (!def) return p;
+    const add: Partial<CertProduct> = {};
+    for (const k of META) if ((p as Partial<CertProduct>)[k] === undefined || (p as Partial<CertProduct>)[k] === null) (add as Record<string, unknown>)[k] = def[k];
+    if (Object.keys(add).length) filled++;
+    return { ...p, ...add };
+  });
+  if (!missing.length && !filled) return;
+  await setSetting(base, PLATFORM_SCOPE, null, "certification", { ...saved, catalog: [...catalog, ...missing] });
 }
 
 async function activateDemoUser(store: Store, u: Doc, login: string): Promise<Doc> {
@@ -85,7 +97,12 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   const store = refs.seeder.store;
   const sd = new Seeder(store);
   await ensureDemoCatalog(store);
-  if (await getSetting(store, NETWORK_SCOPE, null, "demo.network.done", false)) return { skipped: true };
+  // a base (empresas, nós e preços) e as partes seguintes (financeiro, vendas) têm marcas próprias: uma carga
+  // interrompida depois da base retoma o financeiro e as vendas sem refazer os preços
+  const baseDone = await getSetting(store, NETWORK_SCOPE, null, "demo.network.done", false);
+  const billingDone = await getSetting(store, NETWORK_SCOPE, null, "demo.network.billing.done", false);
+  const salesDone = await getSetting(store, NETWORK_SCOPE, null, "demo.network.sales.done", false);
+  if (baseDone && billingDone && salesDone) return { skipped: true };
 
   // empresa da plataforma e usuário com "Gerir toda a rede"
   const plat = await createCompanyWithDefaults(store, { name: "Intercert Certificação Digital Ltda (DEMO)", tradeName: "Intercert Certificação (DEMO)", cnpj: PLATFORM_CNPJ, uf: "CE", cityName: "Juazeiro do Norte", cityCode: "2307304", kind: "certification", key: "demo-intercert-platform" });
@@ -145,7 +162,7 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
     { ctx: await ctxOf(admins.salvador, nodes.salvador.nodeCompanyId), owner: "salvador", level: "contador", idx: 3 },
   ];
   let rules = 0;
-  for (const o of owners) {
+  for (const o of baseDone ? [] : owners) {
     for (const [productKey, p] of Object.entries(PRICES)) {
       await saveLevelPriceRule(o.ctx, o.owner ? nodes[o.owner].id : null, o.level, { productKey, cost: p.costs[o.idx], minPrice: p.min, defaultPrice: p.def, canEdit: p.canEdit, reason: "Tabela de demonstração" });
       rules++;

@@ -101,7 +101,7 @@ describe("demonstração da rede sobre catálogo já salvo", () => {
     await ensureDemoCatalog(store);
     await ensureDemoCatalog(store); // repetível
     const after = await getSetting<{ catalog: { key: string; price: number; label: string }[]; paymentInstructions: string }>(unscoped(store), PLATFORM_SCOPE, null, "certification", null as never);
-    expect(after.catalog[0]).toMatchObject({ key: "ecnpj_a1_12m", price: 21000, label: "e-CNPJ A1 (preço próprio)" });
+    expect(after.catalog[0]).toMatchObject({ key: "ecnpj_a1_12m", price: 21000, label: "e-CNPJ A1 (preço próprio)", acCost: 9000, type: "a1", holder: "pj" });
     expect(after.catalog.map((p) => p.key)).toEqual(expect.arrayContaining(["ecpf_a1_12m", "birdid_12m", "birdid_free_60m"]));
     expect(new Set(after.catalog.map((p) => p.key)).size).toBe(after.catalog.length);
     expect(after.paymentInstructions).toBe("Pix X");
