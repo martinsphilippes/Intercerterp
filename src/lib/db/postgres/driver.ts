@@ -37,6 +37,25 @@ export function postgresUrl(): string {
 }
 
 /**
+ * Do endereço do banco, só o que não é segredo: a região do provedor (ex.: `sa-east-1`) e se a conexão passa pelo
+ * agrupador de conexões dele. Serve ao diagnóstico da instalação — banco longe da região das funções deixa cada tela
+ * lenta, porque uma tela faz várias consultas em sequência.
+ */
+export function postgresEndpoint(url: string = postgresUrl()): { region: string | null; pooled: boolean } {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    // sem endereço (ou endereço inválido): nada a informar
+  }
+  const region =
+    host.match(/\.([a-z0-9-]+)\.(?:aws|azure|gcp)\.neon\.tech$/)?.[1] ?? // Neon: <id>[-pooler].<região>.<nuvem>.neon.tech
+    host.match(/(?:^|[.-])((?:us|eu|sa|ap|ca|me|af|il|mx)-(?:[a-z]+-)+\d)(?=[.-]|$)/)?.[1] ?? // demais: região no padrão da AWS em qualquer ponto
+    null;
+  return { region, pooled: /(^|[.-])pooler([.-]|$)/.test(host) };
+}
+
+/**
  * Conjunto de conexões do `pg`. Poucas conexões por instância e descarte rápido das ociosas: em funções da Vercel as
  * instâncias são suspensas entre requisições (`attachDatabasePool` fecha as ociosas antes da suspensão) e o banco
  * recomendado (Neon) já tem o seu próprio agrupador de conexões no endereço padrão.

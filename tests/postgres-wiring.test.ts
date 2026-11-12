@@ -21,6 +21,7 @@ import { dbOutageOf } from "@/lib/db/outage";
 import { getFileStorage } from "@/lib/core/files";
 import { missingDeploymentConfig } from "@/lib/server/deploy-config";
 import { indexName, schemaSignature } from "@/lib/db/postgres/ddl";
+import { postgresEndpoint } from "@/lib/db/postgres/driver";
 
 const ENV = ["DATA_BACKEND", "DATABASE_URL", "POSTGRES_URL", "APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID", "APPWRITE_API_KEY", "VERCEL", "BLOB_READ_WRITE_TOKEN", "VERCEL_OIDC_TOKEN", "BLOB_STORE_ID"] as const;
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
@@ -115,6 +116,22 @@ describe("banco indisponível: erros do Postgres", () => {
     expect(dbOutageOf(pgError("40001", "could not serialize access"))).toBeNull();
     // e o Appwrite continua classificado como antes
     expect(dbOutageOf(new AppwriteException("Project is paused", 403, "project_paused"))).toMatchObject({ kind: "paused" });
+  });
+});
+
+describe("diagnóstico da instalação", () => {
+  it("do endereço do banco saem só a região e o uso do agrupador de conexões — nunca usuário, senha ou nome do servidor", () => {
+    const at = (host: string) => postgresEndpoint(`postgresql://dono:segredo-forte@${host}/neondb?sslmode=require`);
+    expect(at("ep-cool-night-a1b2c3-pooler.sa-east-1.aws.neon.tech")).toEqual({ region: "sa-east-1", pooled: true });
+    expect(at("ep-cool-night-a1b2c3.sa-east-1.aws.neon.tech")).toEqual({ region: "sa-east-1", pooled: false });
+    expect(at("ep-x-123-pooler.c-2.us-east-1.aws.neon.tech")).toEqual({ region: "us-east-1", pooled: true });
+    expect(at("ep-y-456.eastus2.azure.neon.tech")).toEqual({ region: "eastus2", pooled: false });
+    expect(at("aws-0-eu-central-1.pooler.supabase.com:6543")).toEqual({ region: "eu-central-1", pooled: true });
+    expect(at("banco.cluster-abc.ap-southeast-2.rds.amazonaws.com")).toEqual({ region: "ap-southeast-2", pooled: false });
+    expect(at("localhost:5432")).toEqual({ region: null, pooled: false });
+    expect(postgresEndpoint("")).toEqual({ region: null, pooled: false });
+    expect(postgresEndpoint("isto não é um endereço")).toEqual({ region: null, pooled: false });
+    for (const host of ["ep-cool-night-a1b2c3-pooler.sa-east-1.aws.neon.tech", "localhost:5432"]) expect(JSON.stringify(at(host))).not.toMatch(/dono|segredo|ep-cool|neondb/);
   });
 });
 

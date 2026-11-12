@@ -8,6 +8,7 @@ import { configuredBackend, appwriteConfig, getStore, findOne, detId } from "@/l
  *   ?step=demo      — carrega a empresa de demonstração (idempotente; repita se o tempo acabar)
  *   ?step=owner     — cria o administrador geral (e-mail informado; senha gerada e devolvida UMA vez)
  *   ?step=finish    — encerra a instalação: a rota deixa de funcionar (exceto provision e demo-update, idempotentes)
+ *   ?step=diagnostico — região, tempo de resposta e tamanho do banco, esquema aplicado e onde ficam os arquivos (só leitura)
  * Exige o SETUP_TOKEN (cabeçalho x-setup-token ou ?token=). Depois de "finish" responde 410.
  */
 export const maxDuration = 300;
@@ -30,6 +31,48 @@ export async function GET(req: NextRequest) {
   const step = req.nextUrl.searchParams.get("step") ?? "";
   const store = getStore();
   const started = Date.now();
+
+  if (step === "diagnostico") {
+    // Situação da instalação sem expor credenciais: onde o banco está, quanto demora e onde ficam os arquivos.
+    // Funciona antes e depois de a instalação ser encerrada (só leitura).
+    const { blobConfigured, getFileStorage } = await import("@/lib/core/files");
+    const out: Record<string, unknown> = { ok: true, step, backend, functionRegion: process.env.VERCEL_REGION ?? null, files: getFileStorage().kind, blobConnected: blobConfigured() };
+    if (backend === "postgres") {
+      const { pgDriver, postgresUrl, postgresEndpoint } = await import("@/lib/db/postgres/driver");
+      const { schemaApplied } = await import("@/lib/db/postgres/ddl");
+      // do endereço só saem a região (ex.: sa-east-1) e se é o endereço com agrupador de conexões
+      const endpoint = postgresEndpoint();
+      out.dbRegion = endpoint.region;
+      out.pooled = endpoint.pooled;
+      const driver = pgDriver(postgresUrl());
+      try {
+        const t0 = Date.now();
+        const v = await driver.query("SELECT current_setting('server_version') AS version, pg_database_size(current_database()) AS bytes");
+        out.firstQueryMs = Date.now() - t0; // inclui abrir a conexão (e acordar o banco, se estava ocioso)
+        // ida e volta de uma consulta mínima com a conexão já aberta: mediana de 7 (é o custo fixo de cada consulta de tela)
+        const trips: number[] = [];
+        for (let i = 0; i < 7; i++) {
+          const t = Date.now();
+          await driver.query("SELECT 1");
+          trips.push(Date.now() - t);
+        }
+        trips.sort((a, b) => a - b);
+        out.queryMs = trips[3];
+        out.queryMsRange = [trips[0], trips[6]];
+        out.serverVersion = v.rows[0]?.version ?? null;
+        out.dbSizeMb = Math.round((Number(v.rows[0]?.bytes ?? 0) / 1048576) * 10) / 10;
+        out.schemaApplied = await schemaApplied(driver);
+      } catch (e) {
+        const { dbOutageOf } = await import("@/lib/db/outage");
+        out.ok = false;
+        out.outage = dbOutageOf(e)?.kind ?? null;
+        out.error = (e as Error).message;
+      } finally {
+        await driver.end().catch(() => undefined);
+      }
+    }
+    return NextResponse.json(out, { status: out.ok ? 200 : 503 });
+  }
 
   if (step === "provision" && backend === "postgres") {
     // Postgres: tabelas, colunas e índices que faltam, numa transação (o mesmo que a primeira consulta de cada versão faz sozinha)
@@ -125,5 +168,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, step, completed: true });
   }
 
-  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | demo-update | status | check-login | owner | finish)." }, { status: 400 });
+  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | demo-update | status | check-login | owner | finish | diagnostico)." }, { status: 400 });
 }
