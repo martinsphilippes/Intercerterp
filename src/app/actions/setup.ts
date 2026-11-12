@@ -54,6 +54,10 @@ export async function setupInstallationAction(fd: FormData): Promise<ActionResul
   const store = getStore();
   const mode = String(fd.get("mode") ?? "company");
   if (mode === "demo") {
+    // sem destino para arquivos a carga pararia pela metade: avisa o que falta antes de gravar qualquer coisa
+    const { fileStorageMissing } = await import("@/lib/core/files");
+    const missing = fileStorageMissing();
+    if (missing) return { ok: false, error: missing };
     const { seedDemo } = await import("@/domain/seed");
     await seedDemo(store, { historyDays: Number(process.env.DEMO_HISTORY_DAYS ?? 14) });
     const pwd = process.env.DEMO_PASSWORD ? "a senha definida em DEMO_PASSWORD" : "Intercert@2026";

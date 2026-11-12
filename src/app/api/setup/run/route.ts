@@ -29,8 +29,19 @@ export async function GET(req: NextRequest) {
   const backend = configuredBackend();
   if (backend !== "appwrite" && backend !== "postgres") return NextResponse.json({ ok: false, error: "Somente com banco Postgres ou Appwrite configurado." }, { status: 400 });
   const step = req.nextUrl.searchParams.get("step") ?? "";
-  const store = getStore();
   const started = Date.now();
+  try {
+    return await runStep(req, backend, step, started);
+  } catch (e) {
+    // quem instala precisa ler o motivo (banco fora do ar, sem acesso, codificação errada, arquivos sem destino) — não um erro 500 mudo
+    const { dbOutageOf } = await import("@/lib/db/outage");
+    console.error(`[setup] etapa "${step}" falhou`, e);
+    return NextResponse.json({ ok: false, step, outage: dbOutageOf(e)?.kind ?? null, error: String((e as Error)?.message ?? e), ms: Date.now() - started }, { status: 500 });
+  }
+}
+
+async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step: string, started: number): Promise<NextResponse> {
+  const store = getStore();
 
   if (step === "diagnostico") {
     // Situação da instalação sem expor credenciais: onde o banco está, quanto demora e onde ficam os arquivos.
@@ -101,11 +112,6 @@ export async function GET(req: NextRequest) {
     try {
       const r = await provisionPostgres(driver, (m) => log.push(m));
       return NextResponse.json({ ok: true, step, ...r, log, ms: Date.now() - started });
-    } catch (e) {
-      // quem instala precisa ler o motivo (banco fora do ar, sem acesso, codificação errada) — não um erro 500 mudo
-      const { dbOutageOf } = await import("@/lib/db/outage");
-      console.error("[setup] criação das tabelas falhou", e);
-      return NextResponse.json({ ok: false, step, outage: dbOutageOf(e)?.kind ?? null, error: (e as Error).message, ms: Date.now() - started }, { status: 500 });
     } finally {
       await driver.end().catch(() => undefined);
     }
@@ -116,6 +122,14 @@ export async function GET(req: NextRequest) {
     const log: string[] = [];
     const r = await provisionAppwrite(appwriteConfig(), (m) => log.push(m), { deadline: Date.now() + 240000 });
     return NextResponse.json({ ok: true, step, ...r, log: log.slice(-8), ms: Date.now() - started });
+  }
+
+  if (step === "demo" || step === "demo-update") {
+    // a demonstração grava XML fiscal, certificados e cópias de segurança: sem destino para arquivos ela pararia pela
+    // metade (na primeira venda). Recusa antes de gravar qualquer coisa, dizendo o que falta.
+    const { fileStorageMissing } = await import("@/lib/core/files");
+    const missing = fileStorageMissing();
+    if (missing) return NextResponse.json({ ok: false, step, error: missing }, { status: 409 });
   }
 
   // a partir daqui o banco precisa estar provisionado

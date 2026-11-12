@@ -84,6 +84,16 @@ export function blobConfigured(): boolean {
 }
 
 /**
+ * Publicação na Vercel com Postgres e sem Blob conectado: não há onde gravar arquivo. Devolve a orientação para quem
+ * instala (ou `null` quando há destino). A carga da demonstração confere isto ANTES de gravar qualquer coisa — ela
+ * grava XML fiscal, certificados e cópias de segurança, e pararia pela metade na primeira venda.
+ */
+export function fileStorageMissing(): string | null {
+  if (configuredBackend() !== "postgres" || !process.env.VERCEL || blobConfigured()) return null;
+  return "Conecte antes o Blob privado ao projeto (Vercel → Storage → Create Database → Blob, acesso Private, todos os ambientes) e publique de novo: a demonstração grava XML, certificados e cópias de segurança.";
+}
+
+/**
  * Vercel Blob em modo PRIVADO: o arquivo só sai pelo servidor, com a credencial do projeto — nunca por endereço público.
  * As telas continuam baixando por `/api/files/[id]`, que confere empresa e permissão antes de ler daqui.
  * Caminho: `<bucket lógico>/<id>` (o nome original fica só no registro de metadados, tabela `files`).
