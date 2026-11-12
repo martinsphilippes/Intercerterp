@@ -29,7 +29,13 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     // o banco pausado responde 403 "project_paused": registra para aparecer nos logs da Vercel
     const outage = dbOutageOf(e);
-    console.error(outage?.kind === "paused" ? "[keepalive] banco PAUSADO por inatividade — ninguém consegue entrar; reative o projeto no console do Appwrite" : "[keepalive] banco indisponível", e);
+    const what =
+      outage?.kind === "paused"
+        ? "banco PAUSADO por inatividade — ninguém consegue entrar; reative o projeto no console do Appwrite"
+        : outage?.kind === "quota"
+          ? "banco LIMITADO pelo plano (cota atingida) — ninguém consegue entrar; veja o uso da organização no console do Appwrite"
+          : "banco indisponível";
+    console.error(`[keepalive] ${what}`, e);
     return NextResponse.json({ ok: false, at, outage: outage?.kind ?? null, error: String((e as Error)?.message ?? e) }, { status: 503 });
   }
 }

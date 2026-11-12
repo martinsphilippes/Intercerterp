@@ -6,10 +6,13 @@ import { AppwriteException } from "node-appwrite";
  * (lista de acessos vazia) ou com um "erro no servidor" genérico.
  *
  *  - paused: projeto do Appwrite Cloud pausado por inatividade (plano gratuito) — só o titular reativa, no console;
- *  - credentials: o servidor foi recusado (chave/projeto incorretos, expirados ou sem escopo) — erro de configuração;
- *  - unreachable: rede, tempo esgotado, limite de requisições ou erro interno do serviço — costuma ser passageiro.
+ *  - quota: o Appwrite está limitando o banco porque a organização passou da cota do plano (no gratuito, 500 mil
+ *    leituras por mês, contadas por linha lida) — libera na virada do período ou com o upgrade do plano;
+ *  - credentials: o servidor foi recusado (chave/projeto incorretos, expirados ou sem escopo, ou acesso da organização
+ *    restrito pelo Appwrite) — configuração ou plano;
+ *  - unreachable: rede, tempo esgotado ou erro interno do serviço — costuma ser passageiro.
  */
-export type DbOutageKind = "paused" | "credentials" | "unreachable";
+export type DbOutageKind = "paused" | "quota" | "credentials" | "unreachable";
 
 export interface DbOutage {
   kind: DbOutageKind;
@@ -42,16 +45,30 @@ function isNetworkError(e: unknown): boolean {
 }
 
 /**
+ * Cota do plano: o Appwrite documenta que, no plano gratuito, as operações do banco são limitadas quando a cota do mês
+ * acaba, mas não publica o tipo do erro. Vale então o que a resposta diz: 429 numa chamada do servidor (a chave de API
+ * não passa pelo limite de requisições por visitante) ou tipo/mensagem que fale de uso, cota, plano, cobrança ou
+ * congelamento. Estados do próprio usuário (`user_*`: bloqueado, limite de usuários) não entram.
+ */
+function isQuotaError(code: number, type: string, message: string): boolean {
+  if (type.startsWith("user_")) return false;
+  if (code === 429) return true;
+  return code >= 400 && code < 500 && /usage|quota|billing|budget|free plan|plan limit|frozen|freez|throttl|resource_blocked/i.test(`${type} ${message}`);
+}
+
+/**
  * Classifica um erro de acesso ao banco. `null` = não é indisponibilidade (regra de negócio, registro inexistente,
  * consulta inválida, erro de programação): quem chamou decide o que fazer.
  */
 export function dbOutageOf(e: unknown): DbOutage | null {
   if (isAppwriteError(e)) {
     const code = Number(e.code) || 0;
-    const detail = `${e.type || "appwrite"} (${code}): ${e.message}`;
-    if (e.type === "project_paused") return { kind: "paused", detail };
+    const type = String(e.type ?? "");
+    const detail = `${type || "appwrite"} (${code}): ${e.message}`;
+    if (type === "project_paused") return { kind: "paused", detail };
+    if (isQuotaError(code, type, String(e.message ?? ""))) return { kind: "quota", detail };
     if (code === 401 || code === 403) return { kind: "credentials", detail };
-    if (code === 0 || code === 429 || code >= 500) return { kind: "unreachable", detail };
+    if (code === 0 || code >= 500) return { kind: "unreachable", detail };
     return null;
   }
   if (isNetworkError(e)) {
@@ -67,6 +84,8 @@ export function outageMessage(o: DbOutage): string {
   switch (o.kind) {
     case "paused":
       return "O banco de dados está pausado por inatividade (Appwrite). Não é problema de usuário nem de senha: ninguém consegue entrar até o projeto ser reativado no console do Appwrite.";
+    case "quota":
+      return "O banco de dados está com o acesso limitado pelo Appwrite (limite do plano atingido). Não é problema de usuário nem de senha: ninguém consegue entrar até o limite ser liberado.";
     case "credentials":
       return "O servidor não conseguiu abrir o banco de dados (acesso recusado). Não é problema de usuário nem de senha: avise o administrador do sistema.";
     case "unreachable":

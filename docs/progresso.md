@@ -35,8 +35,10 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 ## Acesso bloqueado pelo banco pausado · 12/11/2026
 - [x] Diagnóstico: ninguém entrava e o acesso rápido tinha sumido porque o projeto do Appwrite (gratuito) estava pausado por inatividade (`403 project_paused`, confirmado nos logs da Vercel e direto no serviço). A rota diária `/api/keepalive` não evita a pausa (o Appwrite só conta atividade no console) — passou a ser tratada como monitor.
 - [x] Tela de login: aviso com o motivo e como liberar; acessos da demonstração sempre visíveis (lista de reserva quando o banco não responde, botões desligados); login, segunda etapa e recuperação de senha devolvem mensagem em vez de exceção (`docs/regras-assumidas.md` §47). `vendedora` ganhou setor no acesso rápido.
-- [x] Testes `tests/login-screen.test.ts` (11 cenários); tsc, lint e build limpos; conferência no navegador com o banco no ar, pausado, com acesso recusado e fora do ar.
-- [ ] **Ação do titular:** reativar o projeto no console do Appwrite (libera o acesso na hora) e decidir o plano (`docs/pendencias-externas.md`, item 1).
+- [x] Segundo bloqueio encontrado nos avisos do Appwrite: cota de leituras do plano gratuito estourada em 11/11 (675,63 mil de 500 mil; leitura contada por linha). A tela de login passou a reconhecer também o limite do plano; reativar o projeto pode não bastar enquanto a cota não zerar.
+- [x] Testes `tests/login-screen.test.ts` (12 cenários); tsc, lint e build limpos; conferência no navegador com o banco no ar, pausado, com acesso recusado e fora do ar.
+- [ ] **Ação do titular:** reativar o projeto no console do Appwrite, conferir o uso da organização (cota de leituras) e decidir o plano (`docs/pendencias-externas.md`, item 1).
+- [ ] Próximo passo técnico: medir e reduzir as leituras por tela (§47, pendências).
 
 ## Pendente (depende de terceiros)
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).

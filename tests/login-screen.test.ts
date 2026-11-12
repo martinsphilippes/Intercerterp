@@ -57,7 +57,12 @@ describe("banco indisponível: classificação do erro", () => {
     expect(dbOutageOf(new AppwriteException("missing scope", 401, "general_unauthorized_scope"))).toMatchObject({ kind: "credentials" });
     expect(dbOutageOf(new AppwriteException("forbidden", 403, "general_access_forbidden"))).toMatchObject({ kind: "credentials" });
     expect(dbOutageOf(new AppwriteException("Server Error", 500, "general_unknown"))).toMatchObject({ kind: "unreachable" });
-    expect(dbOutageOf(new AppwriteException("Too many requests", 429, "general_rate_limit_exceeded"))).toMatchObject({ kind: "unreachable" });
+    // cota do plano: o Appwrite limita as operações do banco (429 em chamada do servidor) ou fala de uso/plano na resposta
+    expect(dbOutageOf(new AppwriteException("Rate limit for the current endpoint has been exceeded.", 429, "general_rate_limit_exceeded"))).toMatchObject({ kind: "quota" });
+    expect(dbOutageOf(new AppwriteException("Your organization has reached the usage limit of the Free plan.", 403, "general_access_forbidden"))).toMatchObject({ kind: "quota" });
+    expect(dbOutageOf(new AppwriteException("The requested resource is blocked.", 401, "general_resource_blocked"))).toMatchObject({ kind: "quota" });
+    // estado do próprio usuário não é cota do plano
+    expect(dbOutageOf(new AppwriteException("The current user has been blocked.", 401, "user_blocked"))).toMatchObject({ kind: "credentials" });
     expect(dbOutageOf(Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } }))).toMatchObject({ kind: "unreachable" });
     expect(dbOutageOf(Object.assign(new Error("connect timeout"), { code: "UND_ERR_CONNECT_TIMEOUT" }))).toMatchObject({ kind: "unreachable" });
     // não é indisponibilidade: registro/tabela inexistente, consulta inválida, concorrência, erro de programação
@@ -70,7 +75,7 @@ describe("banco indisponível: classificação do erro", () => {
   });
 
   it("a mensagem diz que não é a senha, em qualquer motivo", () => {
-    for (const kind of ["paused", "credentials", "unreachable"] as const) {
+    for (const kind of ["paused", "quota", "credentials", "unreachable"] as const) {
       expect(outageMessage({ kind, detail: "x" })).toMatch(/Não é problema de usuário nem de senha/);
     }
     expect(outageMessage({ kind: "paused", detail: "x" })).toMatch(/pausado/);
@@ -115,6 +120,17 @@ describe("tela de login: acessos da demonstração e banco indisponível", () =>
     expect(st.quick.map((u) => u.login)).toEqual(defaultDemoAccess().map((u) => u.login));
     expect(st.quick).toHaveLength(Object.keys(DEMO_SECTORS).length);
     expect(st.quick[0]).toEqual({ login: "admin", name: "", sector: "Administração", scope: "" });
+  });
+
+  it("cota do plano atingida (depois de reativar o projeto): motivo próprio, acessos visíveis e login com a mensagem certa", async () => {
+    const overQuota = () => new AppwriteException("Rate limit for the current endpoint has been exceeded.", 429, "general_rate_limit_exceeded");
+    setStore(failingStore(seeded, overQuota));
+    const st = await loginScreenState();
+    expect(st).toMatchObject({ empty: false, outage: { kind: "quota" }, quickLive: false });
+    expect(st.quick).toHaveLength(Object.keys(DEMO_SECTORS).length);
+    const blocked = await loginAction(form({ login: "caixa", password: DEMO_PASSWORD }));
+    expect(blocked).toMatchObject({ ok: false, code: "db_quota" });
+    expect(blocked.ok === false && blocked.error).toMatch(/limite do plano.*Não é problema de usuário nem de senha/);
   });
 
   it("fora do ambiente de teste: o motivo aparece, os acessos da demonstração não", async () => {

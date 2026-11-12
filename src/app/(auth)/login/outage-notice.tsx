@@ -16,6 +16,11 @@ export function OutageNotice({ outage, retryHref }: { outage: DbOutage; retryHre
       <RefreshCw className="size-3.5" aria-hidden /> Tentar novamente
     </a>
   );
+  const openConsole = (
+    <a href={APPWRITE_CONSOLE} target="_blank" rel="noopener noreferrer" className={buttonClass("primary", "sm")}>
+      <ExternalLink className="size-3.5" aria-hidden /> Abrir o console do Appwrite
+    </a>
+  );
   if (outage.kind === "paused") {
     return (
       <div className="mt-5">
@@ -27,12 +32,28 @@ export function OutageNotice({ outage, retryHref }: { outage: DbOutage; retryHre
             <strong>Como liberar (administrador):</strong> abra o console do Appwrite, entre no projeto pausado e confirme a reativação. O acesso volta em seguida.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <a href={APPWRITE_CONSOLE} target="_blank" rel="noopener noreferrer" className={buttonClass("primary", "sm")}>
-              <ExternalLink className="size-3.5" aria-hidden /> Abrir o console do Appwrite
-            </a>
+            {openConsole}
             {retry}
           </div>
           <p className="mt-3 text-xs opacity-80">Atenção: um projeto que fica 90 dias pausado é apagado pelo Appwrite, com todos os dados.</p>
+        </Notice>
+      </div>
+    );
+  }
+  if (outage.kind === "quota") {
+    return (
+      <div className="mt-5">
+        <Notice tone="bad" title="Acesso bloqueado: limite do plano do banco de dados atingido">
+          <p>
+            Não é problema de usuário nem de senha — <strong>ninguém consegue entrar</strong> enquanto o limite estiver valendo. O Appwrite limita o banco quando a organização passa da cota do plano no mês (no plano gratuito, cada linha lida conta). Os dados continuam guardados.
+          </p>
+          <p className="mt-2">
+            <strong>Como liberar (administrador):</strong> no console do Appwrite, abra a organização e veja o uso. O limite zera na virada do período; para liberar antes, faça o upgrade do plano.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {openConsole}
+            {retry}
+          </div>
         </Notice>
       </div>
     );
@@ -42,12 +63,15 @@ export function OutageNotice({ outage, retryHref }: { outage: DbOutage; retryHre
       <div className="mt-5">
         <Notice tone="bad" title="Acesso bloqueado: o servidor não conseguiu abrir o banco de dados">
           <p>
-            Não é problema de usuário nem de senha — <strong>ninguém consegue entrar</strong> até a configuração ser corrigida. O Appwrite recusou o acesso do servidor (chave expirada, sem permissão ou de outro projeto).
+            Não é problema de usuário nem de senha — <strong>ninguém consegue entrar</strong> até isso ser corrigido. O Appwrite recusou o acesso do servidor: chave expirada, sem permissão ou de outro projeto — ou acesso da organização restrito pelo próprio Appwrite (limite do plano).
           </p>
           <p className="mt-2">
-            <strong>Como liberar (administrador):</strong> confira <span className="font-mono text-xs">APPWRITE_ENDPOINT</span>, <span className="font-mono text-xs">APPWRITE_PROJECT_ID</span> e <span className="font-mono text-xs">APPWRITE_API_KEY</span> nas variáveis do servidor e publique de novo.
+            <strong>Como liberar (administrador):</strong> veja no console do Appwrite se a organização está com o acesso restrito; se não estiver, confira <span className="font-mono text-xs">APPWRITE_ENDPOINT</span>, <span className="font-mono text-xs">APPWRITE_PROJECT_ID</span> e <span className="font-mono text-xs">APPWRITE_API_KEY</span> nas variáveis do servidor e publique de novo.
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">{retry}</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {openConsole}
+            {retry}
+          </div>
         </Notice>
       </div>
     );
