@@ -36,7 +36,7 @@ Na demonstração: escritório "Contábil Horizonte (DEMO)" com os usuários `co
 
 ## Instalação automatizada (sem a tela de primeiro acesso)
 
-`GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `demo-update` (reaplica cenários de demonstração novos numa instalação já concluída, idempotente), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação) e `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema).
+`GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `demo-update` (reaplica cenários de demonstração novos numa instalação já concluída, idempotente), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação), `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema) e `diagnostico` (só leitura, a qualquer momento: regiões das funções e do banco, tempo por consulta, codificação e tamanho do banco, arquivos, chave de cifra e avisos — sem expor credenciais).
 
 ## Início rápido (desenvolvimento local, sem banco)
 
@@ -67,10 +67,11 @@ Sem linha de comando, abra a aplicação publicada: a tela **/primeiro-acesso** 
 Banco, arquivos e aplicação ficam na mesma conta:
 
 1. Vercel → projeto → *Settings → Git*: conecte o repositório do GitHub (deploy a cada push na branch principal).
-2. Projeto → **Storage** → *Create Database* → **Postgres (Neon)** e conecte ao projeto: a conexão cria `DATABASE_URL`. Escolha a região mais perto dos usuários (São Paulo, se listada) e ponha as funções na mesma região.
-3. Projeto → **Storage** → **Blob**, acesso **privado**, e conecte ao projeto: cria `BLOB_READ_WRITE_TOKEN` (XML, anexos e cópias de segurança).
-4. *Settings → Environment Variables*: `CRON_SECRET`, `SETUP_TOKEN` e `AUTH_ENCRYPTION_KEY` (sensíveis; a última cifra o segredo da autenticação em duas etapas — §44), `APP_TIMEZONE=America/Sao_Paulo` e, conforme as integrações, `FOCUSNFE_TOKEN`, `NFCE_CSC`, `MERCADOPAGO_ACCESS_TOKEN`, `RESEND_API_KEY`.
+2. Projeto → **Storage** → *Create Database* → **Postgres (Neon)** e conecte ao projeto: a conexão cria `DATABASE_URL`. Escolha a região **São Paulo**: as funções rodam na região fixada em `vercel.json` (`"regions": ["gru1"]`). Banco em outra região? Troque a região ali — função longe do banco custa ~200 ms **por consulta**.
+3. Projeto → **Storage** → *Create Database* → **Blob**, acesso **Private**, região São Paulo, e conecte ao projeto em todos os ambientes: cria `BLOB_READ_WRITE_TOKEN` (XML, anexos e cópias de segurança).
+4. *Settings → Environment Variables*: `CRON_SECRET`, `SETUP_TOKEN` e `AUTH_ENCRYPTION_KEY` (sensíveis; a última, um texto longo e aleatório, cifra o segredo da autenticação em duas etapas — §44; sem ela a segunda etapa não funciona numa publicação), `APP_TIMEZONE=America/Sao_Paulo` e, conforme as integrações, `FOCUSNFE_TOKEN`, `NFCE_CSC`, `MERCADOPAGO_ACCESS_TOKEN`, `RESEND_API_KEY`.
 5. Faça o deploy e abra `/primeiro-acesso` (informe o `SETUP_TOKEN`), ou use a instalação automatizada (`/api/setup/run`, acima): cria a empresa e o administrador, ou carrega a demonstração identificada.
+6. Confira com `GET /api/setup/run?step=diagnostico`: funções e banco na mesma região, tempo por consulta de poucos milissegundos, Blob conectado e lista de avisos vazia.
 
 Atualizações que mudam o esquema não pedem passo manual: a primeira consulta da nova versão cria o que falta.
 

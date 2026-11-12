@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getStore } from "@/lib/db";
-import { dbOutageOf } from "@/lib/db/outage";
+import { getStore, configuredBackend } from "@/lib/db";
+import { dbOutageOf, outageLogLine } from "@/lib/db/outage";
 import { unscoped } from "@/lib/db/scoped-store";
 import { getSetting, setSetting } from "@/lib/core/settings";
 
@@ -25,15 +25,9 @@ export async function GET(req: NextRequest) {
     await setSetting(store, "platform", null, "keepalive", { at, count: (before?.count ?? 0) + 1 });
     return NextResponse.json({ ok: true, at, previous: before?.at ?? null });
   } catch (e) {
-    // o banco pausado responde 403 "project_paused": registra para aparecer nos logs da Vercel
+    // banco fora do ar, sem acesso ou limitado pelo plano: fica nos logs da Vercel, dizendo onde olhar
     const outage = dbOutageOf(e);
-    const what =
-      outage?.kind === "paused"
-        ? "banco PAUSADO por inatividade — ninguém consegue entrar; reative o projeto no console do Appwrite"
-        : outage?.kind === "quota"
-          ? "banco LIMITADO pelo plano (cota atingida) — ninguém consegue entrar; veja o uso da organização no console do Appwrite"
-          : "banco indisponível";
-    console.error(`[keepalive] ${what}`, e);
+    console.error(`[keepalive] ${outageLogLine(outage, configuredBackend())}`, e);
     return NextResponse.json({ ok: false, at, outage: outage?.kind ?? null, error: String((e as Error)?.message ?? e) }, { status: 503 });
   }
 }

@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     if (out.secretKey === "missing") warnings.push("AUTH_ENCRYPTION_KEY não definida: a autenticação em duas etapas não funciona até a variável existir.");
     if (backend === "postgres") {
       const { pgDriver, postgresUrl, postgresEndpoint } = await import("@/lib/db/postgres/driver");
-      const { schemaApplied } = await import("@/lib/db/postgres/ddl");
+      const { schemaApplied, searchNormalizationWorks } = await import("@/lib/db/postgres/ddl");
       // do endereço só saem a região (ex.: sa-east-1) e se é o endereço com agrupador de conexões
       const endpoint = postgresEndpoint();
       out.dbRegion = endpoint.region;
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
       const driver = pgDriver(postgresUrl());
       try {
         const t0 = Date.now();
-        const v = await driver.query("SELECT current_setting('server_version') AS version, pg_database_size(current_database()) AS bytes");
+        const v = await driver.query("SELECT current_setting('server_version') AS version, current_setting('server_encoding') AS encoding, pg_database_size(current_database()) AS bytes");
         out.firstQueryMs = Date.now() - t0; // inclui abrir a conexão (e acordar o banco, se estava ocioso)
         // ida e volta de uma consulta mínima com a conexão já aberta: mediana de 7 (é o custo fixo de cada consulta de tela)
         const trips: number[] = [];
@@ -72,8 +72,14 @@ export async function GET(req: NextRequest) {
         out.queryMs = trips[3];
         out.queryMsRange = [trips[0], trips[6]];
         out.serverVersion = v.rows[0]?.version ?? null;
+        out.encoding = v.rows[0]?.encoding ?? null;
         out.dbSizeMb = Math.round((Number(v.rows[0]?.bytes ?? 0) / 1048576) * 10) / 10;
         out.schemaApplied = await schemaApplied(driver);
+        if (out.schemaApplied) {
+          // a busca sem acento do banco concorda com a da aplicação? (só em banco UTF-8)
+          out.searchOk = await searchNormalizationWorks(driver);
+          if (!out.searchOk) warnings.push(`A busca sem acento não funciona neste banco (codificação ${out.encoding}; o sistema exige UTF8).`);
+        }
       } catch (e) {
         const { dbOutageOf } = await import("@/lib/db/outage");
         out.ok = false;
@@ -95,6 +101,11 @@ export async function GET(req: NextRequest) {
     try {
       const r = await provisionPostgres(driver, (m) => log.push(m));
       return NextResponse.json({ ok: true, step, ...r, log, ms: Date.now() - started });
+    } catch (e) {
+      // quem instala precisa ler o motivo (banco fora do ar, sem acesso, codificação errada) — não um erro 500 mudo
+      const { dbOutageOf } = await import("@/lib/db/outage");
+      console.error("[setup] criação das tabelas falhou", e);
+      return NextResponse.json({ ok: false, step, outage: dbOutageOf(e)?.kind ?? null, error: (e as Error).message, ms: Date.now() - started }, { status: 500 });
     } finally {
       await driver.end().catch(() => undefined);
     }

@@ -191,9 +191,12 @@ describe("§41 — EFD ICMS/IPI do mês da demonstração (Simples Nacional)", (
 
   it("entradas dos recebimentos concluídos com chave (C100 + C170 + C190); nota a confirmar pendente fica fora e vira pendência", async () => {
     const b = await spedOf(fiscal);
-    const receipts = (await listAll(store, "receipts", { filters: [["eq", "branchId", refs.branches.matriz.id], ["eq", "status", "confirmed"]] })).filter((r: Doc) => toLocalDate(r.confirmedAt) >= `${period}-01`);
+    const confirmed = await listAll(store, "receipts", { filters: [["eq", "branchId", refs.branches.matriz.id], ["eq", "status", "confirmed"]] });
+    const receipts = confirmed.filter((r: Doc) => toLocalDate(r.confirmedAt) >= `${period}-01`);
     const withKey = receipts.filter((r) => r.nfeKey && r.documentStatus !== "pending_invoice");
-    const pending = receipts.filter((r) => r.documentStatus === "pending_invoice");
+    // A nota a confirmar da demonstração entra 12 dias antes de hoje (o prazo dela vence em 3 dias): nos primeiros dias
+    // do mês ela pertence ao mês anterior. Cada uma é conferida no arquivo do mês em que entrou, em qualquer dia do mês.
+    const pending = confirmed.filter((r) => r.documentStatus === "pending_invoice");
     expect(withKey.length).toBeGreaterThan(0);
     expect(pending.length).toBeGreaterThan(0);
     const groups = c100Groups(b.lines);
@@ -207,8 +210,10 @@ describe("§41 — EFD ICMS/IPI do mês da demonstração (Simples Nacional)", (
       expect(g.c190.every((f) => cents(f[6]) === 0)).toBe(true);
     }
     for (const r of pending) {
-      expect(b.pendencies.some((p) => p.code === "pending_invoice" && p.message.includes(`nº ${r.number}`))).toBe(true);
-      if (r.nfeKey) expect(groups.some((g) => g.c100[8] === r.nfeKey)).toBe(false);
+      const month = toLocalDate(r.confirmedAt).slice(0, 7);
+      const file = month === period ? b : await spedOf(fiscal, { period: month });
+      expect(file.pendencies.some((p) => p.code === "pending_invoice" && p.message.includes(`nº ${r.number}`))).toBe(true);
+      if (r.nfeKey) expect(c100Groups(file.lines).some((g) => g.c100[8] === r.nfeKey)).toBe(false);
     }
     expect(b.docs.entries).toBe(withKey.length);
   });

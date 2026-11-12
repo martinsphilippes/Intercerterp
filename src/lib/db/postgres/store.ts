@@ -24,9 +24,18 @@ interface TxState {
   conn: PgConn;
   done: boolean;
   savepoints: number;
+  /** Fila das operações da transação: uma por vez na conexão dela (ver `step`). */
+  queue: Promise<unknown>;
+  /** A transação está sendo desfeita: o que ainda espera na fila não começa. */
+  closing: boolean;
+  /** Erro do banco que abortou a transação (ver `run` e a confirmação em `transaction`). */
+  failed: { error: unknown } | null;
 }
 
 const txContext = new AsyncLocalStorage<TxState>();
+/** Marca o fluxo que já está dentro de uma operação da transação (operação que chama outra não espera por si mesma). */
+const stepContext = new AsyncLocalStorage<TxState>();
+const noop = () => undefined;
 
 const META_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
 
@@ -184,9 +193,44 @@ export class PostgresStore implements Store {
 
   private async run(text: string, params?: unknown[]) {
     const tx = this.activeTx();
-    if (tx) return tx.conn.query(text, params);
+    if (tx) {
+      try {
+        return await tx.conn.query(text, params);
+      } catch (e) {
+        // erro do banco no meio da transação: o Postgres já a abortou, mesmo que quem chamou trate o erro e siga
+        tx.failed ??= { error: e };
+        throw e;
+      }
+    }
     await this.ready();
     return this.driver.query(text, params);
+  }
+
+  /**
+   * Dentro de uma transação todas as operações usam a mesma conexão: passam uma por vez, cada uma até o fim. As que
+   * forem disparadas em paralelo (`Promise.all` dentro do `fn`) entram na fila — o banco atende um comando por vez em
+   * cada conexão, e uma operação de vários comandos (o ponto de salvamento da atualização de campo único) não pode ser
+   * atravessada por outra. Fora de transação cada operação pega a própria conexão do conjunto e nada muda.
+   */
+  private step<R>(fn: () => Promise<R>): Promise<R> {
+    const tx = this.activeTx();
+    if (!tx || stepContext.getStore() === tx) return fn();
+    const p = tx.queue.then(() => {
+      // a transação foi desfeita enquanto esta operação esperava a vez: ela não roda — nem aqui, nem fora da transação
+      if (tx.closing) throw new Error("A transação foi desfeita antes de esta operação começar.");
+      return stepContext.run(tx, fn);
+    });
+    tx.queue = p.then(noop, noop);
+    return p;
+  }
+
+  /** Espera a fila da transação esvaziar (operações em andamento e as que elas ainda enfileirarem). */
+  private async drain(tx: TxState): Promise<void> {
+    let seen: Promise<unknown>;
+    do {
+      seen = tx.queue;
+      await seen;
+    } while (seen !== tx.queue);
   }
 
   private toDoc(collection: string, row: Record<string, any>): Doc {
@@ -205,7 +249,32 @@ export class PostgresStore implements Store {
     return sql.p(value);
   }
 
-  async get<T = any>(collection: string, id: string): Promise<Doc<T> | null> {
+  // Operações do contrato `Store`: cada uma passa pela fila da transação em andamento, quando há uma (`step`).
+  get<T = any>(collection: string, id: string): Promise<Doc<T> | null> {
+    return this.step(() => this.readOne<T>(collection, id));
+  }
+
+  list<T = any>(collection: string, opts: ListOptions = {}): Promise<ListResult<Doc<T>>> {
+    return this.step(() => this.readMany<T>(collection, opts));
+  }
+
+  create<T = any>(collection: string, data: Record<string, any>, id?: string): Promise<Doc<T>> {
+    return this.step(() => this.insertOne<T>(collection, data, id));
+  }
+
+  update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
+    return this.step(() => this.updateOne<T>(collection, id, patch));
+  }
+
+  delete(collection: string, id: string): Promise<void> {
+    return this.step(() => this.deleteOne(collection, id));
+  }
+
+  increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc> {
+    return this.step(() => this.incrementOne(collection, id, field, by, bounds));
+  }
+
+  private async readOne<T = any>(collection: string, id: string): Promise<Doc<T> | null> {
     table(collection);
     const r = await this.run(`SELECT * FROM ${ident(collection)} WHERE "id" = $1`, [id]);
     return r.rows[0] ? (this.toDoc(collection, r.rows[0]) as Doc<T>) : null;
@@ -217,7 +286,7 @@ export class PostgresStore implements Store {
     return d;
   }
 
-  async list<T = any>(collection: string, opts: ListOptions = {}): Promise<ListResult<Doc<T>>> {
+  private async readMany<T = any>(collection: string, opts: ListOptions = {}): Promise<ListResult<Doc<T>>> {
     const t = table(collection);
     const tbl = ident(collection);
     const sql = new Sql();
@@ -256,7 +325,7 @@ export class PostgresStore implements Store {
     return { items, total: Number(c.rows[0]?.n ?? 0) };
   }
 
-  async create<T = any>(collection: string, data: Record<string, any>, id?: string): Promise<Doc<T>> {
+  private async insertOne<T = any>(collection: string, data: Record<string, any>, id?: string): Promise<Doc<T>> {
     const t = table(collection);
     const stored = toStored(collection, data);
     for (const [k, f] of Object.entries(t.def.fields)) if (f.required && (stored[k] == null || stored[k] === "")) throw new Error(`Campo obrigatório ausente: ${collection}.${k}`);
@@ -275,7 +344,7 @@ export class PostgresStore implements Store {
     return this.toDoc(collection, r.rows[0]) as Doc<T>;
   }
 
-  async update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
+  private async updateOne<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
     const t = table(collection);
     const stored = toStored(collection, patch);
     const sql = new Sql();
@@ -292,7 +361,8 @@ export class PostgresStore implements Store {
         r = await tx.conn.query(text, sql.params);
         await tx.conn.query(`RELEASE SAVEPOINT ${sp}`);
       } catch (e) {
-        await tx.conn.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => undefined);
+        // desfeito até o ponto de salvamento a transação segue válida; se nem isso der, ela está abortada
+        await tx.conn.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch((undo) => void (tx.failed ??= { error: undo }));
         mapError(e, collection);
       }
     } else r = await this.run(text, sql.params).catch((e) => mapError(e, collection));
@@ -300,12 +370,12 @@ export class PostgresStore implements Store {
     return this.toDoc(collection, r.rows[0]) as Doc<T>;
   }
 
-  async delete(collection: string, id: string): Promise<void> {
+  private async deleteOne(collection: string, id: string): Promise<void> {
     table(collection);
     await this.run(`DELETE FROM ${ident(collection)} WHERE "id" = $1`, [id]);
   }
 
-  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc> {
+  private async incrementOne(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc> {
     const t = table(collection);
     if (t.kinds.get(field) !== "int") throw new Error(`Campo ${collection}.${field} não é numérico (incremento)`);
     if (!Number.isInteger(by)) throw new Error(`Incremento de ${collection}.${field} exige inteiro (recebido ${String(by)})`);
@@ -329,14 +399,24 @@ export class PostgresStore implements Store {
     if (this.activeTx()) return fn(this); // aninhada: faz parte da transação em andamento
     await this.ready();
     return this.driver.withConnection(async (conn) => {
-      const state: TxState = { root: this, conn, done: false, savepoints: 0 };
+      const state: TxState = { root: this, conn, done: false, savepoints: 0, queue: Promise.resolve(), closing: false, failed: null };
       await conn.query(`BEGIN ISOLATION LEVEL ${ISOLATION}`);
       try {
         const out = await txContext.run(state, () => fn(this));
+        await this.drain(state); // operação disparada sem esperar termina antes da confirmação
+        // Transação abortada pelo banco não se confirma: o Postgres responderia ao COMMIT desfazendo tudo, sem erro —
+        // quem chamou receberia "feito" sem nada gravado. O erro que a abortou sobe, mesmo que tenha sido tratado lá dentro.
+        if (state.failed) throw state.failed.error;
+        state.done = true; // a partir da confirmação, operação nova (trabalho solto) usa o conjunto de conexões
         await conn.query("COMMIT");
         return out;
       } catch (e) {
-        await conn.query("ROLLBACK").catch(() => undefined);
+        // Nada mais começa nesta transação, e a operação em andamento termina antes de desfazer e devolver a conexão:
+        // operação que sobrasse na fila não pode rodar depois, fora da transação, como se fosse avulsa.
+        state.closing = true;
+        await this.drain(state);
+        state.done = true;
+        await conn.query("ROLLBACK").catch(noop);
         return mapError(e, "transaction");
       } finally {
         state.done = true; // trabalho solto que sobreviver à transação volta a usar o conjunto de conexões

@@ -114,3 +114,23 @@ export function outageMessage(o: DbOutage): string {
       return "O banco de dados não respondeu agora. Não é problema de usuário nem de senha: aguarde alguns instantes e tente de novo.";
   }
 }
+
+/**
+ * Linha do log do monitor diário (`/api/keepalive`): quem lê é quem cuida do servidor, então diz o que houve e onde
+ * olhar — conforme o banco em uso (o do projeto na Vercel ou, nas instalações antigas, o Appwrite).
+ */
+export function outageLogLine(o: DbOutage | null, backend: string): string {
+  const where = backend === "postgres" ? "na Vercel (projeto → Storage → banco)" : "no console do Appwrite";
+  switch (o?.kind) {
+    case "paused":
+      return `banco PAUSADO por inatividade — ninguém consegue entrar; reative o projeto ${where}`;
+    case "quota":
+      return `banco LIMITADO pelo plano (cota atingida) — ninguém consegue entrar; veja o uso ${where}`;
+    case "credentials":
+      return `acesso ao banco RECUSADO — ninguém consegue entrar; confira a conexão do banco ${where}`;
+    case "unreachable":
+      return "banco SEM RESPOSTA — pode ser passageiro; se repetir, veja a situação do provedor";
+    default:
+      return "sinal diário do banco falhou (erro que não é de indisponibilidade)";
+  }
+}

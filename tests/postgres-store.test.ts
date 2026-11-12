@@ -185,6 +185,27 @@ describe("PostgresStore: paridade com o armazenamento de referência", () => {
     await outcome((s) => s.get("counters", "tx-c"));
   });
 
+  it("transação: operações disparadas em paralelo dentro dela passam uma por vez; o conflito de uma não derruba as outras", async () => {
+    await outcome((s) =>
+      s.transaction(async (tx) =>
+        Promise.all([
+          tx.create("counters", { key: "par-1", value: 1 }, "par-1").then(() => "criou", (e) => (e as ConflictError).reason),
+          // dois campos de índice único atualizados lado a lado: um conflita (desfeito até o ponto de salvamento), o outro grava
+          tx.update("users", "u5", { email: "ana@x.com" }).then(() => "gravou", (e) => (e as ConflictError).reason),
+          tx.update("users", "u3", { email: "joao.silva@x.com" }).then(() => "gravou", (e) => (e as ConflictError).reason),
+          tx.create("counters", { key: "par-1", value: 2 }, "par-2").then(() => "criou", (e) => (e as ConflictError).reason),
+          tx.increment("counters", "tx-b", "value", 1).then((d) => d.value),
+          tx.get("users", "u1").then((d) => d?.email),
+          s.get("users", "u2").then((d) => d?.email), // pelo Store de fora: a mesma transação, a mesma fila
+        ]),
+      ),
+    );
+    await outcome((s) => s.get("users", "u3").then((d) => d?.email));
+    await outcome((s) => s.get("users", "u5").then((d) => d?.email));
+    await outcome((s) => listAll(s, "counters", { filters: [["eq", "key", "par-1"]] }).then((r) => r.map((c) => [c.id, c.value])));
+    await outcome((s) => s.get("counters", "tx-b").then((d) => d?.value));
+  });
+
   it("numeração sequencial sob concorrência: sem número repetido nem pulado", async () => {
     const [a, b] = await both(async (s) => {
       const got = await Promise.all(
@@ -194,5 +215,56 @@ describe("PostgresStore: paridade com o armazenamento de referência", () => {
     });
     expect(a).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
     expect(b).toEqual(a);
+  });
+});
+
+describe("PostgresStore: transação que o banco abortou", () => {
+  it("erro do banco tratado dentro da transação não vira “feito” com nada gravado", async () => {
+    const pg = freshPostgresStore();
+    await pg.create("counters", { key: "base", value: 1 }, "base");
+    const attempt = pg.transaction(async (tx) => {
+      await tx.create("counters", { key: "antes", value: 1 }, "antes");
+      // inteiro que não cabe na coluna: erro do Postgres (não é um conflito previsto). Quem chamou trata e segue.
+      await tx.update("counters", "base", { value: 1e30 }).catch(() => undefined);
+      return "feito";
+    });
+    // o Postgres aborta a transação nesse erro e responderia ao COMMIT desfazendo tudo, sem avisar: tem de subir como erro
+    await expect(attempt).rejects.toThrow(/bigint|out of range|integer/i);
+    expect(await pg.get("counters", "antes")).toBeNull();
+    expect((await pg.get("counters", "base"))?.value).toBe(1);
+    // e a conexão volta limpa: a transação seguinte funciona
+    await pg.transaction(async (tx) => void (await tx.create("counters", { key: "depois", value: 2 }, "depois")));
+    expect((await pg.get("counters", "depois"))?.value).toBe(2);
+  });
+
+  it("transação desfeita: o que ainda esperava na fila não é executado depois, fora dela", async () => {
+    const pg = freshPostgresStore();
+    const mem = new MemoryStore();
+    for (const s of [pg, mem]) {
+      await s.create("counters", { key: "c", value: 1 }, "c");
+      const attempt = s.transaction(async (tx) =>
+        Promise.all([
+          tx.update("counters", "nao-existe", { value: 2 }), // falha: a transação inteira é desfeita
+          tx.update("counters", "c", { value: 99 }), // disparadas junto: ainda na fila quando a primeira falha
+          tx.create("counters", { key: "novo", value: 5 }, "novo"),
+          tx.increment("counters", "c", "value", 10),
+        ]),
+      );
+      await expect(attempt).rejects.toBeInstanceOf(NotFoundError);
+      await new Promise((r) => setTimeout(r, 30)); // tempo para qualquer operação que tivesse sobrado terminar
+      expect((await s.get("counters", "c"))?.value, s.backend).toBe(1);
+      expect(await s.get("counters", "novo"), s.backend).toBeNull();
+    }
+  });
+
+  it("operação disparada sem esperar termina antes da confirmação e fica gravada", async () => {
+    const pg = freshPostgresStore();
+    let loose: Promise<unknown> = Promise.resolve();
+    await pg.transaction(async (tx) => {
+      await tx.create("counters", { key: "um", value: 1 }, "um");
+      loose = tx.create("counters", { key: "solta", value: 7 }, "solta"); // sem await
+    });
+    await loose;
+    expect((await pg.get("counters", "solta"))?.value).toBe(7);
   });
 });

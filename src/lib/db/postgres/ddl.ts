@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { COLLECTIONS, type CollectionDef, type FieldDef } from "../schema";
 import { normText } from "../norm";
-import type { PgDriver } from "./driver";
+import type { PgConn, PgDriver } from "./driver";
 
 /**
  * Tabelas do ERP no Postgres, geradas do esquema único (src/lib/db/schema.ts) — uma tabela por coleção:
@@ -96,6 +96,25 @@ const ACCENTS = accentMap();
 
 const NORM_FUNCTION = `CREATE OR REPLACE FUNCTION ic_norm(t text) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $ic$ SELECT lower(translate(t, '${ACCENTS.from}', '${ACCENTS.to}')) $ic$`;
 
+/** Texto de conferência da busca sem acento: maiúsculas e minúsculas acentuadas do português e vizinhos. */
+const SEARCH_PROBE = "ÁÉÍÓÚÂÊÔÃÕÀÇÜÑ áéíóúâêôãõàçüñ Conceição & Cia";
+
+/**
+ * A busca sem acento do banco dá o mesmo resultado que a da aplicação? `ic_norm` (coluna, no banco) e `normText`
+ * (termo, na aplicação) têm de concordar, senão “contém” e “começa com” deixam de achar nomes com acento sem avisar.
+ * Só concordam em banco UTF-8: em outra codificação o banco trata cada byte como uma letra.
+ */
+export async function searchNormalizationWorks(conn: PgConn): Promise<boolean> {
+  const r = await conn.query("SELECT ic_norm($1::text) AS n", [SEARCH_PROBE]);
+  return r.rows[0]?.n === normText(SEARCH_PROBE);
+}
+
+/** Codificação do banco (o sistema exige UTF8). */
+export async function serverEncoding(conn: PgConn): Promise<string> {
+  const r = await conn.query("SELECT current_setting('server_encoding') AS enc");
+  return String(r.rows[0]?.enc ?? "");
+}
+
 /** Identidade do esquema desta versão do sistema (tabelas, colunas, tipos e índices). */
 export function schemaSignature(): string {
   const shape = COLLECTIONS.map((c) => [c.id, Object.entries(c.fields).map(([k, f]) => [k, columnKind(f)]), (c.indexes ?? []).map((i) => [i.key, i.type, i.fields])]);
@@ -112,7 +131,11 @@ export async function provisionPostgres(driver: PgDriver, log: (m: string) => vo
     try {
       // trava da transação: outra instância que esteja criando o esquema termina antes desta começar
       await conn.query("SELECT pg_advisory_xact_lock(727410, 1)");
+      // o sistema grava e busca texto em UTF-8: recusa o banco antes de criar qualquer coisa nele
+      const encoding = await serverEncoding(conn);
+      if (encoding.toUpperCase() !== "UTF8") throw new Error(`O banco Postgres está na codificação "${encoding}" e o sistema exige UTF8 (nomes com acento e as buscas sem acento dependem disso). Crie o banco com a codificação UTF8.`);
       await conn.exec(`${NORM_FUNCTION}; CREATE TABLE IF NOT EXISTS ${ident(META_TABLE)} ("key" text PRIMARY KEY, "value" text NOT NULL)`);
+      if (!(await searchNormalizationWorks(conn))) throw new Error("A busca sem acento do banco não deu o mesmo resultado que a da aplicação: o esquema não foi criado. Confira a codificação do banco (UTF8) e a da conexão.");
       const existing = await conn.query(`SELECT table_name AS t, column_name AS c FROM information_schema.columns WHERE table_schema = current_schema()`);
       const have = new Map<string, Set<string>>();
       for (const r of existing.rows) (have.get(r.t) ?? have.set(r.t, new Set()).get(r.t)!).add(r.c);

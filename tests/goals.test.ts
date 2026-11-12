@@ -52,11 +52,18 @@ describe("metas — chave, escopo de filiais e exportação", () => {
 
   it("criação concorrente da mesma meta converge para um único registro", async () => {
     const ctx = ctxFor(store);
-    const [a, b] = await Promise.all([
+    const settled = await Promise.allSettled([
       createGoal(ctx, { branchId: BR2, period: "2026-09", metric: "sales_count", target: 10 }),
       createGoal(ctx, { branchId: BR2, period: "2026-09", metric: "sales_count", target: 10 }),
     ]);
-    expect(a.id).toBe(b.id);
+    // Quando as duas passam juntas pela conferência de duplicidade, as duas recebem o MESMO registro. Num banco de
+    // verdade uma pode terminar antes de a outra conferir (ela abre uma conexão nova enquanto a primeira já grava):
+    // essa é recusada como duplicada. Nos dois casos vale o que importa — uma única meta gravada.
+    const created = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const refused = settled.flatMap((r) => (r.status === "rejected" ? [r.reason] : []));
+    expect(created.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(created.map((g) => g.id)).size).toBe(1);
+    for (const e of refused) expect(e).toMatchObject({ code: "duplicate" });
     expect(await listAll(store, "goals", { filters: [["eq", "companyId", COMPANY]] })).toHaveLength(1);
   });
 

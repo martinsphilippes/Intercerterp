@@ -17,12 +17,13 @@ vi.mock("@vercel/blob", () => ({
 
 import { AppwriteException } from "node-appwrite";
 import { configuredBackend } from "@/lib/db";
-import { dbOutageOf } from "@/lib/db/outage";
+import { dbOutageOf, outageLogLine } from "@/lib/db/outage";
 import { getFileStorage } from "@/lib/core/files";
 import fs from "node:fs";
 import { missingDeploymentConfig, functionsNearDatabase, vercelRegionFor } from "@/lib/server/deploy-config";
-import { indexName, schemaSignature } from "@/lib/db/postgres/ddl";
-import { postgresEndpoint } from "@/lib/db/postgres/driver";
+import { indexName, schemaSignature, provisionPostgres } from "@/lib/db/postgres/ddl";
+import { postgresEndpoint, type PgConn, type PgDriver } from "@/lib/db/postgres/driver";
+import { normText } from "@/lib/db/norm";
 import { openSecret, sealSecret, secretKeySource } from "@/lib/auth/secret-box";
 
 const ENV = ["DATA_BACKEND", "DATABASE_URL", "POSTGRES_URL", "APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID", "APPWRITE_API_KEY", "VERCEL", "BLOB_READ_WRITE_TOKEN", "VERCEL_OIDC_TOKEN", "BLOB_STORE_ID", "AUTH_ENCRYPTION_KEY"] as const;
@@ -121,6 +122,19 @@ describe("banco indisponível: erros do Postgres", () => {
   });
 });
 
+describe("monitor diário do banco", () => {
+  it("o registro da falha diz onde olhar conforme o banco em uso (não manda ao Appwrite quem está no Postgres)", () => {
+    const quota = { kind: "quota" as const, detail: "x" };
+    expect(outageLogLine(quota, "postgres")).toMatch(/LIMITADO.*Vercel/);
+    expect(outageLogLine(quota, "postgres")).not.toMatch(/Appwrite/);
+    expect(outageLogLine(quota, "appwrite")).toMatch(/LIMITADO.*Appwrite/);
+    expect(outageLogLine({ kind: "credentials", detail: "x" }, "postgres")).toMatch(/RECUSADO.*Vercel/);
+    expect(outageLogLine({ kind: "paused", detail: "x" }, "appwrite")).toMatch(/PAUSADO.*Appwrite/);
+    expect(outageLogLine({ kind: "unreachable", detail: "x" }, "postgres")).toMatch(/SEM RESPOSTA/);
+    expect(outageLogLine(null, "postgres")).toMatch(/não é de indisponibilidade/);
+  });
+});
+
 describe("diagnóstico da instalação", () => {
   it("do endereço do banco saem só a região e o uso do agrupador de conexões — nunca usuário, senha ou nome do servidor", () => {
     const at = (host: string) => postgresEndpoint(`postgresql://dono:segredo-forte@${host}/neondb?sslmode=require`);
@@ -196,6 +210,45 @@ describe("região das funções e do banco", () => {
     const config = JSON.parse(fs.readFileSync("vercel.json", "utf8")) as { regions?: string[] };
     expect(config.regions).toEqual(["gru1"]);
     expect(functionsNearDatabase(config.regions![0], "sa-east-1")).toBe(true);
+  });
+});
+
+describe("criação das tabelas: banco fora do padrão", () => {
+  // banco de mentira: responde só o que a criação do esquema pergunta e anota os comandos recebidos
+  function fakeDatabase(answers: { encoding: string; norm: (text: string) => string }) {
+    const commands: string[] = [];
+    const conn: PgConn = {
+      query: async (text, params) => {
+        commands.push(text);
+        if (text.includes("server_encoding")) return { rows: [{ enc: answers.encoding }], rowCount: 1 };
+        if (text.includes("ic_norm($1")) return { rows: [{ n: answers.norm(String(params?.[0])) }], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
+      },
+      exec: async (sql) => void commands.push(sql),
+    };
+    const driver: PgDriver = { ...conn, withConnection: (fn) => fn(conn), end: async () => undefined };
+    return { driver, commands };
+  }
+
+  it("banco que não é UTF-8 é recusado antes de qualquer tabela, dizendo o que corrigir", async () => {
+    const { driver, commands } = fakeDatabase({ encoding: "SQL_ASCII", norm: (t) => t.toLowerCase() });
+    await expect(provisionPostgres(driver, () => undefined)).rejects.toThrow(/SQL_ASCII.*UTF8/);
+    expect(commands.some((c) => /CREATE (TABLE|OR REPLACE FUNCTION)/.test(c))).toBe(false);
+    expect(commands.at(-1)).toBe("ROLLBACK");
+  });
+
+  it("busca sem acento que discorda da aplicação desfaz a criação (nada fica pela metade)", async () => {
+    const { driver, commands } = fakeDatabase({ encoding: "UTF8", norm: (t) => t.toLowerCase() }); // minúscula, mas com acento
+    await expect(provisionPostgres(driver, () => undefined)).rejects.toThrow(/busca sem acento/);
+    expect(commands.some((c) => c.includes("CREATE TABLE IF NOT EXISTS \"users\""))).toBe(false);
+    expect(commands.at(-1)).toBe("ROLLBACK");
+  });
+
+  it("banco UTF-8 com a busca conferida segue até o fim", async () => {
+    const { driver, commands } = fakeDatabase({ encoding: "UTF8", norm: (t) => String(normText(t)) });
+    const r = await provisionPostgres(driver, () => undefined);
+    expect(r.done).toBe(true);
+    expect(commands.at(-1)).toBe("COMMIT");
   });
 });
 
