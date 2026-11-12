@@ -1052,7 +1052,7 @@ Contexto (reunião com o dono): a Intercert é uma AC2 da ICP-Brasil sob as AC1 
 
 **Ações de acesso** (`src/app/actions/session.ts`): login, segunda etapa e pedido de recuperação de senha passam por `guardAccess` — banco indisponível vira a mensagem com o motivo (`code: db_paused | db_credentials | db_unreachable`) e erro inesperado vira mensagem genérica (`unexpected`), **sem exceção e sem expor o erro interno**; redefinição de senha e aceite de convite deixam de culpar o link/convite quando o motivo é o banco. Senha errada continua sendo senha errada, e as respostas do provedor de autenticação não são confundidas com o banco: limite de tentativas continua “serviço de autenticação indisponível” e 401 na redefinição continua “link inválido ou expirado” (ali só pausa e falta de resposta contam como indisponibilidade).
 
-**Fora do escopo desta decisão** (continua como estava): quem já está dentro do sistema e perde o banco no meio do uso é levado ao login (a sessão não é confirmada), onde agora vê o motivo.
+**Fora do escopo desta decisão** (continua como estava): quem já está dentro do sistema e perde o banco no meio do uso pode ver uma tela de erro por até 1 minuto (tempo em que a sessão fica confirmada em memória) e depois é levado ao login, onde agora vê o motivo.
 
 **Testes**: `tests/login-screen.test.ts` — classificação dos erros; tela com banco no ar, pausado, fora do ambiente de teste, falha só na lista e erro desconhecido; instalação vazia; login com banco pausado (mensagem, sem sessão), login normal, senha errada, respostas do provedor de autenticação (limite de tentativas, pausa no meio do login, link de redefinição inválido) e falha inesperada sem vazar detalhe.
 
