@@ -8,13 +8,19 @@ import { loginAction } from "@/app/actions/session";
 
 export interface QuickUser {
   login: string;
+  /** vazio na lista de reserva (banco sem resposta) */
   name: string;
   sector: string;
+  /** vazio na lista de reserva (banco sem resposta) */
   scope: string;
 }
 
-/** Acesso rápido da demonstração: um clique entra como o usuário do setor (somente usuários da empresa DEMO). */
-export function QuickAccess({ users, password }: { users: QuickUser[]; password: string }) {
+/**
+ * Acesso rápido da demonstração: um clique entra como o usuário do setor (somente usuários da empresa DEMO).
+ * `live=false`: lista de reserva (o banco não respondeu) — os acessos continuam visíveis; `unavailable`: o banco está
+ * fora do ar, então os botões ficam desligados (o aviso no topo da tela explica o motivo).
+ */
+export function QuickAccess({ users, password, live = true, unavailable = false }: { users: QuickUser[]; password: string; live?: boolean; unavailable?: boolean }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = (text: string, key: string) => {
     navigator.clipboard?.writeText(text).then(() => {
@@ -37,6 +43,17 @@ export function QuickAccess({ users, password }: { users: QuickUser[]; password:
           {copied === "pwd" ? <Check className="size-3" aria-label="Copiada" /> : <Copy className="size-3" aria-hidden />}
         </button>
       </p>
+      {unavailable ? (
+        <p className="mt-2 rounded-md bg-white px-2.5 py-1.5 text-xs text-fuchsia-950 ring-1 ring-fuchsia-200">
+          Os acessos abaixo voltam a funcionar assim que o banco de dados for liberado (veja o aviso no topo).
+        </p>
+      ) : (
+        !live && (
+          <p className="mt-2 rounded-md bg-white px-2.5 py-1.5 text-xs text-fuchsia-950 ring-1 ring-fuchsia-200">
+            Lista padrão da demonstração: não foi possível confirmar os usuários no banco agora.
+          </p>
+        )
+      )}
       <ul className="mt-3 divide-y divide-fuchsia-100 overflow-hidden rounded-md border border-fuchsia-100 bg-white">
         {users.map((u) => (
           <li key={u.login}>
@@ -48,11 +65,19 @@ export function QuickAccess({ users, password }: { users: QuickUser[]; password:
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-ink">{u.sector}</p>
                     <p className="text-xs text-slate-500">
-                      <code className="font-mono text-slate-700">{u.login}</code> · {u.name}
+                      <code className="font-mono text-slate-700">{u.login}</code>
+                      {u.name ? ` · ${u.name}` : ""}
                     </p>
-                    <p className="text-[11px] text-slate-400">{u.scope}</p>
+                    {u.scope && <p className="text-[11px] text-slate-400">{u.scope}</p>}
                   </div>
-                  <button type="submit" disabled={pending} aria-busy={pending || undefined} className={buttonClass("primary", "sm", "shrink-0 min-w-24")} aria-label={`Entrar como ${u.sector} (${u.login})`}>
+                  <button
+                    type="submit"
+                    disabled={pending || unavailable}
+                    aria-busy={pending || undefined}
+                    title={unavailable ? "Indisponível enquanto o banco de dados não for liberado" : undefined}
+                    className={buttonClass("primary", "sm", "shrink-0 min-w-24")}
+                    aria-label={`Entrar como ${u.sector} (${u.login})`}
+                  >
                     {pending ? <Spinner /> : <LogIn className="size-3.5" aria-hidden />}
                     {pending ? "Entrando…" : "Entrar"}
                   </button>

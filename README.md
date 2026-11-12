@@ -19,6 +19,8 @@ O app abre em tela cheia, com atalhos para PDV, Painel, Produtos e Contas a rece
 
 **Acesso rápido (ambiente de teste):** com `SHOW_DEMO_LOGIN=1`, a tela de login lista os usuários da empresa de demonstração por setor, com a senha e um botão “Entrar” de um clique. Só aparecem usuários marcados como demonstração (nunca contas reais nem o administrador geral). Remova a variável ao entrar em operação real.
 
+**Não consigo entrar / a lista de acessos sumiu:** quase sempre é o banco. O Appwrite Cloud gratuito **pausa o projeto após 7 dias sem atividade no console dele** (as chamadas do ERP não contam) e **apaga o projeto que ficar 90 dias pausado**. Com o banco pausado ninguém entra, qualquer que seja o usuário ou a senha — a tela de login mostra o aviso “Acesso bloqueado: o banco de dados está pausado”, com o botão para o console do Appwrite, e mantém os acessos da demonstração listados. Para liberar: console do Appwrite → projeto → confirmar a reativação; o acesso volta em seguida. Para não repetir: plano pago do Appwrite ou abrir o console ao menos uma vez por semana (`docs/pendencias-externas.md`, item 1; regras em `docs/regras-assumidas.md` §47).
+
 ## Gestão contábil (escritórios de contabilidade)
 
 Uma empresa pode ser criada como **escritório contábil** (Administração → Empresas → Nova empresa → tipo). O escritório tem menu próprio (`/contabil`): carteira de clientes contábeis (PF/PJ, sócios, estabelecimentos, regime com vigência, grupos), departamentos e responsáveis (carteira restrita por responsável), caixa de entrada de entregas e o financeiro/fiscal de serviços do próprio escritório. Vários escritórios convivem na mesma instalação sem se enxergar.

@@ -32,6 +32,12 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] Telas (4 frentes paralelas + 4 revisores no navegador): `/contabil/certificados` (acompanhamento, validades/renovações, registrar certificado existente), `/contabil/certificados/nova`, protocolo `/contabil/certificados/[id]` (próxima ação por etapa, cobrança com prévia, cancelamento, autorização com evidência, download protegido, histórico), fila `/administracao/certificacao` (+ protocolo e parâmetros/catálogo), cartão "Certificados digitais" em Integrações → Contabilidade (titular), aba Certificados no 360°, indicadores no painel. Correções após revisão: perfis de loja sem `certification.operate`; valor ilegível vira mensagem de regra; "Limpar" preserva a aba; indicador "Concluídas" coerente com o link; mensagem adicional registrada nos envios manuais; 5º cliente na demonstração (Oficina Nordeste) com certificado a vencer para mostrar a renovação.
 - [x] 403 testes × 2 modos, build e varredura do build (admin 230, contador 144, analista 78, certificacao 111 páginas — 0 problemas, 0 erros de console); publicado em `a21ff56`; produção com 94 tabelas e demonstração (`demo-update`: 4 protocolos, 5 clientes, usuário `certificacao`).
 
+## Acesso bloqueado pelo banco pausado · 12/11/2026
+- [x] Diagnóstico: ninguém entrava e o acesso rápido tinha sumido porque o projeto do Appwrite (gratuito) estava pausado por inatividade (`403 project_paused`, confirmado nos logs da Vercel e direto no serviço). A rota diária `/api/keepalive` não evita a pausa (o Appwrite só conta atividade no console) — passou a ser tratada como monitor.
+- [x] Tela de login: aviso com o motivo e como liberar; acessos da demonstração sempre visíveis (lista de reserva quando o banco não responde, botões desligados); login, segunda etapa e recuperação de senha devolvem mensagem em vez de exceção (`docs/regras-assumidas.md` §47). `vendedora` ganhou setor no acesso rápido.
+- [x] Testes `tests/login-screen.test.ts` (11 cenários); tsc, lint e build limpos; conferência no navegador com o banco no ar, pausado, com acesso recusado e fora do ar.
+- [ ] **Ação do titular:** reativar o projeto no console do Appwrite (libera o acesso na hora) e decidir o plano (`docs/pendencias-externas.md`, item 1).
+
 ## Pendente (depende de terceiros)
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).
 

@@ -1,12 +1,18 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getStore } from "@/lib/db";
+import { dbOutageOf } from "@/lib/db/outage";
 import { unscoped } from "@/lib/db/scoped-store";
 import { getSetting, setSetting } from "@/lib/core/settings";
 
 /**
- * Mantém o banco (Appwrite Cloud, plano gratuito) ativo: o projeto é pausado após dias sem uso. Acionada pelo Vercel
- * Cron uma vez por dia (vercel.json), faz uma leitura e uma gravação mínimas — o horário do último sinal fica em
+ * Sinal diário do banco (Vercel Cron, vercel.json): uma leitura e uma gravação mínimas, com o horário do último sinal em
  * parâmetros da plataforma ("keepalive"). Protegida por CRON_SECRET como o executor de tarefas.
+ *
+ * NÃO evita a pausa do Appwrite Cloud gratuito: o Appwrite só conta a atividade de desenvolvimento no console dele
+ * (7 dias sem ela → projeto pausado; 90 dias pausado → projeto apagado) e as chamadas da aplicação não entram na conta —
+ * em novembro/2026 o projeto foi pausado com este sinal diário agendado. O que esta rota entrega é o
+ * monitoramento: banco pausado ou fora do ar responde 503 e fica registrado nos logs da Vercel no mesmo dia.
+ * Decisão sobre o plano: docs/pendencias-externas.md (item 1).
  */
 export const maxDuration = 60;
 
@@ -22,7 +28,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, at, previous: before?.at ?? null });
   } catch (e) {
     // o banco pausado responde 403 "project_paused": registra para aparecer nos logs da Vercel
-    console.error("[keepalive] banco indisponível", e);
-    return NextResponse.json({ ok: false, at, error: String((e as Error)?.message ?? e) }, { status: 503 });
+    const outage = dbOutageOf(e);
+    console.error(outage?.kind === "paused" ? "[keepalive] banco PAUSADO por inatividade — ninguém consegue entrar; reative o projeto no console do Appwrite" : "[keepalive] banco indisponível", e);
+    return NextResponse.json({ ok: false, at, outage: outage?.kind ?? null, error: String((e as Error)?.message ?? e) }, { status: 503 });
   }
 }
