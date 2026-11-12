@@ -8,7 +8,7 @@ import { configuredBackend, appwriteConfig, getStore, findOne, detId } from "@/l
  *   ?step=demo      — carrega a empresa de demonstração (idempotente; repita se o tempo acabar)
  *   ?step=owner     — cria o administrador geral (e-mail informado; senha gerada e devolvida UMA vez)
  *   ?step=finish    — encerra a instalação: a rota deixa de funcionar (exceto provision e demo-update, idempotentes)
- *   ?step=diagnostico — região, tempo de resposta e tamanho do banco, esquema aplicado e onde ficam os arquivos (só leitura)
+ *   ?step=diagnostico — região, tempo de resposta e tamanho do banco, esquema aplicado, arquivos, chave de cifra e avisos (só leitura)
  * Exige o SETUP_TOKEN (cabeçalho x-setup-token ou ?token=). Depois de "finish" responde 410.
  */
 export const maxDuration = 300;
@@ -36,7 +36,12 @@ export async function GET(req: NextRequest) {
     // Situação da instalação sem expor credenciais: onde o banco está, quanto demora e onde ficam os arquivos.
     // Funciona antes e depois de a instalação ser encerrada (só leitura).
     const { blobConfigured, getFileStorage } = await import("@/lib/core/files");
-    const out: Record<string, unknown> = { ok: true, step, backend, functionRegion: process.env.VERCEL_REGION ?? null, files: getFileStorage().kind, blobConnected: blobConfigured() };
+    const { secretKeySource } = await import("@/lib/auth/secret-box");
+    const warnings: string[] = [];
+    const out: Record<string, unknown> = { ok: true, step, backend, functionRegion: process.env.VERCEL_REGION ?? null, files: getFileStorage().kind, blobConnected: blobConfigured(), secretKey: secretKeySource(), warnings };
+    if (backend === "postgres" && !blobConfigured()) warnings.push("Sem Blob privado conectado: XML, anexos e cópias de segurança não têm onde ser gravados (Storage → Blob, acesso privado).");
+    if (out.secretKey === "appwrite") warnings.push("A chave que cifra a autenticação em duas etapas ainda vem da chave do Appwrite: defina AUTH_ENCRYPTION_KEY antes de remover as variáveis APPWRITE_*.");
+    if (out.secretKey === "missing") warnings.push("AUTH_ENCRYPTION_KEY não definida: a autenticação em duas etapas não funciona até a variável existir.");
     if (backend === "postgres") {
       const { pgDriver, postgresUrl, postgresEndpoint } = await import("@/lib/db/postgres/driver");
       const { schemaApplied } = await import("@/lib/db/postgres/ddl");
@@ -44,6 +49,13 @@ export async function GET(req: NextRequest) {
       const endpoint = postgresEndpoint();
       out.dbRegion = endpoint.region;
       out.pooled = endpoint.pooled;
+      // funções longe do banco: cada consulta atravessa a distância — a correção é a região em vercel.json ("regions")
+      const { functionsNearDatabase, vercelRegionFor } = await import("@/lib/server/deploy-config");
+      out.sameRegion = functionsNearDatabase(process.env.VERCEL_REGION, endpoint.region);
+      if (out.sameRegion === false) {
+        const target = vercelRegionFor(endpoint.region);
+        warnings.push(`As funções rodam em ${process.env.VERCEL_REGION} e o banco em ${endpoint.region}: cada consulta paga essa distância.${target ? ` Fixe "regions": ["${target}"] em vercel.json.` : ""}`);
+      }
       const driver = pgDriver(postgresUrl());
       try {
         const t0 = Date.now();

@@ -19,11 +19,13 @@ import { AppwriteException } from "node-appwrite";
 import { configuredBackend } from "@/lib/db";
 import { dbOutageOf } from "@/lib/db/outage";
 import { getFileStorage } from "@/lib/core/files";
-import { missingDeploymentConfig } from "@/lib/server/deploy-config";
+import fs from "node:fs";
+import { missingDeploymentConfig, functionsNearDatabase, vercelRegionFor } from "@/lib/server/deploy-config";
 import { indexName, schemaSignature } from "@/lib/db/postgres/ddl";
 import { postgresEndpoint } from "@/lib/db/postgres/driver";
+import { openSecret, sealSecret, secretKeySource } from "@/lib/auth/secret-box";
 
-const ENV = ["DATA_BACKEND", "DATABASE_URL", "POSTGRES_URL", "APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID", "APPWRITE_API_KEY", "VERCEL", "BLOB_READ_WRITE_TOKEN", "VERCEL_OIDC_TOKEN", "BLOB_STORE_ID"] as const;
+const ENV = ["DATA_BACKEND", "DATABASE_URL", "POSTGRES_URL", "APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID", "APPWRITE_API_KEY", "VERCEL", "BLOB_READ_WRITE_TOKEN", "VERCEL_OIDC_TOKEN", "BLOB_STORE_ID", "AUTH_ENCRYPTION_KEY"] as const;
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 
 function env(values: Partial<Record<(typeof ENV)[number], string>>) {
@@ -132,6 +134,68 @@ describe("diagnóstico da instalação", () => {
     expect(postgresEndpoint("")).toEqual({ region: null, pooled: false });
     expect(postgresEndpoint("isto não é um endereço")).toEqual({ region: null, pooled: false });
     for (const host of ["ep-cool-night-a1b2c3-pooler.sa-east-1.aws.neon.tech", "localhost:5432"]) expect(JSON.stringify(at(host))).not.toMatch(/dono|segredo|ep-cool|neondb/);
+  });
+});
+
+describe("chave de cifra dos segredos (autenticação em duas etapas)", () => {
+  it("publicação com banco de verdade nunca cifra com a chave de desenvolvimento; a chave herdada do Appwrite só vale enquanto existir", () => {
+    const mode = process.env.NODE_ENV;
+    const setMode = (v: string | undefined) => (v === undefined ? delete (process.env as Record<string, string | undefined>).NODE_ENV : Object.assign(process.env, { NODE_ENV: v }));
+    const banco = "postgres://usuario:senha@servidor/banco";
+    try {
+      // desenvolvimento e testes: chave fixa de desenvolvimento
+      env({});
+      expect(secretKeySource()).toBe("dev");
+      expect(openSecret(sealSecret("A"))).toBe("A");
+      // produção com a demonstração em memória também (nada ali é de verdade)
+      setMode("production");
+      env({ DATA_BACKEND: "memory" });
+      expect(secretKeySource()).toBe("dev");
+
+      // publicação no Postgres que veio do Appwrite: a chave herdada vale enquanto a variável existir
+      env({ DATABASE_URL: banco, APPWRITE_API_KEY: "chave-antiga" });
+      expect(secretKeySource()).toBe("appwrite");
+      const legacy = sealSecret("SEGREDO");
+      expect(openSecret(legacy)).toBe("SEGREDO");
+
+      // variáveis do Appwrite removidas sem a chave própria: nada é cifrado com chave conhecida, e o que existia não abre
+      env({ DATABASE_URL: banco });
+      expect(secretKeySource()).toBe("missing");
+      expect(() => sealSecret("X")).toThrow(/AUTH_ENCRYPTION_KEY/);
+      expect(openSecret(legacy)).toBeNull();
+
+      // chave própria: tem prioridade sobre a herdada, e remover as variáveis do Appwrite depois não muda nada
+      env({ DATABASE_URL: banco, AUTH_ENCRYPTION_KEY: "chave-propria-bem-longa", APPWRITE_API_KEY: "chave-antiga" });
+      expect(secretKeySource()).toBe("own");
+      const own = sealSecret("SEGREDO");
+      expect(own).not.toContain("SEGREDO");
+      expect(openSecret(legacy)).toBeNull(); // trocar a chave invalida o que foi cifrado com a anterior
+      env({ DATABASE_URL: banco, AUTH_ENCRYPTION_KEY: "chave-propria-bem-longa" });
+      expect(openSecret(own)).toBe("SEGREDO");
+    } finally {
+      setMode(mode);
+    }
+  });
+});
+
+describe("região das funções e do banco", () => {
+  it("reconhece funções na mesma região do banco, longe dele e quando não dá para saber", () => {
+    expect(functionsNearDatabase("gru1", "sa-east-1")).toBe(true);
+    expect(functionsNearDatabase("GRU1", "SA-EAST-1")).toBe(true);
+    expect(functionsNearDatabase("fra1", "sa-east-1")).toBe(false); // Frankfurt ↔ São Paulo: ~200 ms por consulta
+    expect(functionsNearDatabase("iad1", "us-east-1")).toBe(true);
+    expect(functionsNearDatabase(undefined, "sa-east-1")).toBeNull(); // fora da Vercel
+    expect(functionsNearDatabase("gru1", null)).toBeNull(); // banco sem região no endereço
+    expect(functionsNearDatabase("xyz9", "sa-east-1")).toBeNull();
+    expect(vercelRegionFor("sa-east-1")).toBe("gru1");
+    expect(vercelRegionFor("eu-central-1")).toBe("fra1");
+    expect(vercelRegionFor("eastus2")).toBeNull();
+  });
+
+  it("a publicação fixa UMA região para as funções (o plano gratuito só aceita uma), em São Paulo, junto do banco", () => {
+    const config = JSON.parse(fs.readFileSync("vercel.json", "utf8")) as { regions?: string[] };
+    expect(config.regions).toEqual(["gru1"]);
+    expect(functionsNearDatabase(config.regions![0], "sa-east-1")).toBe(true);
   });
 });
 
