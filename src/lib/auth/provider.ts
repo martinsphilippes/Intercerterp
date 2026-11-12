@@ -5,8 +5,9 @@ import type { Store } from "../db/types";
 
 /**
  * Autenticação:
- *  - Backend Appwrite: usuários no Appwrite Auth (sessão por e-mail/senha; recuperação por e-mail do Appwrite).
- *  - Backend local/memória (desenvolvimento e testes): hash scrypt e sessões na coleção "sessions".
+ *  - Própria do ERP (Postgres em produção; local/memória em desenvolvimento e testes): senha com hash scrypt em
+ *    `users.passwordHash` e sessões na tabela "sessions" (o navegador guarda o segredo; o banco, só o hash dele).
+ *  - Backend Appwrite (instalações antigas): usuários no Appwrite Auth (sessão por e-mail/senha; recuperação por e-mail).
  * O perfil do ERP (empresa, filiais, perfil de acesso) fica sempre na coleção "users".
  */
 
@@ -84,7 +85,8 @@ class LocalAuth implements AuthProvider {
     const link = `${resetUrl}?userId=${u.id}&secret=${secret}`;
     const { sendEmail } = await import("../core/email");
     const sent = await sendEmail(u.companyIds?.[0] ?? null, { to: u.email, subject: "Recuperação de senha — Intercert ERP", html: `<p>Para definir uma nova senha, acesse: <a href="${link}">${link}</a></p><p>O link expira em 1 hora.</p>` });
-    if (!sent.delivered) console.info(`[auth] link de recuperação (canal de e-mail não configurado): ${link}`);
+    // o link é uma credencial: só aparece no log fora de produção (em produção, sem canal de e-mail, quem redefine é o administrador)
+    if (!sent.delivered && process.env.NODE_ENV !== "production") console.info(`[auth] link de recuperação (canal de e-mail não configurado): ${link}`);
     return { delivered: sent.delivered, channel: sent.channel, devLink: process.env.NODE_ENV !== "production" && !sent.delivered ? link : undefined };
   }
 

@@ -21,10 +21,8 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 
 function SetupNeeded({ missing }: { missing: string[] }) {
   const vars: Array<[string, string]> = [
-    ["APPWRITE_ENDPOINT", "Endpoint da API do projeto (Appwrite Console → Settings), ex.: https://nyc.cloud.appwrite.io/v1"],
-    ["APPWRITE_PROJECT_ID", "Project ID do projeto Appwrite"],
-    ["APPWRITE_API_KEY", "Chave de API do servidor (marque como Sensitive)"],
-    ["APPWRITE_DATABASE_ID", "Opcional — nome do banco (padrão: intercert)"],
+    ["DATABASE_URL", "Criada pela Vercel ao conectar o banco Postgres ao projeto (não digite à mão)"],
+    ["BLOB_READ_WRITE_TOKEN", "Criada pela Vercel ao conectar o Blob privado ao projeto (arquivos: XML, anexos, cópias de segurança)"],
     ["CRON_SECRET", "Segredo do executor de tarefas (/api/jobs, Vercel Cron)"],
     ["SETUP_TOKEN", "Token exigido na tela de primeiro acesso"],
     ["APP_TIMEZONE", "Opcional — fuso da instalação (padrão America/Sao_Paulo)"],
@@ -33,11 +31,13 @@ function SetupNeeded({ missing }: { missing: string[] }) {
     <main className="mx-auto max-w-2xl p-8">
       <h1 className="text-2xl font-semibold text-ink">Intercert ERP — configuração pendente</h1>
       <p className="mt-2 text-sm text-slate-600">
-        A aplicação foi publicada, mas ainda não está conectada ao Appwrite. Nenhum dado é gravado até a configuração ser concluída.
+        A aplicação foi publicada, mas ainda não está conectada a um banco de dados. Nenhum dado é gravado até a configuração ser concluída.
       </p>
       <p className="mt-4 text-sm font-medium text-red-700">Variáveis ausentes: {missing.join(", ")}</p>
       <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-slate-700">
-        <li>Na Vercel: Project → Settings → Environment Variables, cadastre:</li>
+        <li>
+          Na Vercel: Project → <strong>Storage</strong> → Create Database → Postgres (Neon) e conecte ao projeto. Depois, Storage → Blob (acesso privado) e conecte também. As variáveis abaixo são criadas pela conexão:
+        </li>
       </ol>
       <table className="mt-2 w-full text-left text-sm">
         <tbody>
@@ -51,7 +51,7 @@ function SetupNeeded({ missing }: { missing: string[] }) {
       </table>
       <ol start={2} className="mt-4 list-decimal space-y-2 pl-5 text-sm text-slate-700">
         <li>Faça um novo deploy (Deployments → Redeploy).</li>
-        <li>Abra <span className="font-mono">/primeiro-acesso</span>: o sistema cria as tabelas no Appwrite, a empresa e o administrador.</li>
+        <li>Abra <span className="font-mono">/primeiro-acesso</span>: as tabelas são criadas sozinhas na primeira consulta; a tela cria a empresa e o administrador.</li>
       </ol>
       <p className="mt-6 text-xs text-slate-500">
         Somente para apresentação: <span className="font-mono">DATA_BACKEND=memory</span> sobe uma demonstração volátil (dados perdidos a cada reinício; não use em operação).

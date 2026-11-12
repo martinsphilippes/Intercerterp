@@ -5,27 +5,29 @@
 | Camada | Escolha | Motivo |
 |---|---|---|
 | Aplicação | Next.js 15 (App Router) + TypeScript + Tailwind 4 | SSR/Server Actions, deploy nativo na Vercel |
-| Banco e autenticação | **Appwrite** (TablesDB + Auth + Storage) | Infra do cliente; transações, índices únicos e incrementos atômicos com limite |
+| Banco | **Postgres** conectado ao projeto na Vercel (Storage) | Tudo na conta Vercel do cliente; transações reais, índices únicos e incrementos atômicos com limite; sem pausa por inatividade nem cobrança por linha lida (`docs/regras-assumidas.md` §48) |
+| Login | Próprio do ERP (senha com hash scrypt e sessões no banco) | Sem serviço externo de autenticação |
+| Arquivos | **Vercel Blob privado** | XML, anexos e cópias de segurança saem só pelo servidor, com conferência de empresa e permissão |
 | Hospedagem | **Vercel** (app + Cron em `/api/jobs`) | Infra do cliente |
 | Repositório | **GitHub** | Infra do cliente |
-| Dev/testes | Armazenamento local (arquivo/memória) com a **mesma interface** do Appwrite | Testes rápidos e determinísticos |
+| Dev/testes | Armazenamento local (arquivo/memória) com a **mesma interface**; a suíte também roda inteira sobre o Postgres (`TEST_STORE=postgres`) | Testes rápidos e determinísticos, com conferência no banco de produção |
 
 Monólito modular: um modelo de dados (`src/lib/db/schema.ts`), serviços de domínio compartilhados (`src/domain`), telas em `src/app/(app)`.
 
 ## Camada de dados (`src/lib/db`)
 
 - `Store` (interface) — `get`, `list`, `create`, `update`, `delete`, `increment(min/max)`, `transaction`.
-- `AppwriteStore` (produção) e `MemoryStore` (dev/testes; `.data/local` quando `DATA_BACKEND=local`).
-- **Esquema único** em `schema.ts` → `npm run appwrite:setup` provisiona tabelas/colunas/índices/buckets.
+- `PostgresStore` (produção, `src/lib/db/postgres`), `MemoryStore` (dev/testes; `.data/local` quando `DATA_BACKEND=local`) e `AppwriteStore` (instalações antigas, até a retirada).
+- **Esquema único** em `schema.ts` → no Postgres, uma tabela por coleção, criada e atualizada sozinha na primeira consulta de cada versão (só acrescenta; `npm run db:setup` faz o mesmo sob demanda).
 - Tipos: dinheiro em **centavos** (`money`), quantidade em **milésimos** (`qty`, 1 un = 1000), percentuais em **pontos-base** (`…Bps`, 1% = 100), datas de calendário `AAAA-MM-DD`, instantes ISO UTC, JSON serializado.
-- Filtros: `["eq", campo, valor|valores]`, `["contains", "searchText", termo]`, `["between", …]`, `["or", [...]]` etc. Campos `id/createdAt/updatedAt` mapeiam para `$id/$createdAt/$updatedAt` no Appwrite.
+- Filtros: `["eq", campo, valor|valores]`, `["contains", "searchText", termo]`, `["between", …]`, `["or", [...]]` etc. Campos `id/createdAt/updatedAt` são colunas de sistema (no Appwrite, `$id/$createdAt/$updatedAt`); a ordem padrão é a de inserção (`_seq`).
 
 ## Consistência e concorrência
 
 - **Idempotência por chave**: cada efeito recebe id determinístico `detId(...)`. Repetir uma operação (duplo clique, retentativa) encontra o registro existente em vez de duplicar. Formulários enviam `_idem` estável (`ActionForm`).
 - **Sequência por agregado**: movimentos de estoque `(balanceId, seq)`, lançamentos em conta `(accountId, seq)` e baixas `(installmentId, seq)` têm índice único. Duas operações concorrentes sobre o mesmo saldo geram conflito → `retryOnConflict` relê e reaplica. Nenhuma baixa dupla do mesmo saldo nem consumo duplo de estoque.
 - **Limites atômicos**: `increment(..., {min/max})` impede devolução acima do vendido e saldo negativo de vale/título.
-- **Transações Appwrite** (máx. 100 operações): venda, baixa, estorno, transferência etc. gravam documento + efeitos juntos. Efeitos volumosos (estoque da venda) vão por tarefa durável idempotente.
+- **Transações**: venda, baixa, estorno, transferência etc. gravam documento + efeitos juntos. No Postgres são transações reais (BEGIN … COMMIT, READ COMMITTED) e toda operação feita durante a transação entra nela; no Appwrite eram escritas preparadas e aplicadas no commit (máx. 100 operações — limite que o código continua respeitando). Efeitos volumosos (estoque da venda) vão por tarefa durável idempotente.
 - **Outbox** (`jobs`): emissão/consulta fiscal, efeitos da venda, notificações e rotinas. Executor em `/api/jobs` (Vercel Cron diário) e em segundo plano após cada ação de usuário (`after()`, a cada 30 s no máximo por instância), com reivindicação única por tentativa, recuo exponencial e limite geral de reagendamentos.
 
 ## Serviços de domínio (`src/domain`)

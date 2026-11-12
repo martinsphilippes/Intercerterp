@@ -3,6 +3,7 @@ import { InstallAppButton } from "@/components/pwa/install-button";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { getSession } from "@/lib/server/session";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
+import { configuredBackend } from "@/lib/db";
 import { ShieldCheck } from "lucide-react";
 import { LoginForm } from "./form";
 import { QuickAccess } from "./quick-access";
@@ -30,7 +31,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <div className="rounded-xl border border-line bg-white p-8 shadow-sm">
       <h1 className="text-2xl font-semibold">Bem-vindo!</h1>
       <p className="mt-1 text-sm text-slate-500">Entre com seu usuário ou e-mail para acessar o sistema.</p>
-      {state.outage && <OutageNotice outage={state.outage} retryHref={next ? `/login?next=${encodeURIComponent(next)}` : "/login"} />}
+      {state.outage && <OutageNotice outage={state.outage} provider={configuredBackend() === "appwrite" ? "appwrite" : "postgres"} retryHref={next ? `/login?next=${encodeURIComponent(next)}` : "/login"} />}
       <LoginForm next={next} />
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2 text-sm">
         <Link href="/recuperar-senha" className="text-brand-700 hover:underline">

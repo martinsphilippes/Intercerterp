@@ -40,6 +40,15 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [ ] **Ação do titular:** reativar o projeto no console do Appwrite, conferir o uso da organização (cota de leituras) e decidir o plano (`docs/pendencias-externas.md`, item 1).
 - [ ] Próximo passo técnico: medir e reduzir as leituras por tela (§47, pendências).
 
+## Saída do Appwrite: Postgres, login próprio e Vercel Blob · 12/11/2026
+- [x] Decisão do dono: levar banco, login e arquivos para a Vercel e encerrar o Appwrite (`docs/regras-assumidas.md` §48).
+- [x] `PostgresStore` (`src/lib/db/postgres`): uma tabela por coleção gerada do esquema único (121 tabelas, 2.352 colunas, índices únicos que ignoram vazio), criação/atualização automática na primeira consulta de cada versão, transações reais, cliente `pg`.
+- [x] Paridade com a referência dos testes: comparação operação por operação (`tests/postgres-store.test.ts`, 51 cenários) e **suíte inteira sobre o Postgres** (`TEST_STORE=postgres`): 930 de 931, igual à memória (a mesma falha nos dois: teste do SPED que depende do dia do mês). Paridade também contra PostgreSQL 16 de verdade pelo cliente de produção (`TEST_PG_URL`).
+- [x] Ligação: `DATABASE_URL` tem prioridade sobre o Appwrite; login próprio em produção; arquivos no Vercel Blob privado; instalação (`/api/setup/run`, `/primeiro-acesso`, `npm run db:setup`); tela “configuração pendente”; avisos de banco indisponível para o Postgres (`tests/postgres-wiring.test.ts`).
+- [x] Ponta a ponta em PostgreSQL 16 local com build de produção: instalação do zero (122 tabelas e 495 índices criados no primeiro acesso), demonstração de 7 dias carregada em 14,8 s numa chamada, login conferido, varredura como administrador — 287 páginas, 173 padrões de rota, todas com resposta 200 e nenhuma tela de erro (mediana 0,6 s por página).
+- [ ] **Observação da varredura:** em duas telas pesadas (`/financeiro/pagar` e `/relatorios/financeiros`) o navegador registrou erro de hidratação do React em cerca de 1 a cada 100 visitas — só com banco de verdade, quando a página chega em partes; a tela se refaz sozinha e fica correta. Causa em investigação (não reproduz com o armazenamento em memória; por isso as varreduras anteriores, feitas em memória, não mostravam).
+- [ ] **Depende do titular:** criar o Postgres e o Blob privado na Vercel conectados ao projeto e dizer se há dado do Appwrite a preservar (`docs/pendencias-externas.md`, item 1). Depois: publicar, carregar a demonstração, criar o administrador, conferir o acesso, remover as variáveis `APPWRITE_*` e encerrar o projeto no Appwrite; por fim, retirar o código do Appwrite.
+
 ## Pendente (depende de terceiros)
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).
 

@@ -25,10 +25,25 @@ function tokenOk(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   if (!tokenOk(req)) return NextResponse.json({ ok: false, error: "Token de instalação inválido." }, { status: 401 });
-  if (configuredBackend() !== "appwrite") return NextResponse.json({ ok: false, error: "Somente para Appwrite." }, { status: 400 });
+  const backend = configuredBackend();
+  if (backend !== "appwrite" && backend !== "postgres") return NextResponse.json({ ok: false, error: "Somente com banco Postgres ou Appwrite configurado." }, { status: 400 });
   const step = req.nextUrl.searchParams.get("step") ?? "";
   const store = getStore();
   const started = Date.now();
+
+  if (step === "provision" && backend === "postgres") {
+    // Postgres: tabelas, colunas e índices que faltam, numa transação (o mesmo que a primeira consulta de cada versão faz sozinha)
+    const { provisionPostgres } = await import("@/lib/db/postgres/ddl");
+    const { pgDriver, postgresUrl } = await import("@/lib/db/postgres/driver");
+    const log: string[] = [];
+    const driver = pgDriver(postgresUrl());
+    try {
+      const r = await provisionPostgres(driver, (m) => log.push(m));
+      return NextResponse.json({ ok: true, step, ...r, log, ms: Date.now() - started });
+    } finally {
+      await driver.end().catch(() => undefined);
+    }
+  }
 
   if (step === "provision") {
     const { provisionAppwrite } = await import("@/lib/db/provision");

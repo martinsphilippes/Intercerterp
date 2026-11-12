@@ -6,11 +6,12 @@ import { AppwriteException } from "node-appwrite";
  * (lista de acessos vazia) ou com um "erro no servidor" genérico.
  *
  *  - paused: projeto do Appwrite Cloud pausado por inatividade (plano gratuito) — só o titular reativa, no console;
- *  - quota: o Appwrite está limitando o banco porque a organização passou da cota do plano (no gratuito, 500 mil
- *    leituras por mês, contadas por linha lida) — libera na virada do período ou com o upgrade do plano;
- *  - credentials: o servidor foi recusado (chave/projeto incorretos, expirados ou sem escopo, ou acesso da organização
- *    restrito pelo Appwrite) — configuração ou plano;
- *  - unreachable: rede, tempo esgotado ou erro interno do serviço — costuma ser passageiro.
+ *  - quota: o provedor do banco está limitando o acesso porque a cota do plano acabou no período (Appwrite gratuito:
+ *    500 mil leituras por mês, contadas por linha lida; Postgres: horas de processamento do plano) — libera na virada
+ *    do período ou com o upgrade do plano;
+ *  - credentials: o servidor foi recusado (chave, usuário, senha, projeto ou banco incorretos, expirados ou sem
+ *    permissão) — configuração;
+ *  - unreachable: rede, tempo esgotado, conexões esgotadas ou erro interno do serviço — costuma ser passageiro.
  */
 export type DbOutageKind = "paused" | "quota" | "credentials" | "unreachable";
 
@@ -71,11 +72,32 @@ export function dbOutageOf(e: unknown): DbOutage | null {
     if (code === 0 || code >= 500) return { kind: "unreachable", detail };
     return null;
   }
+  const pg = postgresOutage(e);
+  if (pg) return pg;
   if (isNetworkError(e)) {
     const err = e as { message?: unknown; cause?: { code?: unknown; message?: unknown } };
     const cause = err.cause?.code ?? err.cause?.message;
     return { kind: "unreachable", detail: `${String(err.message ?? e)}${cause ? ` (${String(cause)})` : ""}` };
   }
+  return null;
+}
+
+/**
+ * Postgres: o erro traz o código SQLSTATE de 5 caracteres. Classe 28 e banco inexistente = acesso recusado
+ * (configuração); classes 08/53/57 = conexão, recursos ou servidor em manutenção (passageiro). O provedor também avisa
+ * por mensagem quando o plano suspendeu o processamento (cota do período). Erros de dados e de consulta devolvem `null`.
+ */
+function postgresOutage(e: unknown): DbOutage | null {
+  if (typeof e !== "object" || e === null) return null;
+  const err = e as { code?: unknown; message?: unknown };
+  const message = String(err.message ?? "");
+  const code = typeof err.code === "string" && /^[0-9A-Z]{5}$/.test(err.code) ? err.code : "";
+  const detail = `${code || "postgres"}: ${message}`;
+  if (/exceeded the .*quota|quota (has been )?exceeded|endpoint (has been|is) disabled|(project|account) .*suspended/i.test(message)) return { kind: "quota", detail };
+  if (code.startsWith("28") || code === "3D000") return { kind: "credentials", detail };
+  if (code.startsWith("08") || code.startsWith("53") || code.startsWith("57")) return { kind: "unreachable", detail };
+  // o conjunto de conexões não traz código quando a conexão cai ou não abre a tempo
+  if (!code && /timeout exceeded when trying to connect|connection terminated|connection timeout/i.test(message)) return { kind: "unreachable", detail };
   return null;
 }
 
@@ -85,7 +107,7 @@ export function outageMessage(o: DbOutage): string {
     case "paused":
       return "O banco de dados está pausado por inatividade (Appwrite). Não é problema de usuário nem de senha: ninguém consegue entrar até o projeto ser reativado no console do Appwrite.";
     case "quota":
-      return "O banco de dados está com o acesso limitado pelo Appwrite (limite do plano atingido). Não é problema de usuário nem de senha: ninguém consegue entrar até o limite ser liberado.";
+      return "O banco de dados está com o acesso limitado pelo provedor (limite do plano atingido). Não é problema de usuário nem de senha: ninguém consegue entrar até o limite ser liberado.";
     case "credentials":
       return "O servidor não conseguiu abrir o banco de dados (acesso recusado). Não é problema de usuário nem de senha: avise o administrador do sistema.";
     case "unreachable":

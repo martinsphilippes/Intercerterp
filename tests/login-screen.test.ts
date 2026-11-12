@@ -86,10 +86,11 @@ describe("tela de login: acessos da demonstração e banco indisponível", () =>
   let seeded: Store;
   const env = { backend: process.env.DATA_BACKEND, show: process.env.SHOW_DEMO_LOGIN };
 
+  // a carga completa da demonstração leva mais que o limite padrão de preparação quando a suíte roda sobre o Postgres
   beforeAll(async () => {
     seeded = freshStore();
     await seedDemo(seeded, { historyDays: 1 });
-  });
+  }, 180_000);
 
   afterEach(() => {
     setStore(seeded);

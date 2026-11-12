@@ -8,11 +8,9 @@ import { getSetting, setSetting } from "@/lib/core/settings";
  * Sinal diário do banco (Vercel Cron, vercel.json): uma leitura e uma gravação mínimas, com o horário do último sinal em
  * parâmetros da plataforma ("keepalive"). Protegida por CRON_SECRET como o executor de tarefas.
  *
- * NÃO evita a pausa do Appwrite Cloud gratuito: o Appwrite só conta a atividade de desenvolvimento no console dele
- * (7 dias sem ela → projeto pausado; 90 dias pausado → projeto apagado) e as chamadas da aplicação não entram na conta —
- * em novembro/2026 o projeto foi pausado com este sinal diário agendado. O que esta rota entrega é o
- * monitoramento: banco pausado ou fora do ar responde 503 e fica registrado nos logs da Vercel no mesmo dia.
- * Decisão sobre o plano: docs/pendencias-externas.md (item 1).
+ * É um MONITOR: banco fora do ar, sem acesso ou limitado pelo plano responde 503 e fica registrado nos logs da Vercel
+ * no mesmo dia. No Postgres não há pausa por inatividade a evitar. No Appwrite Cloud gratuito (instalações antigas) ela
+ * não evitava a pausa — o Appwrite só conta a atividade no console dele (docs/regras-assumidas.md §47).
  */
 export const maxDuration = 60;
 

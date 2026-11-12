@@ -1,6 +1,8 @@
 import path from "node:path";
 import { AppwriteStore } from "./appwrite-store";
 import { MemoryStore } from "./memory-store";
+import { PostgresStore } from "./postgres/store";
+import { pgDriver, postgresUrl } from "./postgres/driver";
 import { ReadCachedStore } from "./read-cache";
 import { COLLECTIONS } from "./schema";
 import { ConflictError, Doc, Filter, ListOptions, NotFoundError, Store } from "./types";
@@ -8,11 +10,16 @@ import { ConflictError, Doc, Filter, ListOptions, NotFoundError, Store } from ".
 export * from "./types";
 export { detId, newId, sha256 } from "./ids";
 
-type Backend = "appwrite" | "local" | "memory";
+type Backend = "postgres" | "appwrite" | "local" | "memory";
 
+/**
+ * Armazenamento em uso. Postgres (banco conectado ao projeto na Vercel: `DATABASE_URL`/`POSTGRES_URL`) tem prioridade
+ * sobre o Appwrite: conectar o banco é o que muda a instalação de um para o outro; `DATA_BACKEND` força uma escolha.
+ */
 export function configuredBackend(): Backend {
   const explicit = process.env.DATA_BACKEND as Backend | undefined;
   if (explicit) return explicit;
+  if (postgresUrl()) return "postgres";
   if (process.env.APPWRITE_ENDPOINT && process.env.APPWRITE_PROJECT_ID && process.env.APPWRITE_API_KEY) return "appwrite";
   // Vercel sem Appwrite: o layout raiz mostra "configuração pendente" (src/lib/server/deploy-config.ts);
   // a demonstração em memória só é usada quando pedida explicitamente (DATA_BACKEND=memory).
@@ -39,13 +46,18 @@ export function appwriteConfig() {
 export function getStore(): Store {
   if (g.__intercertStore && process.env.NODE_ENV !== "production") {
     const sig = schemaSignature();
-    if (g.__intercertSchemaSig && g.__intercertSchemaSig !== sig && g.__intercertStore.backend === "appwrite") g.__intercertStore = undefined;
+    // esquema alterado em desenvolvimento: novo Store (no Postgres, a próxima consulta cria as colunas que faltam)
+    if (g.__intercertSchemaSig && g.__intercertSchemaSig !== sig && (g.__intercertStore.backend === "appwrite" || g.__intercertStore.backend === "postgres")) g.__intercertStore = undefined;
     g.__intercertSchemaSig = sig;
   }
   if (g.__intercertStore) return g.__intercertStore;
   const backend = configuredBackend();
   let store: Store;
-  if (backend === "appwrite") store = new AppwriteStore(appwriteConfig());
+  if (backend === "postgres") {
+    const url = postgresUrl();
+    if (!url) throw new Error("Banco Postgres não configurado: defina DATABASE_URL (na Vercel, conecte o banco ao projeto em Storage).");
+    store = new PostgresStore(pgDriver(url));
+  } else if (backend === "appwrite") store = new AppwriteStore(appwriteConfig());
   else if (backend === "local") store = new MemoryStore(process.env.LOCAL_DATA_DIR ?? path.join(process.cwd(), ".data", "local"));
   else store = new MemoryStore();
   // leituras repetidas na mesma tela vão ao banco uma vez só (ver read-cache.ts)

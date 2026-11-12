@@ -18,7 +18,7 @@ export default async function Page() {
       <p className="mt-1 text-sm text-slate-500">Armazenamento: {configuredBackend()}. Nenhum usuário cadastrado ainda.</p>
       {!state.reachable ? (
         <p className="mt-6 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          Não foi possível acessar o Appwrite: {"error" in state ? String(state.error) : "verifique APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID e APPWRITE_API_KEY"}.
+          Não foi possível acessar o banco de dados: {"error" in state ? String(state.error) : state.backend === "postgres" ? "confira se o banco está conectado ao projeto na Vercel (DATABASE_URL)" : "verifique APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID e APPWRITE_API_KEY"}.
         </p>
       ) : !state.provisioned ? (
         <ProvisionPanel missing={state.missing.length} needsToken={needsToken} />

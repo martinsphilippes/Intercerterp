@@ -135,7 +135,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             <ul className="list-disc space-y-1.5 pl-4 text-sm text-slate-600">
               <li>A cópia exporta todas as tabelas da empresa e, se marcado, o conteúdo dos arquivos.</li>
               <li>O artefato é compactado (gzip) e tem manifesto com contagens e SHA-256 por tabela.</li>
-              <li>Destino: {configuredBackend() === "appwrite" ? "Appwrite Storage, bucket “backups” (criptografado)" : "armazenamento local de arquivos da instalação"}.</li>
+              <li>Destino: {configuredBackend() === "postgres" ? "Vercel Blob privado, pasta “backups” (criptografado)" : configuredBackend() === "appwrite" ? "Appwrite Storage, bucket “backups” (criptografado)" : "armazenamento local de arquivos da instalação"}.</li>
               <li>“Verificada” só aparece após restaurar em base de teste isolada e comparar contagens e checksums.</li>
               <li>Retenção: artefatos vencidos são removidos; a cópia válida mais recente nunca é removida.</li>
             </ul>

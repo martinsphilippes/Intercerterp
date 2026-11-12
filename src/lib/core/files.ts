@@ -5,9 +5,9 @@ import { InputFile } from "node-appwrite/file";
 import { configuredBackend, appwriteConfig, newId, sha256 } from "../db";
 import type { Ctx } from "./ctx";
 
-/** Armazenamento de arquivos (XML, DANFE, anexos, backups). Appwrite Storage ou disco local. */
+/** Armazenamento de arquivos (XML, DANFE, anexos, backups): Vercel Blob privado, Appwrite Storage ou disco local. */
 export interface FileStorage {
-  readonly kind: "appwrite" | "local" | "memory";
+  readonly kind: "blob" | "appwrite" | "local" | "memory";
   put(bucket: string, name: string, data: Buffer, mime: string): Promise<string>;
   get(bucket: string, storageId: string): Promise<Buffer>;
   remove(bucket: string, storageId: string): Promise<void>;
@@ -78,17 +78,65 @@ class AppwriteFileStorage implements FileStorage {
   }
 }
 
+/** O projeto tem um Blob conectado? (a Vercel cria `BLOB_READ_WRITE_TOKEN` ao conectar o armazenamento ao projeto) */
+export function blobConfigured(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || (process.env.VERCEL_OIDC_TOKEN && process.env.BLOB_STORE_ID));
+}
+
+/**
+ * Vercel Blob em modo PRIVADO: o arquivo só sai pelo servidor, com a credencial do projeto — nunca por endereço público.
+ * As telas continuam baixando por `/api/files/[id]`, que confere empresa e permissão antes de ler daqui.
+ * Caminho: `<bucket lógico>/<id>` (o nome original fica só no registro de metadados, tabela `files`).
+ */
+class VercelBlobStorage implements FileStorage {
+  readonly kind = "blob" as const;
+  private path = (bucket: string, id: string) => `${bucket}/${id}`;
+  async put(bucket: string, _name: string, data: Buffer, mime: string) {
+    const { put } = await import("@vercel/blob");
+    const id = newId();
+    await put(this.path(bucket, id), data, { access: "private", addRandomSuffix: false, contentType: mime || "application/octet-stream" });
+    return id;
+  }
+  async get(bucket: string, id: string) {
+    const { get } = await import("@vercel/blob");
+    // direto da origem: documento fiscal e cópia de segurança não passam por cache
+    const r = await get(this.path(bucket, id), { access: "private", useCache: false });
+    if (!r || r.statusCode !== 200) throw new Error("Arquivo não encontrado");
+    return Buffer.from(await new Response(r.stream).arrayBuffer());
+  }
+  async remove(bucket: string, id: string) {
+    const { del } = await import("@vercel/blob");
+    await del(this.path(bucket, id));
+  }
+}
+
+/** Sem Blob conectado numa publicação na Vercel não há onde guardar arquivo: o erro diz o que falta (o resto do sistema segue). */
+class MissingFileStorage implements FileStorage {
+  readonly kind = "blob" as const;
+  private fail(): never {
+    throw new Error("Armazenamento de arquivos não configurado: conecte um Blob privado ao projeto na Vercel (Storage → Blob) e publique de novo.");
+  }
+  async put(): Promise<string> {
+    return this.fail();
+  }
+  async get(): Promise<Buffer> {
+    return this.fail();
+  }
+  async remove(): Promise<void> {
+    return this.fail();
+  }
+}
+
 const g = globalThis as unknown as { __intercertFiles?: FileStorage };
 
 export function getFileStorage(): FileStorage {
   if (g.__intercertFiles) return g.__intercertFiles;
   const backend = configuredBackend();
-  g.__intercertFiles =
-    backend === "appwrite"
-      ? new AppwriteFileStorage()
-      : backend === "local"
-        ? new LocalFileStorage(process.env.LOCAL_FILES_DIR ?? path.join(process.cwd(), ".data", "files"))
-        : new LocalFileStorage();
+  const disk = () => new LocalFileStorage(process.env.LOCAL_FILES_DIR ?? path.join(process.cwd(), ".data", "files"));
+  if (backend === "postgres") {
+    // na Vercel: Blob privado; fora dela (desenvolvimento com um Postgres local): pasta de arquivos em disco
+    g.__intercertFiles = blobConfigured() ? new VercelBlobStorage() : process.env.VERCEL ? new MissingFileStorage() : disk();
+  } else g.__intercertFiles = backend === "appwrite" ? new AppwriteFileStorage() : backend === "local" ? disk() : new LocalFileStorage();
   return g.__intercertFiles;
 }
 
