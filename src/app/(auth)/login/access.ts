@@ -1,49 +1,12 @@
 import "server-only";
-import { configuredBackend, getStore, listAll } from "@/lib/db";
+import { getStore, listAll } from "@/lib/db";
 import type { Store } from "@/lib/db/types";
 import { dbOutageOf, type DbOutage } from "@/lib/db/outage";
 import { isEmptyInstallation } from "@/lib/server/bootstrap";
 import type { QuickUser } from "./quick-access";
+import { DEMO_DIRECTORY, DEMO_SECTORS, demoLoginEnabled } from "@/lib/auth/quick-access";
 
-/**
- * Usuários da demonstração no acesso rápido, na ordem de apresentação: [login, setor exibido]. É também a lista de
- * reserva da tela quando o banco não responde (os acessos continuam visíveis). `tests/login-screen.test.ts` confere
- * que ela acompanha, nos dois sentidos, os usuários com acesso criados pela demonstração (`src/domain/seed`).
- */
-const DEMO_DIRECTORY: Array<[login: string, sector: string]> = [
-  // loja (varejo)
-  ["admin", "Administração"],
-  ["gerente", "Gerência"],
-  ["diretoria", "Diretoria"],
-  ["caixa", "Caixa (PDV)"],
-  ["vendedora", "Vendas — vendedora comissionada"],
-  ["estoque", "Estoque"],
-  ["financeiro", "Financeiro"],
-  ["fiscal", "Fiscal"],
-  // escritório contábil e certificação
-  ["contador", "Escritório contábil — sócio"],
-  ["analista", "Escritório contábil — analista"],
-  ["certificacao", "Equipe de certificação Intercert"],
-  // rede de certificação (§43)
-  ["rede", "Rede de certificação — plataforma Intercert"],
-  ["master", "Rede — Master (Rede Nordeste)"],
-  ["regional.ce", "Rede — Regional Ceará"],
-  ["regional.ba", "Rede — Regional Bahia"],
-  ["revenda.juazeiro", "Rede — Revenda Juazeiro do Norte"],
-  ["revenda.fortaleza", "Rede — Revenda Fortaleza"],
-  ["revenda.salvador", "Rede — Revenda Salvador"],
-  ["vendedor.juazeiro", "Rede — vendedor (Juazeiro do Norte)"],
-  ["vendedor.fortaleza", "Rede — vendedor (Fortaleza)"],
-  ["vendedor.salvador", "Rede — vendedor (Salvador)"],
-];
-
-/** Setor e posição de cada login da demonstração. */
-export const DEMO_SECTORS: Record<string, { sector: string; order: number }> = Object.fromEntries(DEMO_DIRECTORY.map(([login, sector], i) => [login, { sector, order: i + 1 }]));
-
-/** Acesso rápido só em ambiente de teste: backend em memória ou `SHOW_DEMO_LOGIN=1`. */
-export function demoLoginEnabled(): boolean {
-  return configuredBackend() === "memory" || process.env.SHOW_DEMO_LOGIN === "1";
-}
+export { DEMO_SECTORS, demoLoginEnabled } from "@/lib/auth/quick-access";
 
 /** Lista de reserva (sem consultar o banco): os logins da demonstração, na ordem de apresentação. */
 export function defaultDemoAccess(): QuickUser[] {

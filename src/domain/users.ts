@@ -14,6 +14,7 @@ import { findUserByLogin, toCtxUser, userRoleIn } from "@/lib/auth/users";
 import { resolveOccurrence } from "@/lib/core/notify";
 import { can, canDo } from "@/lib/permissions";
 import { auditedGuard } from "./roles";
+import { QUICK_ACCESS_LOCKED, isQuickAccessUser, quickAccessLockedMessage } from "@/lib/auth/quick-access";
 
 /**
  * Usuários (Tela 36): cadastro, acesso direto ou convite, situação (ativo/inativo/suspenso),
@@ -381,6 +382,13 @@ export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
     }
   }
   const data = await validateInput(ctx, merged, id);
+  // acesso rápido da tela de login (decisão do titular), para qualquer editor — inclusive o administrador geral:
+  // o botão entra pelo login com a senha presa ao e-mail, e administrador geral não aparece na lista
+  if (isQuickAccessUser(before)) {
+    if ((data.email ?? "") !== (before.email ?? "") || (data.login ?? null) !== (before.login ?? null))
+      throw new BusinessError(quickAccessLockedMessage("Não é possível alterar o e-mail ou o login", before.name), QUICK_ACCESS_LOCKED);
+    if (data.isAdmin) throw new BusinessError(quickAccessLockedMessage("Não é possível tornar administrador geral", before.name), QUICK_ACCESS_LOCKED);
+  }
   const added = data.companyIds.filter((c) => !(before.companyIds ?? []).includes(c));
   const removed = (before.companyIds ?? []).filter((c: string) => !data.companyIds.includes(c));
   await assertCanManageCompanies(ctx, [...added, ...removed]);
@@ -440,6 +448,8 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
   const u = await loadManagedUser(ctx, id);
   assert(u.id !== ctx.user.id, "Você não pode alterar a situação do seu próprio acesso.");
   await assertManagesWholeUser(ctx, u, "Alterar a situação do acesso");
+  // acesso rápido da tela de login (decisão do titular): o usuário não sai da lista
+  if (status !== "active" && isQuickAccessUser(u)) throw new BusinessError(quickAccessLockedMessage(status === "suspended" ? "Não é possível suspender" : "Não é possível inativar", u.name), QUICK_ACCESS_LOCKED);
   if (status === "suspended") assert(reason?.trim(), "Informe o motivo da suspensão.");
   if (status === u.status) return u;
   const what = status === "suspended" ? "Suspender" : "Inativar";
@@ -502,6 +512,9 @@ export async function adminSetPassword(ctx: Ctx, id: string, password: string) {
   const u = await loadManagedUser(ctx, id);
   await assertManagesWholeUser(ctx, u, "Redefinir a senha");
   assert(u.status === "active", "Somente usuários ativos podem ter a senha redefinida.");
+  // acesso rápido: a senha é a da demonstração, exibida na tela — só aceita voltar a ela (conserta um acesso alterado)
+  if (isQuickAccessUser(u) && password !== (process.env.DEMO_PASSWORD || "Intercert@2026"))
+    throw new BusinessError(quickAccessLockedMessage("Não é possível trocar a senha", u.name), QUICK_ACCESS_LOCKED);
   const auth = getAuth();
   if (u.authId) {
     if (auth.kind === "local") await auth.createUser(u.email, password, u.name);

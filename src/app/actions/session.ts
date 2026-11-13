@@ -13,6 +13,7 @@ import { nowIso } from "@/lib/dates";
 import type { ActionResult } from "@/lib/server/action";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
 import { CHALLENGE_TTL_MIN, LOCK_WINDOW_MIN, MAX_LOGIN_FAILURES, completeLoginChallenge, createLoginChallenge, dropChallenge, loadLoginChallenge, logLoginAttempt, loginKeyFor, recentLoginFailures } from "@/domain/two-factor";
+import { isQuickAccessUser } from "@/lib/auth/quick-access";
 
 const secure = process.env.NODE_ENV === "production";
 const MAX_FAILED = MAX_LOGIN_FAILURES;
@@ -61,7 +62,9 @@ async function doLogin(fd: FormData): Promise<ActionResult> {
   const userForKey = await findUserByLogin(store, login);
   const loginKey = loginKeyFor(userForKey, login);
   const failures = await recentLoginFailures(store, loginKey);
-  if (failures >= MAX_FAILED) return { ok: false, error: `Acesso temporariamente bloqueado após ${MAX_FAILED} tentativas inválidas. Tente novamente em ${LOCK_WINDOW_MIN} minutos ou recupere a senha.` };
+  // acesso rápido (decisão do titular): a senha está na tela, então o bloqueio só serviria para um estranho trancar o botão
+  const quickAccess = isQuickAccessUser(userForKey);
+  if (failures >= MAX_FAILED && !quickAccess) return { ok: false, error: `Acesso temporariamente bloqueado após ${MAX_FAILED} tentativas inválidas. Tente novamente em ${LOCK_WINDOW_MIN} minutos ou recupere a senha.` };
   const logAttempt = async (result: "success" | "failure", summary: string, u?: any) =>
     logLoginAttempt(store, { loginKey, result, action: result === "success" ? "auth.login" : "auth.login_failed", summary, user: u ?? null, loginText: login, ip: ip ?? null });
   const user = userForKey;
@@ -84,6 +87,7 @@ async function doLogin(fd: FormData): Promise<ActionResult> {
     if (e.message === "invalid_credentials") {
       await logAttempt("failure", `Senha inválida para ${user.name}`, user);
       const left = MAX_FAILED - failures - 1;
+      if (quickAccess) return { ok: false, error: "Usuário ou senha inválidos. A senha deste acesso é a da demonstração, exibida no acesso rápido." };
       return { ok: false, error: left > 0 ? `Usuário ou senha inválidos. ${left} tentativa(s) restante(s) antes do bloqueio temporário.` : `Usuário ou senha inválidos. Acesso bloqueado por ${LOCK_WINDOW_MIN} minutos.` };
     }
     console.error("[login]", e);
@@ -225,6 +229,8 @@ async function doRequestRecovery(fd: FormData): Promise<ActionResult> {
   // resposta neutra (não revela se o e-mail existe)
   const neutral = "Se o usuário existir, as instruções de recuperação foram encaminhadas pelo canal configurado.";
   if (!user) return { ok: true, message: neutral };
+  // acesso rápido (decisão do titular): a senha é a da tela — nenhum link de troca é gerado para os usuários da lista
+  if (isQuickAccessUser(user)) return { ok: true, message: "Este é um acesso da demonstração: a senha é a exibida no acesso rápido, na tela de login." };
   try {
     const r = await getAuth().requestRecovery(user.email, `${origin}/redefinir-senha`);
     if (!r.delivered) {
