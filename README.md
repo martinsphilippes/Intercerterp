@@ -4,7 +4,7 @@ ERP web para lojas de varejo: PDV, vendas e caixa, produtos e estoque, clientes,
 
 - **Stack:** Next.js 15 (App Router, Server Actions) + TypeScript + Tailwind 4
 - **Banco:** Postgres conectado ao projeto na Vercel (transações reais; tabelas criadas e atualizadas sozinhas)
-- **Login:** próprio do ERP (senha com hash e sessões no banco) · **Arquivos:** Vercel Blob privado
+- **Login:** próprio do ERP (senha com hash e sessões no banco) · **Arquivos:** no próprio banco, ou no Vercel Blob privado quando conectado ao projeto
 - **Hospedagem:** Vercel (aplicação + Cron em `/api/jobs`) — banco, arquivos e aplicação na mesma conta (`docs/regras-assumidas.md` §48)
 - **Referência funcional:** `docs/referencia/Intercert_ERP_48_Telas_Comentadas.pdf` e a especificação extraída em `docs/referencia/especificacao-telas.md`
 
@@ -68,10 +68,10 @@ Banco, arquivos e aplicação ficam na mesma conta:
 
 1. Vercel → projeto → *Settings → Git*: conecte o repositório do GitHub (deploy a cada push na branch principal).
 2. Projeto → **Storage** → *Create Database* → **Postgres (Neon)** e conecte ao projeto: a conexão cria `DATABASE_URL`. Escolha a região **São Paulo**: as funções rodam na região fixada em `vercel.json` (`"regions": ["gru1"]`). Banco em outra região? Troque a região ali — função longe do banco custa ~200 ms **por consulta**.
-3. Projeto → **Storage** → *Create Database* → **Blob**, acesso **Private**, região São Paulo, e conecte ao projeto em todos os ambientes: cria `BLOB_READ_WRITE_TOKEN` (XML, anexos e cópias de segurança).
+3. **Opcional** (recomendado nos planos pagos): Projeto → **Storage** → *Create Database* → **Blob**, acesso **Private**, região São Paulo, e conecte ao projeto em todos os ambientes (cria `BLOB_READ_WRITE_TOKEN`). Sem Blob, XML, anexos e cópias de segurança ficam no próprio banco; com ele, os arquivos novos vão para o Blob.
 4. *Settings → Environment Variables*: `CRON_SECRET`, `SETUP_TOKEN` e `AUTH_ENCRYPTION_KEY` (sensíveis; a última, um texto longo e aleatório, cifra o segredo da autenticação em duas etapas — §44; sem ela a segunda etapa não funciona numa publicação), `APP_TIMEZONE=America/Sao_Paulo` e, conforme as integrações, `FOCUSNFE_TOKEN`, `NFCE_CSC`, `MERCADOPAGO_ACCESS_TOKEN`, `RESEND_API_KEY`.
 5. Faça o deploy e abra `/primeiro-acesso` (informe o `SETUP_TOKEN`), ou use a instalação automatizada (`/api/setup/run`, acima): cria a empresa e o administrador, ou carrega a demonstração identificada.
-6. Confira com `GET /api/setup/run?step=diagnostico`: funções e banco na mesma região, tempo por consulta de poucos milissegundos, Blob conectado e lista de avisos vazia.
+6. Confira com `GET /api/setup/run?step=diagnostico`: funções e banco na mesma região, tempo por consulta de poucos milissegundos e lista de avisos vazia (as notas dizem onde os arquivos estão sendo guardados).
 
 Atualizações que mudam o esquema não pedem passo manual: a primeira consulta da nova versão cria o que falta.
 

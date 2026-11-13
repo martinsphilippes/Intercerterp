@@ -17,8 +17,13 @@ import type { PgConn, PgDriver } from "./driver";
  */
 
 /** Muda quando a forma de gerar as tabelas muda (força nova conferência em instalações existentes). */
-const DDL_VERSION = 1;
+const DDL_VERSION = 2; // 2: tabela de arquivos guardados no próprio banco
 export const META_TABLE = "_intercert_meta";
+/**
+ * Conteúdo dos arquivos (XML, anexos, cópias de segurança) quando não há Blob conectado: `src/lib/core/files.ts`.
+ * Fica fora das coleções do ERP — o registro do arquivo (nome, tamanho, dono) continua na coleção `files`.
+ */
+export const FILES_TABLE = "_intercert_files";
 
 export const ident = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -134,7 +139,10 @@ export async function provisionPostgres(driver: PgDriver, log: (m: string) => vo
       // o sistema grava e busca texto em UTF-8: recusa o banco antes de criar qualquer coisa nele
       const encoding = await serverEncoding(conn);
       if (encoding.toUpperCase() !== "UTF8") throw new Error(`O banco Postgres está na codificação "${encoding}" e o sistema exige UTF8 (nomes com acento e as buscas sem acento dependem disso). Crie o banco com a codificação UTF8.`);
-      await conn.exec(`${NORM_FUNCTION}; CREATE TABLE IF NOT EXISTS ${ident(META_TABLE)} ("key" text PRIMARY KEY, "value" text NOT NULL)`);
+      await conn.exec(
+        `${NORM_FUNCTION}; CREATE TABLE IF NOT EXISTS ${ident(META_TABLE)} ("key" text PRIMARY KEY, "value" text NOT NULL); ` +
+          `CREATE TABLE IF NOT EXISTS ${ident(FILES_TABLE)} ("id" text PRIMARY KEY, "bucket" text NOT NULL, "data" bytea NOT NULL, "createdAt" text NOT NULL)`,
+      );
       if (!(await searchNormalizationWorks(conn))) throw new Error("A busca sem acento do banco não deu o mesmo resultado que a da aplicação: o esquema não foi criado. Confira a codificação do banco (UTF8) e a da conexão.");
       const existing = await conn.query(`SELECT table_name AS t, column_name AS c FROM information_schema.columns WHERE table_schema = current_schema()`);
       const have = new Map<string, Set<string>>();

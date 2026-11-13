@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
 import { configuredBackend, listAll } from "@/lib/db";
+import { fileStorageLabel } from "@/lib/core/files";
 import { COLLECTION_MAP } from "@/lib/db/schema";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList } from "@/components/ui/card";
@@ -93,7 +94,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               items={[
                 { label: "Conteúdo", value: b.scope?.includeFiles ? `Dados, XML e anexos (${b.scope?.files?.included ?? 0} arquivos)` : "Dados (sem conteúdo de arquivos)" },
                 { label: "Unidades", value: branches.map((x) => x.name).join(", ") },
-                { label: "Destino", value: configuredBackend() === "postgres" ? "Vercel Blob privado · pasta “backups” (criptografado)" : configuredBackend() === "appwrite" ? "Appwrite Storage · bucket “backups” (criptografado)" : "Armazenamento local de arquivos" },
+                { label: "Destino", value: configuredBackend() === "postgres" ? `${fileStorageLabel()} · pasta “backups”` : configuredBackend() === "appwrite" ? "Appwrite Storage · bucket “backups” (criptografado)" : "Armazenamento local de arquivos" },
                 { label: "Solicitado por", value: b.kind === "auto" ? "Rotina automática" : (requester?.name ?? "—") },
                 { label: "Tipo da cópia", value: "Completa da empresa" },
                 { label: "Integridade", value: INTEGRITY_LABEL[integrity] },

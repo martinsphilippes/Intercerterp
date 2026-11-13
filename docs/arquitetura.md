@@ -7,7 +7,7 @@
 | Aplicação | Next.js 15 (App Router) + TypeScript + Tailwind 4 | SSR/Server Actions, deploy nativo na Vercel |
 | Banco | **Postgres** conectado ao projeto na Vercel (Storage) | Tudo na conta Vercel do cliente; transações reais, índices únicos e incrementos atômicos com limite; sem pausa por inatividade nem cobrança por linha lida (`docs/regras-assumidas.md` §48) |
 | Login | Próprio do ERP (senha com hash scrypt e sessões no banco) | Sem serviço externo de autenticação |
-| Arquivos | **Vercel Blob privado** | XML, anexos e cópias de segurança saem só pelo servidor, com conferência de empresa e permissão |
+| Arquivos | **O próprio banco**; **Vercel Blob privado** quando conectado ao projeto | A instalação funciona só com o banco; com o Blob, os arquivos novos vão para ele e, se ele recusar, para o banco. XML, anexos e cópias de segurança saem só pelo servidor, com conferência de empresa e permissão (`docs/regras-assumidas.md` §48) |
 | Hospedagem | **Vercel** (app + Cron em `/api/jobs`) | Infra do cliente |
 | Repositório | **GitHub** | Infra do cliente |
 | Dev/testes | Armazenamento local (arquivo/memória) com a **mesma interface**; a suíte também roda inteira sobre o Postgres (`TEST_STORE=postgres`) | Testes rápidos e determinísticos, com conferência no banco de produção |

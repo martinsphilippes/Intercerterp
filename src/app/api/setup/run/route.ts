@@ -8,7 +8,7 @@ import { configuredBackend, appwriteConfig, getStore, findOne, detId } from "@/l
  *   ?step=demo      — carrega a empresa de demonstração (idempotente; repita se o tempo acabar)
  *   ?step=owner     — cria o administrador geral (e-mail informado; senha gerada e devolvida UMA vez)
  *   ?step=finish    — encerra a instalação: a rota deixa de funcionar (exceto provision e demo-update, idempotentes)
- *   ?step=diagnostico — região, tempo de resposta e tamanho do banco, esquema aplicado, arquivos, chave de cifra e avisos (só leitura)
+ *   ?step=diagnostico — região, tempo de resposta e tamanho do banco, esquema aplicado, arquivos, chave de cifra, avisos e notas (só leitura)
  * Exige o SETUP_TOKEN (cabeçalho x-setup-token ou ?token=). Depois de "finish" responde 410.
  */
 export const maxDuration = 300;
@@ -46,11 +46,13 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
   if (step === "diagnostico") {
     // Situação da instalação sem expor credenciais: onde o banco está, quanto demora e onde ficam os arquivos.
     // Funciona antes e depois de a instalação ser encerrada (só leitura).
-    const { blobConfigured, getFileStorage } = await import("@/lib/core/files");
+    const { blobConfigured, getFileStorage, databaseFileUsage } = await import("@/lib/core/files");
     const { secretKeySource } = await import("@/lib/auth/secret-box");
-    const warnings: string[] = [];
-    const out: Record<string, unknown> = { ok: true, step, backend, functionRegion: process.env.VERCEL_REGION ?? null, files: getFileStorage().kind, blobConnected: blobConfigured(), secretKey: secretKeySource(), warnings };
-    if (backend === "postgres" && !blobConfigured()) warnings.push("Sem Blob privado conectado: XML, anexos e cópias de segurança não têm onde ser gravados (Storage → Blob, acesso privado).");
+    const warnings: string[] = []; // o que precisa de correção
+    const notes: string[] = []; // o que está certo, mas convém saber
+    const out: Record<string, unknown> = { ok: true, step, backend, functionRegion: process.env.VERCEL_REGION ?? null, files: getFileStorage().kind, blobConnected: blobConfigured(), secretKey: secretKeySource(), warnings, notes };
+    if (backend === "postgres" && !blobConfigured())
+      notes.push("Arquivos (XML, anexos, cópias de segurança) guardados no próprio banco: não há Blob conectado. Serve para começar; ao contratar os planos pagos, conecte o Blob privado (Storage → Blob) e os arquivos novos passam a ir para ele.");
     if (out.secretKey === "appwrite") warnings.push("A chave que cifra a autenticação em duas etapas ainda vem da chave do Appwrite: defina AUTH_ENCRYPTION_KEY antes de remover as variáveis APPWRITE_*.");
     if (out.secretKey === "missing") warnings.push("AUTH_ENCRYPTION_KEY não definida: a autenticação em duas etapas não funciona até a variável existir.");
     if (backend === "postgres") {
@@ -90,6 +92,8 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
           // a busca sem acento do banco concorda com a da aplicação? (só em banco UTF-8)
           out.searchOk = await searchNormalizationWorks(driver);
           if (!out.searchOk) warnings.push(`A busca sem acento não funciona neste banco (codificação ${out.encoding}; o sistema exige UTF8).`);
+          // quanto do banco é conteúdo de arquivo (sem Blob, ou gravado no banco porque o Blob recusou)
+          out.dbFiles = await databaseFileUsage();
         }
       } catch (e) {
         const { dbOutageOf } = await import("@/lib/db/outage");
@@ -122,14 +126,6 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
     const log: string[] = [];
     const r = await provisionAppwrite(appwriteConfig(), (m) => log.push(m), { deadline: Date.now() + 240000 });
     return NextResponse.json({ ok: true, step, ...r, log: log.slice(-8), ms: Date.now() - started });
-  }
-
-  if (step === "demo" || step === "demo-update") {
-    // a demonstração grava XML fiscal, certificados e cópias de segurança: sem destino para arquivos ela pararia pela
-    // metade (na primeira venda). Recusa antes de gravar qualquer coisa, dizendo o que falta.
-    const { fileStorageMissing } = await import("@/lib/core/files");
-    const missing = fileStorageMissing();
-    if (missing) return NextResponse.json({ ok: false, step, error: missing }, { status: 409 });
   }
 
   // a partir daqui o banco precisa estar provisionado

@@ -249,6 +249,15 @@ export class PostgresStore implements Store {
     return sql.p(value);
   }
 
+  /**
+   * Comando sobre dados que ficam fora das coleções (o conteúdo dos arquivos guardados no banco), pelo mesmo caminho das
+   * operações: dentro de uma transação usa a conexão dela, na vez dela — o que for gravado entra na transação e é
+   * desfeito com ela; fora, usa o conjunto de conexões, com o esquema já conferido.
+   */
+  sql(text: string, params?: unknown[]): Promise<PgResult> {
+    return this.step(() => this.run(text, params));
+  }
+
   // Operações do contrato `Store`: cada uma passa pela fila da transação em andamento, quando há uma (`step`).
   get<T = any>(collection: string, id: string): Promise<Doc<T> | null> {
     return this.step(() => this.readOne<T>(collection, id));

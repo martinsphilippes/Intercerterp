@@ -22,7 +22,7 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 function SetupNeeded({ missing }: { missing: string[] }) {
   const vars: Array<[string, string]> = [
     ["DATABASE_URL", "Criada pela Vercel ao conectar o banco Postgres ao projeto (não digite à mão)"],
-    ["BLOB_READ_WRITE_TOKEN", "Criada pela Vercel ao conectar o Blob privado ao projeto (arquivos: XML, anexos, cópias de segurança)"],
+    ["BLOB_READ_WRITE_TOKEN", "Opcional — criada pela Vercel ao conectar um Blob privado ao projeto; sem ele, XML, anexos e cópias de segurança ficam no próprio banco"],
     ["CRON_SECRET", "Segredo do executor de tarefas (/api/jobs, Vercel Cron)"],
     ["SETUP_TOKEN", "Token exigido na tela de primeiro acesso"],
     ["APP_TIMEZONE", "Opcional — fuso da instalação (padrão America/Sao_Paulo)"],
@@ -36,7 +36,7 @@ function SetupNeeded({ missing }: { missing: string[] }) {
       <p className="mt-4 text-sm font-medium text-red-700">Variáveis ausentes: {missing.join(", ")}</p>
       <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-slate-700">
         <li>
-          Na Vercel: Project → <strong>Storage</strong> → Create Database → Postgres (Neon) e conecte ao projeto. Depois, Storage → Blob (acesso privado) e conecte também. As variáveis abaixo são criadas pela conexão:
+          Na Vercel: Project → <strong>Storage</strong> → Create Database → Postgres (Neon), região São Paulo, e conecte ao projeto. É o único passo obrigatório; um Blob privado para os arquivos pode ser conectado depois. As variáveis abaixo são criadas pela conexão:
         </li>
       </ol>
       <table className="mt-2 w-full text-left text-sm">

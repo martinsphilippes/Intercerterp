@@ -88,6 +88,13 @@ export function setStore(store: Store) {
   g.__intercertStore = store;
 }
 
+/** O PostgresStore em uso, sem as camadas de memória de leitura — ou `null` quando o armazenamento é outro. */
+export function postgresStore(): PostgresStore | null {
+  let s: unknown = getStore();
+  while (s && !(s instanceof PostgresStore) && (s as { inner?: unknown }).inner) s = (s as { inner?: unknown }).inner;
+  return s instanceof PostgresStore ? s : null;
+}
+
 /** Lista todas as páginas de uma consulta (uso em relatórios e tarefas). */
 export async function listAll<T = any>(store: Store, collection: string, opts: Omit<ListOptions, "limit" | "offset" | "cursorAfter"> = {}, max = 100000): Promise<Doc<T>[]> {
   const out: Doc<T>[] = [];

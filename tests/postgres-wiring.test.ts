@@ -18,7 +18,7 @@ vi.mock("@vercel/blob", () => ({
 import { AppwriteException } from "node-appwrite";
 import { configuredBackend } from "@/lib/db";
 import { dbOutageOf, outageLogLine } from "@/lib/db/outage";
-import { getFileStorage, fileStorageMissing } from "@/lib/core/files";
+import { getFileStorage } from "@/lib/core/files";
 import fs from "node:fs";
 import { missingDeploymentConfig, functionsNearDatabase, vercelRegionFor } from "@/lib/server/deploy-config";
 import { indexName, schemaSignature, provisionPostgres } from "@/lib/db/postgres/ddl";
@@ -92,24 +92,13 @@ describe("arquivos no backend Postgres", () => {
     await expect(fsx.get("documents", id)).rejects.toThrow(/Arquivo não encontrado/);
   });
 
-  it("na Vercel sem Blob conectado: erro que diz o que falta; fora da Vercel: pasta em disco", async () => {
+  it("sem Blob conectado o destino é o próprio banco, na Vercel e fora dela (detalhes em tests/postgres-files.test.ts)", () => {
     env({ DATABASE_URL: "postgres://u:s@host/db", VERCEL: "1" });
-    await expect(getFileStorage().put("documents", "a.xml", Buffer.from("x"), "application/xml")).rejects.toThrow(/conecte um Blob privado/);
+    expect(getFileStorage().kind).toBe("postgres");
     env({ DATABASE_URL: "postgres://u:s@host/db" });
-    expect(getFileStorage().kind).toBe("local");
-  });
-});
-
-describe("carga da demonstração sem destino para arquivos", () => {
-  it("na Vercel com Postgres e sem Blob a carga é recusada antes de gravar, dizendo o que falta; com destino, segue", () => {
-    env({ DATABASE_URL: "postgres://u:s@h/b", VERCEL: "1" });
-    expect(fileStorageMissing()).toMatch(/Blob privado.*Private/);
-    env({ DATABASE_URL: "postgres://u:s@h/b", VERCEL: "1", BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x" });
-    expect(fileStorageMissing()).toBeNull();
-    env({ DATABASE_URL: "postgres://u:s@h/b" }); // fora da Vercel: pasta em disco
-    expect(fileStorageMissing()).toBeNull();
+    expect(getFileStorage().kind).toBe("postgres");
     env({ DATA_BACKEND: "memory", VERCEL: "1" }); // demonstração em memória guarda os arquivos na memória
-    expect(fileStorageMissing()).toBeNull();
+    expect(getFileStorage().kind).toBe("memory");
   });
 });
 
