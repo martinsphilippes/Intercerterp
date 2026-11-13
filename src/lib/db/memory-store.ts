@@ -5,6 +5,7 @@ import { getCollection, COLLECTIONS } from "./schema";
 import { fromStored, toStored } from "./serialize";
 import { ConflictError, Doc, Filter, ListOptions, ListResult, NotFoundError, Store } from "./types";
 import { newId } from "./ids";
+import { normText } from "./norm";
 
 type Row = Record<string, any> & { id: string; createdAt: string; updatedAt: string; _seq: number };
 
@@ -27,10 +28,7 @@ class Mutex {
   }
 }
 
-function norm(v: any): any {
-  if (typeof v === "string") return v.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-  return v;
-}
+const norm = normText;
 
 function matches(row: Row, f: Filter): boolean {
   const [op] = f;

@@ -1,71 +1,37 @@
 import Link from "@/components/ui/link";
 import { InstallAppButton } from "@/components/pwa/install-button";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { getSession } from "@/lib/server/session";
-import { isEmptyInstallation, ensureBootstrap } from "@/lib/server/bootstrap";
-import { configuredBackend, getStore, listAll } from "@/lib/db";
+import { ensureBootstrap } from "@/lib/server/bootstrap";
+import { configuredBackend } from "@/lib/db";
 import { ShieldCheck } from "lucide-react";
 import { LoginForm } from "./form";
-import { QuickAccess, type QuickUser } from "./quick-access";
-
-/** Setor exibido no acesso rápido, na ordem de apresentação. */
-const SECTORS: Record<string, { sector: string; order: number }> = {
-  admin: { sector: "Administração", order: 1 },
-  gerente: { sector: "Gerência", order: 2 },
-  diretoria: { sector: "Diretoria", order: 3 },
-  caixa: { sector: "Caixa (PDV)", order: 4 },
-  estoque: { sector: "Estoque", order: 5 },
-  financeiro: { sector: "Financeiro", order: 6 },
-  fiscal: { sector: "Fiscal", order: 7 },
-  contador: { sector: "Escritório contábil — sócio", order: 8 },
-  analista: { sector: "Escritório contábil — analista", order: 9 },
-  certificacao: { sector: "Equipe de certificação Intercert", order: 10 },
-  // rede de certificação (§43)
-  rede: { sector: "Rede de certificação — plataforma Intercert", order: 11 },
-  master: { sector: "Rede — Master (Rede Nordeste)", order: 12 },
-  "regional.ce": { sector: "Rede — Regional Ceará", order: 13 },
-  "regional.ba": { sector: "Rede — Regional Bahia", order: 14 },
-  "revenda.juazeiro": { sector: "Rede — Revenda Juazeiro do Norte", order: 15 },
-  "revenda.fortaleza": { sector: "Rede — Revenda Fortaleza", order: 16 },
-  "revenda.salvador": { sector: "Rede — Revenda Salvador", order: 17 },
-  "vendedor.juazeiro": { sector: "Rede — vendedor (Juazeiro do Norte)", order: 18 },
-  "vendedor.fortaleza": { sector: "Rede — vendedor (Fortaleza)", order: 19 },
-  "vendedor.salvador": { sector: "Rede — vendedor (Salvador)", order: 20 },
-};
-
-/** Somente usuários da empresa de demonstração, ativos e com acesso criado — nunca contas reais. */
-async function demoUsers(): Promise<QuickUser[]> {
-  const store = getStore();
-  const users = (await listAll(store, "users", { filters: [["eq", "isDemo", true]] })).filter((u) => u.status === "active" && u.authId && !u.isAdmin);
-  const branches = await listAll(store, "branches");
-  const branchName = new Map(branches.map((b) => [b.id, b.name as string]));
-  return users
-    .map((u) => ({
-      login: u.login as string,
-      name: u.name as string,
-      sector: SECTORS[u.login]?.sector ?? (u.name as string),
-      scope: (u.branchIds ?? []).length ? (u.branchIds as string[]).map((id) => branchName.get(id) ?? "filial").join(", ") : "todas as filiais",
-      order: SECTORS[u.login]?.order ?? 99,
-    }))
-    .sort((a, b) => a.order - b.order)
-    .map(({ order: _order, ...u }) => u);
-}
+import { QuickAccess } from "./quick-access";
+import { OutageNotice } from "./outage-notice";
+import { loginScreenState } from "./access";
 
 export const metadata = { title: "Entrar" };
+// o estado do banco e da sessão é o do momento do acesso: nunca pré-renderizar no build
+export const dynamic = "force-dynamic";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   await ensureBootstrap();
-  const s = await getSession();
+  // sessão ilegível (banco fora do ar) não derruba a tela: o aviso abaixo explica o motivo
+  const s = await getSession().catch((e) => {
+    unstable_rethrow(e); // sinais internos do Next (redirecionamento, renderização dinâmica) seguem o fluxo normal
+    console.error("[login] não foi possível ler a sessão", e);
+    return null;
+  });
   if (s?.ctx.companyId) redirect("/dashboard");
-  if (await isEmptyInstallation().catch(() => false)) redirect("/primeiro-acesso");
+  // instalação vazia, banco indisponível e acessos da demonstração (lista de reserva quando o banco não responde)
+  const state = await loginScreenState();
+  if (state.empty) redirect("/primeiro-acesso");
   const { next } = await searchParams;
-  // acesso rápido só em ambiente de teste (backend em memória ou SHOW_DEMO_LOGIN=1)
-  const demo = configuredBackend() === "memory" || process.env.SHOW_DEMO_LOGIN === "1";
-  const quick = demo ? await demoUsers().catch(() => []) : [];
   return (
     <div className="rounded-xl border border-line bg-white p-8 shadow-sm">
       <h1 className="text-2xl font-semibold">Bem-vindo!</h1>
       <p className="mt-1 text-sm text-slate-500">Entre com seu usuário ou e-mail para acessar o sistema.</p>
+      {state.outage && <OutageNotice outage={state.outage} provider={configuredBackend() === "appwrite" ? "appwrite" : "postgres"} retryHref={next ? `/login?next=${encodeURIComponent(next)}` : "/login"} />}
       <LoginForm next={next} />
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2 text-sm">
         <Link href="/recuperar-senha" className="text-brand-700 hover:underline">
@@ -81,7 +47,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <p className="mt-4 flex items-center gap-1.5 text-xs text-slate-400">
         <ShieldCheck className="size-3.5" aria-hidden /> Conexão protegida · tentativas de acesso são registradas
       </p>
-      {quick.length > 0 && <QuickAccess users={quick} password={process.env.DEMO_PASSWORD || "Intercert@2026"} />}
+      {state.quick.length > 0 && <QuickAccess users={state.quick} password={process.env.DEMO_PASSWORD || "Intercert@2026"} live={state.quickLive} unavailable={Boolean(state.outage)} />}
     </div>
   );
 }

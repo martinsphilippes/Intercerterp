@@ -1,8 +1,9 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { getStore } from "@/lib/db";
+import { dbOutageOf, outageMessage } from "@/lib/db/outage";
 import { getAuth } from "@/lib/auth/provider";
 import { accessibleUnits, findUserByLogin, findUserByAuthId, toCtxUser, unitBlockReason } from "@/lib/auth/users";
 import { safeNextPath } from "@/lib/auth/redirect";
@@ -12,6 +13,7 @@ import { nowIso } from "@/lib/dates";
 import type { ActionResult } from "@/lib/server/action";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
 import { CHALLENGE_TTL_MIN, LOCK_WINDOW_MIN, MAX_LOGIN_FAILURES, completeLoginChallenge, createLoginChallenge, dropChallenge, loadLoginChallenge, logLoginAttempt, loginKeyFor, recentLoginFailures } from "@/domain/two-factor";
+import { isQuickAccessUser } from "@/lib/auth/quick-access";
 
 const secure = process.env.NODE_ENV === "production";
 const MAX_FAILED = MAX_LOGIN_FAILURES;
@@ -25,7 +27,28 @@ async function rememberUnit(userId: string, value: string) {
   else await store.create("user_prefs", { userId, key: "lastUnit", value }, id).catch(() => undefined);
 }
 
+/**
+ * Falha fora das regras do acesso (banco pausado ou fora do ar, erro inesperado) vira mensagem na tela. Sem isso a
+ * exceção da server action chega ao usuário como "erro no servidor", sem dizer que não é problema de usuário ou senha.
+ */
+async function guardAccess<T>(what: string, fn: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
+  try {
+    return await fn();
+  } catch (e) {
+    unstable_rethrow(e); // sinais internos do Next (redirecionamento) seguem o fluxo normal
+    const outage = dbOutageOf(e);
+    console.error(`[${what}] ${outage ? `banco indisponível (${outage.kind})` : "falha inesperada"}`, e);
+    return outage
+      ? { ok: false, error: outageMessage(outage), code: `db_${outage.kind}` }
+      : { ok: false, error: "Não foi possível concluir agora. Tente novamente em instantes ou fale com o suporte.", code: "unexpected" };
+  }
+}
+
 export async function loginAction(fd: FormData): Promise<ActionResult> {
+  return guardAccess("login", () => doLogin(fd));
+}
+
+async function doLogin(fd: FormData): Promise<ActionResult> {
   await ensureBootstrap();
   const login = String(fd.get("login") ?? "").trim();
   const password = String(fd.get("password") ?? "");
@@ -39,7 +62,9 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
   const userForKey = await findUserByLogin(store, login);
   const loginKey = loginKeyFor(userForKey, login);
   const failures = await recentLoginFailures(store, loginKey);
-  if (failures >= MAX_FAILED) return { ok: false, error: `Acesso temporariamente bloqueado após ${MAX_FAILED} tentativas inválidas. Tente novamente em ${LOCK_WINDOW_MIN} minutos ou recupere a senha.` };
+  // acesso rápido (decisão do titular): a senha está na tela, então o bloqueio só serviria para um estranho trancar o botão
+  const quickAccess = isQuickAccessUser(userForKey);
+  if (failures >= MAX_FAILED && !quickAccess) return { ok: false, error: `Acesso temporariamente bloqueado após ${MAX_FAILED} tentativas inválidas. Tente novamente em ${LOCK_WINDOW_MIN} minutos ou recupere a senha.` };
   const logAttempt = async (result: "success" | "failure", summary: string, u?: any) =>
     logLoginAttempt(store, { loginKey, result, action: result === "success" ? "auth.login" : "auth.login_failed", summary, user: u ?? null, loginText: login, ip: ip ?? null });
   const user = userForKey;
@@ -62,9 +87,13 @@ export async function loginAction(fd: FormData): Promise<ActionResult> {
     if (e.message === "invalid_credentials") {
       await logAttempt("failure", `Senha inválida para ${user.name}`, user);
       const left = MAX_FAILED - failures - 1;
+      if (quickAccess) return { ok: false, error: "Usuário ou senha inválidos. A senha deste acesso é a da demonstração, exibida no acesso rápido." };
       return { ok: false, error: left > 0 ? `Usuário ou senha inválidos. ${left} tentativa(s) restante(s) antes do bloqueio temporário.` : `Usuário ou senha inválidos. Acesso bloqueado por ${LOCK_WINDOW_MIN} minutos.` };
     }
     console.error("[login]", e);
+    // respostas do provedor de autenticação (limite de tentativas etc.) não são banco fora do ar: só a pausa é inequívoca
+    const outage = dbOutageOf(e);
+    if (outage?.kind === "paused") return { ok: false, error: outageMessage(outage), code: "db_paused" };
     return { ok: false, error: "Serviço de autenticação indisponível. Tente novamente em instantes." };
   }
   // §44: autenticação em duas etapas — a sessão fica guardada (cifrada) até o código; "manter conectado" não pula a etapa
@@ -111,6 +140,10 @@ async function finishLogin(user: Record<string, any>, session: { secret: string;
  * exigido pelo perfil. Código errado conta nas tentativas do bloqueio temporário.
  */
 export async function verifyTwoFactorLoginAction(fd: FormData): Promise<ActionResult<{ recoveryCodes?: string[]; next?: string; remaining?: number }>> {
+  return guardAccess("login.duas-etapas", () => doVerifyTwoFactorLogin(fd));
+}
+
+async function doVerifyTwoFactorLogin(fd: FormData): Promise<ActionResult<{ recoveryCodes?: string[]; next?: string; remaining?: number }>> {
   await ensureBootstrap();
   const jar = await cookies();
   const token = jar.get(MFA_COOKIE)?.value;
@@ -183,6 +216,10 @@ export async function selectUnitAction(fd: FormData): Promise<ActionResult> {
 }
 
 export async function requestRecoveryAction(fd: FormData): Promise<ActionResult> {
+  return guardAccess("recuperar-senha", () => doRequestRecovery(fd));
+}
+
+async function doRequestRecovery(fd: FormData): Promise<ActionResult> {
   const login = String(fd.get("login") ?? "").trim();
   if (!login) return { ok: false, error: "Informe seu usuário ou e-mail." };
   const store = getStore();
@@ -192,6 +229,8 @@ export async function requestRecoveryAction(fd: FormData): Promise<ActionResult>
   // resposta neutra (não revela se o e-mail existe)
   const neutral = "Se o usuário existir, as instruções de recuperação foram encaminhadas pelo canal configurado.";
   if (!user) return { ok: true, message: neutral };
+  // acesso rápido (decisão do titular): a senha é a da tela — nenhum link de troca é gerado para os usuários da lista
+  if (isQuickAccessUser(user)) return { ok: true, message: "Este é um acesso da demonstração: a senha é a exibida no acesso rápido, na tela de login." };
   try {
     const r = await getAuth().requestRecovery(user.email, `${origin}/redefinir-senha`);
     if (!r.delivered) {
@@ -204,6 +243,8 @@ export async function requestRecoveryAction(fd: FormData): Promise<ActionResult>
     }
   } catch (e: any) {
     console.error("[recovery]", e);
+    const outage = dbOutageOf(e);
+    if (outage?.kind === "paused") return { ok: false, error: outageMessage(outage), code: "db_paused" };
     return { ok: false, error: "Não foi possível solicitar a recuperação agora. Tente novamente ou contate o suporte." };
   }
   return { ok: true, message: neutral };
@@ -218,7 +259,10 @@ export async function completeRecoveryAction(fd: FormData): Promise<ActionResult
   if (password !== confirm) return { ok: false, error: "As senhas não conferem." };
   try {
     await getAuth().completeRecovery({ userId, secret, password });
-  } catch {
+  } catch (e) {
+    // 401 aqui é o próprio link inválido ou expirado; só pausa e falta de resposta são indisponibilidade
+    const outage = dbOutageOf(e);
+    if (outage && outage.kind !== "credentials") return { ok: false, error: outageMessage(outage), code: `db_${outage.kind}` };
     return { ok: false, error: "Link inválido ou expirado. Solicite uma nova recuperação." };
   }
   return { ok: true, message: "Senha redefinida. Entre com a nova senha.", redirect: "/login" };
@@ -233,6 +277,8 @@ export async function acceptInviteAction(fd: FormData): Promise<ActionResult> {
     const { acceptInvite } = await import("@/domain/users");
     await acceptInvite(getStore(), token, password);
   } catch (e: any) {
+    const outage = dbOutageOf(e);
+    if (outage) return { ok: false, error: outageMessage(outage), code: `db_${outage.kind}` };
     return { ok: false, error: e?.message ?? "Convite inválido ou expirado." };
   }
   return { ok: true, message: "Acesso ativado. Entre com seu e-mail e a nova senha.", redirect: "/login" };

@@ -123,11 +123,18 @@ describe("comissões de vendedores (VEN-05) e vendedor sem acesso (CAD-05)", () 
   });
 
   it("fechamento gera um único título a pagar (idempotente, sem fechar duas vezes) e reabertura cancela o título em aberto", async () => {
-    const [t1, t2] = await Promise.all([
+    const settled = await Promise.allSettled([
       closeCommission(ctx, { ...OCT, sellerId: sellerA, base: "invoiced", dueDate: "2026-11-10" }),
       closeCommission(ctx, { ...OCT, sellerId: sellerA, base: "invoiced", dueDate: "2026-11-10" }),
     ]);
-    expect(t1.id).toBe(t2.id);
+    // As duas confirmações juntas devolvem o MESMO título. Num banco de verdade uma pode terminar antes de a outra
+    // conferir o fechamento vigente: essa é recusada ("já foi fechada"). Nos dois casos, um único título a pagar.
+    const closed = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const refused = settled.flatMap((r) => (r.status === "rejected" ? [r.reason] : []));
+    expect(closed.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(closed.map((t) => t.id)).size).toBe(1);
+    for (const e of refused) expect(e).toMatchObject({ code: "already_closed" });
+    const t1 = closed[0];
     expect(t1).toMatchObject({ kind: "payable", originType: "commission", partyId: sellerA, total: 1950, status: "open" });
     const titles = await listAll(store, "titles", { filters: [["eq", "originType", "commission"]] });
     expect(titles).toHaveLength(1);

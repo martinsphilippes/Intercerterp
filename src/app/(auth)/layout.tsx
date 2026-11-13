@@ -21,7 +21,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           </ul>
         </div>
         <p className="text-xs text-brand-300">
-          Armazenamento: {backend === "appwrite" ? "Appwrite" : backend === "local" ? "local (desenvolvimento)" : "memória (demonstração volátil)"}
+          Armazenamento: {backend === "postgres" ? "Postgres" : backend === "appwrite" ? "Appwrite" : backend === "local" ? "local (desenvolvimento)" : "memória (demonstração volátil)"}
         </p>
         <div className="pointer-events-none absolute -bottom-24 -right-24 size-80 rounded-full bg-accent-500/20 blur-3xl" />
       </aside>

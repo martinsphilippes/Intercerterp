@@ -2,8 +2,8 @@ import "server-only";
 import { configuredBackend, getStore, listAll } from "../db";
 
 /**
- * Inicialização: no modo memória (demonstração volátil, ex.: prévia na Vercel sem Appwrite),
- * carrega a demonstração automaticamente. Em Appwrite/local, nada é criado sem comando explícito
+ * Inicialização: no modo memória (demonstração volátil, pedida com DATA_BACKEND=memory),
+ * carrega a demonstração automaticamente. Em Postgres/Appwrite/local, nada é criado sem comando explícito
  * (npm run seed / tela de primeiro acesso).
  */
 let booting: Promise<void> | null = null;
@@ -39,8 +39,16 @@ export async function isEmptyInstallation() {
   }
 }
 
-/** Estado do banco (somente Appwrite): acessível? provisionado? */
+/** Estado do banco: acessível? com as tabelas criadas? (no Postgres as tabelas são criadas sozinhas na primeira consulta) */
 export async function installationState() {
+  if (configuredBackend() === "postgres") {
+    try {
+      await getStore().list("companies", { limit: 1, total: false });
+      return { backend: "postgres" as const, reachable: true, provisioned: true, missing: [] as string[] };
+    } catch (e) {
+      return { backend: "postgres" as const, reachable: false, provisioned: false, missing: [] as string[], error: e instanceof Error ? e.message : String(e) };
+    }
+  }
   if (configuredBackend() !== "appwrite") return { backend: configuredBackend(), reachable: true, provisioned: true, missing: [] as string[] };
   const { appwriteProvisionState } = await import("../db/provision");
   const { appwriteConfig } = await import("../db");

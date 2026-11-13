@@ -11,8 +11,8 @@ import type { ActionResult } from "@/lib/server/action";
 function checkSetupToken(fd: FormData): string | null {
   const expected = process.env.SETUP_TOKEN;
   if (!expected) {
-    // Em produção com Appwrite a instalação exige token (evita que um visitante crie o administrador)
-    return process.env.NODE_ENV === "production" && configuredBackend() === "appwrite" ? "Defina a variável SETUP_TOKEN no servidor para concluir a instalação." : null;
+    // Em produção com banco real a instalação exige token (evita que um visitante crie o administrador)
+    return process.env.NODE_ENV === "production" && (configuredBackend() === "appwrite" || configuredBackend() === "postgres") ? "Defina a variável SETUP_TOKEN no servidor para concluir a instalação." : null;
   }
   const got = Buffer.from(String(fd.get("setupToken") ?? ""));
   const exp = Buffer.from(expected);

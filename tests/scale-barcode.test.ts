@@ -285,7 +285,9 @@ describe("arquivo de carga (Toledo ITENSMGV.TXT / Filizola CADTXT.TXT)", () => {
     expect(r.count).toBe(1);
     expect(r.skipped).toEqual([{ name: "Pão Francês (kg)", reason: "Sem preço na tabela" }]);
     await expect(generateScaleLoad(cashier, { format: "toledo" })).rejects.toThrow();
-    // duplicidade legada (antes do índice): a carga é recusada
+    // duplicidade legada (antes do índice): a carga é recusada. Só se reproduz gravando por dentro do armazenamento em
+    // memória — num banco de verdade (TEST_STORE=postgres) o índice único não deixa a duplicidade existir
+    if (typeof (store as any).coll !== "function") return;
     const raw = (store as any).coll("products") as Map<string, any>;
     raw.get(scaleProduct("pao-frances-kg")).plu = 101;
     const list = await listScaleProducts(admin);

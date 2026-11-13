@@ -58,7 +58,7 @@ export class NotFoundError extends Error {
 }
 
 export interface Store {
-  readonly backend: "appwrite" | "local" | "memory";
+  readonly backend: "postgres" | "appwrite" | "local" | "memory";
   get<T = any>(collection: string, id: string): Promise<Doc<T> | null>;
   getOrThrow<T = any>(collection: string, id: string): Promise<Doc<T>>;
   list<T = any>(collection: string, opts?: ListOptions): Promise<ListResult<Doc<T>>>;

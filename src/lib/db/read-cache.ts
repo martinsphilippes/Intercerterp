@@ -35,7 +35,9 @@ function invalidate(collection?: string) {
   for (const k of shared.keys()) if (k.startsWith(`${collection}|`)) shared.delete(k);
 }
 
-function remember<R>(key: string, collection: string, load: () => Promise<R>): Promise<R> {
+function remember<R>(key: string, collection: string, load: () => Promise<R>, live = false): Promise<R> {
+  // dentro de uma transação a leitura enxerga gravações ainda não confirmadas: vai direto ao banco e não fica guardada
+  if (live) return load();
   const memo = currentMemo();
   const hit = memo?.get(key);
   if (hit) return hit as Promise<R>;
@@ -62,8 +64,13 @@ export class ReadCachedStore implements Store {
     return this.inner.backend;
   }
 
+  /** Transação em andamento neste fluxo (Postgres: as operações do Store de fora também entram nela). */
+  private live(): boolean {
+    return (this.inner as { inTransaction?: () => boolean }).inTransaction?.() ?? false;
+  }
+
   async get<T = any>(collection: string, id: string): Promise<Doc<T> | null> {
-    return copyDoc(await remember(`${collection}|get|${id}`, collection, () => this.inner.get<T>(collection, id)));
+    return copyDoc(await remember(`${collection}|get|${id}`, collection, () => this.inner.get<T>(collection, id), this.live()));
   }
 
   async getOrThrow<T = any>(collection: string, id: string): Promise<Doc<T>> {
@@ -73,7 +80,7 @@ export class ReadCachedStore implements Store {
   }
 
   async list<T = any>(collection: string, opts: ListOptions = {}): Promise<ListResult<Doc<T>>> {
-    return copyList(await remember(`${collection}|list|${JSON.stringify(opts)}`, collection, () => this.inner.list<T>(collection, opts)));
+    return copyList(await remember(`${collection}|list|${JSON.stringify(opts)}`, collection, () => this.inner.list<T>(collection, opts), this.live()));
   }
 
   async create<T = any>(collection: string, data: Partial<T> & Record<string, any>, id?: string) {

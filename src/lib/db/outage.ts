@@ -1,0 +1,136 @@
+import { AppwriteException } from "node-appwrite";
+
+/**
+ * Indisponibilidade do banco: situações em que NINGUÉM consegue entrar, qualquer que seja o usuário ou a senha.
+ * A tela de login e as ações de acesso usam esta classificação para dizer o motivo em vez de falhar em silêncio
+ * (lista de acessos vazia) ou com um "erro no servidor" genérico.
+ *
+ *  - paused: projeto do Appwrite Cloud pausado por inatividade (plano gratuito) — só o titular reativa, no console;
+ *  - quota: o provedor do banco está limitando o acesso porque a cota do plano acabou no período (Appwrite gratuito:
+ *    500 mil leituras por mês, contadas por linha lida; Postgres: horas de processamento do plano) — libera na virada
+ *    do período ou com o upgrade do plano;
+ *  - credentials: o servidor foi recusado (chave, usuário, senha, projeto ou banco incorretos, expirados ou sem
+ *    permissão) — configuração;
+ *  - unreachable: rede, tempo esgotado, conexões esgotadas ou erro interno do serviço — costuma ser passageiro.
+ */
+export type DbOutageKind = "paused" | "quota" | "credentials" | "unreachable";
+
+export interface DbOutage {
+  kind: DbOutageKind;
+  /** Detalhe técnico para o log do servidor (mensagem do serviço). Não vai para a tela. */
+  detail: string;
+}
+
+type AppwriteLike = { name?: unknown; code?: unknown; type?: unknown; message?: unknown };
+
+// comparação estrutural além do instanceof (mesmo motivo de isConflict/isNotFound: em desenvolvimento a classe lançada
+// pode vir de outro grafo de módulos)
+function isAppwriteError(e: unknown): e is { code: number; type: string; message: string } {
+  return e instanceof AppwriteException || (typeof e === "object" && e !== null && (e as AppwriteLike).name === "AppwriteException");
+}
+
+// códigos de transporte (DNS, conexão, TLS); os do undici (cliente HTTP do Node) começam por UND_ERR_
+const NETWORK_CODES = new Set([
+  "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ECONNABORTED", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "ENETDOWN", "EPIPE", "EPROTO",
+  "CERT_HAS_EXPIRED", "DEPTH_ZERO_SELF_SIGNED_CERT", "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+/** Falha de transporte do `fetch` (DNS, conexão recusada/derrubada, tempo esgotado, incompatibilidade do runtime). */
+function isNetworkError(e: unknown): boolean {
+  if (typeof e !== "object" || e === null) return false;
+  const err = e as { name?: unknown; message?: unknown; code?: unknown; cause?: { code?: unknown } | null };
+  if (err.name === "AbortError" || err.name === "TimeoutError") return true;
+  const code = typeof err.code === "string" ? err.code : typeof err.cause?.code === "string" ? err.cause.code : "";
+  if (NETWORK_CODES.has(code) || code.startsWith("UND_ERR_")) return true;
+  return err.name === "TypeError" && typeof err.message === "string" && /fetch failed/i.test(err.message);
+}
+
+/**
+ * Cota do plano: o Appwrite documenta que, no plano gratuito, as operações do banco são limitadas quando a cota do mês
+ * acaba, mas não publica o tipo do erro. Vale então o que a resposta diz: 429 numa chamada do servidor (a chave de API
+ * não passa pelo limite de requisições por visitante) ou tipo/mensagem que fale de uso, cota, plano, cobrança ou
+ * congelamento. Estados do próprio usuário (`user_*`: bloqueado, limite de usuários) não entram.
+ */
+function isQuotaError(code: number, type: string, message: string): boolean {
+  if (type.startsWith("user_")) return false;
+  if (code === 429) return true;
+  return code >= 400 && code < 500 && /usage|quota|billing|budget|free plan|plan limit|frozen|freez|throttl|resource_blocked/i.test(`${type} ${message}`);
+}
+
+/**
+ * Classifica um erro de acesso ao banco. `null` = não é indisponibilidade (regra de negócio, registro inexistente,
+ * consulta inválida, erro de programação): quem chamou decide o que fazer.
+ */
+export function dbOutageOf(e: unknown): DbOutage | null {
+  if (isAppwriteError(e)) {
+    const code = Number(e.code) || 0;
+    const type = String(e.type ?? "");
+    const detail = `${type || "appwrite"} (${code}): ${e.message}`;
+    if (type === "project_paused") return { kind: "paused", detail };
+    if (isQuotaError(code, type, String(e.message ?? ""))) return { kind: "quota", detail };
+    if (code === 401 || code === 403) return { kind: "credentials", detail };
+    if (code === 0 || code >= 500) return { kind: "unreachable", detail };
+    return null;
+  }
+  const pg = postgresOutage(e);
+  if (pg) return pg;
+  if (isNetworkError(e)) {
+    const err = e as { message?: unknown; cause?: { code?: unknown; message?: unknown } };
+    const cause = err.cause?.code ?? err.cause?.message;
+    return { kind: "unreachable", detail: `${String(err.message ?? e)}${cause ? ` (${String(cause)})` : ""}` };
+  }
+  return null;
+}
+
+/**
+ * Postgres: o erro traz o código SQLSTATE de 5 caracteres. Classe 28 e banco inexistente = acesso recusado
+ * (configuração); classes 08/53/57 = conexão, recursos ou servidor em manutenção (passageiro). O provedor também avisa
+ * por mensagem quando o plano suspendeu o processamento (cota do período). Erros de dados e de consulta devolvem `null`.
+ */
+function postgresOutage(e: unknown): DbOutage | null {
+  if (typeof e !== "object" || e === null) return null;
+  const err = e as { code?: unknown; message?: unknown };
+  const message = String(err.message ?? "");
+  const code = typeof err.code === "string" && /^[0-9A-Z]{5}$/.test(err.code) ? err.code : "";
+  const detail = `${code || "postgres"}: ${message}`;
+  if (/exceeded the .*quota|quota (has been )?exceeded|endpoint (has been|is) disabled|(project|account) .*suspended/i.test(message)) return { kind: "quota", detail };
+  if (code.startsWith("28") || code === "3D000") return { kind: "credentials", detail };
+  if (code.startsWith("08") || code.startsWith("53") || code.startsWith("57")) return { kind: "unreachable", detail };
+  // o conjunto de conexões não traz código quando a conexão cai ou não abre a tempo
+  if (!code && /timeout exceeded when trying to connect|connection terminated|connection timeout/i.test(message)) return { kind: "unreachable", detail };
+  return null;
+}
+
+/** Frase curta para o erro do formulário e o aviso flutuante: deixa claro que não é a senha e quem resolve. */
+export function outageMessage(o: DbOutage): string {
+  switch (o.kind) {
+    case "paused":
+      return "O banco de dados está pausado por inatividade (Appwrite). Não é problema de usuário nem de senha: ninguém consegue entrar até o projeto ser reativado no console do Appwrite.";
+    case "quota":
+      return "O banco de dados está com o acesso limitado pelo provedor (limite do plano atingido). Não é problema de usuário nem de senha: ninguém consegue entrar até o limite ser liberado.";
+    case "credentials":
+      return "O servidor não conseguiu abrir o banco de dados (acesso recusado). Não é problema de usuário nem de senha: avise o administrador do sistema.";
+    case "unreachable":
+      return "O banco de dados não respondeu agora. Não é problema de usuário nem de senha: aguarde alguns instantes e tente de novo.";
+  }
+}
+
+/**
+ * Linha do log do monitor diário (`/api/keepalive`): quem lê é quem cuida do servidor, então diz o que houve e onde
+ * olhar — conforme o banco em uso (o do projeto na Vercel ou, nas instalações antigas, o Appwrite).
+ */
+export function outageLogLine(o: DbOutage | null, backend: string): string {
+  const where = backend === "postgres" ? "na Vercel (projeto → Storage → banco)" : "no console do Appwrite";
+  switch (o?.kind) {
+    case "paused":
+      return `banco PAUSADO por inatividade — ninguém consegue entrar; reative o projeto ${where}`;
+    case "quota":
+      return `banco LIMITADO pelo plano (cota atingida) — ninguém consegue entrar; veja o uso ${where}`;
+    case "credentials":
+      return `acesso ao banco RECUSADO — ninguém consegue entrar; confira a conexão do banco ${where}`;
+    case "unreachable":
+      return "banco SEM RESPOSTA — pode ser passageiro; se repetir, veja a situação do provedor";
+    default:
+      return "sinal diário do banco falhou (erro que não é de indisponibilidade)";
+  }
+}

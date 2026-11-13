@@ -8,6 +8,7 @@ import { audit } from "@/lib/core/audit";
 import { nowIso } from "@/lib/dates";
 import { getAuth } from "@/lib/auth/provider";
 import { userRoleIn } from "@/lib/auth/users";
+import { QUICK_ACCESS_LOCKED, isQuickAccessUser } from "@/lib/auth/quick-access";
 import { openSecret, sealSecret } from "@/lib/auth/secret-box";
 import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, normalizeCode, normalizeRecoveryCode, otpauthUri, verifyTotp } from "@/lib/auth/totp";
 
@@ -59,6 +60,8 @@ export async function logLoginAttempt(store: Store, input: { loginKey: string; r
 /** O usuário precisa da segunda etapa: 2FA ativo ou algum perfil dele (em qualquer empresa) exige. */
 export async function userRequiresTwoFactor(store: Store, u: Doc): Promise<boolean> {
   if (u.isAdmin) return false;
+  // acesso rápido da tela de login (decisão do titular): o botão entra direto, mesmo que o perfil exija a segunda etapa
+  if (isQuickAccessUser(u)) return false;
   const companies = [...new Set<string>(u.companyIds ?? [])];
   for (const cid of companies) {
     const role = await userRoleIn(store, u, cid);
@@ -131,6 +134,8 @@ export type ChallengeKind = "verify" | "enroll";
  */
 export async function createLoginChallenge(store: Store, input: { user: Doc; session: { secret: string; expiresAt: string }; persistent: boolean; next?: string | null; loginKey: string; ip?: string | null }): Promise<{ token: string; kind: ChallengeKind } | null> {
   const { user } = input;
+  // acesso rápido (decisão do titular): a senha é pública; um autenticador cadastrado por um visitante trancaria o botão
+  if (isQuickAccessUser(user)) return null;
   const kind: ChallengeKind | null = user.totpEnabled && user.totpSecretEnc ? "verify" : (await userRequiresTwoFactor(store, user)) ? "enroll" : null;
   if (!kind) return null;
   // um desafio pendente por usuário: os anteriores (abandonados) são descartados com a sessão que guardavam
@@ -250,8 +255,12 @@ export function twoFactorState(u: Record<string, any>) {
 }
 
 /** Inicia (ou retoma) o cadastro: segredo pendente cifrado; devolve segredo e URI para o QR code. */
+/** Recusa do cadastro do autenticador para os usuários do acesso rápido (ver `createLoginChallenge`). */
+const QUICK_ACCESS_NO_2FA = "Os usuários do acesso rápido da tela de login não usam autenticação em duas etapas: a senha deles está na tela, e o aparelho de quem cadastrasse primeiro trancaria a entrada de todos os outros. O acesso rápido fica ligado por decisão do titular.";
+
 export async function beginTwoFactorSetup(ctx: Ctx, opts: { restart?: boolean } = {}) {
   const u = await selfUser(ctx);
+  if (isQuickAccessUser(u)) throw new BusinessError(QUICK_ACCESS_NO_2FA, QUICK_ACCESS_LOCKED);
   assert(!u.totpEnabled, "A autenticação em duas etapas já está ativa. Para trocar de aparelho, desative e cadastre de novo.", "already_enabled");
   let secret = opts.restart ? null : openSecret(u.totpPendingEnc);
   if (!secret) {
@@ -264,6 +273,7 @@ export async function beginTwoFactorSetup(ctx: Ctx, opts: { restart?: boolean } 
 /** Confirma o cadastro com um código do aplicativo; devolve os códigos de recuperação (exibidos uma única vez). */
 export async function confirmTwoFactorSetup(ctx: Ctx, code: string) {
   const u = await selfUser(ctx);
+  if (isQuickAccessUser(u)) throw new BusinessError(QUICK_ACCESS_NO_2FA, QUICK_ACCESS_LOCKED);
   assert(!u.totpEnabled, "A autenticação em duas etapas já está ativa.", "already_enabled");
   const secret = openSecret(u.totpPendingEnc);
   assert(secret, "Cadastro não iniciado ou expirado. Gere um novo QR code.", "setup_missing");
