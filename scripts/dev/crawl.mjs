@@ -3,6 +3,9 @@
  * erros de página, erros de console e telas de erro/404. Uso:
  *   BASE=http://localhost:3000 LOGIN=admin OUT=/tmp/crawl.json node scripts/dev/crawl.mjs
  *   (START=/contabil para começar pela área do escritório contábil)
+ * Publicação com o acesso rápido da demonstração ligado (não exige saber a senha):
+ *   BASE=https://… QUICK="Administração" node scripts/dev/crawl.mjs
+ * Com HTTPS_PROXY definido, o navegador sai pelo proxy do ambiente.
  */
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
@@ -10,7 +13,9 @@ import fs from "node:fs";
 const base = process.env.BASE || "http://localhost:3000";
 const perPattern = Number(process.env.PER_PATTERN || 2);
 const maxPages = Number(process.env.MAX_PAGES || 500);
-const browser = await chromium.launch().catch(() => chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }));
+const proxy = base.startsWith("https://") ? process.env.HTTPS_PROXY || process.env.https_proxy : undefined;
+const launch = proxy ? { proxy: { server: proxy } } : {};
+const browser = await chromium.launch(launch).catch(() => chromium.launch({ ...launch, executablePath: "/opt/pw-browsers/chromium" }));
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "pt-BR", timezoneId: process.env.TZ_ID || "America/Sao_Paulo" });
 const page = await ctx.newPage();
 let pageErrors = [];
@@ -19,9 +24,14 @@ page.on("pageerror", (e) => pageErrors.push(e.message));
 page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text().slice(0, 300)));
 
 await page.goto(base + "/login");
-await page.fill("#login", process.env.LOGIN || "admin");
-await page.fill("#password", process.env.PASSWORD || "Intercert@2026");
-await page.click("button[type=submit]");
+if (process.env.QUICK) {
+  // acesso rápido da demonstração: o botão do setor entra direto
+  await page.click(`button[aria-label^="Entrar como ${process.env.QUICK}"]`);
+} else {
+  await page.fill("#login", process.env.LOGIN || "admin");
+  await page.fill("#password", process.env.PASSWORD || "Intercert@2026");
+  await page.click("button[type=submit]");
+}
 await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 90000 });
 if (page.url().includes("selecionar-unidade")) {
   await page.getByText(process.env.BRANCH || "Matriz — Centro").click();
