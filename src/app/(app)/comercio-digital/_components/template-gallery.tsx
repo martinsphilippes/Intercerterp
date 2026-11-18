@@ -6,7 +6,7 @@ import { ActionButton } from "@/components/ui/action-form";
 import { Badge } from "@/components/ui/badge";
 import type { ActionResult } from "@/lib/server/action";
 import { TEMPLATES, TEMPLATE_KEYS, type TemplateKey } from "@/domain/ecommerce/templates";
-import { StorePreview } from "./store-preview";
+import { StorePreview, type PreviewProduct } from "./store-preview";
 
 /** Tela 50: visualizar e comparar os três modelos (computador/celular); aplicar muda só o rascunho da loja. */
 export function TemplateGallery({
@@ -17,6 +17,9 @@ export function TemplateGallery({
   tagline,
   canApply,
   apply,
+  products = [],
+  categories = [],
+  offer = null,
 }: {
   current: TemplateKey;
   accent: string;
@@ -25,6 +28,10 @@ export function TemplateGallery({
   tagline: string;
   canApply: boolean;
   apply: Record<TemplateKey, (fd: FormData) => Promise<ActionResult<any>>>;
+  /** produtos reais da vitrine: cada modelo aparece com o catálogo da loja */
+  products?: PreviewProduct[];
+  categories?: string[];
+  offer?: PreviewProduct | null;
 }) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [compare, setCompare] = useState(false);
@@ -81,7 +88,7 @@ export function TemplateGallery({
           return (
             <article key={k} className={`flex flex-col rounded-xl border bg-white ${isCurrent ? "border-brand-500 ring-1 ring-brand-500" : "border-slate-200"}`}>
               <div className="rounded-t-xl bg-slate-50 p-3">
-                <StorePreview template={k} accent={isCurrent ? accent : t.suggestedAccent} storeName={storeName} title={title} tagline={tagline} device={device} compact />
+                <StorePreview template={k} accent={isCurrent ? accent : t.suggestedAccent} storeName={storeName} title={title} tagline={tagline} device={device} compact products={products} categories={categories} offer={offer} />
               </div>
               <div className="flex flex-1 flex-col gap-2 p-4">
                 <div className="flex items-center justify-between gap-2">

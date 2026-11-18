@@ -19,7 +19,7 @@ import { expirePendingOrders } from "@/domain/ecommerce/orders";
 import { INTEGRATION_CATALOG, STATUS_LABEL, getIntegration, type IntegrationKind } from "@/domain/integrations";
 import { StorePreview } from "./_components/store-preview";
 import { createStoreAction } from "./actions";
-import { ecomPage } from "./_lib";
+import { ecomPage, storePreviewProps } from "./_lib";
 
 export const metadata = { title: "Central de comércio digital" };
 
@@ -73,12 +73,13 @@ export default async function Page() {
 
   await expirePendingOrders(s.ctx.store, s.ctx.companyId).catch(() => 0);
   const base = unscoped(s.ctx.store);
-  const [checks, listings, products, orders, domain] = await Promise.all([
+  const [checks, listings, products, orders, domain, preview] = await Promise.all([
     readiness(s.ctx, st),
     listAll(base, "store_products", { filters: [["eq", "storeId", st.id]] }),
     listAll(s.ctx.store, "products", { filters: [["eq", "companyId", s.ctx.companyId]] }),
     listAll(base, "online_orders", { filters: [["eq", "storeId", st.id]] }, 5000),
     primaryDomainOf(s.ctx.store, st.id),
+    storePreviewProps(s.ctx.store, st),
   ]);
   const integrations = await Promise.all((["store_gateway", "store_bank", "store_logistics", "store_domains"] as IntegrationKind[]).map(async (k) => ({ kind: k, integ: await getIntegration(s.ctx.store, s.ctx.companyId, null, k) })));
   const theme = themeOf(st);
@@ -137,7 +138,7 @@ export default async function Page() {
                 Endereço: <span className="font-mono">{domain ?? `…/loja/${st.slug}`}</span>
               </p>
             </div>
-            <StorePreview template={st.template} accent={theme.accentColor} storeName={st.name} title={theme.title} tagline={theme.tagline} compact />
+            <StorePreview template={st.template} accent={theme.accentColor} storeName={st.name} title={theme.title} tagline={theme.tagline} compact {...preview} />
           </div>
           <p className="mt-3 text-sm text-slate-600">Use os produtos e o estoque que você já administra no ERP. Personalize a vitrine para começar a vender on-line.</p>
           <div className="mt-3 flex flex-wrap gap-2">

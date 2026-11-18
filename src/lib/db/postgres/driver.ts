@@ -56,13 +56,26 @@ export function postgresEndpoint(url: string = postgresUrl()): { region: string 
 }
 
 /**
+ * Modo SSL explícito na conexão. O `pg` 8 trata `sslmode=prefer|require|verify-ca` exatamente como `verify-full`
+ * (confere o certificado e o nome do servidor), mas avisa em todo processo novo — o aviso aparecia como “erro” no
+ * painel da Vercel — que, na próxima versão principal, esses modos passarão à semântica do libpq, mais fraca: `require`
+ * deixará de conferir o certificado. Escrever `verify-full` mantém a proteção de hoje, igual, e não a deixa cair numa
+ * atualização do cliente. Quem pediu outro modo (`disable`, `no-verify`) ou a compatibilidade com o libpq
+ * (`uselibpqcompat=true`) fica como está; o resto do endereço não muda (nenhuma releitura da URL nem da senha).
+ */
+export function withExplicitSslMode(connectionString: string): string {
+  if (/[?&]uselibpqcompat=true(?=&|#|$)/.test(connectionString)) return connectionString;
+  return connectionString.replace(/([?&])sslmode=(?:prefer|require|verify-ca)(?=&|#|$)/g, "$1sslmode=verify-full");
+}
+
+/**
  * Conjunto de conexões do `pg`. Poucas conexões por instância e descarte rápido das ociosas: em funções da Vercel as
  * instâncias são suspensas entre requisições (`attachDatabasePool` fecha as ociosas antes da suspensão) e o banco
  * recomendado (Neon) já tem o seu próprio agrupador de conexões no endereço padrão.
  */
 export function pgDriver(connectionString: string): PgDriver {
   const pool = new Pool({
-    connectionString,
+    connectionString: withExplicitSslMode(connectionString),
     max: Math.max(1, Number(process.env.PG_POOL_MAX ?? 5)),
     idleTimeoutMillis: 5_000,
     connectionTimeoutMillis: 15_000,

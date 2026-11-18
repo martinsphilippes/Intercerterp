@@ -7,7 +7,7 @@ import { themeOf } from "@/domain/ecommerce/store";
 import { TEMPLATE_KEYS, type TemplateKey } from "@/domain/ecommerce/templates";
 import { TemplateGallery } from "../_components/template-gallery";
 import { applyTemplateAction } from "../actions";
-import { ecomStorePage } from "../_lib";
+import { ecomStorePage, storePreviewProps } from "../_lib";
 
 export const metadata = { title: "Modelos da loja" };
 
@@ -15,6 +15,7 @@ export const metadata = { title: "Modelos da loja" };
 export default async function Page() {
   const { s, st } = await ecomStorePage(["ecommerce.manage", "ecommerce.catalog", "ecommerce.marketing"]);
   const theme = themeOf(st);
+  const preview = await storePreviewProps(s.ctx.store, st);
   const apply = Object.fromEntries(TEMPLATE_KEYS.map((k) => [k, applyTemplateAction.bind(null, k)])) as Record<TemplateKey, (fd: FormData) => Promise<any>>;
   return (
     <>
@@ -28,7 +29,7 @@ export default async function Page() {
           </Link>
         }
       />
-      <TemplateGallery current={(st.template ?? "essencial") as TemplateKey} accent={theme.accentColor} storeName={st.name} title={theme.title} tagline={theme.tagline} canApply={canDo(s.user, "ecommerce.manage")} apply={apply} />
+      <TemplateGallery current={(st.template ?? "essencial") as TemplateKey} accent={theme.accentColor} storeName={st.name} title={theme.title} tagline={theme.tagline} canApply={canDo(s.user, "ecommerce.manage")} apply={apply} {...preview} />
     </>
   );
 }

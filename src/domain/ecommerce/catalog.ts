@@ -9,7 +9,7 @@ import { searchable } from "@/lib/core/text";
 import { resolvePrices } from "../pricing";
 import { defaultWarehouse } from "../stock";
 import { commerceEvent, requireStore, settleCommerceEvent, slugify } from "./common";
-import { shippingOf } from "./store";
+import { shippingOf, themeOf } from "./store";
 
 /**
  * Catálogo digital (Tela 52) e leituras públicas da vitrine (Telas 61–62).
@@ -417,6 +417,29 @@ export async function publicCatalog(store: Store, st: Doc, opts: { q?: string | 
   }
   filtered.sort((a, b) => Number(b.available) - Number(a.available) || Number(b.featured) - Number(a.featured) || a.title.localeCompare(b.title));
   return { cards: filtered, all: cards, categories };
+}
+
+/** Produto na miniatura da loja dentro do ERP (Central, editor e modelos). Preços em centavos. */
+export interface PreviewCard {
+  title: string;
+  price: number;
+  compareAtPrice: number | null;
+  category: string | null;
+  imageFileId: string | null;
+}
+
+/**
+ * Miniatura da vitrine no ERP: a mesma consulta da loja pública — os produtos, preços, categorias e a ordem que o
+ * cliente vê —, para a prévia não mostrar nada que não exista no catálogo. Sem produto vendável, as listas vêm vazias e
+ * a miniatura usa exemplos rotulados como tal.
+ */
+export async function storePreviewData(store: Store, st: Doc, limit = 8): Promise<{ cards: PreviewCard[]; categories: string[]; offer: PreviewCard | null; total: number }> {
+  const { cards, categories } = await publicCatalog(store, st);
+  const card = (c: PublicCard): PreviewCard => ({ title: c.title, price: c.price, compareAtPrice: c.compareAtPrice, category: c.categoryName, imageFileId: c.imageFileId });
+  // produto da oferta do modelo Campanha (o mesmo da abertura da vitrine), quando escolhido e ainda à venda
+  const offerId = themeOf(st).offerProductId;
+  const offer = offerId ? cards.find((c) => c.productId === offerId) : undefined;
+  return { cards: cards.slice(0, limit).map(card), categories: categories.map((c) => c.name), offer: offer ? card(offer) : null, total: cards.length };
 }
 
 export interface PublicVariant {
