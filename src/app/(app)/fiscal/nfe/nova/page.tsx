@@ -80,7 +80,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
   } else if (sp.origem) {
     const [type, id] = sp.origem.split(":");
     try {
-      if (!["sale", "transfer", "purchase_order", "return", "receipt", "sales_document"].includes(type) || !id) throw new BusinessError("Origem inválida.");
+      if (!["sale", "transfer", "purchase_order", "return", "receipt", "sales_document", "online_order"].includes(type) || !id) throw new BusinessError("Origem inválida.");
       const o = await loadOrigin(s.ctx, type as NfeOriginType, id, branchId);
       if (o.existingDocId) {
         const ex = await s.ctx.store.get("fiscal_documents", o.existingDocId);

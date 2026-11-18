@@ -17,7 +17,7 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-/** Navegação por grupos funcionais (9 grupos da referência). */
+/** Navegação por grupos funcionais (9 grupos da referência + comércio digital). */
 export const NAV: NavGroup[] = [
   { label: "Gestão", items: [{ href: "/dashboard", label: "Painel do gestor", module: "dashboard", icon: "LayoutDashboard" }] },
   {
@@ -31,6 +31,25 @@ export const NAV: NavGroup[] = [
       { href: "/vendas/vendedores", label: "Vendedores", module: "sales", icon: "UserCheck" },
       { href: "/vendas/comissoes", label: "Comissões", module: "sales", icon: "HandCoins", action: "sales.commissions", feature: "comissoes" },
       { href: "/caixa", label: "Caixa (abertura, movimentos, fechamento)", module: "cash", icon: "Wallet" },
+    ],
+  },
+  {
+    // Comércio digital (Telas 49–64, §49): loja própria por empresa; cada tela pede a operação correspondente
+    label: "Comércio digital",
+    items: [
+      { href: "/comercio-digital", label: "Central de comércio digital", module: "sales", icon: "Store", anyAction: ["ecommerce.manage", "ecommerce.catalog", "ecommerce.orders", "ecommerce.marketing", "ecommerce.finance"], feature: "comercioDigital" },
+      { href: "/comercio-digital/modelos", label: "Modelos da loja", module: "sales", icon: "LayoutTemplate", action: "ecommerce.manage", feature: "comercioDigital" },
+      { href: "/comercio-digital/editor", label: "Editor e domínio", module: "sales", icon: "Brush", action: "ecommerce.manage", feature: "comercioDigital" },
+      { href: "/comercio-digital/catalogo", label: "Catálogo digital", module: "sales", icon: "PackageSearch", action: "ecommerce.catalog", feature: "comercioDigital" },
+      { href: "/comercio-digital/canais", label: "Canais e contas", module: "sales", icon: "Share2", action: "ecommerce.manage", feature: "comercioDigital" },
+      { href: "/comercio-digital/pedidos", label: "Pedidos on-line", module: "sales", icon: "ShoppingBag", action: "ecommerce.orders", feature: "comercioDigital" },
+      { href: "/comercio-digital/promocoes", label: "Promoções e carrinhos", module: "sales", icon: "TicketPercent", action: "ecommerce.marketing", feature: "comercioDigital" },
+      { href: "/comercio-digital/pagamentos", label: "Gateway e checkout", module: "sales", icon: "CreditCard", action: "ecommerce.manage", feature: "comercioDigital" },
+      { href: "/comercio-digital/banco", label: "Banco Intercert e repasses", module: "sales", icon: "Landmark", action: "ecommerce.finance", feature: "comercioDigital" },
+      { href: "/comercio-digital/frete", label: "Frete e logística", module: "sales", icon: "Truck", action: "ecommerce.manage", feature: "comercioDigital" },
+      { href: "/comercio-digital/expedicao", label: "Expedição e rastreio", module: "sales", icon: "PackageCheck", action: "ecommerce.orders", feature: "comercioDigital" },
+      { href: "/comercio-digital/monitor", label: "Monitor de integrações", module: "sales", icon: "Activity", action: "ecommerce.manage", feature: "comercioDigital" },
+      { href: "/comercio-digital/ver-loja", label: "Ver loja pública", module: "sales", icon: "ExternalLink", anyAction: ["ecommerce.manage", "ecommerce.catalog", "ecommerce.orders", "ecommerce.marketing"], feature: "comercioDigital" },
     ],
   },
   {

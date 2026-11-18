@@ -3,6 +3,7 @@ import {
   Landmark, CreditCard, Settings2, Factory, TrendingDown, Scale, ShoppingCart, BadgeCheck, PackageCheck, FileClock, FileText, FileCheck2, FileSignature, FileBarChart, Cog,
   BarChart3, PieChart, ShieldCheck, Building2, Monitor, Plug, DatabaseBackup, History, SlidersHorizontal, Bell, LifeBuoy, Circle, Boxes, ListChecks, Tag, BadgePercent, MessageCircle, UserCheck, HandCoins, FilePen, ClipboardCheck, Weight, Combine, Percent, Gift,
   CalendarClock, BookOpen, FileDown, BookOpenCheck, LibraryBig, FileInput, FileSpreadsheet, Calculator, LockKeyhole, Network, RefreshCcw, Ticket,
+  Store, LayoutTemplate, Brush, PackageSearch, Share2, ShoppingBag, TicketPercent, Activity, ExternalLink,
 } from "lucide-react";
 
 const MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -10,6 +11,7 @@ const MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Landmark, CreditCard, Settings2, Factory, TrendingDown, Scale, ShoppingCart, BadgeCheck, PackageCheck, FileClock, FileText, FileCheck2, FileSignature, FileBarChart, Cog,
   BarChart3, PieChart, ShieldCheck, Building2, Monitor, Plug, DatabaseBackup, History, SlidersHorizontal, Bell, LifeBuoy, Boxes, ListChecks, Tag, BadgePercent, MessageCircle, UserCheck, HandCoins, FilePen, ClipboardCheck, Weight, Combine, Percent, Gift,
   CalendarClock, BookOpen, FileDown, BookOpenCheck, LibraryBig, FileInput, FileSpreadsheet, Calculator, LockKeyhole, Network, RefreshCcw, Ticket,
+  Store, LayoutTemplate, Brush, PackageSearch, Share2, ShoppingBag, TicketPercent, Activity, ExternalLink,
 };
 
 export function NavIcon({ name, className }: { name: string; className?: string }) {

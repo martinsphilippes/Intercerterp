@@ -6,3 +6,4 @@ import "./stock";
 import "./accounting";
 import "./sales";
 import "./network";
+import "./ecommerce";
