@@ -38,7 +38,7 @@ import {
  * baixa o estoque e gera o título na autorização (ver src/domain/sales-documents.ts).
  */
 
-export type NfeOriginType = "sale" | "transfer" | "purchase_order" | "return" | "receipt" | "sales_document" | "manual";
+export type NfeOriginType = "sale" | "transfer" | "purchase_order" | "return" | "receipt" | "sales_document" | "online_order" | "manual";
 
 export interface NfeRecipient {
   partyType: "customer" | "supplier" | "branch" | "other";
@@ -204,6 +204,12 @@ export async function loadOrigin(ctx: Ctx, type: NfeOriginType, id: string, bran
     const { salesDocumentNfePrefill } = await import("../sales-documents");
     const pre = await salesDocumentNfePrefill(ctx, id, branchId, existing?.id ?? null, base);
     return { input: pre.input, effectsLocked: false, label: pre.label, href: pre.href, warnings: [...warnings, ...pre.warnings], blockers: [...blockers, ...pre.blockers], existingDocId: existing?.id ?? null, generation };
+  }
+  if (type === "online_order") {
+    // pedido on-line (comércio digital, §49): estoque e recebível tratados pelo próprio pedido — efeitos travados
+    const { onlineOrderNfePrefill } = await import("../ecommerce/fiscal");
+    const pre = await onlineOrderNfePrefill(ctx, id, branchId, existing?.id ?? null, base);
+    return { ...pre, warnings: [...warnings, ...pre.warnings], blockers: [...blockers, ...pre.blockers], existingDocId: existing?.id ?? null, generation };
   }
   if (type === "sale") {
     const sale = await ctx.store.getOrThrow("sales", id);
@@ -418,7 +424,7 @@ function effectsFor(input: NfeInput, locked: boolean, supplierReturn?: SupplierR
   };
 }
 
-const lockedOrigins = (t: NfeOriginType) => ["sale", "transfer", "return"].includes(t);
+const lockedOrigins = (t: NfeOriginType) => ["sale", "transfer", "return", "online_order"].includes(t);
 
 /**
  * Normaliza a entrada antes de calcular/gravar: origem recebimento tem quantidades limitadas ao restante devolvível e

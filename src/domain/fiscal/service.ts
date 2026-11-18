@@ -66,6 +66,7 @@ export const ORIGIN_LABEL: Record<string, string> = {
   purchase_order: "Pedido de compra (devolução a fornecedor)",
   receipt: "Recebimento (devolução a fornecedor)",
   sales_document: "Pedido de venda",
+  online_order: "Pedido on-line (loja virtual)",
   return: "Devolução de venda",
   manual: "Operação avulsa",
   service: "Serviço",
@@ -1081,6 +1082,13 @@ async function syncOrigin(ctx: Ctx, doc: Doc) {
   }
   if (doc.originType === "return" && doc.originId) {
     await ctx.store.update("returns", doc.originId, { fiscalDocumentId: doc.id }).catch(() => undefined);
+  }
+  // pedido on-line (§49): autorização libera a expedição; cancelamento devolve o pedido a "pago — a faturar"
+  if (doc.originType === "online_order" && doc.originId && doc.model === "nfe") {
+    const { syncOrderFromNfe } = await import("../ecommerce/fiscal");
+    await syncOrderFromNfe(ctx, doc).catch(async (e: any) => {
+      await addEvent(ctx, doc.id, "online_order", doc.status, `Falha ao atualizar o pedido on-line: ${e?.message ?? e}`);
+    });
   }
   // pedido de venda (FIS-05): autorização fatura as quantidades do pedido; cancelamento as devolve ao saldo (idempotente)
   if (doc.originType === "sales_document" && doc.originId && doc.model === "nfe") {

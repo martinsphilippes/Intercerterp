@@ -14,9 +14,13 @@ export const KIND_META: Record<IntegrationKind, { abbr: string; category: string
   accounting: { abbr: "CT", category: "Contabilidade" },
   accounting_dominio: { abbr: "DM", category: "Contabilidade" },
   email: { abbr: "EM", category: "Comunicação" },
+  store_gateway: { abbr: "GW", category: "Comércio digital" },
+  store_bank: { abbr: "BI", category: "Comércio digital" },
+  store_logistics: { abbr: "LG", category: "Comércio digital" },
+  store_domains: { abbr: "DN", category: "Comércio digital" },
 };
 
-export const CATEGORIES = ["Pagamentos", "Fiscal", "Financeiro", "Contabilidade", "Comunicação"];
+export const CATEGORIES = ["Pagamentos", "Fiscal", "Financeiro", "Contabilidade", "Comunicação", "Comércio digital"];
 
 export interface IntegrationOverview {
   kind: IntegrationKind;

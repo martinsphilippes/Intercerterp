@@ -1263,6 +1263,118 @@ export const COLLECTIONS: CollectionDef[] = [
     },
     indexes: [k("i_relation", "relationKey"), k("i_payer", "payerNodeId"), k("i_payee", "payeeNodeId"), k("i_payer_company", "payerCompanyId")],
   },
+  // ───────────────────────────── Comércio digital (Telas 49–64, §49): loja própria de cada empresa, com domínio próprio
+  {
+    id: "stores",
+    label: "Comércio digital — loja virtual da empresa (identidade, modelo, domínio, pagamentos, frete e políticas)",
+    fields: {
+      ...ctx, name: s(120, true), slug: s(60, true), status: s(20), template: s(20), theme: json, sections: json, benefits: json,
+      pages: json, legal: json, contact: json, seo: json, checkout: json, payments: json, shipping: json,
+      // filial que atende os pedidos (estoque e nota fiscal) e filiais com retirada
+      fulfillmentBranchId: id(), pickupBranchIds: strings, orderPrefix: s(10), safetyStockQty: qty,
+      publishedAt: dt, pausedAt: dt, previewToken: s(64), notes: s(500),
+    },
+    indexes: [u("u_company", "companyId"), u("u_slug", "slug"), u("u_preview", "previewToken")],
+  },
+  {
+    id: "store_domains",
+    label: "Comércio digital — domínios próprios das lojas (endereço, verificação e situação)",
+    fields: {
+      ...ctx, storeId: id(true), domain: s(253, true), primary: bool, status: s(20), provider: s(20), lastCheckAt: dt, verifiedAt: dt,
+      // dns: { records, verifyToken } — o código do registro TXT prova que a empresa controla o domínio; enquanto não
+      // verificado, o mesmo domínio pode estar cadastrado em outra loja (só a que comprovar passa a "active")
+      diagnostic: s(500), dns: json,
+    },
+    indexes: [u("u_store_domain", "storeId", "domain"), k("i_domain", "domain"), k("i_store", "storeId")],
+  },
+  {
+    id: "store_products",
+    label: "Comércio digital — catálogo digital (produto do ERP na vitrine: título, fotos, descrição, preço on-line e medidas)",
+    fields: {
+      ...ctx, storeId: id(true), productId: id(true), published: bool, title: s(200), slug: s(120, true), description: txt,
+      categoryId: id(), images: strings, priceOverride: money, compareAtPrice: money, weightGrams: int, heightCm: int, widthCm: int,
+      lengthCm: int, featured: bool, sortOrder: int, seoTitle: s(120), seoDescription: s(300), issues: json, searchText: s(1000),
+      updatedBy: id(),
+    },
+    indexes: [u("u_store_product", "storeId", "productId"), u("u_store_slug", "storeId", "slug"), k("i_store", "storeId")],
+  },
+  {
+    id: "store_carts",
+    label: "Comércio digital — carrinhos da loja (itens, cupom, entrega e contato para recuperação)",
+    fields: {
+      ...ctx, storeId: id(true), token: s(64, true), items: json, itemsCount: int, subtotal: money, couponCode: s(40), customer: json,
+      address: json, delivery: json, marketingConsent: bool, status: s(20), orderId: id(), lastActivityAt: dt, recoveryDraft: txt,
+      recoveryAt: dt,
+    },
+    indexes: [u("u_token", "token"), k("i_store_status", "storeId", "status")],
+  },
+  {
+    id: "store_coupons",
+    label: "Comércio digital — cupons de desconto da loja",
+    fields: {
+      ...ctx, storeId: id(true), code: s(40, true), description: s(200), percentBps: int, capAmount: money, minOrder: money,
+      freeShipping: bool, active: bool, validFrom: date, validTo: date, usageLimit: int, usedCount: int, perCustomerLimit: int,
+    },
+    indexes: [u("u_store_code", "storeId", "code"), k("i_store", "storeId")],
+  },
+  {
+    id: "online_orders",
+    label: "Comércio digital — pedidos on-line (origem, itens, pagamento, nota fiscal, reserva, entrega e atendimento)",
+    fields: {
+      ...ctx, storeId: id(true), number: int, code: s(30), token: s(64, true), origin: s(30), status: s(30), paymentStatus: s(20),
+      fiscalStatus: s(20), customerId: id(), customer: json, shippingAddress: json, items: json, itemsCount: int, subtotal: money,
+      discount: money, couponCode: s(40), couponId: id(), shippingAmount: money, total: money, delivery: json, payment: json,
+      fiscalDocumentId: id(), receivableTitleId: id(), pickupCode: s(12), consents: json, notes: s(500), idemKey: s(120),
+      cancelReason: s(500), cancelledAt: dt, paidAt: dt, invoicedAt: dt, readyAt: dt, dispatchedAt: dt, deliveredAt: dt,
+      expiresAt: dt, returnRequest: json, refundStatus: s(20), searchText: s(1000),
+    },
+    indexes: [u("u_token", "token"), u("u_idem", "idemKey"), k("i_store_status", "storeId", "status"), k("i_customer", "customerId"), k("i_number", "companyId", "number")],
+  },
+  {
+    id: "online_order_events",
+    label: "Comércio digital — linha do tempo dos pedidos on-line",
+    fields: { ...ctx, orderId: id(true), kind: s(40), summary: s(500), actor: s(120), data: json, at: dt },
+    indexes: [k("i_order", "orderId")],
+  },
+  {
+    id: "commerce_events",
+    label: "Comércio digital — monitor das integrações (catálogo, pagamento, fiscal, estoque, entrega, banco, domínio e canais)",
+    fields: {
+      ...ctx, storeId: id(), area: s(20), action: s(60), status: s(20), reference: s(120), orderId: id(), externalKey: s(200),
+      attempts: int, diagnostic: txt, payload: json, lastAttemptAt: dt, resolvedAt: dt,
+      // número sequencial por empresa exibido no monitor (EV-006) e cadastro de origem para correção (ex.: product:<id>)
+      number: int, subject: s(120),
+    },
+    indexes: [u("u_external", "externalKey"), k("i_company_status", "companyId", "status"), k("i_order", "orderId")],
+  },
+  {
+    id: "store_channels",
+    label: "Comércio digital — canais de venda e contas preparadas (marketplaces, redes sociais e descoberta)",
+    fields: {
+      ...ctx, storeId: id(true), channel: s(30, true), accountName: s(120), catalogScope: s(20), categoryIds: strings, status: s(20),
+      notes: s(500), preparedAt: dt,
+    },
+    indexes: [u("u_store_channel", "storeId", "channel")],
+  },
+  {
+    id: "gateway_transactions",
+    label: "Comércio digital — recebimentos do gateway da loja (bruto, taxa, líquido, crédito no Banco Intercert e repasse)",
+    fields: {
+      ...ctx, storeId: id(true), orderId: id(true), provider: s(30), providerRef: s(120), method: s(20), gross: money, fee: money,
+      net: money, status: s(20), expectedAt: date, creditedAt: date, reconciledAt: dt, payoutId: id(), titleId: id(),
+      installmentId: id(), accountId: id(), notes: s(300),
+    },
+    indexes: [u("u_order", "orderId"), k("i_store_status", "storeId", "status")],
+  },
+  {
+    id: "store_payouts",
+    label: "Comércio digital — repasses do Banco Intercert para a conta da empresa",
+    fields: {
+      ...ctx, storeId: id(true), amount: money, status: s(20), destinationAccountId: id(), transactionIds: strings, requestedBy: id(),
+      requestedAt: dt, providerRef: s(120), notes: s(300),
+    },
+    indexes: [k("i_store", "storeId")],
+  },
   {
     id: "files",
     label: "Arquivos",

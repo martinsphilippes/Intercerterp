@@ -80,6 +80,8 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
  */
 export const KIND_FEATURE_DEFAULTS: Record<string, Record<string, boolean>> = {
   redeCertificacao: { certification: true, accounting: true, retail: false },
+  /** comércio digital (§49): loja própria das empresas de varejo; escritórios e parceiros da rede não vendem mercadoria */
+  comercioDigital: { retail: true, accounting: false, certification: false },
 };
 
 /** Padrão do recurso para o tipo da empresa (sem regra por tipo: o padrão geral). */

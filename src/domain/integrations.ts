@@ -12,7 +12,22 @@ import { audit } from "@/lib/core/audit";
  * Configuração preenchida não equivale a conexão operacional: o estado só muda com um teste real.
  */
 
-export type IntegrationKind = "pix" | "card_tef" | "fiscal_nfe" | "fiscal_nfse" | "bank" | "accounting" | "accounting_dominio" | "email";
+export type IntegrationKind =
+  | "pix"
+  | "card_tef"
+  | "fiscal_nfe"
+  | "fiscal_nfse"
+  | "bank"
+  | "accounting"
+  | "accounting_dominio"
+  | "email"
+  | "store_gateway"
+  | "store_bank"
+  | "store_logistics"
+  | "store_domains";
+
+/** Integrações do comércio digital (Telas 49–64): sempre por empresa (a loja é uma por empresa). */
+export const STORE_INTEGRATION_KINDS: IntegrationKind[] = ["store_gateway", "store_bank", "store_logistics", "store_domains"];
 
 export interface CatalogProvider {
   id: string;
@@ -109,6 +124,91 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     consumer: "Financeiro → Exportação para a Domínio",
     consumers: [{ label: "Exportação de lançamentos (Domínio)", href: "/financeiro/exportacao-dominio" }],
   },
+  store_gateway: {
+    label: "Gateway de pagamento da loja virtual",
+    description:
+      "Pix, cartão e boleto do checkout da loja própria. O Gateway Intercert entra por esta integração: o checkout, os pedidos, a conciliação e o monitor já usam a interface do provedor; até a ligação, a simulação aprova, recusa e expira pagamentos sem valor financeiro.",
+    providers: [
+      { id: "simulated", label: "Simulação (sem cobrança real)", secrets: [], config: [], test: "Verifica o provedor de simulação (cobranças sem valor financeiro).", simulated: true },
+      {
+        id: "intercert",
+        label: "Gateway Intercert",
+        secrets: ["apiKey", "webhookSecret"],
+        config: ["merchantId"],
+        defaultRefs: { apiKey: "GATEWAY_INTERCERT_API_KEY", webhookSecret: "GATEWAY_INTERCERT_WEBHOOK_SECRET" },
+        refPrefixes: ["GATEWAY_INTERCERT_", "INTERCERT_GATEWAY_"],
+        test: "Conector reservado: a chamada à API do Gateway Intercert entra na integração (os avisos de pagamento já são recebidos e conferidos por assinatura).",
+      },
+    ],
+    consumer: "Comércio digital → Checkout, pedidos e conciliação",
+    consumers: [{ label: "Pagamentos da loja", href: "/comercio-digital/pagamentos" }, { label: "Pedidos on-line", href: "/comercio-digital/pedidos" }],
+  },
+  store_bank: {
+    label: "Banco Intercert — conta da loja",
+    description:
+      "Conta que recebe os créditos do gateway, conciliação dos repasses e transferências (saques). Até a ligação, a simulação credita os pagamentos no prazo de cada meio e os repasses ficam como solicitação registrada.",
+    providers: [
+      { id: "simulated", label: "Simulação (créditos sem valor financeiro)", secrets: [], config: [], test: "Verifica o provedor de simulação (créditos e repasses sem banco real).", simulated: true },
+      {
+        id: "intercert",
+        label: "Banco Intercert",
+        secrets: ["clientId", "clientSecret"],
+        config: ["accountNumber"],
+        defaultRefs: { clientId: "BANCO_INTERCERT_CLIENT_ID", clientSecret: "BANCO_INTERCERT_CLIENT_SECRET" },
+        refPrefixes: ["BANCO_INTERCERT_", "INTERCERT_BANK_"],
+        test: "Conector reservado: extrato, crédito e transferência pela API do Banco Intercert entram na integração.",
+      },
+    ],
+    consumer: "Comércio digital → Banco e conciliação",
+    consumers: [{ label: "Banco e conciliação da loja", href: "/comercio-digital/banco" }],
+  },
+  store_logistics: {
+    label: "Logística da loja (transportadora e entrega por terceiros)",
+    description:
+      "Cotação de frete, etiqueta e rastreio. Retirada e entrega própria (faixas de CEP) não dependem de integração; transportadora e entrega por terceiros usam este conector — até a ligação, a simulação cota por peso, distância de CEP e prazo.",
+    providers: [
+      { id: "simulated", label: "Simulação (tabela de referência)", secrets: [], config: [], test: "Verifica o provedor de simulação (cotações e rastreio sem transportadora real).", simulated: true },
+      {
+        id: "carrier_api",
+        label: "Plataforma de fretes (API)",
+        secrets: ["token"],
+        config: ["serviceCodes"],
+        defaultRefs: { token: "FRETES_API_TOKEN" },
+        refPrefixes: ["FRETES_", "LOGISTICA_", "TRANSPORTADORA_"],
+        test: "Conector reservado: cotação, etiqueta e rastreio pela API da plataforma escolhida entram na integração.",
+      },
+      {
+        id: "delivery_api",
+        label: "Entrega por aplicativo (API)",
+        secrets: ["token"],
+        config: [],
+        defaultRefs: { token: "ENTREGAS_API_TOKEN" },
+        refPrefixes: ["ENTREGAS_", "DELIVERY_"],
+        test: "Conector reservado: chamada do entregador e acompanhamento pela API do aplicativo entram na integração.",
+      },
+    ],
+    consumer: "Comércio digital → Frete e logística",
+    consumers: [{ label: "Frete e logística", href: "/comercio-digital/frete" }, { label: "Pedidos on-line", href: "/comercio-digital/pedidos" }],
+  },
+  store_domains: {
+    label: "Domínio próprio da loja",
+    description:
+      "Liga o domínio da empresa (ex.: www.minhaloja.com.br) à loja. Sem integração, o lojista aponta o DNS e o sistema confere o apontamento; com a API da hospedagem, o domínio também é cadastrado no projeto automaticamente (certificado HTTPS emitido pela hospedagem).",
+    providers: [
+      { id: "manual_dns", label: "Apontamento manual (DNS)", secrets: [], config: [], test: "Confere a resolução DNS dos domínios cadastrados (sem credencial)." },
+      {
+        id: "hosting_api",
+        label: "API da hospedagem (cadastro automático do domínio)",
+        secrets: ["token"],
+        config: ["projectId", "teamId"],
+        defaultRefs: { token: "DOMINIOS_API_TOKEN" },
+        refPrefixes: ["DOMINIOS_"],
+        test: "Consulta autenticada ao projeto na hospedagem (somente leitura).",
+      },
+    ],
+    consumer: "Comércio digital → Editor da loja (domínio)",
+    consumers: [{ label: "Domínio da loja", href: "/comercio-digital/editor?aba=dominio" }],
+  },
   email: {
     label: "E-mail",
     description: "Envio de documentos, convites e recuperação de senha.",
@@ -131,6 +231,11 @@ export const CONFIG_LABEL: Record<string, string> = {
   accountantEmail: "E-mail da contabilidade",
   accountantName: "Contato na contabilidade",
   linkedFirmName: "Escritório vinculado (Intercert)",
+  merchantId: "Código do estabelecimento no gateway",
+  accountNumber: "Conta no Banco Intercert",
+  serviceCodes: "Serviços de frete (códigos separados por vírgula)",
+  projectId: "Projeto na hospedagem (ID)",
+  teamId: "Equipe na hospedagem (ID, opcional)",
   providerId: "ID do provedor de e-mail no Appwrite",
   from: "Remetente (From)",
   dominioCompanyCode: "Código da empresa na Domínio",
@@ -149,7 +254,7 @@ export const CONFIG_LABEL: Record<string, string> = {
   accountBankFees: "Tarifas bancárias/taxas",
 };
 
-export const SECRET_LABEL: Record<string, string> = { accessToken: "Access token", connectorToken: "Token do conector", token: "Token da API", clientId: "Client ID", clientSecret: "Client secret", apiKey: "Chave da API" };
+export const SECRET_LABEL: Record<string, string> = { accessToken: "Access token", connectorToken: "Token do conector", token: "Token da API", clientId: "Client ID", clientSecret: "Client secret", apiKey: "Chave da API", webhookSecret: "Segredo de assinatura dos avisos (webhook)" };
 
 export const STATUS_LABEL: Record<string, string> = {
   not_configured: "Não configurada",
@@ -277,6 +382,8 @@ export async function saveIntegration(
   requireAction(ctx, "admin.integrations");
   const cat = INTEGRATION_CATALOG[input.kind];
   assert(cat, "Tipo de integração desconhecido.");
+  // a loja virtual é uma por empresa: as integrações dela valem para a empresa inteira (nunca por filial)
+  if (STORE_INTEGRATION_KINDS.includes(input.kind)) input = { ...input, branchId: null };
   const prov = cat.providers.find((p) => p.id === input.provider);
   assert(prov, "Provedor não suportado para esta integração.");
   // o endereço da API é fixo no código de cada provedor: nunca configurável (o servidor enviaria a credencial a ele)
@@ -491,6 +598,9 @@ export async function testIntegration(ctx: Ctx, kind: IntegrationKind, branchId:
         const r = await sendEmail(ctx.companyId, { to, subject: `Teste de integração — ${INTEGRATION_CATALOG[kind].label}`, html: `<p>Mensagem de teste enviada pela Central de integrações em ${new Date().toLocaleString("pt-BR")} por ${ctx.user.name}.</p>${kind === "accounting" ? `<p>Destino configurado para os pacotes: ${integ.config?.accountantEmail}</p>` : ""}` });
         out = r.delivered ? { status: "operational", ok: true, message: `Mensagem de teste entregue ao canal ${r.channel} para ${to}.` } : { status: r.channel === "not_configured" ? "error" : "error", ok: false, message: `Envio de teste falhou (${r.channel}): ${r.message ?? "sem detalhes"}` };
       }
+    } else if (STORE_INTEGRATION_KINDS.includes(kind)) {
+      const { testStoreIntegration } = await import("./ecommerce/providers");
+      out = await testStoreIntegration(ctx, kind, integ);
     } else out = { status: "configured_untested", ok: true, message: "Sem teste disponível para este tipo." };
   } catch (e: any) {
     out = { status: "error", ok: false, message: `Falha no teste: ${e.message}` };
@@ -568,6 +678,10 @@ const JOB_PREFIX: Record<IntegrationKind, string[]> = {
   accounting: ["fiscal.accounting"],
   accounting_dominio: ["accounting.dominio"],
   email: ["email.", "mail.", "notify.email"],
+  store_gateway: ["ecommerce.payment"],
+  store_bank: ["ecommerce.bank"],
+  store_logistics: ["ecommerce.shipping"],
+  store_domains: ["ecommerce.domain"],
 };
 
 /** Tarefas com problema (retentativa/falha definitiva) ligadas ao tipo de integração. */

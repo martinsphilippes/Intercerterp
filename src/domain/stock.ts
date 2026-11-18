@@ -174,6 +174,8 @@ export function originHref(originType: string | null | undefined, originId: stri
       return `/produtos/importar/${originId}`;
     case "sales_document":
       return `/vendas/pedidos/${originId}`;
+    case "online_order":
+      return `/comercio-digital/pedidos/${originId}`;
     case "assembly":
       return `/estoque/montagem?id=${originId}`;
     case "freight_cte":

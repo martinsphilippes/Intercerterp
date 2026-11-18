@@ -86,6 +86,13 @@ export const SPECIAL_ACTIONS = [
   { key: "pdv.remove_item", label: "Remover item já registrado no atendimento do PDV (sem autorização do supervisor)" },
   { key: "pdv.cancel_cart", label: "Cancelar atendimento do PDV com itens (sem autorização do supervisor)" },
   { key: "sale.return_over_limit", label: "Registrar devolução acima do valor máximo sem autorização do gerente" },
+  // comércio digital (Telas 49–64, §49): loja própria da empresa
+  { key: "ecommerce.manage", label: "Configurar a loja virtual (modelo, identidade, domínio, publicação, canais, pagamentos e frete)" },
+  { key: "ecommerce.catalog", label: "Editar o catálogo digital (produtos na vitrine, fotos, descrições e preço on-line)" },
+  { key: "ecommerce.orders", label: "Atender pedidos on-line (nota fiscal, separação, expedição, retirada e entrega)" },
+  { key: "ecommerce.cancel", label: "Cancelar pedidos on-line e registrar devoluções e arrependimentos" },
+  { key: "ecommerce.marketing", label: "Cupons da loja e recuperação de carrinhos" },
+  { key: "ecommerce.finance", label: "Banco Intercert: conciliar recebimentos da loja e preparar repasses" },
 ] as const;
 
 export type SpecialAction = (typeof SPECIAL_ACTIONS)[number]["key"];
@@ -128,7 +135,9 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     },
     actions: ["sale.cancel", "sale.return", "sale.discount_over_limit", "cash.reopen", "cash.withdrawal", "pdv.receive_installments", "pdv.reverse_receipt", "stock.adjust", "stock.inventory_close", "stock.warehouses", "finance.settle", "purchase.approve", "purchase.receive", "purchase.receive_pending_invoice", "purchase.confirm_invoice", "purchase.pricing", "products.bulk_edit", "fiscal.issue", "data.export", "customer.credit_limit", "sale.overdue_override", "sales.commissions", "sales_doc.quote", "sales_doc.order", "sales_doc.cancel",
       // §44: remover item, cancelar atendimento e devolução acima do limite sem autorização
-      "pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit"],
+      "pdv.remove_item", "pdv.cancel_cart", "sale.return_over_limit",
+      // §49: comércio digital
+      "ecommerce.manage", "ecommerce.catalog", "ecommerce.orders", "ecommerce.cancel", "ecommerce.marketing", "ecommerce.finance"],
     discountLimitBps: 2000,
   },
   {
@@ -136,7 +145,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     name: "Caixa",
     description: "Operação do PDV, abertura e fechamento de caixa.",
     permissions: { dashboard: ro(), pdv: all(), sales: { view: true, create: true }, cash: rw(), customers: rw(), products: ro(), support: rw() },
-    actions: ["cash.withdrawal", "sale.return", "fiscal.issue", "pdv.receive_installments", "sales_doc.quote"],
+    actions: ["cash.withdrawal", "sale.return", "fiscal.issue", "pdv.receive_installments", "sales_doc.quote", "ecommerce.orders"],
     discountLimitBps: 500,
   },
   {
@@ -144,7 +153,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     name: "Estoquista",
     description: "Movimentações, transferências, inventários e recebimentos.",
     permissions: { dashboard: ro(), products: rw(), stock: all(), purchases: { view: true }, suppliers: ro(), support: rw() },
-    actions: ["stock.adjust", "purchase.receive", "purchase.receive_pending_invoice"],
+    actions: ["stock.adjust", "purchase.receive", "purchase.receive_pending_invoice", "ecommerce.orders"],
     discountLimitBps: 0,
   },
   {
@@ -152,7 +161,7 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     name: "Financeiro",
     description: "Contas a receber e pagar, fluxo de caixa e conciliação.",
     permissions: { dashboard: ro(), finance: all(), customers: ro(), suppliers: ro(), sales: ro(), purchases: ro(), reports: ro(), support: rw() },
-    actions: ["finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "data.export"],
+    actions: ["finance.settle", "finance.reverse", "finance.reconcile", "finance.approve_payable", "finance.close_period", "data.export", "ecommerce.finance"],
     discountLimitBps: 0,
   },
   {

@@ -43,6 +43,9 @@ export const ACTIONS_ADDED_TO_TEMPLATES: string[] = [
   // rede de certificação — etapa 3 (§46): financeiro em camadas — modalidade/recarga/ajuste/fechamento (Administrador e
   // Financeiro do parceiro) e consulta do financeiro da rede (Administrador, Gestor e Financeiro)
   "network.billing", "network.finance_view",
+  // comércio digital (§49): loja própria — gestão completa (Gerente e Administrador), atendimento dos pedidos (Caixa e
+  // Estoquista) e conciliação/repasses do Banco Intercert (Financeiro)
+  "ecommerce.manage", "ecommerce.catalog", "ecommerce.orders", "ecommerce.cancel", "ecommerce.marketing", "ecommerce.finance",
 ];
 
 const ORDER = SPECIAL_ACTIONS.map((a) => a.key as string);
