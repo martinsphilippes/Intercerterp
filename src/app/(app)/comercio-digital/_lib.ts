@@ -1,10 +1,23 @@
 import "server-only";
 import { redirect } from "next/navigation";
-import type { Doc } from "@/lib/db/types";
+import type { Doc, Store } from "@/lib/db/types";
 import { requireSession, type SessionInfo } from "@/lib/server/session";
 import { requireFeaturePage } from "@/lib/server/features";
 import { canDo, type SpecialAction } from "@/lib/permissions";
 import { storeOfCompany } from "@/domain/ecommerce/common";
+import { storePreviewData, type PreviewCard } from "@/domain/ecommerce/catalog";
+import type { PreviewProduct } from "./_components/store-preview";
+
+/**
+ * Produtos reais da vitrine para a miniatura da loja (Central, editor e modelos). As fotos vêm pela mesma rota de imagens
+ * da vitrine — que só entrega a identidade da loja e fotos de produtos do catálogo dela, inclusive com a loja em
+ * rascunho —, como na edição do catálogo: a prévia mostra exatamente a foto que o cliente vai ver.
+ */
+export async function storePreviewProps(store: Store, st: Doc): Promise<{ products: PreviewProduct[]; categories: string[]; offer: PreviewProduct | null }> {
+  const { cards, categories, offer } = await storePreviewData(store, st, 8);
+  const product = (c: PreviewCard): PreviewProduct => ({ title: c.title, price: c.price, compareAtPrice: c.compareAtPrice, category: c.category, imageUrl: c.imageFileId ? `/loja/${st.slug}/imagem/${c.imageFileId}` : null });
+  return { products: cards.map(product), categories, offer: offer ? product(offer) : null };
+}
 
 /** Operações do comércio digital (§49). */
 export const ECOM_ACTIONS: SpecialAction[] = ["ecommerce.manage", "ecommerce.catalog", "ecommerce.orders", "ecommerce.cancel", "ecommerce.marketing", "ecommerce.finance"];

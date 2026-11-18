@@ -1,22 +1,6 @@
-import { Coffee, Shirt, Lamp, ShoppingBag, Headphones, GlassWater, ShoppingBasket, Sparkles, Package, Footprints, NotebookPen, Watch } from "lucide-react";
-import { slugify } from "@/domain/ecommerce/common";
+import { iconFor } from "@/components/storefront/product-icon";
 
-/** Ilustração do produto sem foto, pela categoria (a vitrine nunca mostra uma caixa vazia). */
-export function iconFor(category: string | null | undefined) {
-  const c = slugify(category ?? "");
-  if (/casa|cozinha|cafe|utilidade|mesa/.test(c)) return Coffee;
-  if (/moda|roupa|vestu|camis/.test(c)) return Shirt;
-  if (/calcad|tenis|sapat/.test(c)) return Footprints;
-  if (/ilumin|lumin|decor/.test(c)) return Lamp;
-  if (/acess|bolsa|bag/.test(c)) return /acess/.test(c) ? Watch : ShoppingBag;
-  if (/eletr|audio|fone|tecno|info/.test(c)) return Headphones;
-  if (/bebida|garraf|esporte|fitness/.test(c)) return GlassWater;
-  if (/papel|escrit|caderno/.test(c)) return NotebookPen;
-  if (/aliment|mercad|hortifruti|padaria/.test(c)) return ShoppingBasket;
-  if (/beleza|perfum|cosmet|higiene/.test(c)) return Sparkles;
-  return Package;
-}
-
+/** Produto sem foto: ilustração pela categoria (a vitrine nunca mostra uma caixa vazia). */
 export function ProductArt({ category, imageUrl, alt, size = "card" }: { category: string | null | undefined; imageUrl: string | null; alt: string; size?: "card" | "page" | "thumb" }) {
   const box = size === "page" ? "aspect-square w-full rounded-xl" : size === "thumb" ? "size-16 rounded-lg" : "aspect-[4/3] w-full rounded-t-xl";
   if (imageUrl)

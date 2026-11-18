@@ -33,7 +33,7 @@ import {
   uploadThemeImageAction,
   verifyDomainAction,
 } from "../actions";
-import { brDateTime, ecomStorePage } from "../_lib";
+import { brDateTime, ecomStorePage, storePreviewProps } from "../_lib";
 
 export const metadata = { title: "Editor visual e domínio" };
 
@@ -59,6 +59,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const tpl = templateOf(st.template);
   const status = (st.status ?? "draft") as StoreStatus;
   const listings = tab === "identidade" ? (await listAll(unscoped(s.ctx.store), "store_products", { filters: [["eq", "storeId", st.id]] })).filter((l) => l.published) : [];
+  const preview = tab === "identidade" ? await storePreviewProps(s.ctx.store, st) : null;
   const accentIsPreset = ACCENT_PRESETS.some((p) => p.value === theme.accentColor);
 
   return (
@@ -125,7 +126,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           </Card>
           <div className="space-y-4 xl:col-span-2">
             <Card title="Prévia">
-              <StorePreview template={st.template} accent={theme.accentColor} storeName={st.name} title={theme.title} tagline={theme.tagline} sections={sections} />
+              <StorePreview template={st.template} accent={theme.accentColor} storeName={st.name} title={theme.title} tagline={theme.tagline} sections={sections} {...preview} />
             </Card>
             <Card title="Logotipo e imagem de destaque">
               {(["logo", "hero"] as const).map((which) => {
