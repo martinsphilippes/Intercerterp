@@ -8,7 +8,7 @@ import { QTY } from "@/lib/money";
 import { searchable } from "@/lib/core/text";
 import { resolvePrices } from "../pricing";
 import { defaultWarehouse } from "../stock";
-import { commerceEvent, requireStore, slugify } from "./common";
+import { commerceEvent, requireStore, settleCommerceEvent, slugify } from "./common";
 import { shippingOf } from "./store";
 
 /**
@@ -164,7 +164,7 @@ export async function catalogRows(ctx: Ctx, opts: { show?: "all" | "in_store" | 
     if (show === "in_store" && !listing) continue;
     if (show === "published" && !listing?.published) continue;
     if (show === "off" && listing?.published) continue;
-    if (show === "issues" && !issues.some((i) => i.blocking)) continue;
+    if (show === "issues" && (!listing || !issues.some((i) => i.blocking))) continue;
     rows.push(row);
   }
   return rows.sort((a, b) => Number(Boolean(b.listing?.published)) - Number(Boolean(a.listing?.published)) || String(a.product.name).localeCompare(String(b.product.name)));
@@ -317,18 +317,17 @@ export async function validateListings(ctx: Ctx, productIds: string[], opts: { s
     const issues = computeIssues({ st, product, skus: own, listing: l, price: ps.length ? Math.min(...ps) : 0 });
     const after = await unscoped(ctx.store).update("store_products", l.id, { issues });
     out.push(after);
-    if (opts.silent && !hasBlocking(issues)) continue;
+    // uma linha do monitor por produto (Tela 60: "Catálogo — <produto> — Falha de validação — Tentativas N"): cada
+    // validação atualiza a situação e soma uma tentativa; produto sem pendência e sem histórico não gera registro na
+    // validação silenciosa (ao salvar)
+    const key = `catalog:${st.id}:${pid}`;
     const blocking = issues.filter((i) => i.blocking);
-    await commerceEvent(ctx.store, {
-      companyId: ctx.companyId,
-      storeId: st.id,
-      area: "catalog",
-      action: "catalog.validate",
-      status: blocking.length ? "failed" : "ok",
-      reference: l.title,
-      diagnostic: blocking.length ? `Falha de validação: ${blocking.map((b) => b.label.toLowerCase()).join("; ")}. Corrija o cadastro do produto e reprocesse.` : "Produto pronto para a vitrine e para os conectores.",
-      subject: `product:${pid}`,
-    });
+    const status = blocking.length ? "failed" : "ok";
+    const diagnostic = blocking.length ? `Falha de validação: ${blocking.map((b) => b.label.toLowerCase()).join("; ")}. Corrija o cadastro do produto e reprocesse.` : "Produto pronto para a vitrine e para os conectores.";
+    const known = await unscoped(ctx.store).get("commerce_events", detId("cevent", key));
+    if (opts.silent && !blocking.length && !known) continue;
+    if (known) await settleCommerceEvent(ctx.store, known.id, status, diagnostic);
+    else await commerceEvent(ctx.store, { companyId: ctx.companyId, storeId: st.id, area: "catalog", action: "catalog.validate", status, reference: l.title, externalKey: key, diagnostic, subject: `product:${pid}` });
   }
   return out;
 }
@@ -452,12 +451,15 @@ export async function publicProduct(store: Store, st: Doc, slug: string) {
   return { listing: l, product: p, variants, category: category && category.companyId === st.companyId ? category : null, brand: brand && brand.companyId === st.companyId ? brand : null, images };
 }
 
-/** Uma imagem pode ser servida publicamente só se for da identidade da loja ou de um produto da vitrine. */
+/**
+ * Uma imagem só é servida pela vitrine se for da identidade da loja ou de um produto do catálogo da loja (fotos enviadas
+ * para a loja ou a foto do cadastro do produto). Qualquer outro arquivo da empresa (XML, anexos, backups) nunca sai.
+ */
 export async function isPublicImage(store: Store, st: Doc, fileId: string): Promise<boolean> {
   if (st.theme?.logoFileId === fileId || st.theme?.heroFileId === fileId) return true;
-  const listings = (await listingsOf(store, st.id)).filter((l) => l.published);
+  const listings = await listingsOf(store, st.id);
   if (listings.some((l) => (l.images ?? []).includes(fileId))) return true;
-  const pids = listings.filter((l) => !(l.images ?? []).length).map((l) => l.productId);
+  const pids = listings.map((l) => l.productId);
   for (let i = 0; i < pids.length; i += 100) {
     const ps = await listAll(unscoped(store), "products", { filters: [["eq", "id", pids.slice(i, i + 100)]] });
     if (ps.some((p) => p.imageFileId === fileId && p.companyId === st.companyId)) return true;

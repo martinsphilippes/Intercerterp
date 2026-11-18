@@ -55,6 +55,14 @@ const SCREENS = [
   ["46", "Planejamento de compras e reposição", "Análise e planejamento", "70–73"], ["47", "Cotação e comparação de fornecedores", "Análise e planejamento", "74–76"], ["48", "Aprovação de compras", "Análise e planejamento", "77–79"],
 ];
 
+// Comércio digital — guia v2.0 (docs/referencia/Intercert_ERP_64_Telas_Comentadas.pdf, p. 81–125)
+const ECOM = [
+  ["49", "Central de comércio digital", "81–82"], ["50", "Modelos da loja", "83–86"], ["51", "Editor visual e domínio", "87–89"], ["52", "Catálogo digital", "90–92"],
+  ["53", "Canais e contas conectadas", "93–95"], ["54", "Pedidos online e detalhes", "96–98"], ["55", "Promoções e recuperação de carrinhos", "99–101"], ["56", "Gateway e checkout", "102–103"],
+  ["57", "Banco Intercert e repasses", "104–105"], ["58", "Frete e plataformas logísticas", "106–107"], ["59", "Expedição e rastreamento", "108–109"], ["60", "Monitoramento das integrações", "110–111"],
+  ["61", "Loja pública e categorias", "112–113"], ["62", "Página pública do produto", "114–115"], ["63", "Carrinho", "116–117"], ["64", "Checkout e acompanhamento", "118–122"],
+];
+
 const VIEWS = [
   [1, "Cadastro do produto — dados fiscais", "21", "16", "/produtos/[id]?tab=fiscal", "tests/products.test.ts; tests/fiscal.test.ts (CST/CSOSN por regime)"],
   [2, "Cadastro do produto — custos e preços", "22", "16", "/produtos/[id]?tab=precos", "tests/products.test.ts (vigência, atacado, histórico de preço)"],
@@ -94,9 +102,11 @@ const evidence = (name) => {
   return `${name} (pendente)`;
 };
 
-let md = `# Matriz de cobertura — 48 telas, 14 visões complementares e continuações
+let md = `# Matriz de cobertura — 64 telas, 14 visões complementares e continuações
 
-Fonte: \`docs/referencia/Intercert_ERP_48_Telas_Comentadas.pdf\` (v1.0, 80 páginas). Este arquivo é gerado por \`node scripts/docs/build-matrix.mjs\`
+Fontes: \`docs/referencia/Intercert_ERP_48_Telas_Comentadas.pdf\` (v1.0, 80 páginas — Telas 01–48) e
+\`docs/referencia/Intercert_ERP_64_Telas_Comentadas.pdf\` (v2.0, 125 páginas — referência oficial; acrescenta as Telas 49–64 do comércio digital).
+Este arquivo é gerado por \`node scripts/docs/build-matrix.mjs\`
 a partir de \`scripts/docs/coverage-map.json\`. Especificação detalhada por tela (regiões, campos, ações, regras): \`docs/referencia/telas/*.md\`.
 
 Legenda de integração: **real** = chamada ao serviço externo quando a credencial existe; **simulação** = provedor de simulação rotulado (selo “SIMULAÇÃO”),
@@ -110,6 +120,18 @@ nunca apresentado como operação real. Estados e dependências externas: \`docs
 for (const [n, name, group, pages] of SCREENS) {
   const m = map[n] ?? {};
   md += `| ${n} | ${esc(name)} | ${esc(group)} | ${pages} | ${observed(n)} | ${esc(m.route)} | ${esc(m.integ)} | ${esc(m.test)} | ${situation(m)} | ${evidence(m.evid)} | ${esc(m.notes)} |\n`;
+}
+md += `
+## Comércio digital — Telas 49–64 (guia v2.0)
+
+Especificação, regras e lacunas: [referencia/telas/comercio-digital.md](referencia/telas/comercio-digital.md) · decisões: \`docs/regras-assumidas.md\` §49.
+
+| Nº | Tela | Pág. PDF | Rota(s) | Integrações | Validação (testes / e2e) | Situação | Observações e decisões |
+|---|---|---|---|---|---|---|---|
+`;
+for (const [n, name, pages] of ECOM) {
+  const m = map[n] ?? {};
+  md += `| ${n} | ${esc(name)} | ${pages} | ${esc(m.route)} | ${esc(m.integ)} | ${esc(m.test)} | ${/simula|reservado|conector/i.test(String(m.integ)) ? "Implementada · serviço externo em simulação até a ligação" : "Implementada"} | ${esc(m.notes)} |\n`;
 }
 md += `
 ## Visões complementares (14)

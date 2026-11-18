@@ -236,7 +236,7 @@ export function defaultPages(storeName: string, legal: StoreLegal): StorePages {
     privacy:
       `Coletamos os dados necessários para processar o pedido, emitir a nota fiscal e entregar (nome, CPF/CNPJ, contato e endereço), com base na execução do contrato e no cumprimento de obrigação legal (LGPD, art. 7º, II e V). ` +
       `Mensagens de ofertas e de carrinho abandonado só são enviadas com o seu consentimento, que pode ser retirado a qualquer momento. ` +
-      `Usamos apenas cookies essenciais para manter o carrinho. Dados de cartão são tratados exclusivamente pelo provedor de pagamento e não são armazenados pela loja. ` +
+      `Usamos apenas cookies essenciais para manter o carrinho. O CEP informado é consultado em serviço público de endereços para preencher o endereço e o município da nota fiscal. Dados de cartão são tratados exclusivamente pelo provedor de pagamento e não são armazenados pela loja. ` +
       `Para exercer seus direitos (acesso, correção, eliminação), fale conosco${contact ? ` pelo ${contact}` : ""}.`,
     terms:
       `Ao finalizar a compra você declara conhecer estes termos. Preço, disponibilidade e frete são confirmados no momento do pedido; o estoque fica reservado durante o prazo de pagamento. ` +

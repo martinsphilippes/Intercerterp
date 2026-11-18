@@ -86,7 +86,12 @@ export async function invoiceOrder(ctx: Ctx, orderId: string): Promise<Doc> {
   const fctx = { ...ctx, branchId: order.branchId };
   const pre = await loadOrigin(fctx, "online_order", orderId, order.branchId);
   if (pre.blockers.length) throw new BusinessError(pre.blockers.join(" "), "fiscal_blocked");
-  const doc = await saveNfe(fctx, pre.input, { idemKey: `online_order:${orderId}`, draftId: pre.existingDocId ?? null, transmit: true });
+  let doc = await saveNfe(fctx, pre.input, { idemKey: `online_order:${orderId}`, draftId: pre.existingDocId ?? null, transmit: true });
+  // consulta a situação logo após o envio (como no PDV): sem isso a nota ficaria "em processamento" até a próxima rotina
+  if (["processing", "queued"].includes(doc.status)) {
+    const { queryDocument } = await import("../fiscal/service");
+    doc = (await queryDocument(fctx, doc.id).catch(() => null)) ?? doc;
+  }
   await syncOrderFromNfe(fctx, doc);
   return (await unscoped(ctx.store).get(ORDER_COLLECTION, orderId))!;
 }

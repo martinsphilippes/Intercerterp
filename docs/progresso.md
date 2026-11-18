@@ -67,3 +67,10 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 1. `npm install` · `npm test` · `MEMORY_TX_MODE=deferred npm test` · `npx tsc --noEmit` · `npx next lint`.
 2. Appwrite local (opcional): variáveis em `.env.local`, `npm run appwrite:setup`, `npm run seed`.
 3. `npm run build && npm start` · `node scripts/dev/crawl.mjs` · `node scripts/dev/evidence.mjs` · `node scripts/docs/build-matrix.mjs`.
+
+## Comércio digital — Telas 49–64 (guia v2.0) · 18/11/2026
+- [x] Guia de 64 telas (v2.0) adotado como referência oficial (`docs/referencia/Intercert_ERP_64_Telas_Comentadas.pdf`); decisões do titular: loja própria por empresa com domínio próprio, Gateway e Banco Intercert depois (ambiente pronto), quatro modalidades de entrega.
+- [x] Domínio `src/domain/ecommerce/` (loja, modelos, domínios, catálogo, carrinho, cupons, frete, checkout, pedidos, NF-e do pedido, banco, monitor, canais, imagens, provedores) + 11 tabelas, 6 operações de permissão, recurso `comercioDigital`, 4 integrações na Central, rotina diária de expiração.
+- [x] Gestão no ERP (Telas 49–60) em `/comercio-digital/*` e vitrine pública (Telas 61–64) em `/loja/<endereço>` ou domínio próprio (middleware + verificação por TXT); avisos do gateway em `/api/loja/gateway/<provedor>/<loja>`.
+- [x] Testes: `tests/ecommerce.test.ts` (12 cenários, memória e PostgreSQL) e `tests/ecommerce-demo.test.ts` (demonstração e reexecução sem duplicar). Demonstração “Loja Modelo” com 7 pedidos pelo fluxo real.
+- [x] Documentação: especificação e lacunas (`docs/referencia/telas/comercio-digital.md`), matriz (Telas 49–64), regras §49, pendências 13–17.

@@ -28,6 +28,10 @@ import { checkoutOf, paymentsOf } from "./store";
 
 export const UFS = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"];
 
+/** Pedidos não pagos simultâneos (seguram estoque): por acesso (IP) e por e-mail, na mesma loja. */
+export const MAX_PENDING_PER_IP = 3;
+export const MAX_PENDING_PER_EMAIL = 2;
+
 export interface CheckoutInput {
   /** chave do envio (gerada ao abrir o checkout): repetir o envio devolve o mesmo pedido */
   submissionKey: string;
@@ -73,6 +77,25 @@ export function validateCheckout(st: Doc, input: CheckoutInput): CheckoutProblem
   if (!m?.enabled) out.push({ field: "payment", message: "Escolha um meio de pagamento disponível." });
   if (!input.deliveryOptionId) out.push({ field: "delivery", message: "Escolha a forma de entrega." });
   return out;
+}
+
+/**
+ * Código IBGE do município pelo CEP (exigido na NF-e). O navegador já tenta pelo ViaCEP ao digitar o CEP; quando não
+ * veio (consulta bloqueada, endereço digitado à mão), o servidor tenta uma vez, com limite de tempo. Só o CEP é enviado.
+ * Sem resposta, o pedido segue e a NF-e avisa a falta do código para correção no Fiscal.
+ */
+export async function cityCodeByZip(zip: string, uf: string): Promise<string | null> {
+  const z = onlyDigits(zip);
+  if (z.length !== 8 || process.env.STORE_CEP_LOOKUP === "off") return null;
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${z}/json/`, { signal: AbortSignal.timeout(3000), headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { ibge?: string; uf?: string; erro?: boolean };
+    if (j.erro || !/^\d{7}$/.test(String(j.ibge ?? "")) || (uf && j.uf && j.uf.toUpperCase() !== uf.toUpperCase())) return null;
+    return String(j.ibge);
+  } catch {
+    return null;
+  }
 }
 
 /** Cliente da empresa pelo CPF/CNPJ; sem cadastro, cria um (com o consentimento de mensagens informado). */
@@ -127,9 +150,20 @@ export async function placeOrder(store: Store, st: Doc, cartToken: string, input
 
   const problems = validateCheckout(st, input);
   if (problems.length) throw new BusinessError(problems.map((p) => p.message).join(" "), "checkout_invalid");
+  if (!input.address.cityCode) {
+    const code = await cityCodeByZip(input.address.zip, input.address.uf);
+    if (code) input = { ...input, address: { ...input.address, cityCode: code } };
+  }
 
   // pedidos vencidos da empresa liberam estoque antes da nova reserva
   await expirePendingOrders(store, st.companyId).catch(() => 0);
+
+  // proteção da reserva: pedidos não pagos seguram estoque — limite por IP e por e-mail na loja
+  const pendingNow = await listAll(base, ORDER_COLLECTION, { filters: [["eq", "storeId", st.id], ["eq", "status", "pending_payment"]] }, 2000);
+  const ip = input.meta?.ip?.trim() || null;
+  const email = input.customer.email.trim().toLowerCase();
+  if (ip && pendingNow.filter((o) => o.consents?.ip === ip).length >= MAX_PENDING_PER_IP) throw new BusinessError("Há pedidos aguardando pagamento feitos deste acesso: conclua o pagamento ou cancele um deles antes de fazer outro.", "too_many_pending");
+  if (pendingNow.filter((o) => String(o.customer?.email ?? "").toLowerCase() === email).length >= MAX_PENDING_PER_EMAIL) throw new BusinessError("Você já tem pedidos aguardando pagamento: conclua o pagamento ou cancele um deles antes de fazer outro.", "too_many_pending");
 
   // carrinho e frete recalculados no servidor (CEP do endereço informado)
   const zip = onlyDigits(input.address.zip);

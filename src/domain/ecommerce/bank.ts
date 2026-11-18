@@ -1,5 +1,4 @@
 import { detId, listAll } from "@/lib/db";
-import type { Doc } from "@/lib/db/types";
 import { unscoped } from "@/lib/db/scoped-store";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, type Ctx } from "@/lib/core/ctx";

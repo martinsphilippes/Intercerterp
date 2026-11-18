@@ -54,6 +54,19 @@ export const TEMPLATES: Record<TemplateKey, StoreTemplate> = {
 
 export const TEMPLATE_KEYS = Object.keys(TEMPLATES) as TemplateKey[];
 
+/** Cores de destaque sugeridas no editor (Tela 51); qualquer #RRGGBB válido também é aceito. */
+export const ACCENT_PRESETS: Array<{ value: string; label: string }> = [
+  { value: "#1f448c", label: "Azul Intercert" },
+  { value: "#d95f0f", label: "Laranja Intercert" },
+  { value: "#c2410c", label: "Terracota" },
+  { value: "#1d4ed8", label: "Azul vivo" },
+  { value: "#be123c", label: "Vermelho campanha" },
+  { value: "#15803d", label: "Verde" },
+  { value: "#0f766e", label: "Verde-petróleo" },
+  { value: "#7c3aed", label: "Roxo" },
+  { value: "#334155", label: "Grafite" },
+];
+
 export function templateOf(key: string | null | undefined): StoreTemplate {
   return TEMPLATES[(key as TemplateKey) ?? "essencial"] ?? TEMPLATES.essencial;
 }

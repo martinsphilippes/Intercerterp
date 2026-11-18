@@ -49,14 +49,17 @@ export async function reprocessEvent(ctx: Ctx, eventId: string): Promise<{ statu
   const [kind, id] = String(ev.subject ?? "").split(":");
   let status: CommerceEventStatus = "failed";
   let message = "";
+  // a validação do catálogo atualiza o próprio evento do produto (uma linha por produto): não registrar de novo
+  let settled = false;
   try {
     if (ev.area === "catalog" && kind === "product") {
       const { validateListings, hasBlocking } = await import("./catalog");
-      const [l] = await validateListings(ctx, [id], { silent: true });
+      const [l] = await validateListings(ctx, [id]);
       if (!l) throw new BusinessError("Produto fora do catálogo da loja.");
       const blocking = (l.issues ?? []).filter((i: { blocking?: boolean }) => i.blocking);
       status = hasBlocking(l.issues) ? "failed" : "ok";
       message = status === "ok" ? "Validação refeita: produto pronto para a vitrine e os conectores." : `Ainda pendente: ${blocking.map((b: { label: string }) => b.label.toLowerCase()).join("; ")}.`;
+      settled = ev.externalKey === `catalog:${st.id}:${id}`;
     } else if (ev.area === "domain" && kind === "domain") {
       const { verifyDomain } = await import("./domains");
       const d = await verifyDomain(ctx, id);
@@ -100,7 +103,7 @@ export async function reprocessEvent(ctx: Ctx, eventId: string): Promise<{ statu
     status = "failed";
     message = String(e?.message ?? e).slice(0, 500);
   }
-  await settleCommerceEvent(ctx.store, ev.id, status, message);
+  if (!settled) await settleCommerceEvent(ctx.store, ev.id, status, message);
   await audit(ctx, { module: "sales", action: "ecommerce.event_reprocess", entityType: "commerce_event", entityId: ev.id, summary: `Evento ${ev.area}/${ev.action} reprocessado: ${status}`, related: [`store:${st.id}`] });
   return { status, message };
 }

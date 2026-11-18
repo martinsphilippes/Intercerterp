@@ -105,6 +105,15 @@ describe("loja e vitrine", () => {
     await saveListing(admin, refs.products.bone.id, { title: l.title, description: l.description, images: [], featured: false, published: true, weightGrams: null });
     expect((await listAll(store, "store_products", { filters: [["eq", "productId", refs.products.bone.id]] }))[0].issues.map((i: any) => i.code)).toContain("no_weight");
     expect((await publicCatalog(store, st)).cards.some((c) => c.productId === refs.products.bone.id)).toBe(false);
+    // monitor: falha de validação do produto; corrigido o peso, o reprocessamento conclui a MESMA linha
+    const { monitorEvents, reprocessEvent } = await import("@/domain/ecommerce/monitor");
+    const failed = (await monitorEvents(admin, { status: "failed" })).filter((e) => e.subject === `product:${refs.products.bone.id}`);
+    expect(failed).toHaveLength(1);
+    await saveListing(admin, refs.products.bone.id, { title: l.title, description: l.description, images: [], featured: false, published: true, weightGrams: 150 });
+    const r = await reprocessEvent(admin, failed[0].id);
+    expect(r.status).toBe("ok");
+    expect((await monitorEvents(admin, {})).filter((e) => e.subject === `product:${refs.products.bone.id}`)).toHaveLength(1);
+    expect((await publicCatalog(store, st)).cards.some((c) => c.productId === refs.products.bone.id)).toBe(true);
     // produto com variações: uma variante por SKU com estoque próprio
     const camiseta = await publicProduct(store, st, await slugOf("camiseta"));
     expect(camiseta!.variants.length).toBeGreaterThan(1);
@@ -241,6 +250,18 @@ describe("carrinho, checkout e pagamento", () => {
     expect(await bal("fone-u")).toEqual(before);
   });
 
+  it("pedidos não pagos seguram estoque: limite por e-mail e por acesso (IP) na loja", async () => {
+    const one = await placeOrder(store, st, await cartWith([[await slugOf("caderno"), 1]]), checkout({ meta: { ip: "203.0.113.7" } }));
+    await placeOrder(store, st, await cartWith([[await slugOf("caderno"), 1]]), checkout({ meta: { ip: "203.0.113.7" } }));
+    await expect(placeOrder(store, st, await cartWith([[await slugOf("caderno"), 1]]), checkout({ meta: { ip: "198.51.100.1" } }))).rejects.toMatchObject({ code: "too_many_pending" });
+    const other = (n: number) => checkout({ customer: { name: "Outra Pessoa", email: `outra${n}@example.com`, phone: "11987654321", doc: "52998224725" }, meta: { ip: "203.0.113.7" } });
+    expect((await placeOrder(store, st, await cartWith([[await slugOf("caderno"), 1]]), other(1))).status).toBe("pending_payment"); // 3º do mesmo acesso
+    await expect(placeOrder(store, st, await cartWith([[await slugOf("caderno"), 1]]), other(2))).rejects.toMatchObject({ code: "too_many_pending" });
+    // pago, deixa de contar
+    await simulatePaymentEvent(store, one, "approved");
+    expect((await placeOrder(store, st, await cartWith([[await slugOf("caderno"), 1]]), other(3))).status).toBe("pending_payment");
+  });
+
   it("checkout recusa dados inválidos e opção de entrega inexistente; pagamento de boleto desligado não é aceito", async () => {
     const t = await cartWith([[await slugOf("caderno"), 1]]);
     await expect(placeOrder(store, st, t, checkout({ customer: { name: "A", email: "x", phone: "1", doc: "123" } }))).rejects.toMatchObject({ code: "checkout_invalid" });
@@ -259,6 +280,28 @@ describe("domínio próprio e avisos do gateway", () => {
     expect(() => normalizeDomain("loja.exemplo.com.br/produtos")).toThrow();
     expect(() => normalizeDomain("minhaloja.vercel.app")).toThrow(/próprio sistema/);
     expect(() => normalizeDomain("localhost")).toThrow();
+  });
+
+  it("domínio próprio: só o verificado abre a loja; hosts do ERP nunca viram vitrine", async () => {
+    const { resolveStore } = await import("@/domain/ecommerce/storefront");
+    const { isErpHost } = await import("@/middleware");
+    const { detId } = await import("@/lib/db");
+    const put = (storeId: string, status: string) => store.create("store_domains", { companyId: st.companyId, branchId: null, storeId, domain: "loja.exemplo.com.br", primary: true, status, provider: "manual_dns", dns: { verifyToken: "abc" } }, detId("sdomain", storeId, "loja.exemplo.com.br"));
+    await put(st.id, "pending_dns");
+    expect(await resolveStore(store, "~loja.exemplo.com.br")).toBeNull();
+    // outra loja cadastra o mesmo domínio e comprova a propriedade: só ela abre
+    const other = await store.create("stores", { companyId: "outra-empresa", branchId: null, name: "Outra", slug: "outra", status: "published" });
+    await put(other.id, "active");
+    const r = await resolveStore(store, "~loja.exemplo.com.br");
+    expect(r).toMatchObject({ basePath: "", viaDomain: true });
+    expect(r!.st.id).toBe(other.id);
+    expect((await resolveStore(store, "loja-teste"))?.basePath).toBe("/loja/loja-teste");
+    expect(isErpHost("intercerterp.vercel.app")).toBe(true);
+    expect(isErpHost("localhost:3000")).toBe(true);
+    expect(isErpHost("loja.exemplo.com.br")).toBe(false);
+    process.env.APP_HOSTS = "erp.minhaempresa.com.br";
+    expect(isErpHost("erp.minhaempresa.com.br")).toBe(true);
+    delete process.env.APP_HOSTS;
   });
 
   it("Gateway Intercert: aviso só vale com assinatura HMAC válida e recente", () => {
