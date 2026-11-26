@@ -50,6 +50,25 @@ export async function applyDueTransitions(store: Store, companyId: string, now =
   return out;
 }
 
+/**
+ * Transições vencidas de VÁRIAS empresas de uma vez (listas consultadas periodicamente pelo Interos, como
+ * `GET /api/interos/v2/companies`): sem esperar a rotina diária, mesmo para a empresa que ninguém abriu. Só toca as
+ * empresas com algo vencido (licença com `nextTransitionAt` passado ou operação agendada vencida).
+ */
+export async function applyDueTransitionsForAll(store: Store, onlyCompanyIds: string[] | null = null, now = new Date()): Promise<number> {
+  const base = unscoped(store);
+  const iso = now.toISOString();
+  const scope = onlyCompanyIds ? [["eq", "companyId", onlyCompanyIds] as any] : [];
+  const { listAll } = await import("@/lib/db");
+  const [lics, ops] = await Promise.all([
+    listAll(base, "company_licenses", { filters: [["notNull", "nextTransitionAt"], ["lte", "nextTransitionAt", iso], ...scope] }),
+    listAll(base, "module_operations", { filters: [["eq", "status", "scheduled"], ["lte", "scheduledFor", iso], ...scope] }),
+  ]);
+  const due = [...new Set([...lics.map((l) => l.companyId as string), ...ops.map((o) => o.companyId as string)].filter(Boolean))];
+  for (const companyId of due) await applyDueTransitions(base, companyId, now);
+  return due.length;
+}
+
 /** Só para testes: esquece quando os desligamentos em conclusão foram conferidos. */
 export function resetDueTransitionChecks() {
   drainChecked.clear();

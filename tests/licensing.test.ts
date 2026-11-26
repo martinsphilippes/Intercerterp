@@ -431,6 +431,22 @@ describe("API /api/interos/v2", () => {
     expect(r3.status).toBe(409);
   });
 
+  it("correção 3 (listas): a lista de empresas consultada pelo Interos aplica as transições vencidas de todas elas", async () => {
+    const t0 = Date.now();
+    const trial = (cid: string) => snap(cid, 1, [...ALL_SELLABLE_RETAIL.filter((c) => c !== "05.02").map((code) => ({ code, state: "active" as const })), { code: "05.02", state: "trial" as const, until: iso(t0 + day) }], { controlMode: "enforced" });
+    await applyLicense(store, A.id, trial(A.id), meta);
+    await applyLicense(store, B.id, trial(B.id), meta);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(t0 + 10 * day));
+      const r = await (await import("@/app/api/interos/v2/companies/route")).GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${token}` } }));
+      expect(r.status).toBe(200);
+      for (const c of [A, B]) expect(decide(await loadCompanyModules(store, c.id), "compras.cotacoes").level, c.id).toBe("read");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("escopo e restrição de empresa por credencial", async () => {
     const { PUT, GET } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
     const body = JSON.stringify(snap(A.id, 1, []));
