@@ -79,7 +79,7 @@ O `vercel.json` agenda `/api/jobs` **uma vez por dia** (compatível com o plano 
 
 Sem banco conectado, a aplicação mostra a página **“configuração pendente”** com o que falta (nenhum dado é gravado). Somente para apresentação, `DATA_BACKEND=memory` sobe uma demonstração volátil (recriada a cada reinício e sem consistência entre instâncias).
 
-Variáveis `APPWRITE_*` que tenham sobrado no projeto não têm efeito (o Appwrite saiu do código em 26/11/2026) e podem ser apagadas em *Settings → Environment Variables*.
+O Appwrite saiu do código em 26/11/2026, e as variáveis `APPWRITE_*` foram apagadas do projeto na Vercel no mesmo dia. Se aparecerem em outra instalação, não têm efeito.
 
 ## Scripts
 
