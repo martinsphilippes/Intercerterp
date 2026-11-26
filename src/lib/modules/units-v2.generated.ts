@@ -1,6 +1,6 @@
 // GERADO por scripts/modules/build-catalog-v2.ts — não edite. Catálogo 2.0.0-proposta.
 export const CATALOG_V2_VERSION = "2.0.0-proposta";
-export interface UnitV2 { code: string; name: string; slug: string; v1Key: string | null; devStatus: string; sellable: boolean; requires: string[] }
+export interface UnitV2 { code: string; name: string; slug: string; v1Key: string | null; devStatus: string; sellable: boolean; includedInParent: boolean; companyKinds: string[]; requires: string[]; requiresAny: string[][] }
 export const UNITS_V2: UnitV2[] = [
  {
   "code": "01.02",
@@ -9,7 +9,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "cadastros.clientes",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "01.03",
@@ -18,7 +23,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "cadastros.fornecedores",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "01.04",
@@ -27,7 +37,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "cadastros.produtos",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "02.09",
@@ -36,7 +51,17 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.tributacao_avancada",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": [
+   [
+    "04.01",
+    "04.02"
+   ]
+  ]
  },
  {
   "code": "02.14",
@@ -45,7 +70,17 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.reforma_tributaria",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": [
+   [
+    "04.01",
+    "04.02"
+   ]
+  ]
  },
  {
   "code": "03.13",
@@ -54,9 +89,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.cte",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "05.06"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "04.01",
@@ -65,7 +105,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.nfe",
   "devStatus": "EXT",
   "sellable": false,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "04.02",
@@ -74,7 +119,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.nfce",
   "devStatus": "EXT",
   "sellable": false,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "04.03",
@@ -83,7 +133,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.nfse",
   "devStatus": "EXT",
   "sellable": false,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "05.02",
@@ -92,9 +149,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.cotacoes",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "05.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "05.04",
@@ -103,10 +165,15 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.pedidos",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.03",
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "05.05",
@@ -115,9 +182,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.aprovacoes",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "05.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "05.06",
@@ -126,10 +198,15 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.recebimento",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.03",
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "05.08",
@@ -138,9 +215,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.reposicao",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "05.19",
@@ -149,9 +231,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.nota_a_confirmar",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "05.06"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "05.20",
@@ -160,9 +247,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "compras.precificacao",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "05.06"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "06.01",
@@ -171,9 +263,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "vendas.documentos",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "06.09",
@@ -182,9 +279,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "pdv.reserva_prevenda",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "07.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "06.12",
@@ -193,7 +295,18 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "vendas.comissoes",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": [
+   [
+    "06.01",
+    "07.01",
+    "12.01"
+   ]
+  ]
  },
  {
   "code": "06.13",
@@ -202,7 +315,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "gestao.metas",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "07.01",
@@ -211,10 +329,15 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "vendas.pdv",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04",
    "07.02"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "07.02",
@@ -223,7 +346,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "caixa.operacao",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "07.27",
@@ -232,10 +360,15 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "pdv.recebimento_crediario",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "07.01",
    "18.02"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "08.04",
@@ -244,9 +377,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "vendas.devolucoes",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "07.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "09.13",
@@ -255,9 +393,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "produtos.etiquetas",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "09.22",
@@ -266,9 +409,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "produtos.alteracao_massa",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "10.01",
@@ -277,9 +425,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "estoque.gestao",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "10.05",
@@ -288,9 +441,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "estoque.transferencias",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "10.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "10.09",
@@ -299,9 +457,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "estoque.inventario",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "10.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "10.10",
@@ -310,9 +473,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "estoque.lotes",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "10.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "10.17",
@@ -321,7 +489,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "relatorios.curva_abc",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "10.32",
@@ -330,9 +503,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "estoque.inventario_fiscal",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "10.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "12.01",
@@ -341,10 +519,15 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "ecommerce.loja",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04",
    "04.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "12.09",
@@ -353,9 +536,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "ecommerce.promocoes",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "12.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "15.01",
@@ -364,9 +552,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "produtos.kits",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "18.01",
@@ -375,7 +568,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.contas_pagar",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "18.02",
@@ -384,7 +584,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.contas_receber",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "18.03",
@@ -393,7 +600,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.fluxo_caixa",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "18.10",
@@ -402,7 +616,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.conciliacao",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "18.11",
@@ -411,9 +632,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.taxas_adquirente",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "18.44"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "18.13",
@@ -422,9 +648,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.inadimplencia",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "18.02"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "18.18",
@@ -433,7 +664,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.relatorios",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "18.22",
@@ -442,9 +680,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.fechamento_periodo",
   "devStatus": "PARC",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "18.03"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "18.41",
@@ -453,9 +698,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.cobranca_whatsapp",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "18.02"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "18.42",
@@ -464,9 +716,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.carne",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "18.02"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "18.43",
@@ -475,9 +734,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.baixa_lote",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "18.02"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "18.44",
@@ -486,7 +752,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.cartoes",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "20.03",
@@ -495,10 +766,15 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "clientes.fidelidade",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.02",
    "07.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "21.02",
@@ -507,7 +783,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "relatorios.gerenciais",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "22.02",
@@ -516,7 +797,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.sped",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "22.05",
@@ -525,7 +813,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.livro_entradas",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "22.07",
@@ -534,7 +827,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "integracao.contabilidade",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "22.21",
@@ -543,7 +841,19 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "financeiro.exportacao_dominio",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": [
+   [
+    "18.01",
+    "18.02"
+   ]
+  ]
  },
  {
   "code": "22.22",
@@ -552,7 +862,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "fiscal.sintegra",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "24.13",
@@ -561,7 +876,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "implantacao.importacao",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "25.01",
@@ -570,9 +890,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "produtos.promocoes",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "35.18",
@@ -581,9 +906,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "ecommerce.canais",
   "devStatus": "DEV",
   "sellable": false,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "12.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "36.17",
@@ -592,9 +922,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "ecommerce.banco",
   "devStatus": "EXT",
   "sellable": false,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "12.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "46.01",
@@ -603,9 +938,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "produtos.balanca",
   "devStatus": "PARC",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "retail"
+  ],
   "requires": [
    "01.04"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "48.06",
@@ -614,9 +954,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "contabil.certificados",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting"
+  ],
   "requires": [
    "51.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "51.01",
@@ -625,7 +970,12 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "contabil.carteira",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "51.04",
@@ -634,9 +984,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "contabil.entregas",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting"
+  ],
   "requires": [
    "51.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "52.01",
@@ -645,7 +1000,14 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "rede.parceiro",
   "devStatus": "OP",
   "sellable": true,
-  "requires": []
+  "includedInParent": true,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
+  "requires": [],
+  "requiresAny": []
  },
  {
   "code": "52.03",
@@ -654,9 +1016,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "rede.vendas",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "52.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "52.04",
@@ -665,9 +1034,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "rede.vouchers_cupons",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "52.03"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "52.06",
@@ -676,9 +1052,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "rede.renovacoes",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "52.01"
-  ]
+  ],
+  "requiresAny": []
  },
  {
   "code": "52.07",
@@ -687,9 +1070,16 @@ export const UNITS_V2: UnitV2[] = [
   "v1Key": "rede.financeiro",
   "devStatus": "OP",
   "sellable": true,
+  "includedInParent": false,
+  "companyKinds": [
+   "accounting",
+   "certification",
+   "retail"
+  ],
   "requires": [
    "52.01"
-  ]
+  ],
+  "requiresAny": []
  }
 ];
 export const ALIAS_OF: Record<string, string> = {"05.13":"27.09","07.07":"46.01","07.13":"36.04","08.03":"08.02","08.07":"18.23","09.02":"09.04","09.03":"09.04","09.06":"46.02","10.28":"05.08","11.18":"12.24","12.06":"36.01","12.07":"36.04","12.08":"36.03","12.33":"08.14","14.14":"09.09","14.19":"15.03","14.21":"15.09","20.09":"12.23","23.04":"46.01","25.13":"09.22","26.01":"01.05","32.11":"27.13","33.06":"27.03","34.06":"10.05","37.03":"17.13","37.04":"14.05","37.07":"26.10","37.08":"05.18","37.09":"22.08","43.12":"06.13","46.10":"09.13","48.01":"02.12","48.02":"02.12","50.06":"01.19","50.10":"24.24","50.13":"24.09","50.15":"12.24"};

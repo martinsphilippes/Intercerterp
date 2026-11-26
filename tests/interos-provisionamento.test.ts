@@ -292,3 +292,24 @@ describe("vínculo de empresa existente — identidade confirmada e sem vínculo
     expect(list.body.itens.map((e: any) => e.idEmpresa)).toEqual(expect.arrayContaining([existing.id]));
   });
 });
+
+describe("uma referência de contrato (pendência 4): com licença v2, os módulos seguem a licença", () => {
+  it("licença aplicada deriva o contrato amplo; PUT /modulos passa a responder 409 licenca_governa", async () => {
+    const r = await call("POST", "/empresas", { key: "k-gama-lic-01", body: body({ contaInterosId: "acc-gama-lic", empresa: { ...body().empresa, cnpj: "03.778.130/0001-48", razaoSocial: "Gama Licença Ltda" }, administrador: { nome: "Gil Gama", email: "gil@gama.example" } }) });
+    expect(r.status).toBe(201);
+    const id = r.body.empresa.idEmpresa;
+    expect(r.body.empresa.contrato.origemModulos).toBe("provisionamento");
+    const { applyLicense } = await import("@/domain/licensing/license");
+    const { takeBaseline } = await import("@/domain/modules/baseline");
+    await takeBaseline(store, id);
+    const items = [{ code: "07.01", state: "active" }, { code: "07.02", state: "active" }, { code: "01.04", state: "active" }, { code: "18.02", state: "suspended" }];
+    const applied = await applyLicense(store, id, { licenseVersion: 1, companyId: id, product: "erp-intercert", commercialStatus: "active", items, issuedAt: new Date().toISOString() }, { clientId: "interos-licencas", source: "push" });
+    expect(applied.status).toBe("applied");
+    const view = await call("GET", `/empresas/${id}`, { params: { idEmpresa: id } });
+    expect(view.body.empresa.modulos).toEqual(["financeiro", "pdv"]); // derivado da licença (suspenso continua contratado)
+    expect(view.body.empresa.contrato.origemModulos).toBe("licenca");
+    const put = await call("PUT", `/empresas/${id}/modulos`, { key: "k-gama-lic-02", params: { idEmpresa: id }, body: { modulos: ["pdv", "vendas"] } });
+    expect(put.status).toBe(409);
+    expect(put.body.erro.codigo).toBe("licenca_governa");
+  });
+});

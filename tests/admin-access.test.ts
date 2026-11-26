@@ -122,6 +122,27 @@ describe("administração de outra empresa autorizada (contexto restrito à empr
   });
 });
 
+describe("correção 14: quem cria um escritório contábil recebe o perfil de administrador do escritório", () => {
+  it("modo de ativação gradual (observar): administrador da empresa cria escritório e recebe firm_admin, com menu do escritório", async () => {
+    const prev = process.env.MULTIEMPRESA_ISOLAMENTO;
+    process.env.MULTIEMPRESA_ISOLAMENTO = "observar";
+    try {
+      const adminRole = await roleOf(A, "admin");
+      const ana = await directUser("ana-cria-escritorio", { name: "Ana Administra", companyIds: [A], roleId: adminRole.id, roleByCompany: { [A]: adminRole.id } });
+      const ctx = await req(ana.id, A, refs.branches.matriz.id);
+      const r = await createCompany(ctx, { name: "Escritório Contábil Teste Ltda", cnpj: cnpj("223334440001"), kind: "accounting" } as any);
+      const after = (await store.get("users", ana.id))!;
+      const granted = await store.get("roles", after.roleByCompany[r.company.id]);
+      expect(granted).toMatchObject({ key: "firm_admin", companyId: r.company.id });
+      const u = await toCtxUser(store, after, r.company.id);
+      expect(Object.keys(u.permissions ?? {}).length).toBeGreaterThan(0); // menu não fica vazio
+    } finally {
+      if (prev === undefined) delete process.env.MULTIEMPRESA_ISOLAMENTO;
+      else process.env.MULTIEMPRESA_ISOLAMENTO = prev;
+    }
+  });
+});
+
 describe("usuários: alcance de quem gerencia usuários sem ser administrador", () => {
   let rita: Ctx;
   let ritaId: string;

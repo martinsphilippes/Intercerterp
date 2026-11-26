@@ -20,6 +20,11 @@ const STATUS: Record<string, number> = {
   changes_rejected: 422, baseline_required: 422, unknown_module: 422, kind_not_supported: 422, dependency_missing: 422,
 };
 
+/** Status HTTP do código de erro do contrato (desconhecido = 422). */
+export function errorStatus(code: string): number {
+  return STATUS[code] ?? 422;
+}
+
 export function ok(data: unknown, init: { status?: number; headers?: Record<string, string>; requestId: string }) {
   return NextResponse.json({ data, meta: { apiVersion: API_VERSION, catalogVersion: CATALOG_VERSION, requestId: init.requestId } }, { status: init.status ?? 200, headers: { "Cache-Control": "no-store", "X-Request-Id": init.requestId, ...(init.headers ?? {}) } });
 }

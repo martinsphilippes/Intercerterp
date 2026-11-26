@@ -78,7 +78,11 @@ O retrato é versionado por `licenseVersion`, um inteiro que só cresce e é emi
 ```
 
 - `items[].code` é o código estável do catálogo v2 (módulo `NN`, submódulo `NN.SS` ou recurso `NN.SS.RR`).
-- Contratar o módulo (`"07"`) inclui os submódulos marcados como `includedInParent`. Os demais exigem item próprio, o que evita cobrança dupla.
+- Contratar o módulo (`"07"`) inclui só as unidades com `includedInParent: true` no catálogo (as principais, por
+  exemplo `07.01` e `07.02`). As adicionais (`includedInParent: false`, por exemplo `07.27`) exigem item próprio, o que
+  evita ligar e cobrar adicional sem querer. O aviso `module_expanded` diz quais entraram e quais ficaram de fora.
+- **Referência do contrato:** as unidades v2. O módulo amplo do provisionamento e a chave v1 são traduções delas,
+  publicadas no catálogo em `translations.provisioningModules` e `translations.v1Keys`.
 - Os aliases do catálogo (por exemplo, `07.13` é alias de `36.04`) são resolvidos para o proprietário antes de aplicar. Licenciar alias e proprietário ao mesmo tempo gera aviso `duplicate_entitlement`, nunca cobrança dupla.
 
 ### Estados de item e de empresa
@@ -88,16 +92,32 @@ O retrato é versionado por `licenseVersion`, um inteiro que só cresce e é emi
 | `active` | `enabled`: operação completa |
 | `inactive` | `disabled`, histórico em consulta conforme a política do módulo (contrato encerrado) |
 | `trial` | `enabled` até `until`; mais **7 dias** de carência (com aviso); depois `suspended`, **localmente**, sem depender do Interos. |
-| `activation_scheduled` | Nada até `effectiveAt`; então `enabled` (executado pela rotina local) |
+| `activation_scheduled` | Nada até `effectiveAt`; então `enabled`. Unidade **já ligada** continua ligada: agendar nunca desliga. |
 | `suspension_scheduled` | `enabled` até `effectiveAt`; então `suspended` |
 | `suspended` | Bloqueia novas operações. Obrigações em curso continuam (política `drain`). Consulta histórica mantida. Reversível sem perda. |
 | `expired` | Somente consulta histórica (igual a `read_only`). A carência de 7 dias vale para `validUntil` e para o teste, não para um item já enviado como `expired`. |
 | `read_only` | Só consulta histórica e ações de correção de histórico (`historyActions`) |
-| `unavailable` (técnico) | Definido **pelo ERP**, nunca pelo Interos: o item não está operacional. O ERP recusa ativar e informa em `rejectedItems`. |
+| (técnico, do ERP) | Unidade com `sellable: false` no catálogo (depende de integração externa ainda não homologada, ou está em desenvolvimento). O ERP recusa ativá-la para quem não tinha (`rejectedItems`, motivo `not_homologated`). Quem já tinha mantém (`warnings`, `preserved_access`). Não é um estado que o Interos envie. |
 
-`commercialStatus` da empresa aceita os mesmos valores. Ele **limita** todos os itens:
+`commercialStatus` da empresa aceita os mesmos valores. Ele **limita** todos os itens, inclusive as unidades não
+vendáveis preservadas (NF-e, NFC-e, NFS-e, Banco Intercert, Canais):
 - empresa `suspended` deixa todos os itens, no máximo, em `suspended`;
-- empresa `read_only` deixa todos, no máximo, em `read_only`.
+- empresa `read_only`, ou com a vigência vencida depois da carência, deixa todos, no máximo, em `read_only`;
+- o direito preservado continua registrado (`preservedAccess`) e volta quando o teto sai. Só um item `inactive`
+  explícito, ou a saída de uma dependência dele do contrato, encerra o direito.
+
+**Quando vale.** Transições de teste, carência, agendamento e vigência valem **no instante devido**, sem esperar a
+rotina diária. A primeira requisição da empresa, ou leitura do Interos (licença, sincronização, histórico, módulos),
+depois do instante aplica. O histórico mostra a transição (`kind: "transition"`).
+
+**Filiais (`branches`).** `{ "mode": "all" }` (ou ausente) libera todas. `{ "mode": "list", "branchIds": [...] }`
+libera só essas (ids ERP das unidades). As outras continuam acessíveis **só em consulta**: nenhuma gravação a partir
+delas, com o motivo na tela. Id que não existe na empresa gera o aviso `unknown_branch`.
+
+**Controle `enforced` e revisão.** Passar a `controlMode: "enforced"` com divergência aberta da linha de base exige uma
+revisão real: envie `baselineReview: { "reviewedBy": "<pessoa>", "notes": "…" }` no mesmo retrato. Sem ela, as unidades
+valem, o controle não muda e a resposta traz o aviso `review_required`. O modo sozinho nunca marca divergências como
+revisadas.
 
 Funções da plataforma (CORE) continuam sempre ativas: login, administração essencial, auditoria, backup, isolamento e cumprimento de obrigações fiscais.
 
@@ -115,7 +135,7 @@ Funções da plataforma (CORE) continuam sempre ativas: login, administração e
 | Utilização (telemetria agregada) | `GET /api/interos/v2/companies/{id}/usage?from&to` |
 | Erros de integração | `GET /api/interos/v2/errors?since` |
 | Histórico | `GET /api/interos/v2/companies/{id}/license/history` |
-| Solicitações de contratação vindas do ERP | `GET /api/interos/v2/upsell-requests?since` |
+| Solicitações de contratação vindas do ERP (quem pediu vai como identificador pseudônimo `requestedBy: "usr_…"` e `requesterRole`, nunca o nome) | `GET /api/interos/v2/upsell-requests?since` |
 
 Ativar, desativar, suspender, reativar, programar e atualizar limites são todos feitos por `PUT .../license` com um novo retrato. Não existem verbos separados: o retrato é a única verdade e a idempotência fica trivial.
 
@@ -131,9 +151,19 @@ Ativar, desativar, suspender, reativar, programar e atualizar limites são todos
 
   O mesmo `Event-Id` com o mesmo corpo devolve a resposta anterior (idempotência). Com corpo diferente, devolve 409.
 - **Ordem.** O `licenseVersion` monotônico garante que um retrato antigo, chegando atrasado, nunca sobrescreve um mais novo.
-- **Concorrência.** Dois `PUT` com a mesma versão: o primeiro aplica e o segundo recebe a mesma resposta. Duas versões diferentes ao mesmo tempo: aplica a maior; a menor recebe `stale_version`.
+- **Concorrência.** Dois `PUT` com a mesma versão: o primeiro aplica e o segundo recebe a mesma resposta (`status: "duplicate"`). Duas versões diferentes ao mesmo tempo: aplica a maior; a menor recebe `200` com `status: "stale"` e a `appliedVersion` vigente. Duas aplicações simultâneas da mesma empresa: a segunda recebe `409 license_busy` e pode repetir.
+- **Event-Id só depois da validação.** Corpo inválido (`400`) não consome o `X-Interos-Event-Id`: corrija e reenvie com o mesmo id. O mesmo evento ainda em processamento responde `409 event_in_progress`.
 - **Isolamento.** A credencial de um cliente Interos pode ser restrita a uma lista de empresas. Uma empresa nunca altera outra, porque o `companyId` vem da rota e é conferido contra o retrato.
-- **Confirmação.** A resposta do `PUT` traz `appliedVersion`, `operationalState` por item, `rejectedItems` (com motivo: `unavailable`, `dependency_missing`, `kind_not_supported`) e `pendingObligations`.
+- **Confirmação.** A resposta do `PUT` traz:
+  - `status` (`applied`, `rejected`, `stale` ou `duplicate`), `appliedVersion` e `runtimeVersion`;
+  - `effective`: o estado por chave v1 (`unit`, `on`, `state`, `notice`);
+  - `rejectedItems`, com motivo `unknown_code`, `not_contractable`, `not_homologated`, `dependency_missing` ou `kind_not_supported`;
+  - `warnings`, com motivo `preserved_access`, `module_expanded`, `alias_resolved`, `included_item`, `duplicate_entitlement`, `review_required`, `unknown_branch` ou `no_branch_allowed`;
+  - `nextTransitionAt`.
+- **Pendências antes de desligar.** `POST .../license/simulate` devolve o plano completo. Em `simulation.impacts[]` estão, por unidade desligada:
+  - `to` (`disabled`, `draining` ou `scheduled_off`) e `policy`;
+  - `blockers[]`, as pendências em andamento com contagem (por exemplo, vendas no prazo de devolução do CDC);
+  - `obligations[]`, as obrigações que continuam.
 
 ### Eventos do ERP para o Interos (saída)
 
@@ -141,6 +171,11 @@ Usa o mecanismo de tarefas duráveis já existente (`jobs`, tipo `interos.event`
 - Cabeçalhos: `X-ERP-Signature: t=<unix>,v1=<hex>` (segredo `INTEROS_OUTBOUND_SECRET`) e `X-ERP-Event-Type`.
 - O corpo traz `eventId`, `type`, `companyId`, `at` e `data`.
 - Respostas 4xx (exceto 408 e 429) não são repetidas.
+- **Nesta fase não há destino configurado** (`INTEROS_EVENTS_URL`): o Interos acompanha pelo histórico de licença
+  (`GET .../license/history`, a cada 5 minutos), que traz os retratos e as transições locais. Os eventos **ficam na
+  fila**, nunca dados como entregues, e aparecem em `GET /errors` como `event.undelivered`, com
+  `reason: "not_configured"`. Quando o destino for configurado, os guardados são enviados. Depois de 30 dias sem
+  destino, passam a `dead` e continuam listados.
 
 | Evento | Quando |
 |---|---|
@@ -152,7 +187,7 @@ Usa o mecanismo de tarefas duráveis já existente (`jobs`, tipo `interos.event`
 
 ## 4. Resiliência e contingência
 
-- O ERP **nunca** consulta o Interos durante uma ação do usuário. A decisão usa a cópia local já aplicada (`company_modules`, com cache por empresa de 15 segundos).
+- O ERP **nunca** consulta o Interos durante uma ação do usuário. A decisão usa a cópia local já aplicada (`company_modules`, lida a cada requisição: uma revogação vale na hora).
 - **Reconciliação** em duas vias:
   - o Interos chama `GET .../sync` periodicamente e reenvia o retrato quando a versão diverge;
   - opcionalmente, o ERP chama `GET {INTEROS_BASE_URL}/licenses/{companyId}` uma vez por dia.

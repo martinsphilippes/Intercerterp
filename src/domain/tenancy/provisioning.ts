@@ -10,7 +10,7 @@ import { getSetting, setSetting } from "@/lib/core/settings";
 import { ServiceError, validationError, notFound, type FieldIssue } from "@/lib/service/errors";
 import { createCompanyWithDefaults } from "../setup";
 import { REGIMES, TIMEZONES, UFS } from "../companies";
-import { CONTRACT_MODULES, CONTRACT_MODULE_KEYS, contractOf, invalidContractModules } from "./contract";
+import { contractModuleOfV1Key, CONTRACT_MODULES, CONTRACT_MODULE_KEYS, contractOf, invalidContractModules } from "./contract";
 import { companyBlockState, revokeSessionsOfCompany, holdCompanyJobs, releaseCompanyJobs } from "./status";
 
 /**
@@ -155,7 +155,7 @@ export async function linkedCompany(store: Store, companyId: string): Promise<Do
   return c;
 }
 
-function adminRoleKey(kind: string | null | undefined) {
+export function adminRoleKey(kind: string | null | undefined) {
   return ADMIN_ROLE_KEY[kind ?? "retail"] ?? "admin";
 }
 
@@ -220,7 +220,8 @@ export async function tenantView(store: Store, companyId: string) {
       requestId: h.requestId ?? null,
     })),
     modulos: contract ? [...contract.modules] : null,
-    contrato: contract ? { referencia: contract.reference ?? null, plano: contract.plan ?? null } : null,
+    // origem dos módulos: "provisionamento" (PUT /modulos) ou "licenca" (derivados da licença v2, a referência)
+    contrato: contract ? { referencia: contract.reference ?? null, plano: contract.plan ?? null, origemModulos: (contract as any).source === "licenca" ? "licenca" : "provisionamento" } : null,
     implantacao: prov
       ? { operacao: prov.operation, estado: prov.status, etapas: (prov.steps ?? []) as ProvisionStep[], tentativas: prov.attempts ?? 1, ultimoErro: prov.lastError ?? null, iniciadaEm: prov.startedAt ?? null, concluidaEm: prov.finishedAt ?? null }
       : { operacao: null, estado: "nao_iniciada", etapas: [], tentativas: 0, ultimoErro: null, iniciadaEm: null, concluidaEm: null },
@@ -383,6 +384,11 @@ async function ensureTenantAdmin(store: Store, actor: ServiceActor, company: Doc
 
 async function applyContract(store: Store, actor: ServiceActor, company: Doc, modules: string[], contrato: { referencia?: unknown; plano?: unknown } | null | undefined) {
   const base = unscoped(store);
+  // uma referência só (pendência 4): com licença v2 aplicada, os módulos seguem o retrato de licença
+  const { licenseId } = await import("../licensing/license");
+  const lic = await base.get("company_licenses", licenseId(company.id));
+  if (lic && lic.licenseVersion > 0)
+    throw new ServiceError(409, "licenca_governa", "Os módulos desta empresa seguem a licença v2 aplicada: altere pelo retrato de licença (PUT /api/interos/v2/companies/{id}/license). O provisionamento cuida só da conta, da unidade inicial e dos administradores.", { idEmpresa: company.id, versaoLicenca: lic.licenseVersion });
   const before = contractOf(company);
   const contract = { modules: [...modules].sort(), reference: str(contrato?.referencia, 100) ?? before?.reference ?? null, plan: str(contrato?.plano, 60) ?? before?.plan ?? null, updatedAt: nowIso(), updatedBy: `servico:${actor.clientId}` };
   const after = await base.update("companies", company.id, { contract });
@@ -391,7 +397,42 @@ async function applyContract(store: Store, actor: ServiceActor, company: Doc, mo
   const changed = JSON.stringify(before?.modules ?? null) !== JSON.stringify(contract.modules) || before?.reference !== contract.reference || before?.plan !== contract.plan;
   if (changed)
     await audit(serviceCtx(store, actor, company.id), { module: "admin", action: "company.contract", entityType: "company", entityId: company.id, summary: `Módulos contratados definidos pelo Interos: ${contract.modules.join(", ")}`, before: before ?? null, after: contract });
+  await syncModulesFromContract(store, actor, after, contract.modules);
   return after;
+}
+
+/**
+ * Habilitação real a partir do contrato amplo (pendência 4: o módulo amplo é tradução das unidades v2). Empresa sem
+ * estado de módulos nasce com o controle aplicado e SÓ com o contratado — nunca com a linha de base "legada" (que
+ * ligaria tudo, inclusive unidades ainda não homologadas, e criaria direito preservado que a empresa nunca teve).
+ * Empresa com controle já aplicado recebe a diferença; empresa anterior (modo legacy) só tem os perfis restringidos.
+ */
+async function syncModulesFromContract(store: Store, actor: ServiceActor, company: Doc, modules: string[]) {
+  const base = unscoped(store);
+  const { v1KeysForContract } = await import("./contract");
+  const { loadCompanyModules } = await import("@/lib/modules/access");
+  const { provisionModules } = await import("../modules/baseline");
+  const keys = await v1KeysForContract(modules, company.kind ?? "retail");
+  const doc = await loadCompanyModules(base, company.id);
+  const who = `interos:${actor.clientId}`;
+  if (!doc) {
+    await provisionModules(base, company.id, keys, who, "enforced");
+    return;
+  }
+  if (doc.mode === "legacy") return;
+  const { UNITS_V2 } = await import("@/lib/modules/units-v2.generated");
+  const preserved = new Set(UNITS_V2.filter((u) => u.v1Key && !u.sellable).map((u) => u.v1Key!));
+  const want = new Set(keys);
+  const isOn = (state: string | undefined) => state === "enabled" || state === "scheduled_off";
+  const changes = [
+    ...keys.filter((k) => !isOn(doc.modules[k]?.state)).map((k) => ({ module: k, action: "enable" as const })),
+    ...Object.entries(doc.modules)
+      .filter(([k, e]) => isOn(e.state) && !want.has(k) && contractModuleOfV1Key(k) && !preserved.has(k))
+      .map(([k]) => ({ module: k, action: "disable" as const, history: "read" as const })),
+  ];
+  if (!changes.length) return;
+  const { applyChanges } = await import("../modules/changes");
+  await applyChanges(base, { companyId: company.id, changes, cascade: true }, { actor: who, actorType: "provisioning", reason: "Módulos contratados definidos pelo Interos (provisionamento)." });
 }
 
 // ─── operações ────────────────────────────────────────────────────────────────────────────────────────────────────

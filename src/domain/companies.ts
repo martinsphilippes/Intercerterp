@@ -165,7 +165,10 @@ export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName
   if (!ctx.user.isAdmin) {
     const me = await store.get("users", ctx.user.id);
     if (me) {
-      const roleByCompany = { ...(me.roleByCompany ?? {}), ...(roles.admin ? { [company.id]: roles.admin.id } : {}) };
+      // perfil de administrador DO TIPO da empresa (escritório contábil: firm_admin; varejo: admin) — correção 14
+      const { adminRoleKey } = await import("./tenancy/provisioning");
+      const adminRole = roles[adminRoleKey(company.kind)] ?? roles.admin;
+      const roleByCompany = { ...(me.roleByCompany ?? {}), ...(adminRole ? { [company.id]: adminRole.id } : {}) };
       await store.update("users", me.id, { companyIds: [...new Set([...(me.companyIds ?? []), company.id])], roleByCompany });
     }
   }

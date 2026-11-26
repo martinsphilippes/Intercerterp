@@ -77,10 +77,18 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   // multiempresa: Store restrito à empresa (a da plataforma atende os chamados da tela de login); empresa suspensa em
   // "somente leitura" recebe um Store que recusa qualquer gravação
   const scoped = scopeStore(store, company.id, { platform: Boolean(company.isPlatform) });
+  // filiais autorizadas pela licença do Interos (correção 11): fora da lista, a filial opera só em consulta
+  const { branchOutsideLicense } = await import("../../domain/licensing/branches");
+  const branchBlocked = branch && !consolidated ? await branchOutsideLicense(store, company.id, branch.id) : null;
   return {
-    // suspensa em somente leitura: toda gravação é recusada com o motivo; a trilha de auditoria continua registrando
+    // suspensa em somente leitura (ou filial fora da licença): toda gravação é recusada com o motivo; a trilha de
+    // auditoria continua registrando
     ctx: {
-      store: companyReadOnly(company) ? readOnly(scoped, { message: companyBlockMessage(company) ?? undefined, appendOnly: ["audit_logs"] }) : scoped,
+      store: companyReadOnly(company)
+        ? readOnly(scoped, { message: companyBlockMessage(company) ?? undefined, appendOnly: ["audit_logs"] })
+        : branchBlocked
+          ? readOnly(scoped, { message: branchBlocked, appendOnly: ["audit_logs"] })
+          : scoped,
       user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined,
     },
     user,

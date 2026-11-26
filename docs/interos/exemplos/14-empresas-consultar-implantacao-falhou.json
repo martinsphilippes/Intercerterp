@@ -35,7 +35,8 @@
         ],
         "contrato": {
           "referencia": "CT-2026-0057",
-          "plano": "essencial"
+          "plano": "essencial",
+          "origemModulos": "provisionamento"
         },
         "implantacao": {
           "operacao": "criar",

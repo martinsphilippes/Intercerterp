@@ -1,4 +1,4 @@
-import { detId, isConflict } from "@/lib/db";
+import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { nowIso } from "@/lib/dates";
 import { BusinessError } from "@/lib/core/errors";
@@ -41,6 +41,8 @@ export interface LicensePlan {
    * `inactive` explícito encerra o direito.
    */
   preservedAccess: string[];
+  /** modo de controle que será aplicado (null = mantém o atual; o pedido pode ter ficado pendente de revisão) */
+  controlMode: "legacy" | "shadow" | "enforced" | null;
 }
 
 export function parseSnapshot(body: unknown, companyId: string): LicenseSnapshot {
@@ -62,6 +64,13 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
   const changes: ModuleChange[] = [];
   const effective: LicensePlan["effective"] = {};
   const isOn = (k: string) => ["enabled", "scheduled_off"].includes(doc?.modules?.[k]?.state ?? "");
+  // filiais autorizadas (correção 11): aplicadas na sessão (fora da lista = só consulta); aqui só a conferência
+  if (snapshot.branches?.mode === "list") {
+    const own = new Set((await listAll(store, "branches", { filters: [["eq", "companyId", companyId]] })).map((b) => b.id));
+    const unknown = (snapshot.branches.branchIds ?? []).filter((b) => !own.has(b));
+    if (unknown.length) warnings.push({ code: "-", reason: "unknown_branch", message: `Filial(is) que não existe(m) nesta empresa: ${unknown.join(", ")} (ignorada(s)).` });
+    if (!(snapshot.branches.branchIds ?? []).some((b) => own.has(b))) warnings.push({ code: "-", reason: "no_branch_allowed", message: "Nenhuma filial da empresa está autorizada: todas ficam só em consulta." });
+  }
   // direito preservado (unidade não vendável que a empresa já tinha): o que estava registrado + o que está ligado agora
   const preserved = new Set<string>((lic?.preservedAccess as string[] | undefined) ?? []);
   const notSellable = (key: string) => UNITS_V2.find((x) => x.v1Key === key)?.sellable === false;
@@ -74,6 +83,11 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
     const key = unit.v1Key;
     if (!key || !MODULE_MAP.has(key)) continue;
     effective[key] = { unit: code, on: eff.on, state: eff.state, notice: eff.notice };
+    // ativação agendada de uma unidade JÁ ligada: continua ligada até a data — agendar nunca desliga (correção 8)
+    if (!eff.on && eff.state === "activation_scheduled" && isOn(key)) {
+      effective[key] = { unit: code, on: true, state: "active", notice: "Ativação agendada de uma unidade já ligada: continua ligada (a data não desliga nada)." };
+      continue;
+    }
     if (eff.on && !isOn(key)) {
       if (!unit.sellable && !preserved.has(key)) {
         // decisão do titular: dependente de integração externa só é liberada depois da homologação
@@ -132,11 +146,22 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
     }
   }
   let simulation: LicensePlan["simulation"] = null;
-  const mode = snapshot.controlMode ?? undefined;
+  let mode = snapshot.controlMode ?? undefined;
+  // passar a "enforced" com divergência aberta exige revisão REAL (pessoa nomeada em baselineReview) — o modo sozinho
+  // nunca marca as divergências como revisadas (correção 9). Sem revisão: as unidades valem, o controle fica como está.
+  const reviewed = Boolean(snapshot.baselineReview?.reviewedBy);
+  if (doc && mode === "enforced" && doc.mode !== "enforced" && !reviewed) {
+    const baseline = await store.get("module_baselines", detId("modbase", companyId));
+    const open = ((baseline?.divergences as unknown[] | undefined) ?? []).length;
+    if (open && baseline?.status !== "reviewed") {
+      warnings.push({ code: "-", reason: "review_required", message: `Controle "enforced" não aplicado: há ${open} divergência(s) da linha de base sem revisão. Envie baselineReview (quem revisou) junto com controlMode "enforced" depois de revisá-las.` });
+      mode = undefined;
+    }
+  }
   if (doc && (changes.length || (mode && mode !== doc.mode))) {
     // cascata: o que não foi listado (ou foi preservado) acompanha a dependência desligada; o que o Interos listou
     // como ativo e ficaria sem dependência recusa o retrato (consistência explícita)
-    const { entries: _e, ...sim } = await simulateChanges(store, { companyId, changes, mode, cascade: true, reviewDivergences: Boolean(mode === "enforced") }, doc);
+    const { entries: _e, ...sim } = await simulateChanges(store, { companyId, changes, mode, cascade: true, reviewDivergences: reviewed }, doc);
     void _e;
     simulation = sim;
     for (const e of sim.errors) rejectedItems.push({ code: e.module ? unitByV1KeyCode(e.module) : "-", reason: e.code === "kind_not_supported" ? "kind_not_supported" : "dependency_missing", message: e.message });
@@ -156,6 +181,7 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
     companyState: cap.state, companyNotice: cap.notice, nextTransitionAt: nextAt, simulation,
     valid: !rejectedItems.some((r) => r.reason === "dependency_missing" || r.reason === "kind_not_supported"),
     preservedAccess: [...preserved].sort(),
+    controlMode: mode ?? null,
   };
 }
 
@@ -230,14 +256,15 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
         return result;
       }
       const doc = await loadCompanyModules(store, companyId);
-      const mode = snapshot.controlMode ?? undefined;
+      const mode = plan.controlMode ?? undefined;
       if (!plan.changes.length && (!mode || mode === doc?.mode)) {
         runtimeVersion = doc?.version ?? null;
         break;
       }
+      const review = snapshot.baselineReview?.reviewedBy ? { name: snapshot.baselineReview.reviewedBy, notes: snapshot.baselineReview.notes ?? null } : null;
       try {
-        const r = await applyChanges(store, { companyId, changes: plan.changes, mode, cascade: true, reviewDivergences: mode === "enforced" }, {
-          actor: meta.actor ?? meta.clientId, actorType: "interos", reason: `Licença v${snapshot.licenseVersion} (${meta.source})`, operationId: histId, expectedVersion: doc?.version ?? null,
+        const r = await applyChanges(store, { companyId, changes: plan.changes, mode, cascade: true, reviewDivergences: Boolean(review) }, {
+          actor: meta.actor ?? meta.clientId, actorType: "interos", reason: `Licença v${snapshot.licenseVersion} (${meta.source})`, operationId: histId, expectedVersion: doc?.version ?? null, reviewer: review,
         });
         runtimeVersion = r.version;
         break;
@@ -251,11 +278,35 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
       limits: snapshot.limits ?? null, effective: plan!.effective, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings, appliedAt: nowIso(), preservedAccess: plan!.preservedAccess,
       appliedRuntimeVersion: runtimeVersion, nextTransitionAt: plan!.nextTransitionAt, clientId: meta.clientId, lastSnapshotAt: nowIso(), staleNotifiedAt: null,
     });
+    // contrato amplo (provisionamento) passa a ser a tradução da licença: menu, telas, recursos e Torre seguem o retrato
+    await syncContractFromLicense(store, companyId, meta.clientId);
     const result: ApplyLicenseResult = { status: "applied", appliedVersion: snapshot.licenseVersion, plan, runtimeVersion };
     await recordHistory(store, histId, companyId, snapshot, "applied", meta, result);
     await emitInterosEvent(store, companyId, "license.applied", { licenseVersion: snapshot.licenseVersion, runtimeVersion, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings.map((w) => w.reason) });
     return result;
   });
+}
+
+/**
+ * Uma referência só (pendência 4): com licença v2, o contrato amplo da empresa (`company.contract`, que restringe
+ * perfis e recursos) é DERIVADO dos itens licenciados — módulo amplo contratado = alguma unidade dele licenciada (em
+ * qualquer estado, menos inactive) ou com direito preservado. Suspenso continua contratado: a consulta do histórico
+ * fica; quem bloqueia a operação é a habilitação dos módulos.
+ */
+async function syncContractFromLicense(store: Store, companyId: string, clientId: string) {
+  const company = await store.get("companies", companyId);
+  if (!company) return;
+  const { contractedAreas } = await import("../tenancy/contracted");
+  const { CONTRACT_MODULES } = await import("../tenancy/contract");
+  const { setSetting } = await import("@/lib/core/settings");
+  const areas = await contractedAreas(store, company);
+  if (!areas) return;
+  const modules = [...areas].sort();
+  const prev = company.contract && Array.isArray(company.contract.modules) ? company.contract : null;
+  if (prev && prev.source === "licenca" && JSON.stringify(prev.modules) === JSON.stringify(modules)) return;
+  await store.update("companies", companyId, { contract: { ...(prev ?? {}), modules, source: "licenca", updatedAt: nowIso(), updatedBy: `interos:${clientId}` } });
+  // recursos governados pelo contrato (ex.: comércio digital) acompanham
+  for (const m of CONTRACT_MODULES) for (const f of m.features) await setSetting(store, companyId, null, `feature.${f}`, modules.includes(m.key), `interos:${clientId}`);
 }
 
 async function recordHistory(store: Store, id: string, companyId: string, snapshot: LicenseSnapshot, status: string, meta: { clientId: string; eventId?: string | null; source: LicenseSource }, result: ApplyLicenseResult) {

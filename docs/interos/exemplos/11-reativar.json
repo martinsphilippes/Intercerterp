@@ -62,7 +62,8 @@
         ],
         "contrato": {
           "referencia": "CT-2026-0042-A1",
-          "plano": "profissional"
+          "plano": "profissional",
+          "origemModulos": "provisionamento"
         },
         "implantacao": {
           "operacao": "criar",

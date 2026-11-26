@@ -4,6 +4,7 @@ import { today } from "@/lib/dates";
 import { fiscalSnapshot, latestSales } from "@/app/(app)/dashboard/queries";
 import { monitorCounts } from "@/domain/ecommerce/monitor";
 import { storeOfCompany } from "@/domain/ecommerce/common";
+import { anyContracted } from "../tenancy/contracted";
 import { userStats } from "@/domain/users";
 import { inUnits, pt, SALE_STATUS_PT, type TowerRequest } from "./common";
 
@@ -36,6 +37,7 @@ async function latest(t: TowerRequest<any>, collection: string, field: string, e
 }
 
 export async function adoptionBlock(t: TowerRequest<any>) {
+  const has = (...keys: string[]) => anyContracted(t.areas, ...keys);
   const now = Date.now();
   const since30 = new Date(now - 30 * DAY_MS).toISOString();
   const since7 = new Date(now - 7 * DAY_MS).toISOString();
@@ -89,11 +91,12 @@ export async function adoptionBlock(t: TowerRequest<any>) {
       fonte: "login",
     },
     atividadeOperacional: {
-      ultimaVenda: lastSale ? { em: lastSale.completedAt as string, idUnidade: (lastSale.branchId ?? null) as string | null, situacao: pt(SALE_STATUS_PT, lastSale.status) } : null,
-      ultimaAberturaCaixaEm: (lastCash?.openedAt ?? null) as string | null,
-      ultimoMovimentoEstoqueEm: (lastStock?.occurredAt ?? null) as string | null,
-      ultimoDocumentoFiscalEm: (lastFiscal?.issuedAt ?? null) as string | null,
-      ultimoPedidoOnlineEm: (lastOrder?.createdAt ?? null) as string | null,
+      // só o que a empresa contratou (correção 6): o campo de módulo não contratado vem null
+      ultimaVenda: has("pdv", "vendas", "comercio_digital") && lastSale ? { em: lastSale.completedAt as string, idUnidade: (lastSale.branchId ?? null) as string | null, situacao: pt(SALE_STATUS_PT, lastSale.status) } : null,
+      ultimaAberturaCaixaEm: has("pdv") ? ((lastCash?.openedAt ?? null) as string | null) : null,
+      ultimoMovimentoEstoqueEm: has("estoque") ? ((lastStock?.occurredAt ?? null) as string | null) : null,
+      ultimoDocumentoFiscalEm: has("fiscal") ? ((lastFiscal?.issuedAt ?? null) as string | null) : null,
+      ultimoPedidoOnlineEm: has("comercio_digital") ? ((lastOrder?.createdAt ?? null) as string | null) : null,
     },
     terminais: {
       ativos: terminals.filter((x) => x.status === "active" && inUnits(t, x.branchId)).length,
@@ -101,8 +104,8 @@ export async function adoptionBlock(t: TowerRequest<any>) {
       ultimaAtividadeEm: null,
     },
     pendenciasIntegracao: {
-      documentosFiscais: { pendentes: fiscal.totals.pending, processando: fiscal.totals.processing, rejeitados: fiscal.totals.rejected },
-      comercioDigital: monitor ? { falhas: monitor.failed, pendentes: monitor.pending } : null,
+      documentosFiscais: has("fiscal") ? { pendentes: fiscal.totals.pending, processando: fiscal.totals.processing, rejeitados: fiscal.totals.rejected } : null,
+      comercioDigital: has("comercio_digital") && monitor ? { falhas: monitor.failed, pendentes: monitor.pending } : null,
       tarefas: {
         comFalhaEmNovaTentativa: jobs.filter((j) => j.status === "retry").length,
         esgotadas: jobs.filter((j) => j.status === "dead").length,

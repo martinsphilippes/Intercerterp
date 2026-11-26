@@ -31,6 +31,11 @@ export const licenseSnapshotSchema = z.object({
   limits: z.object({ users: z.number().int().min(0).nullish(), devices: z.number().int().min(0).nullish(), branches: z.number().int().min(0).nullish(), fiscalDocumentsPerMonth: z.number().int().min(0).nullish() }).nullish(),
   display: z.enum(DISPLAY_MODES).nullish(),
   controlMode: z.enum(["legacy", "shadow", "enforced"]).nullish(),
+  /**
+   * Revisão REAL das divergências da linha de base (correção 9): exigida para passar a "enforced" quando há divergência
+   * aberta. Quem revisou (pessoa) e a observação. Sem ela, o controle não muda e o retrato volta com aviso review_required.
+   */
+  baselineReview: z.object({ reviewedBy: z.string().trim().min(3).max(200), notes: z.string().max(1000).nullish() }).nullish(),
   items: z.array(z.object({
     code: z.string().regex(/^\d\d(\.\d\d){0,2}$/),
     state: z.enum(ITEM_STATES),
@@ -50,7 +55,7 @@ export interface ResolvedItem {
 }
 export interface ItemIssue {
   code: string;
-  reason: "unknown_code" | "not_contractable" | "not_homologated" | "dependency_missing" | "kind_not_supported" | "duplicate_entitlement" | "alias_resolved" | "included_item" | "module_expanded" | "preserved_access";
+  reason: "unknown_code" | "not_contractable" | "not_homologated" | "dependency_missing" | "kind_not_supported" | "duplicate_entitlement" | "alias_resolved" | "included_item" | "module_expanded" | "preserved_access" | "review_required" | "unknown_branch" | "no_branch_allowed";
   message: string;
 }
 
@@ -69,8 +74,12 @@ export function resolveCode(code: string): { units: string[]; issue?: ItemIssue 
   if (UNIT_BY_CODE.has(c)) return { units: [c], issue };
   if (INCLUDED_IN[c]) return { units: [INCLUDED_IN[c]], issue: issue ?? { code, reason: "included_item", message: `${code} vem incluído na unidade ${INCLUDED_IN[c]}: licenciado por ela.` } };
   if (/^\d\d$/.test(c)) {
-    const units = UNITS_V2.filter((u) => u.code.startsWith(`${c}.`)).map((u) => u.code);
-    if (units.length) return { units, issue: { code, reason: "module_expanded", message: `Módulo ${c} expandido nas unidades ${units.join(", ")}.` } };
+    // contratar o módulo NN inclui só as unidades PRINCIPAIS (includedInParent no catálogo); as adicionais exigem item
+    // próprio — evita ligar (e cobrar) adicional sem querer (correção 12)
+    const all = UNITS_V2.filter((u) => u.code.startsWith(`${c}.`));
+    const units = all.filter((u) => u.includedInParent).map((u) => u.code);
+    const addOns = all.filter((u) => !u.includedInParent).map((u) => u.code);
+    if (units.length) return { units, issue: { code, reason: "module_expanded", message: `Módulo ${c}: unidades principais ${units.join(", ")}${addOns.length ? `; adicionais exigem item próprio (${addOns.join(", ")})` : ""}.` } };
   }
   if (KNOWN_CODES.includes(c)) return { units: [], issue: { code, reason: "not_contractable", message: `${code} não é unidade comercial (CORE, compartilhado, permissão ou recurso futuro).` } };
   return { units: [], issue: { code, reason: "unknown_code", message: `${code} não existe no catálogo v2.` } };

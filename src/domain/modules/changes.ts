@@ -43,6 +43,8 @@ export interface ApplyContext {
   operationId?: string | null;
   /** versão esperada do registro da empresa (controle de edição concorrente); ausente = sem conferência */
   expectedVersion?: number | null;
+  /** quem revisou as divergências da linha de base (pessoa, nunca o cliente de serviço) e a observação dela */
+  reviewer?: { name: string; notes?: string | null } | null;
 }
 
 export interface ModuleImpact {
@@ -260,7 +262,7 @@ export async function applyChanges(store: Store, input: ChangeSetInput, ctx: App
       await tx.update("company_modules", companyModulesId(input.companyId), { mode: sim.nextMode, version: next, modules, updatedBy: `${ctx.actorType}:${ctx.actor}` });
       if (input.reviewDivergences) {
         const bid = detId("modbase", input.companyId);
-        if (await tx.get("module_baselines", bid)) await tx.update("module_baselines", bid, { status: "reviewed", reviewedBy: `${ctx.actorType}:${ctx.actor}`, reviewedAt: now });
+        if (await tx.get("module_baselines", bid)) await tx.update("module_baselines", bid, { status: "reviewed", reviewedBy: (ctx.reviewer?.name ?? `${ctx.actorType}:${ctx.actor}`).slice(0, 200), reviewedAt: now, ...(ctx.reviewer?.notes ? { notes: ctx.reviewer.notes.slice(0, 2000) } : {}) });
       }
     });
   } catch (e) {

@@ -15,7 +15,7 @@ export function GET(req: Request) {
     ]);
     return ok([
       ...lic.filter((h) => allowed(h.companyId)).map((h) => ({ kind: "license.rejected", companyId: h.companyId, at: h.at, licenseVersion: h.licenseVersion, details: h.result?.plan?.rejectedItems ?? [] })),
-      ...jobs.filter((j) => allowed(j.companyId)).map((j) => ({ kind: "event.undelivered", companyId: j.companyId, at: j.updatedAt, eventType: j.payload?.event?.type, status: j.status, attempts: j.attempts, error: j.lastError ?? null })),
+      ...jobs.filter((j) => allowed(j.companyId)).map((j) => ({ kind: "event.undelivered", companyId: j.companyId, at: j.updatedAt, eventType: j.payload?.event?.type, eventAt: j.payload?.event?.at ?? null, status: j.status, attempts: j.attempts, reason: j.result?.reason ?? null, error: j.lastError ?? null })),
       ...ops.filter((o) => allowed(o.companyId)).map((o) => ({ kind: "modules.apply_rejected", companyId: o.companyId, at: o.finishedAt ?? o.createdAt, operationId: o.id, error: o.error })),
     ].sort((a, b) => String(b.at).localeCompare(String(a.at))), { requestId });
   });

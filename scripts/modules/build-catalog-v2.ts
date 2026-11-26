@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { MODULES_CATALOG, MODULE_MAP } from "../../src/lib/modules/catalog";
 import { SPECIAL_ACTIONS } from "../../src/lib/permissions";
+import { CONTRACT_MODULES, CONTRACT_MODULE_V1_KEYS } from "../../src/domain/tenancy/contract";
 
 const ROOT = path.join(__dirname, "../..");
 const DIR = path.join(ROOT, "docs/MODULE_CATALOG");
@@ -74,7 +75,15 @@ interface Node {
   v1Keys: string[];
   commercialUnit: string | null;
   includedIn: string | null;
-  dependencies: { required: string[]; optional: string[] };
+  /**
+   * Dependências entre unidades v2: `required` (todas), `requiredAnyOf` (de cada grupo, basta uma) e `optional`
+   * (integrações que acrescentam função).
+   */
+  dependencies: { required: string[]; requiredAnyOf: string[][]; optional: string[] };
+  /** só nas unidades comerciais: vendável hoje (homologação), incluída ao contratar o módulo NN e tipos de empresa */
+  sellable?: boolean;
+  includedInParent?: boolean;
+  companyKinds?: string[];
   routes: string[];
   apis: string[];
   permissions: string[];
@@ -136,7 +145,7 @@ export function buildCatalogV2() {
   const blank = (code: string, name: string, level: Node["level"], parent: string | null, origin: Node["origin"]): Node => ({
     id: stableId(code), code, level, name, technicalName: "", slug: "", description: name, parent, origin, devStatus: "NAO", devStatusLabel: "", availability: "indisponivel",
     commercialClass: "RECURSO_FUTURO", technicalClass: "future", aliasOf: null, aliases: [], reuses: null, v1Keys: [], commercialUnit: null, includedIn: null,
-    dependencies: { required: [], optional: [] }, routes: [], apis: [], permissions: [], evidence: [], notes: "", version: "2.0.0", createdAt: CREATED, updatedAt: CREATED,
+    dependencies: { required: [], requiredAnyOf: [], optional: [] }, routes: [], apis: [], permissions: [], evidence: [], notes: "", version: "2.0.0", createdAt: CREATED, updatedAt: CREATED,
   });
   // 1. taxonomia literal
   let mod = "";
@@ -245,7 +254,20 @@ export function buildCatalogV2() {
         if (u && u !== n.code) opt.add(u);
       }
     }
-    n.dependencies = { required: [...req].sort(), optional: [...opt].filter((x) => !req.has(x)).sort() };
+    // grupos "basta um" (requiresAny do v1), traduzidos para unidades; grupo sem unidade v2 não entra
+    const anyOf: string[][] = [];
+    for (const k of n.v1Keys) {
+      for (const group of MODULE_MAP.get(k)?.requiresAny ?? []) {
+        const units = [...new Set(group.map((g) => unitOfV1.get(g)).filter((u): u is string => Boolean(u) && u !== n.code))].sort();
+        if (units.length && !anyOf.some((a) => a.join("|") === units.join("|"))) anyOf.push(units);
+      }
+    }
+    n.dependencies = { required: [...req].sort(), requiredAnyOf: anyOf, optional: [...opt].filter((x) => !req.has(x) && !anyOf.flat().includes(x)).sort() };
+    // vendável (decisão do titular: dependente de integração externa ou em desenvolvimento só depois da homologação),
+    // incluída no módulo NN (unidade principal; adicionais exigem item próprio) e tipos de empresa em que vale
+    n.sellable = ["OP", "PARC", "FALHA"].includes(n.devStatus);
+    n.includedInParent = n.commercialClass === "MODULO_COMERCIAL";
+    n.companyKinds = [...new Set(n.v1Keys.flatMap((k) => MODULE_MAP.get(k)?.kinds ?? []))].sort();
   }
   // 8. rotas, APIs e permissões (evidência do app + superfícies v1 da unidade)
   for (const n of nodes.values()) {
@@ -316,6 +338,18 @@ export function catalogV2Document() {
       commercialUnits: count((n) => Boolean(n.commercialUnit)), aliases: count((n) => Boolean(n.aliasOf)), audited: audited.size,
     },
     v1Compatibility: { unitsByV1Key: Object.fromEntries([...unitOfV1.entries()].sort()), v1KeysWithoutV2Unit: v1Unmapped },
+    /**
+     * Tradução publicada (pendência 4): as unidades v2 são a referência do contrato; o módulo amplo do provisionamento
+     * (PUT /api/interos/v1/empresas/{id}/modulos) e a chave v1 são traduções delas.
+     */
+    translations: {
+      provisioningModules: Object.fromEntries(CONTRACT_MODULES.map((m) => [m.key, {
+        label: m.label,
+        companyKinds: m.kinds,
+        units: [...new Set((CONTRACT_MODULE_V1_KEYS[m.key] ?? []).map((k) => unitOfV1.get(k)).filter((u): u is string => Boolean(u)))].sort(),
+      }])),
+      v1Keys: Object.fromEntries([...unitOfV1.entries()].sort()),
+    },
     permissions: SPECIAL_ACTIONS.map((a) => ({ key: a.key, label: a.label, classification: "PERMISSAO", units: nodes.filter((n) => n.permissions.includes(a.key) && n.commercialUnit).map((n) => n.code) })),
     items: nodes,
   };
@@ -346,14 +380,15 @@ function markdown(doc: ReturnType<typeof catalogV2Document>): string {
 export function runtimeUnitsModule(doc: ReturnType<typeof catalogV2Document>): string {
   const units = doc.items.filter((n) => n.commercialUnit).map((n) => ({
     code: n.code, name: n.name, slug: n.slug, v1Key: Object.entries(doc.v1Compatibility.unitsByV1Key).find(([, c]) => c === n.code)?.[0] ?? null,
-    devStatus: n.devStatus, sellable: ["OP", "PARC", "FALHA"].includes(n.devStatus), requires: n.dependencies.required,
+    devStatus: n.devStatus, sellable: Boolean(n.sellable), includedInParent: Boolean(n.includedInParent), companyKinds: n.companyKinds ?? [],
+    requires: n.dependencies.required, requiresAny: n.dependencies.requiredAnyOf,
   }));
   const aliasOf = Object.fromEntries(doc.items.filter((n) => n.aliasOf).map((n) => [n.code, n.aliasOf]));
   const includedIn = Object.fromEntries(doc.items.filter((n) => n.includedIn && !n.aliasOf).map((n) => [n.code, n.includedIn]));
   const known = doc.items.map((n) => n.code);
   return `// GERADO por scripts/modules/build-catalog-v2.ts — não edite. Catálogo ${doc.catalogVersion}.
 export const CATALOG_V2_VERSION = ${JSON.stringify(doc.catalogVersion)};
-export interface UnitV2 { code: string; name: string; slug: string; v1Key: string | null; devStatus: string; sellable: boolean; requires: string[] }
+export interface UnitV2 { code: string; name: string; slug: string; v1Key: string | null; devStatus: string; sellable: boolean; includedInParent: boolean; companyKinds: string[]; requires: string[]; requiresAny: string[][] }
 export const UNITS_V2: UnitV2[] = ${JSON.stringify(units, null, 1)};
 export const ALIAS_OF: Record<string, string> = ${JSON.stringify(aliasOf)};
 export const INCLUDED_IN: Record<string, string> = ${JSON.stringify(includedIn)};

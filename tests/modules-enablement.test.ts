@@ -382,8 +382,15 @@ describe("API /api/interos/v1 (servidor a servidor)", () => {
     expect(r2.headers.get("idempotent-replayed")).toBe("true");
     expect((await r2.json()).data.operationId).toBe(op.operationId);
     const stale = await apply(call("/x", { method: "POST", body, headers: { ...headers, "idempotency-key": "k-2026-11-26-0002" } }), params);
-    expect(stale.status).toBe(422); // operação registrada como rejected (versão 1 já não vale)
-    expect((await stale.json()).data.error.code).toBe("version_conflict");
+    // correção 13: conflito de versão responde 409 no envelope de erro do contrato (a operação recusada vai nos detalhes)
+    expect(stale.status).toBe(409);
+    const staleBody = await stale.json();
+    expect(staleBody.error.code).toBe("version_conflict");
+    expect(staleBody.error.details.operation.status).toBe("rejected");
+    // empresa inexistente: 404 company_not_found (não 422 baseline_required), sem registrar operação
+    const ghost = await apply(call("/x", { method: "POST", body, headers: { ...headers, "idempotency-key": "k-2026-11-26-0003" } }), { params: Promise.resolve({ companyId: "naoexiste" }) });
+    expect(ghost.status).toBe(404);
+    expect((await ghost.json()).error.code).toBe("company_not_found");
 
     const opr = await (await import("@/app/api/interos/v1/operations/[operationId]/route")).GET(call(`/x`), { params: Promise.resolve({ operationId: op.operationId }) });
     expect((await opr.json()).data.status).toBe("applied");

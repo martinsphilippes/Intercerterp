@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { freshStore } from "./helpers";
 import type { MemoryStore } from "@/lib/db/memory-store";
 import type { Doc } from "@/lib/db/types";
-import { listAll } from "@/lib/db";
+import { detId, listAll, sha256 } from "@/lib/db";
 import { unscoped } from "@/lib/db/scoped-store";
 import { createCompanyWithDefaults } from "@/domain/setup";
 import { takeBaseline, provisionModules } from "@/domain/modules/baseline";
@@ -77,6 +77,11 @@ describe("estado efetivo (puro)", () => {
     expect(resolveCode("07.13").issue?.reason).toBe("not_contractable"); // PIX do PDV ≡ 36.04: componente compartilhado, não se vende à parte
     expect(resolveCode("07.03")).toMatchObject({ units: ["07.02"], issue: { reason: "included_item" } }); // fechamento vem com o caixa
     expect(resolveCode("05").units).toEqual(expect.arrayContaining(["05.02", "05.04", "05.05", "05.06", "05.08"]));
+    // correção 12: o módulo NN liga só as unidades principais (includedInParent); adicionais exigem item próprio
+    expect(resolveCode("07").units.sort()).toEqual(["07.01", "07.02"]);
+    expect(resolveCode("07").issue?.message).toMatch(/adicionais exigem item próprio \(07\.27\)/);
+    expect(resolveCode("05").units).not.toContain("05.19"); // nota a confirmar: adicional
+    for (const u of UNITS_V2) expect(typeof u.includedInParent, u.code).toBe("boolean");
     expect(resolveCode("14.02").issue?.reason).toBe("not_contractable"); // food service: futuro
     expect(resolveCode("99.99").issue?.reason).toBe("unknown_code");
   });
@@ -157,6 +162,50 @@ describe("aplicação do retrato de licença", () => {
     expect(r7.plan!.rejectedItems.some((i) => i.code === "04.01" && i.reason === "not_homologated")).toBe(true);
   });
 
+  it("correção 9: controlMode enforced não marca divergências como revisadas — exige revisão nominal (baselineReview)", async () => {
+    const bid = detId("modbase", A.id);
+    await store.update("module_baselines", bid, { divergences: [{ module: "compras.cotacoes", kind: "in_use_not_available" }], status: "open", reviewedBy: null, reviewedAt: null });
+    const items = ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }));
+    const r1 = await applyLicense(store, A.id, snap(A.id, 1, items, { controlMode: "enforced" }), meta);
+    expect(r1.status).toBe("applied");
+    expect(r1.plan!.warnings.some((w) => w.reason === "review_required")).toBe(true);
+    expect((await loadCompanyModules(store, A.id))!.mode).toBe("legacy"); // o controle não mudou
+    expect((await store.get("module_baselines", bid))!.status).toBe("open"); // nem a revisão foi presumida
+    const r2 = await applyLicense(store, A.id, snap(A.id, 2, items, { controlMode: "enforced", baselineReview: { reviewedBy: "Ana Souza (Interos)", notes: "Cotações em uso: contratadas no plano." } }), meta);
+    expect(r2.plan!.warnings.some((w) => w.reason === "review_required")).toBe(false);
+    expect((await loadCompanyModules(store, A.id))!.mode).toBe("enforced");
+    expect(await store.get("module_baselines", bid)).toMatchObject({ status: "reviewed", reviewedBy: "Ana Souza (Interos)", notes: "Cotações em uso: contratadas no plano." });
+  });
+
+  it("correção 8: activation_scheduled numa unidade já ligada mantém a unidade ligada até a data", async () => {
+    const t0 = Date.now();
+    const items = ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }));
+    await applyLicense(store, A.id, snap(A.id, 1, items, { controlMode: "enforced" }), meta);
+    expect(decide(await loadCompanyModules(store, A.id), "compras.cotacoes").level).toBe("full");
+    const scheduled = items.map((it) => (it.code === "05.02" ? { code: "05.02", state: "activation_scheduled" as const, effectiveAt: iso(t0 + 5 * day) } : it));
+    const r = await applyLicense(store, A.id, snap(A.id, 2, scheduled), meta);
+    expect(r.plan!.changes.some((c) => c.module === "compras.cotacoes")).toBe(false);
+    expect(r.plan!.effective["compras.cotacoes"]).toMatchObject({ on: true });
+    expect(decide(await loadCompanyModules(store, A.id), "compras.cotacoes").level).toBe("full");
+    // e na data continua ligada
+    await maintainLicense(store, A.id, new Date(t0 + 6 * day));
+    expect(decide(await loadCompanyModules(store, A.id), "compras.cotacoes").level).toBe("full");
+  });
+
+  it("correção 11: filiais da licença (branches) valem — fora da lista, só consulta; filial inexistente gera aviso", async () => {
+    const own = await listAll(store, "branches", { filters: [["eq", "companyId", A.id]] });
+    const second = await store.create("branches", { companyId: A.id, name: "Alfa — Filial 2", code: "02", status: "active" });
+    const items = ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }));
+    const r = await applyLicense(store, A.id, snap(A.id, 1, items, { branches: { mode: "list", branchIds: [own[0].id, "nao-existe"] } }), meta);
+    expect(r.plan!.warnings.some((w) => w.reason === "unknown_branch" && /nao-existe/.test(w.message))).toBe(true);
+    const { branchOutsideLicense } = await import("@/domain/licensing/branches");
+    expect(await branchOutsideLicense(store, A.id, own[0].id)).toBeNull();
+    expect(await branchOutsideLicense(store, A.id, second.id)).toMatch(/só para consulta/);
+    // "all" (ou sem branches) libera todas
+    await applyLicense(store, A.id, snap(A.id, 2, items, { branches: { mode: "all", branchIds: [] } }), meta);
+    expect(await branchOutsideLicense(store, A.id, second.id)).toBeNull();
+  });
+
   it("dependência ausente recusa o retrato inteiro (nada muda)", async () => {
     const C = (await createCompanyWithDefaults(store, { name: "Delta Ficticia", key: "delta-lic" })).company;
     await provisionModules(store, C.id, ["cadastros.produtos"], "teste");
@@ -231,11 +280,15 @@ describe("eventos, assinatura e reconciliação", () => {
     expect(verifySignature(secret, signBody(secret, body, Math.floor(Date.now() / 1000) - 600), body).ok).toBe(false);
   });
 
-  it("eventos de saída: sem configuração ficam registrados como não enviados; com configuração vão assinados", async () => {
+  it("correção 10 — eventos de saída: sem configuração ficam NA FILA (nunca dados como entregues) e saem quando o destino existe", async () => {
     await applyLicense(store, A.id, snap(A.id, 1, ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }))), meta);
     let r = await runDueJobs(store, { types: ["interos.event"] });
-    expect(r.every((x) => x.status === "done")).toBe(true);
-    expect((await listAll(store, "jobs", { filters: [["eq", "type", "interos.event"]] }))[0].result).toMatchObject({ delivered: false, reason: "not_configured" });
+    expect(r.length).toBeGreaterThan(0);
+    expect(r.every((x) => x.status === "retry")).toBe(true);
+    const queued = await listAll(store, "jobs", { filters: [["eq", "type", "interos.event"]] });
+    expect(queued.every((j) => j.status === "retry" && j.result?.reason === "not_configured")).toBe(true);
+    // na fila para a próxima tentativa: o destino configurado depois recebe os eventos guardados
+    for (const j of queued) await store.update("jobs", j.id, { runAt: new Date(Date.now() - 1000).toISOString() });
     process.env.INTEROS_EVENTS_URL = "https://interos.example/events";
     process.env.INTEROS_OUTBOUND_SECRET = "x".repeat(40);
     const calls: { headers: any; body: string }[] = [];
@@ -246,8 +299,12 @@ describe("eventos, assinatura e reconciliação", () => {
     await applyLicense(store, A.id, snap(A.id, 2, ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }))), meta);
     r = await runDueJobs(store, { types: ["interos.event"] });
     vi.unstubAllGlobals();
-    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.length).toBeGreaterThan(queued.length - 1); // os guardados + os novos
+    expect(calls.some((c) => JSON.parse(c.body).licenseVersion === undefined && JSON.parse(c.body).type === "license.applied")).toBe(true);
     expect(verifySignature("x".repeat(40), calls[0].headers["x-erp-signature"], calls[0].body).ok).toBe(true);
+    expect((await listAll(store, "jobs", { filters: [["eq", "type", "interos.event"]] })).every((j) => j.status === "done")).toBe(true);
+    delete process.env.INTEROS_EVENTS_URL;
+    delete process.env.INTEROS_OUTBOUND_SECRET;
   });
 
   it("reconciliação: aplica retrato mais novo do Interos; Interos fora do ar mantém a última licença; retrato velho gera sync.stale", async () => {
@@ -357,6 +414,21 @@ describe("API /api/interos/v2", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("correção 7: Event-Id registrado só depois da validação — corpo inválido não consome o evento", async () => {
+    const { PUT } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
+    const bad = JSON.stringify({ ...snap(A.id, 4, []), licenseVersion: "quatro" });
+    const r1 = await PUT(req(bad, { "x-interos-signature": signBody(secret, bad), "x-interos-event-id": "evt-corrige-0001" }), params());
+    expect(r1.status).toBe(400);
+    expect(await store.get("interos_events", sha256("interos-v2|evt-corrige-0001").slice(0, 32))).toBeNull();
+    // o Interos corrige o corpo e reenvia com o MESMO Event-Id: aceito
+    const good = JSON.stringify(snap(A.id, 4, ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }))));
+    const r2 = await PUT(req(good, { "x-interos-signature": signBody(secret, good), "x-interos-event-id": "evt-corrige-0001" }), params());
+    expect(r2.status).toBe(201);
+    // depois de processado, o mesmo Event-Id com outro corpo continua recusado
+    const r3 = await PUT(req(bad, { "x-interos-signature": signBody(secret, bad), "x-interos-event-id": "evt-corrige-0001" }), params());
+    expect(r3.status).toBe(409);
   });
 
   it("escopo e restrição de empresa por credencial", async () => {

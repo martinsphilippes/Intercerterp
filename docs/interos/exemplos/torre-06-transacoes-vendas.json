@@ -27,7 +27,8 @@
         "unidades": null,
         "fuso": "America/Sao_Paulo",
         "geradoEm": "2026-11-20T18:00:00.000Z",
-        "versaoIndicadores": "2026-11-v1"
+        "versaoIndicadores": "2026-11-v1",
+        "modulosContratados": null
       },
       "itens": [
         {
@@ -38,7 +39,7 @@
           "canal": "pdv",
           "idUnidade": "0f141ddae2733e13500593ac12e10236",
           "idTerminal": "cb5fef50ab825ad79ab22c72dd49a034",
-          "idSessaoCaixa": "cb9036e3662d27cb110b",
+          "idSessaoCaixa": "28aed41c630f3ac254cd",
           "idOperador": "66d25de8b21063346a77ed31c9414333",
           "idVendedor": "d57efc71c48222fe6eeadaeade9edad3",
           "idCliente": "4a5ed4ab051ead7363858ca1293c0dbc",
@@ -64,7 +65,7 @@
           "canal": "pdv",
           "idUnidade": "0f141ddae2733e13500593ac12e10236",
           "idTerminal": "cb5fef50ab825ad79ab22c72dd49a034",
-          "idSessaoCaixa": "cb9036e3662d27cb110b",
+          "idSessaoCaixa": "28aed41c630f3ac254cd",
           "idOperador": "66d25de8b21063346a77ed31c9414333",
           "idVendedor": null,
           "idCliente": null,

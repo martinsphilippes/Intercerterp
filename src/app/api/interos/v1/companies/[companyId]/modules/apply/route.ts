@@ -1,6 +1,7 @@
 import { BusinessError } from "@/lib/core/errors";
 import { publicOperation, resumeIfStuck, submitApply } from "@/domain/modules/operations";
-import { companyIdParam, handle, ok, parseChangeSet, readJson } from "../../../../_modules";
+import { companyOrThrow } from "@/domain/modules/changes";
+import { companyIdParam, errorStatus, fail, handle, ok, parseChangeSet, readJson } from "../../../../_modules";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ export const dynamic = "force-dynamic";
 export function POST(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.modules.write", async ({ store, client, requestId }) => {
     const companyId = companyIdParam(client, (await params).companyId);
+    // empresa inexistente: 404 company_not_found (antes de registrar a operação) — correção 13
+    await companyOrThrow(store, companyId);
     const idem = req.headers.get("idempotency-key")?.trim();
     if (!idem) throw new BusinessError("Cabeçalho Idempotency-Key obrigatório.", "idempotency_key_required");
     const actor = (req.headers.get("x-interos-actor") ?? "").trim().slice(0, 200);
@@ -24,7 +27,16 @@ export function POST(req: Request, { params }: { params: Promise<{ companyId: st
     const submitted = await submitApply(store, { clientId: client.id, idempotencyKey: idem, companyId, actor, request });
     const replayed = submitted.replayed;
     const op = replayed ? await resumeIfStuck(store, submitted.op) : submitted.op;
-    const status = op.status === "applied" ? (replayed ? 200 : 201) : op.status === "scheduled" ? 202 : op.status === "rejected" ? 422 : 202;
-    return ok(publicOperation(op), { requestId, status, headers: { ...(op.versionAfter ? { ETag: `"${op.versionAfter}"` } : {}), "Idempotent-Replayed": String(replayed), Location: `/api/interos/v1/operations/${op.id}` } });
+    const headers = { ...(op.versionAfter ? { ETag: `"${op.versionAfter}"` } : {}), "Idempotent-Replayed": String(replayed), Location: `/api/interos/v1/operations/${op.id}` };
+    // operação recusada: envelope de erro do contrato, com o status do código (version_conflict → 409,
+    // changes_rejected → 422…) e a operação registrada nos detalhes — correção 13
+    if (op.status === "rejected") {
+      const code = String(op.error?.code ?? "changes_rejected");
+      const res = fail(errorStatus(code), code, String(op.error?.message ?? "Lote recusado."), requestId, { ...(op.error?.details ?? {}), operationId: op.id, operation: publicOperation(op) });
+      for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+      return res;
+    }
+    const status = op.status === "applied" ? (replayed ? 200 : 201) : 202;
+    return ok(publicOperation(op), { requestId, status, headers });
   });
 }

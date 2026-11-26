@@ -15,7 +15,7 @@ export const API_VERSION = "v2";
 
 const STATUS: Record<string, number> = {
   invalid_request: 400, signature_required: 401, signature_invalid: 401, event_id_required: 400, company_not_found: 404, not_found: 404,
-  company_not_allowed: 403, event_replay_mismatch: 409, license_busy: 409, signing_not_configured: 503,
+  company_not_allowed: 403, event_replay_mismatch: 409, event_in_progress: 409, license_busy: 409, signing_not_configured: 503,
 };
 
 export function ok(data: unknown, init: { status?: number; headers?: Record<string, string>; requestId: string }) {
@@ -52,8 +52,10 @@ export function companyParam(client: InterosClient, v: string) {
 }
 
 /**
- * Escrita assinada e protegida contra repetição: confere HMAC (janela ±5 min) e registra o X-Interos-Event-Id.
- * Mesmo Event-Id + mesmo corpo → devolve a resposta original; corpo diferente → 409.
+ * Escrita assinada e protegida contra repetição: confere HMAC (janela ±5 min) e o X-Interos-Event-Id.
+ * O Event-Id só fica registrado DEPOIS da validação (correção 7): corpo inválido ou recusa de validação não consome o
+ * evento — o Interos corrige e reenvia com o mesmo Event-Id. Mesmo Event-Id + mesmo corpo já processado → devolve a
+ * resposta original; corpo diferente → 409; o mesmo evento ainda em processamento → 409 event_in_progress.
  */
 export async function signedWrite(req: Request, r: V2Request, companyId: string, fn: (body: unknown, eventId: string) => Promise<{ status: number; data: unknown; headers?: Record<string, string> }>): Promise<Response> {
   const raw = await req.text();
@@ -66,26 +68,35 @@ export async function signedWrite(req: Request, r: V2Request, companyId: string,
   if (!sig.ok) throw new BusinessError(sig.reason, req.headers.get("x-interos-signature") ? "signature_invalid" : "signature_required");
   const eventId = req.headers.get("x-interos-event-id")?.trim() ?? "";
   if (!/^[A-Za-z0-9._:-]{8,200}$/.test(eventId)) throw new BusinessError("Cabeçalho X-Interos-Event-Id obrigatório (8 a 200 caracteres).", "event_id_required");
-  const hash = sha256(raw);
-  const id = sha256(`${r.client.id}|${eventId}`).slice(0, 32);
-  const prior = await r.store.get("interos_events", id);
-  if (prior) {
-    if (prior.requestHash !== hash) throw new BusinessError("X-Interos-Event-Id já usado com outro conteúdo.", "event_replay_mismatch");
-    if (prior.status) return ok(prior.response, { requestId: r.requestId, status: prior.status, headers: { "Idempotent-Replayed": "true" } });
-  } else {
-    try {
-      await r.store.create("interos_events", { clientId: r.client.id, eventId, requestHash: hash, status: 0, response: null, at: nowIso(), companyId }, id);
-    } catch (e) {
-      if (!isConflict(e)) throw e;
-    }
-  }
+  // validação do corpo antes de registrar o evento
   let body: unknown;
   try {
     body = raw.trim() ? JSON.parse(raw) : {};
   } catch {
     throw new BusinessError("JSON inválido.", "invalid_request");
   }
-  const out = await fn(body, eventId);
+  const hash = sha256(raw);
+  const id = sha256(`${r.client.id}|${eventId}`).slice(0, 32);
+  const prior = await r.store.get("interos_events", id);
+  if (prior) {
+    if (prior.requestHash !== hash) throw new BusinessError("X-Interos-Event-Id já usado com outro conteúdo.", "event_replay_mismatch");
+    if (prior.status) return ok(prior.response, { requestId: r.requestId, status: prior.status, headers: { "Idempotent-Replayed": "true" } });
+    throw new BusinessError("Este evento ainda está em processamento. Repita em alguns segundos com o mesmo Event-Id.", "event_in_progress");
+  }
+  try {
+    await r.store.create("interos_events", { clientId: r.client.id, eventId, requestHash: hash, status: 0, response: null, at: nowIso(), companyId }, id);
+  } catch (e) {
+    if (!isConflict(e)) throw e;
+    throw new BusinessError("Este evento ainda está em processamento. Repita em alguns segundos com o mesmo Event-Id.", "event_in_progress");
+  }
+  let out: { status: number; data: unknown; headers?: Record<string, string> };
+  try {
+    out = await fn(body, eventId);
+  } catch (e) {
+    // recusa de validação ou falha: o evento não fica consumido (reenvio corrigido com o mesmo Event-Id é aceito)
+    await r.store.delete("interos_events", id).catch(() => undefined);
+    throw e;
+  }
   await r.store.update("interos_events", id, { status: out.status, response: JSON.parse(JSON.stringify(out.data)) });
   return ok(out.data, { requestId: r.requestId, status: out.status, headers: { "Idempotent-Replayed": "false", ...(out.headers ?? {}) } });
 }
