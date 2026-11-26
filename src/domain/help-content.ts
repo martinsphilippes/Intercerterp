@@ -507,7 +507,7 @@ No modo teclado, o leitor "digita" o código e envia Enter: basta o cursor estar
   },
   {
     slug: "backup-e-restauracao",
-    summary: "Programe cópias, comprove que são restauráveis em base de teste e restaure em nova base.",
+    summary: "Programe cópias e comprove que são restauráveis em base de teste.",
     area: "administracao",
     title: "Backup, verificação e restauração",
     tags: ["backup", "cópia", "restauração", "retenção", "verificação"],
@@ -522,7 +522,7 @@ Defina frequência, horário e por quantos dias as cópias são mantidas. Cópia
 **Verificar** restaura a cópia em uma **base de teste isolada** e compara a quantidade de registros e os checksums de cada tabela. Só então a cópia aparece como "Verificado (restaurável)". A base em uso nunca é tocada.
 
 ## Restauração
-Escolha a cópia e o destino: base de teste (verificação) ou **nova base Appwrite** com outro identificador. A restauração nunca sobrescreve a base em uso; para passar a usar a base restaurada, o responsável técnico altera a configuração da aplicação (APPWRITE_DATABASE_ID).`,
+Escolha a cópia: a restauração pela tela é feita numa **base de teste isolada** e nunca sobrescreve a base em uso. Para voltar a operação a um ponto anterior, o responsável técnico usa a cópia ou ramificação do próprio provedor do banco; baixe e guarde fora do sistema as cópias que quiser manter.`,
   },
   {
     slug: "historico-e-auditoria",

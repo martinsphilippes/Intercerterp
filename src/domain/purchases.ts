@@ -56,7 +56,7 @@ export async function getOrderForWrite(ctx: Ctx, id: string) {
   return o;
 }
 
-/** Limite de gravações por transação do Appwrite. */
+/** Limite de gravações por transação (o modo `MEMORY_TX_MODE=deferred` dos testes recusa acima disso). */
 const TX_MAX_WRITES = 100;
 
 /**

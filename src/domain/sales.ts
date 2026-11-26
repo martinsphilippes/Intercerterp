@@ -90,7 +90,7 @@ export interface FinalizeSaleInput {
 
 /** Máximo de linhas por venda (o que não cabe na transação principal é gravado pela tarefa durável de efeitos). */
 export const MAX_SALE_LINES = 200;
-/** Escritas por transação: o Appwrite aceita no máximo 100 — mantém folga. */
+/** Escritas por transação: limite de 100 (o modo `MEMORY_TX_MODE=deferred` dos testes recusa acima disso) — mantém folga. */
 const TX_OPS_BUDGET = 95;
 /** Itens por lote nos efeitos pós-venda (cada movimento de estoque grava 2 operações). */
 const EFFECT_BATCH = 40;
@@ -657,7 +657,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
             if (isConflict(e) && e.reason === "bounds") throw new BusinessError(`Saldo do vale ${v.code} insuficiente (consumido por outra operação).`, "voucher_balance");
             throw e;
           });
-          const balanceAfter = ctx.store.backend === "appwrite" ? v.balance - p.amount : after.balance;
+          const balanceAfter = after.balance;
           await t.create("credit_voucher_moves", { ...base, voucherId: v.id, seq: 0, kind: "use", amount: -p.amount, balanceAfter, saleId, idemKey: `sale:${saleId}:${i + 1}` }, detId("vmove", `sale:${saleId}:${i + 1}`));
           if (balanceAfter === 0) await t.update("credit_vouchers", v.id, { status: "used" });
         } else if (kind === "loyalty") {
@@ -694,7 +694,7 @@ export async function finalizeSale(ctx: Ctx, input: FinalizeSaleInput) {
         await t.update("returns", exchangeRet.id, { exchangeSaleId: saleId, difference: calc.total - exchangeCredit });
       }
     });
-    // somente após o commit: no Appwrite o conflito (venda concorrente com a mesma chave) surge no commit
+    // somente após o commit: com a transação adiada (modo deferred) o conflito (venda concorrente com a mesma chave) surge no commit
     created = true;
   });
 

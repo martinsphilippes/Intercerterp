@@ -176,8 +176,8 @@ Cada tela tem a lista de inconsistências do protótipo em \`docs/referencia/tel
 
 | Rota | Motivo |
 |---|---|
-| \`/primeiro-acesso\` | Instalação inicial segura (provisiona o banco Appwrite, cria empresa e administrador; exige \`SETUP_TOKEN\` em produção). |
-| \`/recuperar-senha\`, \`/redefinir-senha\`, \`/convite/[token]\` | Recuperação de senha (Appwrite Auth) e ativação por convite. |
+| \`/primeiro-acesso\` | Instalação inicial segura (cria empresa e administrador — as tabelas do Postgres são criadas na primeira consulta; exige \`SETUP_TOKEN\` em produção). |
+| \`/recuperar-senha\`, \`/redefinir-senha\`, \`/convite/[token]\` | Recuperação de senha (login próprio, link de uso único) e ativação por convite. |
 | \`/suporte\` | Chamado público a partir da tela de login (sem sessão). |
 | \`/caixa/[id]\`, \`/caixa/[id]/relatorio\`, \`/caixa/movimentos/[id]/comprovante\` | Consulta da sessão de caixa, relatório de fechamento e comprovante de suprimento/sangria. |
 | \`/vendas/[id]/recibo\`, \`/fiscal/*/[id]/imprimir\` | Recibo 80 mm e impressão de DANFE/DANFCE/DANFSE. |

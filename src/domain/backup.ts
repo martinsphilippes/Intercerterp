@@ -1,6 +1,6 @@
 import { PLATFORM_ONLY } from "@/lib/db/scoped-store";
 import zlib from "node:zlib";
-import { appwriteConfig, configuredBackend, detId, isConflict, listAll, sha256 } from "@/lib/db";
+import { detId, isConflict, listAll, sha256 } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { COLLECTIONS, COLLECTION_MAP, type CollectionDef } from "@/lib/db/schema";
 import { MemoryStore } from "@/lib/db/memory-store";
@@ -20,8 +20,8 @@ import { DEFAULT_TZ, addDays, nowIso, startOfLocalDay, today } from "@/lib/dates
  * "backups" (registro em `backups` + `files`). Artefatos acima de 25 MB são divididos em partes.
  *
  * Verificação: restaura o artefato em uma base de TESTE isolada (MemoryStore nova, nunca a base do usuário)
- * e compara contagens e checksums → "verificado (restaurável)" com evidência.
- * Restauração "nova base Appwrite": provisiona outro databaseId e grava a cópia lá (nunca sobrescreve a base em uso).
+ * e compara contagens e checksums → "verificado (restaurável)" com evidência. A restauração pela tela usa o mesmo
+ * destino; voltar a operação a um ponto anterior é feito com a cópia/ramificação do provedor do banco.
  */
 
 export const BACKUP_FORMAT = "intercert-backup";
@@ -235,7 +235,13 @@ export function unpackPayload(buf: Buffer): Payload {
   return p;
 }
 
-// ───────────────────────────── restauração em uma base (teste isolada ou nova base Appwrite)
+// ───────────────────────────── restauração em uma base (de teste, isolada)
+
+/**
+ * Destino da restauração: base de teste isolada em memória. O antigo destino "nova base" (no armazenamento anterior,
+ * desligado) não existe mais — execução registrada com ele falha dizendo o motivo.
+ */
+export type RestoreTarget = "test";
 
 export interface RestoreReport {
   ok: boolean;
@@ -248,7 +254,7 @@ export interface RestoreReport {
   errors: string[];
   droppedFields: string[];
   skippedCollections: string[];
-  files: { checked: number; ok: number; corrupted: string[]; reuploaded?: number };
+  files: { checked: number; ok: number; corrupted: string[] };
   artifactSha256Ok: boolean | null;
   checksum: { expected: string; actual: string };
 }
@@ -432,12 +438,12 @@ export async function verifyBackup(ctx: Ctx, backupId: string, opts: { system?: 
   const b = await ctx.store.getOrThrow("backups", backupId);
   assert(b.companyId === ctx.companyId, "Cópia de outra empresa.");
   assert(["completed", "verified"].includes(b.status), "Somente cópias concluídas podem ser verificadas.");
-  const job = await createRestoreJob(ctx, b, "test", null, opts.idemKey);
+  const job = await createRestoreJob(ctx, b, "test", opts.idemKey);
   const result = await runRestoreJob(ctx, job.id);
   return { backup: (await ctx.store.get("backups", backupId))!, job: result };
 }
 
-export function restorePreview(b: Doc, target: "test" | "appwrite_new", databaseId: string | null) {
+export function restorePreview(b: Doc) {
   const counts: Record<string, number> = b.counts ?? {};
   const rows = Object.values(counts).reduce((a: number, x: any) => a + Number(x || 0), 0);
   return {
@@ -448,37 +454,24 @@ export function restorePreview(b: Doc, target: "test" | "appwrite_new", database
     collections: Object.keys(counts).length,
     files: b.scope?.files?.included ?? 0,
     sizeBytes: b.sizeBytes,
-    target,
-    databaseId,
-    targetLabel: target === "test" ? "Base de teste isolada em memória (descartada após a verificação)" : `Nova base Appwrite "${databaseId}" no mesmo projeto (a base em uso não é alterada)`,
+    target: "test" as RestoreTarget,
+    targetLabel: "Base de teste isolada em memória (descartada após a verificação)",
     top: Object.entries(counts)
       .sort((a: any, b2: any) => b2[1] - a[1])
       .slice(0, 12),
   };
 }
 
-export function suggestedDatabaseId() {
-  const base = appwriteConfig().databaseId || "intercert";
-  const d = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
-  return `${base}-r${d}`.slice(0, 36);
-}
-
-export async function createRestoreJob(ctx: Ctx, b: Doc, target: "test" | "appwrite_new", databaseId: string | null, idemKey?: string) {
+export async function createRestoreJob(ctx: Ctx, b: Doc, target: RestoreTarget, idemKey?: string | null) {
   assert(b.companyId === ctx.companyId, "Cópia de outra empresa: a restauração só pode ser solicitada na empresa da cópia.");
-  if (target === "appwrite_new") {
-    await guard(ctx, `restaurar cópia em nova base Appwrite ${databaseId ?? ""}`, b.id);
-    assert(configuredBackend() === "appwrite", "Restauração em nova base Appwrite exige a aplicação conectada ao Appwrite.");
-    assert(databaseId && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,35}$/.test(databaseId), "Identificador da nova base inválido (até 36 caracteres: letras, números, ponto, hífen, sublinhado).");
-    assert(databaseId !== appwriteConfig().databaseId, "A restauração nunca sobrescreve a base em uso: informe um identificador diferente.");
-  }
   assert(["completed", "verified"].includes(b.status) && (b.fileId || b.scope?.parts?.length), "Cópia sem artefato disponível.");
   const id = idemKey ? detId("restore", b.id, idemKey) : undefined;
   if (id) {
     const ex = await ctx.store.get("restore_jobs", id);
     if (ex) return ex;
   }
-  const job = await ctx.store.create("restore_jobs", { companyId: ctx.companyId, branchId: null, createdBy: ctx.user.id, backupId: b.id, target, status: "pending", preview: restorePreview(b, target, databaseId) }, id);
-  await audit(ctx, { module: "admin", action: "restore.request", entityType: "restore_job", entityId: job.id, summary: `Restauração solicitada da cópia de ${new Date(b.finishedAt ?? b.startedAt).toLocaleString("pt-BR", { timeZone: DEFAULT_TZ })} → ${target === "test" ? "base de teste isolada" : `nova base Appwrite ${databaseId}`}`, related: [`backup:${b.id}`] });
+  const job = await ctx.store.create("restore_jobs", { companyId: ctx.companyId, branchId: null, createdBy: ctx.user.id, backupId: b.id, target, status: "pending", preview: restorePreview(b) }, id);
+  await audit(ctx, { module: "admin", action: "restore.request", entityType: "restore_job", entityId: job.id, summary: `Restauração solicitada da cópia de ${new Date(b.finishedAt ?? b.startedAt).toLocaleString("pt-BR", { timeZone: DEFAULT_TZ })} → base de teste isolada`, related: [`backup:${b.id}`] });
   return job;
 }
 
@@ -492,45 +485,18 @@ export async function runRestoreJob(ctx: Ctx, jobId: string) {
   const t0 = Date.now();
   await ctx.store.update("restore_jobs", jobId, { status: "running", startedAt: nowIso() });
   try {
+    // destino "nova base" era do armazenamento antigo (desligado): a execução registrada com ele falha com o motivo
+    assert(job.target === "test", "Restauração em nova base indisponível: o destino era do armazenamento antigo, desligado. Use a base de teste isolada.");
     const { payload, shaOk } = await loadBackupPayload(ctx.store, b);
-    let target: Store;
-    let reuploaded: number | undefined;
-    const databaseId: string | null = job.preview?.databaseId ?? null;
-    if (job.target === "appwrite_new") {
-      assert(configuredBackend() === "appwrite", "Aplicação não conectada ao Appwrite.");
-      const cfg = { ...appwriteConfig(), databaseId: databaseId! };
-      assert(cfg.databaseId !== appwriteConfig().databaseId, "Destino igual à base em uso — operação recusada.");
-      const { provisionAppwrite } = await import("@/lib/db/provision");
-      await provisionAppwrite(cfg, () => undefined);
-      const { AppwriteStore } = await import("@/lib/db/appwrite-store");
-      target = new AppwriteStore(cfg);
-      const nonEmpty = await target.list("companies", { limit: 1, total: false });
-      assert(nonEmpty.items.length === 0 || nonEmpty.items[0].id === payload.manifest.companyId, "A base de destino já contém dados de outra empresa — escolha outro identificador.");
-    } else {
-      target = new MemoryStore(); // base de TESTE isolada; nunca a base do usuário
-    }
-    const r = await restoreInto(target, payload, { concurrency: job.target === "appwrite_new" ? 8 : 1 });
+    const target: Store = new MemoryStore(); // base de TESTE isolada; nunca a base do usuário
+    const r = await restoreInto(target, payload);
     const cmp = await compareWithManifest(target, payload, payload.manifest.companyId);
     const files = checkFiles(payload);
-    if (job.target === "appwrite_new" && payload.files.length) {
-      // blobs ausentes no armazenamento são reenviados a partir do artefato
-      const storage = getFileStorage();
-      reuploaded = 0;
-      for (const f of payload.files) {
-        try {
-          await storage.get(f.bucket, f.storageId);
-        } catch {
-          const sid = await storage.put(f.bucket, f.name, Buffer.from(f.data, "base64"), f.mime);
-          await target.update("files", f.id, { storageId: sid });
-          reuploaded++;
-        }
-      }
-    }
     const expectedRows = Object.values(payload.manifest.counts).reduce((a, x) => a + x, 0);
     const ok = cmp.mismatches.length === 0 && r.errors.length === 0 && files.corrupted.length === 0 && cmp.checksum === payload.manifest.checksum;
     const report: RestoreReport = {
       ok,
-      target: job.target === "test" ? "Base de teste isolada (MemoryStore em memória, descartada)" : `Nova base Appwrite ${databaseId}`,
+      target: "Base de teste isolada (MemoryStore em memória, descartada)",
       durationMs: Date.now() - t0,
       restoredRows: r.restored,
       expectedRows,
@@ -539,22 +505,20 @@ export async function runRestoreJob(ctx: Ctx, jobId: string) {
       errors: r.errors,
       droppedFields: r.dropped,
       skippedCollections: r.skipped,
-      files: { ...files, reuploaded },
+      files,
       artifactSha256Ok: shaOk,
       checksum: { expected: payload.manifest.checksum, actual: cmp.checksum },
     };
     const done = await ctx.store.update("restore_jobs", jobId, { status: ok ? "completed" : "failed", result: report, finishedAt: nowIso(), error: ok ? null : summarizeFailure(report) });
-    if (job.target === "test") {
-      await ctx.store.update("backups", b.id, { status: ok ? "verified" : "completed", verifiedAt: nowIso(), verifyResult: { ...report, collections: undefined, restoreJobId: jobId } });
-    }
+    await ctx.store.update("backups", b.id, { status: ok ? "verified" : "completed", verifiedAt: nowIso(), verifyResult: { ...report, collections: undefined, restoreJobId: jobId } });
     await audit(ctx, {
-      module: "admin", action: job.target === "test" ? "backup.verify" : "restore.execute", entityType: "restore_job", entityId: jobId,
+      module: "admin", action: "backup.verify", entityType: "restore_job", entityId: jobId,
       summary: ok
-        ? `${job.target === "test" ? "Verificação" : "Restauração"} concluída: ${r.restored.toLocaleString("pt-BR")} de ${expectedRows.toLocaleString("pt-BR")} registros, checksums iguais (${report.target})`
-        : `${job.target === "test" ? "Verificação" : "Restauração"} com divergência: ${summarizeFailure(report)}`,
+        ? `Verificação concluída: ${r.restored.toLocaleString("pt-BR")} de ${expectedRows.toLocaleString("pt-BR")} registros, checksums iguais (${report.target})`
+        : `Verificação com divergência: ${summarizeFailure(report)}`,
       result: ok ? "success" : "failure", related: [`backup:${b.id}`],
     });
-    if (!ok) await notifyBackupProblem(ctx, b, `Cópia de segurança não passou na ${job.target === "test" ? "verificação" : "restauração"}`, summarizeFailure(report));
+    if (!ok) await notifyBackupProblem(ctx, b, "Cópia de segurança não passou na verificação", summarizeFailure(report));
     return done;
   } catch (e: any) {
     const msg = String(e?.message ?? e).slice(0, 4000);

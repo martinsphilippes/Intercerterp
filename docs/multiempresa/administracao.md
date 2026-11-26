@@ -97,7 +97,6 @@ Tudo o que o administrador da empresa faz vale **na empresa em uso** (a escolhid
 - **Pelo administrador** (`revokeUserSessions`): grava `sessionsValidAfter` = agora e apaga as linhas de `sessions` da pessoa. Qualquer sessão criada antes disso deixa de valer (`LocalAuth.verify`), inclusive uma que estivesse em andamento. A sessão é da pessoa, então o encerramento vale em todos os dispositivos e em todas as empresas dela. O administrador não encerra as próprias sessões por essa tela.
 - **Pelo próprio usuário**, em Minha conta › Segurança (`revokeOtherSessions`): encerra as **outras** sessões e mantém a atual, identificada pelo cookie da requisição.
 - A página do usuário mostra quantas sessões estão abertas e quando foram encerradas pela última vez.
-- Serviço de autenticação legado (Appwrite): o encerramento usa a API dele. A conferência de sessão guardada em memória pode levar até 1 minuto para cair em cada instância.
 
 ### 3.8 Dados que valem em todas as empresas da pessoa
 

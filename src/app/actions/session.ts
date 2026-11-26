@@ -28,8 +28,9 @@ async function rememberUnit(userId: string, value: string) {
 }
 
 /**
- * Falha fora das regras do acesso (banco pausado ou fora do ar, erro inesperado) vira mensagem na tela. Sem isso a
- * exceção da server action chega ao usuário como "erro no servidor", sem dizer que não é problema de usuário ou senha.
+ * Falha fora das regras do acesso (banco fora do ar, sem acesso ou limitado pelo plano, erro inesperado) vira mensagem
+ * na tela. Sem isso a exceção da server action chega ao usuário como "erro no servidor", sem dizer que não é problema
+ * de usuário ou senha.
  */
 async function guardAccess<T>(what: string, fn: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
   try {
@@ -96,9 +97,8 @@ async function doLogin(fd: FormData): Promise<ActionResult> {
       return { ok: false, error: left > 0 ? `Usuário ou senha inválidos. ${left} tentativa(s) restante(s) antes do bloqueio temporário.` : `Usuário ou senha inválidos. Acesso bloqueado por ${LOCK_WINDOW_MIN} minutos.` };
     }
     console.error("[login]", e);
-    // respostas do provedor de autenticação (limite de tentativas etc.) não são banco fora do ar: só a pausa é inequívoca
-    const outage = dbOutageOf(e);
-    if (outage?.kind === "paused") return { ok: false, error: outageMessage(outage), code: "db_paused" };
+    // falha do provedor de autenticação depois de o usuário ter sido lido: mensagem própria (o banco fora do ar antes
+    // desta etapa já é explicado por guardAccess)
     return { ok: false, error: "Serviço de autenticação indisponível. Tente novamente em instantes." };
   }
   // §44: autenticação em duas etapas — a sessão fica guardada (cifrada) até o código; "manter conectado" não pula a etapa
@@ -248,8 +248,6 @@ async function doRequestRecovery(fd: FormData): Promise<ActionResult> {
     }
   } catch (e: any) {
     console.error("[recovery]", e);
-    const outage = dbOutageOf(e);
-    if (outage?.kind === "paused") return { ok: false, error: outageMessage(outage), code: "db_paused" };
     return { ok: false, error: "Não foi possível solicitar a recuperação agora. Tente novamente ou contate o suporte." };
   }
   return { ok: true, message: neutral };
@@ -282,7 +280,7 @@ export async function completeRecoveryAction(fd: FormData): Promise<ActionResult
     await getAuth().completeRecovery({ userId, secret, password });
     await auditRecoveryCompleted(userId).catch((e) => console.warn("[recuperacao] auditoria não registrada", (e as Error)?.message));
   } catch (e) {
-    // 401 aqui é o próprio link inválido ou expirado; só pausa e falta de resposta são indisponibilidade
+    // acesso recusado aqui continua como link inválido ou expirado; limite do plano e falta de resposta são indisponibilidade
     const outage = dbOutageOf(e);
     if (outage && outage.kind !== "credentials") return { ok: false, error: outageMessage(outage), code: `db_${outage.kind}` };
     return { ok: false, error: "Link inválido ou expirado. Solicite uma nova recuperação." };

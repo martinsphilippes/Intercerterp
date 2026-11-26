@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/empty";
 import { ActionButton } from "@/components/ui/action-form";
 import { formatDateTime } from "@/lib/dates";
-import { getAuth } from "@/lib/auth/provider";
 import { isQuickAccessUser } from "@/lib/auth/quick-access";
 import { twoFactorState, userRequiresTwoFactor } from "@/domain/two-factor";
 import { openSessions } from "@/domain/users";
@@ -22,7 +21,7 @@ export default async function Page() {
   const u = (await getStore().get("users", s.user.id))!;
   const st = twoFactorState(u);
   const required = await userRequiresTwoFactor(getStore(), u);
-  const sessions = getAuth().kind === "local" ? await openSessions(getStore(), u) : null;
+  const sessions = await openSessions(getStore(), u);
   const quick = isQuickAccessUser(u);
   return (
     <>
@@ -44,7 +43,7 @@ export default async function Page() {
         <Card title="Sessões" className="lg:col-start-1">
           <DefinitionList
             items={[
-              { label: "Sessões abertas (incluindo esta)", value: sessions ? String(sessions.count) : "Gerenciadas pelo serviço de autenticação" },
+              { label: "Sessões abertas (incluindo esta)", value: String(sessions.count) },
               { label: "Encerradas pela última vez", value: u.sessionsValidAfter ? formatDateTime(u.sessionsValidAfter) : "—" },
             ]}
           />
@@ -53,7 +52,7 @@ export default async function Page() {
             {quick ? (
               <p className="text-xs text-slate-500">Acesso da demonstração: o mesmo usuário é usado por outros visitantes, então as sessões dele não são encerradas por aqui.</p>
             ) : (
-              <ActionButton action={revokeOtherSessionsAction} label="Encerrar as outras sessões" confirm="Encerrar todas as outras sessões? Esta continua aberta." disabled={sessions !== null && sessions.count <= 1} />
+              <ActionButton action={revokeOtherSessionsAction} label="Encerrar as outras sessões" confirm="Encerrar todas as outras sessões? Esta continua aberta." disabled={sessions.count <= 1} />
             )}
           </div>
         </Card>

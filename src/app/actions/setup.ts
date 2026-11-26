@@ -12,7 +12,7 @@ function checkSetupToken(fd: FormData): string | null {
   const expected = process.env.SETUP_TOKEN;
   if (!expected) {
     // Em produção com banco real a instalação exige token (evita que um visitante crie o administrador)
-    return process.env.NODE_ENV === "production" && (configuredBackend() === "appwrite" || configuredBackend() === "postgres") ? "Defina a variável SETUP_TOKEN no servidor para concluir a instalação." : null;
+    return process.env.NODE_ENV === "production" && configuredBackend() === "postgres" ? "Defina a variável SETUP_TOKEN no servidor para concluir a instalação." : null;
   }
   const got = Buffer.from(String(fd.get("setupToken") ?? ""));
   const exp = Buffer.from(expected);
@@ -24,24 +24,6 @@ async function emptyOrError(): Promise<string | null> {
     return (await isEmptyInstallation()) ? null : "A instalação já foi inicializada.";
   } catch (e: any) {
     return `Banco de dados indisponível: ${e?.message ?? e}`;
-  }
-}
-
-/** Cria tabelas/índices/buckets no Appwrite. Retomável: cada chamada continua de onde parou. */
-export async function provisionAction(fd: FormData): Promise<ActionResult<{ done: boolean; tables: number; total: number; log: string[] }>> {
-  const closed = await emptyOrError();
-  if (closed) return { ok: false, error: closed };
-  const bad = checkSetupToken(fd);
-  if (bad) return { ok: false, error: bad };
-  const { configuredBackend, appwriteConfig } = await import("@/lib/db");
-  if (configuredBackend() !== "appwrite") return { ok: false, error: "Provisionamento aplica-se apenas ao backend Appwrite." };
-  const { provisionAppwrite } = await import("@/lib/db/provision");
-  const log: string[] = [];
-  try {
-    const r = await provisionAppwrite(appwriteConfig(), (m) => log.push(m), { deadline: Date.now() + 240000 });
-    return { ok: true, data: { ...r, log: log.slice(-12) }, message: r.done ? "Banco provisionado." : `Parcial: ${r.tables}/${r.total} tabelas. Clique novamente para continuar.` };
-  } catch (e: any) {
-    return { ok: false, error: `Falha no provisionamento: ${e.message}` };
   }
 }
 

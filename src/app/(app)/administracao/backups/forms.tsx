@@ -83,34 +83,17 @@ export function ScheduleForm({ schedule, readOnly, weekdays, frequencies }: { sc
 
 type Preview = { rows: number; collections: number; files: number; sizeBytes: number; targetLabel: string; top: Array<[string, number]> };
 
-export function RestoreForm({ backupId, previews, appwriteAvailable, suggestedDb, labels }: { backupId: string; previews: { test: Preview; appwrite: Preview }; appwriteAvailable: boolean; suggestedDb: string; labels: Record<string, string> }) {
-  const [target, setTarget] = useState<"test" | "appwrite_new">("test");
-  const [db, setDb] = useState(suggestedDb);
-  const p = target === "test" ? previews.test : previews.appwrite;
+export function RestoreForm({ backupId, preview: p, labels }: { backupId: string; preview: Preview; labels: Record<string, string> }) {
   return (
     <ActionForm action={restoreAction.bind(null, backupId)} className="space-y-4">
       {({ pending, error }) => (
         <>
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-600">1. Destino</p>
-            <label className="flex items-start gap-2 text-sm">
-              <input type="radio" name="target" value="test" checked={target === "test"} onChange={() => setTarget("test")} className="mt-1 accent-brand-700" />
-              <span>
-                <b>Base de teste isolada</b> — restaura em memória, compara contagens e checksums e descarta. Comprova que a cópia é recuperável sem tocar nos dados em uso.
-              </span>
-            </label>
-            <label className={`flex items-start gap-2 text-sm ${appwriteAvailable ? "" : "opacity-60"}`}>
-              <input type="radio" name="target" value="appwrite_new" checked={target === "appwrite_new"} disabled={!appwriteAvailable} onChange={() => setTarget("appwrite_new")} className="mt-1 accent-brand-700" />
-              <span>
-                <b>Nova base Appwrite</b> — provisiona outro banco (identificador abaixo) no mesmo projeto e grava a cópia nele. A base em uso nunca é sobrescrita; para adotá-la, o responsável técnico altera APPWRITE_DATABASE_ID.
-                {!appwriteAvailable && <span className="block text-xs text-slate-500">Indisponível: a aplicação não está conectada ao Appwrite.</span>}
-              </span>
-            </label>
-            {target === "appwrite_new" && (
-              <Field label="Identificador da nova base" hint="Até 36 caracteres; diferente da base em uso.">
-                <Input name="databaseId" value={db} onChange={(e) => setDb(e.target.value)} required maxLength={36} />
-              </Field>
-            )}
+            <p className="text-sm">
+              <b>Base de teste isolada</b> — restaura em memória, compara contagens e checksums e descarta. Comprova que a cópia é recuperável sem tocar nos dados em uso.
+            </p>
+            <p className="text-xs text-slate-500">Para voltar a operação a um ponto anterior, o responsável técnico usa a cópia ou ramificação do próprio provedor do banco.</p>
           </div>
           <div>
             <p className="mb-2 text-xs font-semibold text-slate-600">2. Prévia do escopo</p>
@@ -118,7 +101,7 @@ export function RestoreForm({ backupId, previews, appwriteAvailable, suggestedDb
               <p>
                 <b>{p.rows.toLocaleString("pt-BR")}</b> registros em <b>{p.collections}</b> tabelas · <b>{p.files}</b> arquivo(s) · artefato de {(p.sizeBytes / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} KB
               </p>
-              <p className="mt-1 text-xs text-slate-600">Destino: {target === "appwrite_new" ? `Nova base Appwrite "${db}" no mesmo projeto (a base em uso não é alterada)` : p.targetLabel}</p>
+              <p className="mt-1 text-xs text-slate-600">Destino: {p.targetLabel}</p>
               <p className="mt-2 text-xs text-slate-500">Maiores tabelas: {p.top.map(([k, n]) => `${labels[k] ?? k} (${n})`).join(", ")}</p>
             </div>
           </div>
@@ -128,7 +111,7 @@ export function RestoreForm({ backupId, previews, appwriteAvailable, suggestedDb
           </div>
           {error && <Notice tone="bad">{error}</Notice>}
           <div className="flex justify-end">
-            <SubmitButton pending={pending}>{target === "test" ? "Restaurar em base de teste" : "Iniciar restauração na nova base"}</SubmitButton>
+            <SubmitButton pending={pending}>Restaurar em base de teste</SubmitButton>
           </div>
         </>
       )}

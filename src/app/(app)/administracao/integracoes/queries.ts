@@ -2,7 +2,7 @@ import "server-only";
 import { detId } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
 import type { Ctx } from "@/lib/core/ctx";
-import { diagnose, INTEGRATION_CATALOG, integrationJobs, secretStatus, STATUS_LABEL, type IntegrationKind } from "@/domain/integrations";
+import { diagnose, INTEGRATION_CATALOG, integrationJobs, retiredProvider, secretStatus, STATUS_LABEL, type IntegrationKind } from "@/domain/integrations";
 import { getFiscalConfig, measuredStatus } from "@/domain/fiscal/service";
 
 export const KIND_META: Record<IntegrationKind, { abbr: string; category: string }> = {
@@ -54,7 +54,9 @@ export async function integrationOverview(ctx: Ctx, kind: IntegrationKind): Prom
   const meta = KIND_META[kind];
   const branchRec = ctx.branchId ? await ctx.store.get("integrations", detId("integration", `${ctx.companyId}|${ctx.branchId}|${kind}`)) : null;
   const companyRec = await ctx.store.get("integrations", detId("integration", `${ctx.companyId}|*|${kind}`));
-  const record = branchRec ?? companyRec;
+  // registro de provedor desligado (ex.: e-mail pelo antigo Appwrite Messaging) aparece como não configurado
+  const found = branchRec ?? companyRec;
+  const record = found && !retiredProvider(found) ? found : null;
   const jobs = await integrationJobs(ctx, kind, ["retry", "dead"]);
   if (kind === "fiscal_nfe" || kind === "fiscal_nfse") {
     const cfg = await getFiscalConfig(ctx.store, ctx.companyId, ctx.branchId);

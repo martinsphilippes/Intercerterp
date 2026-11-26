@@ -37,7 +37,7 @@ import type { CartItem } from "./cart-calc";
 
 export const SALES_DOC_FLAG = "documentoComercial";
 export type SalesDocType = "quote" | "order";
-/** linhas por documento (cabeçalho + itens numa transação do Appwrite, limite de 100 operações) */
+/** linhas por documento (cabeçalho + itens numa transação, limite de 100 operações) */
 export const MAX_DOC_LINES = 90;
 
 export const QUOTE_STATUS_LABEL: Record<string, string> = { draft: "Rascunho", sent: "Enviado", approved: "Aprovado", rejected: "Recusado", expired: "Expirado", converted: "Convertido" };

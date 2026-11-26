@@ -9,7 +9,7 @@ import { getFileStorage, saveFile } from "@/lib/core/files";
 import { runDueJobs } from "@/lib/core/jobs";
 import { setSetting } from "@/lib/core/settings";
 import { addDays, today } from "@/lib/dates";
-import { createBackup, verifyBackup, applyRetention, loadBackupPayload, scheduleDailyBackup, scheduleDue, collectionChecksum, buildPayload, compareWithManifest, restoreInto } from "@/domain/backup";
+import { createBackup, verifyBackup, applyRetention, loadBackupPayload, scheduleDailyBackup, scheduleDue, collectionChecksum, buildPayload, compareWithManifest, restoreInto, runRestoreJob } from "@/domain/backup";
 import { COLLECTION_MAP } from "@/lib/db/schema";
 import { MemoryStore as MS } from "@/lib/db/memory-store";
 import "@/domain/jobs-registry";
@@ -113,6 +113,17 @@ describe("backup e restauração", () => {
     expect((await store.get("backups", recent.id))!.status).toBe("completed");
     expect(await store.get("files", recent.fileId)).not.toBeNull();
     await expect(verifyBackup(admin, old1.id)).rejects.toThrow(/concluídas/);
+  }, 120000);
+
+  it("restauração registrada com o destino antigo (“nova base” do armazenamento desligado) falha com o motivo, sem tocar na cópia", async () => {
+    const b = await createBackup(admin, { kind: "manual", includeFiles: false, idemKey: "t-destino-antigo" });
+    expect(b.status).toBe("completed");
+    const job = await store.create("restore_jobs", { companyId, branchId: null, createdBy: admin.user.id, backupId: b.id, target: "appwrite_new", status: "pending", preview: { databaseId: "intercert-r1" } });
+    const done = await runRestoreJob(admin, job.id);
+    expect(done.status).toBe("failed");
+    expect(done.error).toMatch(/armazenamento antigo, desligado/);
+    // a cópia continua como estava (a verificação só registra a execução na base de teste)
+    expect((await store.get("backups", b.id))!.status).toBe("completed");
   }, 120000);
 
   it("rotina diária agenda a cópia automática no horário configurado e o executor cria e verifica", async () => {

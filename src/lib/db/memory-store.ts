@@ -251,9 +251,9 @@ export class MemoryStore implements Store {
   }
 
   /**
-   * Modo "deferred" (MEMORY_TX_MODE=deferred) reproduz a semântica do Appwrite: as escritas da transação
-   * ficam pendentes e só são aplicadas no commit; leituras feitas fora do `tx` não as enxergam;
-   * conflitos de unicidade/limite aparecem no commit (desfazendo tudo).
+   * Modo "deferred" (MEMORY_TX_MODE=deferred): transação adiada, mais restrita que a do Postgres — as escritas da
+   * transação ficam pendentes e só são aplicadas no commit; leituras feitas fora do `tx` não as enxergam;
+   * conflitos de unicidade/limite aparecem no commit (desfazendo tudo). A suíte também roda assim.
    */
   readonly deferredTx = process.env.MEMORY_TX_MODE === "deferred";
 
@@ -309,8 +309,8 @@ function owns(collection: string, row: Record<string, any>, guard?: WriteGuard):
   return row.companyId === guard.companyId;
 }
 
-/** Visão de transação com escritas pendentes até o commit (semântica Appwrite). */
-/** Limite de operações por transação do Appwrite (TablesDB), reproduzido no modo deferred. */
+/** Visão de transação com escritas pendentes até o commit (modo deferred). */
+/** Limite de operações por transação no modo deferred (o mesmo que o código de domínio respeita). */
 export const TX_MAX_OPS = 100;
 
 class DeferredTx implements Store {
@@ -318,7 +318,7 @@ class DeferredTx implements Store {
   readonly ops: TxOp[] = [];
   constructor(private readonly base: MemoryStore) {}
   private push(op: TxOp) {
-    if (this.ops.length >= TX_MAX_OPS) throw new Error("Operação excede o limite de 100 escritas por transação do Appwrite.");
+    if (this.ops.length >= TX_MAX_OPS) throw new Error("Operação excede o limite de 100 escritas por transação.");
     this.ops.push(op);
   }
   get<T = any>(collection: string, id: string) {

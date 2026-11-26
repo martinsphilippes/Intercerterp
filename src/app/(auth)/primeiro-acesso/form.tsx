@@ -2,9 +2,7 @@
 
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, Input, Select, FormGrid } from "@/components/ui/form";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { setupInstallationAction, provisionAction } from "@/app/actions/setup";
+import { setupInstallationAction } from "@/app/actions/setup";
 
 function TokenField({ show }: { show: boolean }) {
   if (!show) return null;
@@ -12,33 +10,6 @@ function TokenField({ show }: { show: boolean }) {
     <Field label="Token de instalação" required hint="Valor da variável SETUP_TOKEN configurada no servidor.">
       <Input name="setupToken" type="password" required autoComplete="off" />
     </Field>
-  );
-}
-
-export function ProvisionPanel({ missing, needsToken }: { missing: number; needsToken: boolean }) {
-  const [log, setLog] = useState<string[]>([]);
-  const router = useRouter();
-  return (
-    <ActionForm
-      action={provisionAction}
-      className="mt-6 space-y-4"
-      onSuccess={(d) => {
-        setLog(d?.log ?? []);
-        if (d?.done) router.refresh();
-      }}
-    >
-      {({ pending, error }) => (
-        <>
-          <p className="text-sm text-slate-600">O banco de dados do Appwrite ainda não tem as tabelas do ERP ({missing} pendentes). O provisionamento cria tabelas, colunas, índices e buckets — pode levar alguns minutos e é retomável.</p>
-          <TokenField show={needsToken} />
-          {error && <p className="text-sm text-red-700">{error}</p>}
-          {log.length > 0 && <pre className="max-h-48 overflow-auto rounded bg-slate-50 p-2 text-xs text-slate-600">{log.join("\n")}</pre>}
-          <SubmitButton pending={pending} className="w-full">
-            {pending ? "Provisionando…" : "Preparar banco de dados no Appwrite"}
-          </SubmitButton>
-        </>
-      )}
-    </ActionForm>
   );
 }
 

@@ -15,7 +15,6 @@ vi.mock("@vercel/blob", () => ({
   del: async (pathname: string) => void blobs.delete(pathname),
 }));
 
-import { AppwriteException } from "node-appwrite";
 import { configuredBackend } from "@/lib/db";
 import { dbOutageOf, outageLogLine } from "@/lib/db/outage";
 import { getFileStorage } from "@/lib/core/files";
@@ -44,33 +43,45 @@ afterEach(() => {
   blobs.clear();
 });
 
+/** Variáveis do Appwrite (desligado e retirado do código) que ainda existem na Vercel: não podem ter efeito algum. */
 const APPWRITE = { APPWRITE_ENDPOINT: "https://fra.cloud.appwrite.io/v1", APPWRITE_PROJECT_ID: "p", APPWRITE_API_KEY: "k" };
 
 describe("escolha do armazenamento", () => {
-  it("banco Postgres conectado ao projeto tem prioridade sobre o Appwrite; DATA_BACKEND força a escolha", () => {
-    env({ ...APPWRITE });
-    expect(configuredBackend()).toBe("appwrite");
-    env({ ...APPWRITE, DATABASE_URL: "postgres://u:s@host/db" });
+  it("banco Postgres conectado ao projeto define o armazenamento; DATA_BACKEND força a escolha; variáveis do Appwrite não contam", () => {
+    env({ DATABASE_URL: "postgres://u:s@host/db" });
     expect(configuredBackend()).toBe("postgres");
     env({ POSTGRES_URL: "postgres://u:s@host/db" });
     expect(configuredBackend()).toBe("postgres");
-    env({ ...APPWRITE, DATABASE_URL: "postgres://u:s@host/db", DATA_BACKEND: "appwrite" });
-    expect(configuredBackend()).toBe("appwrite");
+    env({ DATABASE_URL: "postgres://u:s@host/db", DATA_BACKEND: "memory" });
+    expect(configuredBackend()).toBe("memory");
     env({ VERCEL: "1" });
     expect(configuredBackend()).toBe("memory");
     env({});
     expect(configuredBackend()).toBe("local");
+    // as variáveis antigas e o valor antigo de DATA_BACKEND são ignorados: vale a detecção de sempre
+    env({ ...APPWRITE, DATABASE_URL: "postgres://u:s@host/db" });
+    expect(configuredBackend()).toBe("postgres");
+    env({ ...APPWRITE, DATABASE_URL: "postgres://u:s@host/db", DATA_BACKEND: "appwrite" });
+    expect(configuredBackend()).toBe("postgres");
+    env({ ...APPWRITE, VERCEL: "1" });
+    expect(configuredBackend()).toBe("memory");
+    env({ ...APPWRITE });
+    expect(configuredBackend()).toBe("local");
   });
 
-  it("publicação sem banco: a tela de configuração pede o Postgres; Appwrite pela metade lista o que falta", () => {
+  it("publicação sem banco: a tela de configuração pede o Postgres, haja ou não variáveis do Appwrite", () => {
     env({ VERCEL: "1" });
     expect(missingDeploymentConfig()).toEqual(["DATABASE_URL"]);
     env({ VERCEL: "1", DATABASE_URL: "postgres://u:s@host/db" });
     expect(missingDeploymentConfig()).toEqual([]);
-    env({ VERCEL: "1", ...APPWRITE });
+    env({ VERCEL: "1", ...APPWRITE, DATABASE_URL: "postgres://u:s@host/db" });
     expect(missingDeploymentConfig()).toEqual([]);
+    env({ VERCEL: "1", ...APPWRITE });
+    expect(missingDeploymentConfig()).toEqual(["DATABASE_URL"]);
     env({ VERCEL: "1", APPWRITE_ENDPOINT: "https://x" });
-    expect(missingDeploymentConfig()).toEqual(["APPWRITE_PROJECT_ID", "APPWRITE_API_KEY"]);
+    expect(missingDeploymentConfig()).toEqual(["DATABASE_URL"]);
+    env({ VERCEL: "1", DATA_BACKEND: "appwrite" });
+    expect(missingDeploymentConfig()).toEqual(["DATABASE_URL"]);
     env({ VERCEL: "1", DATA_BACKEND: "memory" });
     expect(missingDeploymentConfig()).toEqual([]);
     env({});
@@ -119,21 +130,21 @@ describe("banco indisponível: erros do Postgres", () => {
     expect(dbOutageOf(pgError("23505", "duplicate key value violates unique constraint"))).toBeNull();
     expect(dbOutageOf(pgError("42703", 'column "x" does not exist'))).toBeNull();
     expect(dbOutageOf(pgError("40001", "could not serialize access"))).toBeNull();
-    // e o Appwrite continua classificado como antes
-    expect(dbOutageOf(new AppwriteException("Project is paused", 403, "project_paused"))).toMatchObject({ kind: "paused" });
   });
 });
 
 describe("monitor diário do banco", () => {
-  it("o registro da falha diz onde olhar conforme o banco em uso (não manda ao Appwrite quem está no Postgres)", () => {
-    const quota = { kind: "quota" as const, detail: "x" };
-    expect(outageLogLine(quota, "postgres")).toMatch(/LIMITADO.*Vercel/);
-    expect(outageLogLine(quota, "postgres")).not.toMatch(/Appwrite/);
-    expect(outageLogLine(quota, "appwrite")).toMatch(/LIMITADO.*Appwrite/);
-    expect(outageLogLine({ kind: "credentials", detail: "x" }, "postgres")).toMatch(/RECUSADO.*Vercel/);
-    expect(outageLogLine({ kind: "paused", detail: "x" }, "appwrite")).toMatch(/PAUSADO.*Appwrite/);
-    expect(outageLogLine({ kind: "unreachable", detail: "x" }, "postgres")).toMatch(/SEM RESPOSTA/);
-    expect(outageLogLine(null, "postgres")).toMatch(/não é de indisponibilidade/);
+  it("o registro da falha diz o que houve e onde olhar (o banco do projeto na Vercel)", () => {
+    const lines = [
+      [outageLogLine({ kind: "quota", detail: "x" }), /LIMITADO.*Vercel/],
+      [outageLogLine({ kind: "credentials", detail: "x" }), /RECUSADO.*Vercel/],
+      [outageLogLine({ kind: "unreachable", detail: "x" }), /SEM RESPOSTA/],
+      [outageLogLine(null), /não é de indisponibilidade/],
+    ] as const;
+    for (const [line, expected] of lines) {
+      expect(line).toMatch(expected);
+      expect(line).not.toMatch(/Appwrite/);
+    }
   });
 });
 
@@ -154,7 +165,7 @@ describe("diagnóstico da instalação", () => {
 });
 
 describe("chave de cifra dos segredos (autenticação em duas etapas)", () => {
-  it("publicação com banco de verdade nunca cifra com a chave de desenvolvimento; a chave herdada do Appwrite só vale enquanto existir", () => {
+  it("publicação com banco de verdade nunca cifra com a chave de desenvolvimento; só AUTH_ENCRYPTION_KEY vale (a chave do Appwrite, não)", () => {
     const mode = process.env.NODE_ENV;
     const setMode = (v: string | undefined) => (v === undefined ? delete (process.env as Record<string, string | undefined>).NODE_ENV : Object.assign(process.env, { NODE_ENV: v }));
     const banco = "postgres://usuario:senha@servidor/banco";
@@ -162,32 +173,32 @@ describe("chave de cifra dos segredos (autenticação em duas etapas)", () => {
       // desenvolvimento e testes: chave fixa de desenvolvimento
       env({});
       expect(secretKeySource()).toBe("dev");
-      expect(openSecret(sealSecret("A"))).toBe("A");
+      const dev = sealSecret("A");
+      expect(openSecret(dev)).toBe("A");
       // produção com a demonstração em memória também (nada ali é de verdade)
       setMode("production");
       env({ DATA_BACKEND: "memory" });
       expect(secretKeySource()).toBe("dev");
 
-      // publicação no Postgres que veio do Appwrite: a chave herdada vale enquanto a variável existir
-      env({ DATABASE_URL: banco, APPWRITE_API_KEY: "chave-antiga" });
-      expect(secretKeySource()).toBe("appwrite");
-      const legacy = sealSecret("SEGREDO");
-      expect(openSecret(legacy)).toBe("SEGREDO");
+      // publicação no Postgres sem a chave própria: nada é cifrado com chave conhecida, e o que existia não abre —
+      // a chave de API do Appwrite que ainda esteja nas variáveis não serve de chave
+      for (const extra of [{}, { APPWRITE_API_KEY: "chave-antiga" }]) {
+        env({ DATABASE_URL: banco, ...extra });
+        expect(secretKeySource()).toBe("missing");
+        expect(() => sealSecret("X")).toThrow(/AUTH_ENCRYPTION_KEY/);
+        expect(openSecret(dev)).toBeNull();
+      }
 
-      // variáveis do Appwrite removidas sem a chave própria: nada é cifrado com chave conhecida, e o que existia não abre
-      env({ DATABASE_URL: banco });
-      expect(secretKeySource()).toBe("missing");
-      expect(() => sealSecret("X")).toThrow(/AUTH_ENCRYPTION_KEY/);
-      expect(openSecret(legacy)).toBeNull();
-
-      // chave própria: tem prioridade sobre a herdada, e remover as variáveis do Appwrite depois não muda nada
+      // chave própria: as variáveis do Appwrite não mudam nada
       env({ DATABASE_URL: banco, AUTH_ENCRYPTION_KEY: "chave-propria-bem-longa", APPWRITE_API_KEY: "chave-antiga" });
       expect(secretKeySource()).toBe("own");
       const own = sealSecret("SEGREDO");
       expect(own).not.toContain("SEGREDO");
-      expect(openSecret(legacy)).toBeNull(); // trocar a chave invalida o que foi cifrado com a anterior
+      expect(openSecret(dev)).toBeNull(); // trocar a chave invalida o que foi cifrado com a anterior
       env({ DATABASE_URL: banco, AUTH_ENCRYPTION_KEY: "chave-propria-bem-longa" });
       expect(openSecret(own)).toBe("SEGREDO");
+      env({ DATABASE_URL: banco, AUTH_ENCRYPTION_KEY: "outra-chave-propria-bem-longa" });
+      expect(openSecret(own)).toBeNull();
     } finally {
       setMode(mode);
     }

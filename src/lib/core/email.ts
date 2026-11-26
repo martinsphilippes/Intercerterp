@@ -3,7 +3,8 @@ import { getIntegration, logIntegration } from "@/domain/integrations";
 
 /**
  * Envio de e-mail pelo canal configurado (Integrações → E-mail).
- * Retorna se foi efetivamente entregue ao provedor — nunca presume envio.
+ * Retorna se foi efetivamente entregue ao provedor — nunca presume envio. Integração gravada com um provedor desligado
+ * (ex.: o antigo Appwrite Messaging) vale como canal não configurado (`getIntegration`).
  */
 export async function sendEmail(
   companyId: string | null,
@@ -34,18 +35,6 @@ export async function sendEmail(
       if (!res.ok) throw new Error(`Resend HTTP ${res.status}: ${body}`);
       await logIntegration(store, { companyId: companyId!, integrationId: integ.id, kind: "email", action: "send", status: "success", message: `E-mail para ${msg.to}: ${msg.subject}` });
       return { delivered: true, channel: "resend" };
-    }
-    if (integ.provider === "appwrite_messaging") {
-      const { Client, Messaging, ID, Users, Query } = await import("node-appwrite");
-      const { appwriteConfig } = await import("../db");
-      const c = appwriteConfig();
-      const client = new Client().setEndpoint(c.endpoint).setProject(c.projectId).setKey(c.apiKey);
-      const users = await new Users(client).list({ queries: [Query.equal("email", msg.to)] });
-      const target = users.users[0]?.targets?.find((t: any) => t.providerType === "email");
-      if (!target) throw new Error("Destinatário sem alvo de e-mail no Appwrite (apenas usuários do sistema).");
-      await new Messaging(client).createEmail({ messageId: ID.unique(), subject: msg.subject, content: msg.html, targets: [target.$id], html: true });
-      await logIntegration(store, { companyId: companyId!, integrationId: integ.id, kind: "email", action: "send", status: "success", message: `E-mail para ${msg.to} enfileirado no Appwrite Messaging` });
-      return { delivered: true, channel: "appwrite_messaging" };
     }
     return { delivered: false, channel: integ.provider, message: "Provedor de e-mail não suportado." };
   } catch (e: any) {

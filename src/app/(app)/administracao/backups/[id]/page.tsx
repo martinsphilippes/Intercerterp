@@ -15,7 +15,7 @@ import { Timeline } from "@/components/ui/timeline";
 import { EmptyState, Notice } from "@/components/ui/empty";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { canDo } from "@/lib/permissions";
-import { backupCode, backupPlan, restorePreview, suggestedDatabaseId } from "@/domain/backup";
+import { backupCode, backupPlan, restorePreview } from "@/domain/backup";
 import { INTEGRITY_LABEL, formatBytes, integrityOf } from "../queries";
 import { verifyBackupAction } from "../actions";
 import { RestoreForm } from "../forms";
@@ -94,7 +94,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
               items={[
                 { label: "Conteúdo", value: b.scope?.includeFiles ? `Dados, XML e anexos (${b.scope?.files?.included ?? 0} arquivos)` : "Dados (sem conteúdo de arquivos)" },
                 { label: "Unidades", value: branches.map((x) => x.name).join(", ") },
-                { label: "Destino", value: configuredBackend() === "postgres" ? `${fileStorageLabel()} · pasta “backups”` : configuredBackend() === "appwrite" ? "Appwrite Storage · bucket “backups” (criptografado)" : "Armazenamento local de arquivos" },
+                { label: "Destino", value: configuredBackend() === "postgres" ? `${fileStorageLabel()} · pasta “backups”` : "Armazenamento local de arquivos" },
                 { label: "Solicitado por", value: b.kind === "auto" ? "Rotina automática" : (requester?.name ?? "—") },
                 { label: "Tipo da cópia", value: "Completa da empresa" },
                 { label: "Integridade", value: INTEGRITY_LABEL[integrity] },
@@ -175,15 +175,9 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       )}
       {tab === "restauracao" && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Preparar restauração" description="Escolha o destino, revise o escopo e confirme. Nunca restaura sobre a base em uso.">
+          <Card title="Preparar restauração" description="Revise o escopo e confirme. Nunca restaura sobre a base em uso.">
             {usable && manage ? (
-              <RestoreForm
-                backupId={id}
-                previews={JSON.parse(JSON.stringify({ test: restorePreview(b, "test", null), appwrite: restorePreview(b, "appwrite_new", suggestedDatabaseId()) }))}
-                appwriteAvailable={configuredBackend() === "appwrite"}
-                suggestedDb={suggestedDatabaseId()}
-                labels={labels}
-              />
+              <RestoreForm backupId={id} preview={JSON.parse(JSON.stringify(restorePreview(b)))} labels={labels} />
             ) : (
               <EmptyState title={usable ? "Sem permissão para restaurar" : "Cópia sem artefato disponível"} description={usable ? "Requer a operação “Backup e restauração”." : "Cópias com falha ou expiradas não podem ser restauradas."} />
             )}
@@ -197,14 +191,13 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                   <li key={j.id} className="space-y-1 px-4 py-3 text-sm">
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge kind="restore" status={j.status} />
-                      <span className="font-medium">{j.target === "test" ? "Base de teste isolada" : `Nova base Appwrite ${j.preview?.databaseId ?? ""}`}</span>
+                      <span className="font-medium">{j.target === "test" ? "Base de teste isolada" : "Nova base (armazenamento antigo, desligado)"}</span>
                       <span className="text-xs text-slate-500">{formatDateTime(j.createdAt)}</span>
                     </div>
                     {j.result?.restoredRows != null && (
                       <p className="text-xs text-slate-600">
                         {Number(j.result.restoredRows).toLocaleString("pt-BR")} de {Number(j.result.expectedRows).toLocaleString("pt-BR")} registros · {j.result.collections?.filter((c: any) => c.checksumOk).length ?? 0} de {j.result.collections?.length ?? 0} tabelas com checksum igual
-                        {j.result.files ? ` · arquivos ${j.result.files.ok}/${j.result.files.checked}` : ""}
-                        {j.result.files?.reuploaded ? ` · ${j.result.files.reuploaded} reenviado(s)` : ""} · {(Number(j.result.durationMs ?? 0) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s
+                        {j.result.files ? ` · arquivos ${j.result.files.ok}/${j.result.files.checked}` : ""} · {(Number(j.result.durationMs ?? 0) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s
                       </p>
                     )}
                     {j.error && <p className="text-xs text-red-700">{j.error}</p>}

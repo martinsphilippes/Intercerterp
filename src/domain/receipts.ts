@@ -1194,7 +1194,7 @@ async function linkedOrdersOrThrow(ctx: Ctx, r: Doc) {
   return out;
 }
 
-/** Limite de gravações por transação do Appwrite. */
+/** Limite de gravações por transação (o modo `MEMORY_TX_MODE=deferred` dos testes recusa acima disso). */
 const TX_MAX_WRITES = 100;
 
 /**

@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual, randomBytes } from "node:crypto";
-import { configuredBackend, appwriteConfig, getStore, findOne, detId } from "@/lib/db";
+import { configuredBackend, getStore, findOne, detId } from "@/lib/db";
 
 /**
  * Instalação automatizada (sem a tela de primeiro acesso), em etapas retomáveis:
- *   ?step=provision — cria tabelas/índices/buckets (repita até done=true)
+ *   ?step=provision — cria no Postgres as tabelas, colunas e índices que faltam (a primeira consulta já faz isso sozinha)
  *   ?step=demo      — carrega a empresa de demonstração (idempotente; repita se o tempo acabar)
  *   ?step=owner     — cria o administrador geral (e-mail informado; senha gerada e devolvida UMA vez)
  *   ?step=finish    — encerra a instalação: a rota deixa de funcionar (exceto provision e demo-update, idempotentes)
@@ -27,7 +27,7 @@ function tokenOk(req: NextRequest) {
 export async function GET(req: NextRequest) {
   if (!tokenOk(req)) return NextResponse.json({ ok: false, error: "Token de instalação inválido." }, { status: 401 });
   const backend = configuredBackend();
-  if (backend !== "appwrite" && backend !== "postgres") return NextResponse.json({ ok: false, error: "Somente com banco Postgres ou Appwrite configurado." }, { status: 400 });
+  if (backend !== "postgres") return NextResponse.json({ ok: false, error: "Somente com banco Postgres configurado." }, { status: 400 });
   const step = req.nextUrl.searchParams.get("step") ?? "";
   const started = Date.now();
   try {
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step: string, started: number): Promise<NextResponse> {
+async function runStep(req: NextRequest, backend: "postgres", step: string, started: number): Promise<NextResponse> {
   const store = getStore();
 
   if (step === "diagnostico") {
@@ -51,63 +51,60 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
     const warnings: string[] = []; // o que precisa de correção
     const notes: string[] = []; // o que está certo, mas convém saber
     const out: Record<string, unknown> = { ok: true, step, backend, functionRegion: process.env.VERCEL_REGION ?? null, files: getFileStorage().kind, blobConnected: blobConfigured(), secretKey: secretKeySource(), warnings, notes };
-    if (backend === "postgres" && !blobConfigured())
+    if (!blobConfigured())
       notes.push("Arquivos (XML, anexos, cópias de segurança) guardados no próprio banco: não há Blob conectado. Serve para começar; ao contratar os planos pagos, conecte o Blob privado (Storage → Blob) e os arquivos novos passam a ir para ele.");
-    if (out.secretKey === "appwrite") warnings.push("A chave que cifra a autenticação em duas etapas ainda vem da chave do Appwrite: defina AUTH_ENCRYPTION_KEY antes de remover as variáveis APPWRITE_*.");
     if (out.secretKey === "missing") warnings.push("AUTH_ENCRYPTION_KEY não definida: a autenticação em duas etapas não funciona até a variável existir.");
-    if (backend === "postgres") {
-      const { pgDriver, postgresUrl, postgresEndpoint } = await import("@/lib/db/postgres/driver");
-      const { schemaApplied, searchNormalizationWorks } = await import("@/lib/db/postgres/ddl");
-      // do endereço só saem a região (ex.: sa-east-1) e se é o endereço com agrupador de conexões
-      const endpoint = postgresEndpoint();
-      out.dbRegion = endpoint.region;
-      out.pooled = endpoint.pooled;
-      // funções longe do banco: cada consulta atravessa a distância — a correção é a região em vercel.json ("regions")
-      const { functionsNearDatabase, vercelRegionFor } = await import("@/lib/server/deploy-config");
-      out.sameRegion = functionsNearDatabase(process.env.VERCEL_REGION, endpoint.region);
-      if (out.sameRegion === false) {
-        const target = vercelRegionFor(endpoint.region);
-        warnings.push(`As funções rodam em ${process.env.VERCEL_REGION} e o banco em ${endpoint.region}: cada consulta paga essa distância.${target ? ` Fixe "regions": ["${target}"] em vercel.json.` : ""}`);
+    const { pgDriver, postgresUrl, postgresEndpoint } = await import("@/lib/db/postgres/driver");
+    const { schemaApplied, searchNormalizationWorks } = await import("@/lib/db/postgres/ddl");
+    // do endereço só saem a região (ex.: sa-east-1) e se é o endereço com agrupador de conexões
+    const endpoint = postgresEndpoint();
+    out.dbRegion = endpoint.region;
+    out.pooled = endpoint.pooled;
+    // funções longe do banco: cada consulta atravessa a distância — a correção é a região em vercel.json ("regions")
+    const { functionsNearDatabase, vercelRegionFor } = await import("@/lib/server/deploy-config");
+    out.sameRegion = functionsNearDatabase(process.env.VERCEL_REGION, endpoint.region);
+    if (out.sameRegion === false) {
+      const target = vercelRegionFor(endpoint.region);
+      warnings.push(`As funções rodam em ${process.env.VERCEL_REGION} e o banco em ${endpoint.region}: cada consulta paga essa distância.${target ? ` Fixe "regions": ["${target}"] em vercel.json.` : ""}`);
+    }
+    const driver = pgDriver(postgresUrl());
+    try {
+      const t0 = Date.now();
+      const v = await driver.query("SELECT current_setting('server_version') AS version, current_setting('server_encoding') AS encoding, pg_database_size(current_database()) AS bytes");
+      out.firstQueryMs = Date.now() - t0; // inclui abrir a conexão (e acordar o banco, se estava ocioso)
+      // ida e volta de uma consulta mínima com a conexão já aberta: mediana de 7 (é o custo fixo de cada consulta de tela)
+      const trips: number[] = [];
+      for (let i = 0; i < 7; i++) {
+        const t = Date.now();
+        await driver.query("SELECT 1");
+        trips.push(Date.now() - t);
       }
-      const driver = pgDriver(postgresUrl());
-      try {
-        const t0 = Date.now();
-        const v = await driver.query("SELECT current_setting('server_version') AS version, current_setting('server_encoding') AS encoding, pg_database_size(current_database()) AS bytes");
-        out.firstQueryMs = Date.now() - t0; // inclui abrir a conexão (e acordar o banco, se estava ocioso)
-        // ida e volta de uma consulta mínima com a conexão já aberta: mediana de 7 (é o custo fixo de cada consulta de tela)
-        const trips: number[] = [];
-        for (let i = 0; i < 7; i++) {
-          const t = Date.now();
-          await driver.query("SELECT 1");
-          trips.push(Date.now() - t);
-        }
-        trips.sort((a, b) => a - b);
-        out.queryMs = trips[3];
-        out.queryMsRange = [trips[0], trips[6]];
-        out.serverVersion = v.rows[0]?.version ?? null;
-        out.encoding = v.rows[0]?.encoding ?? null;
-        out.dbSizeMb = Math.round((Number(v.rows[0]?.bytes ?? 0) / 1048576) * 10) / 10;
-        out.schemaApplied = await schemaApplied(driver);
-        if (out.schemaApplied) {
-          // a busca sem acento do banco concorda com a da aplicação? (só em banco UTF-8)
-          out.searchOk = await searchNormalizationWorks(driver);
-          if (!out.searchOk) warnings.push(`A busca sem acento não funciona neste banco (codificação ${out.encoding}; o sistema exige UTF8).`);
-          // quanto do banco é conteúdo de arquivo (sem Blob, ou gravado no banco porque o Blob recusou)
-          out.dbFiles = await databaseFileUsage();
-        }
-      } catch (e) {
-        const { dbOutageOf } = await import("@/lib/db/outage");
-        out.ok = false;
-        out.outage = dbOutageOf(e)?.kind ?? null;
-        out.error = (e as Error).message;
-      } finally {
-        await driver.end().catch(() => undefined);
+      trips.sort((a, b) => a - b);
+      out.queryMs = trips[3];
+      out.queryMsRange = [trips[0], trips[6]];
+      out.serverVersion = v.rows[0]?.version ?? null;
+      out.encoding = v.rows[0]?.encoding ?? null;
+      out.dbSizeMb = Math.round((Number(v.rows[0]?.bytes ?? 0) / 1048576) * 10) / 10;
+      out.schemaApplied = await schemaApplied(driver);
+      if (out.schemaApplied) {
+        // a busca sem acento do banco concorda com a da aplicação? (só em banco UTF-8)
+        out.searchOk = await searchNormalizationWorks(driver);
+        if (!out.searchOk) warnings.push(`A busca sem acento não funciona neste banco (codificação ${out.encoding}; o sistema exige UTF8).`);
+        // quanto do banco é conteúdo de arquivo (sem Blob, ou gravado no banco porque o Blob recusou)
+        out.dbFiles = await databaseFileUsage();
       }
+    } catch (e) {
+      const { dbOutageOf } = await import("@/lib/db/outage");
+      out.ok = false;
+      out.outage = dbOutageOf(e)?.kind ?? null;
+      out.error = (e as Error).message;
+    } finally {
+      await driver.end().catch(() => undefined);
     }
     return NextResponse.json(out, { status: out.ok ? 200 : 503 });
   }
 
-  if (step === "provision" && backend === "postgres") {
+  if (step === "provision") {
     // Postgres: tabelas, colunas e índices que faltam, numa transação (o mesmo que a primeira consulta de cada versão faz sozinha)
     const { provisionPostgres } = await import("@/lib/db/postgres/ddl");
     const { pgDriver, postgresUrl } = await import("@/lib/db/postgres/driver");
@@ -119,13 +116,6 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
     } finally {
       await driver.end().catch(() => undefined);
     }
-  }
-
-  if (step === "provision") {
-    const { provisionAppwrite } = await import("@/lib/db/provision");
-    const log: string[] = [];
-    const r = await provisionAppwrite(appwriteConfig(), (m) => log.push(m), { deadline: Date.now() + 240000 });
-    return NextResponse.json({ ok: true, step, ...r, log: log.slice(-8), ms: Date.now() - started });
   }
 
   // a partir daqui o banco precisa estar provisionado
