@@ -1,0 +1,27 @@
+{
+  "titulo": "Empresa inexistente ou não vinculada ao Interos",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/naoexiste000000000000",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e404"
+    }
+  },
+  "resposta": {
+    "status": 404,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e404",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "nao_encontrado",
+        "mensagem": "Empresa não encontrada para esta credencial."
+      },
+      "requestId": "req-exemplo-e404"
+    }
+  }
+}

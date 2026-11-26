@@ -1,0 +1,27 @@
+{
+  "titulo": "Credencial ausente ou inválida",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/status",
+    "cabecalhos": {
+      "X-Request-Id": "req-exemplo-e401"
+    }
+  },
+  "resposta": {
+    "status": 401,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e401",
+      "API-Version": "v1",
+      "Cache-Control": "no-store",
+      "WWW-Authenticate": "Bearer realm=\"intercert-erp\""
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "nao_autenticado",
+        "mensagem": "Credencial ausente ou inválida."
+      },
+      "requestId": "req-exemplo-e401"
+    }
+  }
+}

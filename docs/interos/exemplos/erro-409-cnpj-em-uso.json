@@ -1,0 +1,78 @@
+{
+  "titulo": "CNPJ de uma empresa que já usa o ERP (a saída é a vinculação por código)",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e409",
+      "Idempotency-Key": "epsilon-criar-20261125-001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "contaInterosId": "conta-epsilon-0005",
+      "empresa": {
+        "tipo": "varejo",
+        "razaoSocial": "Alfa Utilidades Domésticas Ltda",
+        "nomeFantasia": "Alfa Utilidades",
+        "cnpj": "13.579.246/0001-01",
+        "inscricaoEstadual": "123.456.789.110",
+        "regimeTributario": "simples",
+        "cnae": "4759-8/99",
+        "email": "financeiro@alfa-utilidades.example",
+        "telefone": "(11) 3333-0001",
+        "endereco": {
+          "cep": "01310-100",
+          "logradouro": "Avenida Paulista",
+          "numero": "1000",
+          "complemento": "Loja 3",
+          "bairro": "Bela Vista",
+          "municipio": "São Paulo",
+          "codigoMunicipioIbge": "3550308",
+          "uf": "SP"
+        }
+      },
+      "unidadeInicial": {
+        "nome": "Alfa — Paulista",
+        "codigo": "01",
+        "telefone": "(11) 3333-0001",
+        "fusoHorario": "America/Sao_Paulo"
+      },
+      "modulos": [
+        "pdv",
+        "vendas",
+        "estoque",
+        "compras",
+        "financeiro",
+        "fiscal",
+        "relatorios"
+      ],
+      "administrador": {
+        "nome": "Marina Alves",
+        "email": "marina.alves@alfa-utilidades.example",
+        "telefone": "(11) 98888-0001"
+      },
+      "entregaConvite": "interos",
+      "contrato": {
+        "referencia": "CT-2026-0042",
+        "plano": "profissional"
+      }
+    }
+  },
+  "resposta": {
+    "status": 409,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e409",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "cnpj_em_uso",
+        "mensagem": "Já existe uma empresa com este CNPJ no ERP. Para trazê-la ao Interos, use a vinculação (POST /empresas/vincular) com o código gerado pelo administrador dela."
+      },
+      "requestId": "req-exemplo-e409"
+    }
+  }
+}

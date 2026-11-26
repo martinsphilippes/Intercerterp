@@ -1,0 +1,35 @@
+{
+  "titulo": "Operação que exige a empresa ativa (convidar administrador numa empresa suspensa)",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/792018d6437e43897eb2aa4c3db45e9a/administradores",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e423",
+      "Idempotency-Key": "alfa-admin-20261125-002",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "administrador": {
+        "nome": "Paula Prado",
+        "email": "paula@alfa-utilidades.example"
+      }
+    }
+  },
+  "resposta": {
+    "status": 423,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e423",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "empresa_suspensa",
+        "mensagem": "Empresa suspensa: reative antes desta operação."
+      },
+      "requestId": "req-exemplo-e423"
+    }
+  }
+}

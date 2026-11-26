@@ -1,9 +1,9 @@
 import { serviceRoute } from "@/lib/service/http";
 import { updateInitialUnit } from "@/domain/tenancy/provisioning";
-import { actorOf, MAX_DURATION } from "../../../_lib";
+import { actorOf } from "../../../_lib";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = MAX_DURATION;
+export const maxDuration = 60; // literal: o Next lê a configuração da rota sem executar o código
 
 /** Ajusta a unidade inicial (nome, código, CNPJ, IE, endereço, contato, fuso). */
 export const PUT = serviceRoute({ scope: "provisionamento:escrita", operation: "empresas.unidade_inicial", mutation: true }, async (call) => {

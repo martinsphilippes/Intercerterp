@@ -4,9 +4,6 @@ import type { ServiceActor } from "@/domain/tenancy/provisioning";
 /** Autor das alterações feitas pela interface de serviço (auditoria e trilha). */
 export const actorOf = (call: ServiceCall): ServiceActor => ({ clientId: call.client.id, name: call.client.nome, requestId: call.requestId });
 
-/** Nenhuma operação de provisionamento roda mais que isto (Vercel: limite da função). */
-export const MAX_DURATION = 60;
-
 type Invite = { link: string | null; entrega: string; entregue: boolean | null; canal: string; detalhe: string; expiraEm: string } | null;
 
 /**

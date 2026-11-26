@@ -1,9 +1,9 @@
 import { serviceRoute } from "@/lib/service/http";
 import { resendTenantInvite } from "@/domain/tenancy/provisioning";
-import { actorOf, inviteBodies, MAX_DURATION } from "../../../../_lib";
+import { actorOf, inviteBodies } from "../../../../_lib";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = MAX_DURATION;
+export const maxDuration = 60; // literal: o Next lê a configuração da rota sem executar o código
 
 /** Gera um link novo de convite para um administrador ainda não ativado (o anterior deixa de valer). */
 export const POST = serviceRoute({ scope: "provisionamento:escrita", operation: "empresas.reenviar_convite", mutation: true }, async (call) => {

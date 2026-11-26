@@ -1,5 +1,5 @@
 import { detId, findOne, isConflict, listAll } from "@/lib/db";
-import type { Doc, Store } from "@/lib/db/types";
+import type { Store } from "@/lib/db/types";
 import { COLLECTIONS } from "@/lib/db/schema";
 import { unscoped, SHARED_GLOBAL } from "@/lib/db/scoped-store";
 import { PLATFORM_ACTIONS } from "@/lib/permissions";

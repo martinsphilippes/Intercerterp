@@ -1,9 +1,9 @@
 import { serviceRoute } from "@/lib/service/http";
 import { listLinkedTenants, provisionTenant } from "@/domain/tenancy/provisioning";
-import { actorOf, inviteBodies, MAX_DURATION } from "../_lib";
+import { actorOf, inviteBodies } from "../_lib";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = MAX_DURATION;
+export const maxDuration = 60; // literal: o Next lê a configuração da rota sem executar o código
 
 /** Empresas contratantes vinculadas ao Interos (sincronização), com filtro por conta e paginação por cursor. */
 export const GET = serviceRoute({ scope: "provisionamento:leitura", operation: "empresas.listar" }, async (call) => ({ body: await listLinkedTenants(call.store, call.query) }));

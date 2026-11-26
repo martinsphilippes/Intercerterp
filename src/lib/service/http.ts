@@ -110,7 +110,8 @@ export function toServiceError(e: unknown): ServiceError {
 
 export function serviceRoute(opts: RouteOptions, handler: (call: ServiceCall) => Promise<ServiceResult>) {
   const scopes = Array.isArray(opts.scope) ? opts.scope : [opts.scope];
-  return async (req: NextRequest, ctx?: { params?: Promise<Record<string, string>> }) => {
+  // segundo argumento no formato que o Next exige das rotas (RouteContext): `params` sempre presente
+  return async (req: NextRequest, ctx: { params: Promise<any> }) => {
     const started = Date.now();
     const given = req.headers.get("x-request-id") ?? "";
     const requestId = REQUEST_ID_RE.test(given) ? given : `req_${crypto.randomBytes(12).toString("hex")}`;

@@ -179,7 +179,7 @@ function userView(u: Doc) {
     nome: u.name,
     email: u.email,
     situacao: USER_STATE[u.status] ?? u.status,
-    convite: u.status === "invited" || u.inviteSentAt ? { estado: inviteState(u), expiraEm: u.inviteExpiresAt ?? null, enviadoEm: u.inviteSentAt ?? null, entrega: u.inviteDelivery ?? null } : null,
+    convite: u.status === "invited" || u.inviteSentAt ? { estado: inviteState(u), expiraEm: u.inviteExpiresAt ?? null, enviadoEm: u.inviteSentAt ?? null, detalheEntrega: u.inviteDelivery ?? null } : null,
     primeiroAcessoEm: u.firstAccessAt ?? null,
     ultimoAcessoEm: u.lastAccessAt ?? null,
   };
@@ -210,6 +210,15 @@ export async function tenantView(store: Store, companyId: string) {
     cnpj: c.cnpj ?? null,
     situacao: block.state,
     suspensao: c.status === "suspended" && c.suspension ? { modo: c.suspension.mode, motivo: c.suspension.reason ?? null, referenciaContrato: c.suspension.contractRef ?? null, desde: c.suspension.at ?? null } : null,
+    // trilha das suspensões e reativações (mais recentes por último; o histórico completo fica na auditoria da empresa)
+    historicoSituacao: ((c.suspensionHistory ?? []) as any[]).slice(-20).map((h) => ({
+      evento: h.event === "reativacao" ? "reativacao" : "suspensao",
+      modo: h.event === "reativacao" ? null : (h.mode ?? null),
+      motivo: h.reason ?? null,
+      referenciaContrato: h.contractRef ?? null,
+      em: h.at ?? null,
+      requestId: h.requestId ?? null,
+    })),
     modulos: contract ? [...contract.modules] : null,
     contrato: contract ? { referencia: contract.reference ?? null, plano: contract.plan ?? null } : null,
     implantacao: prov
@@ -256,7 +265,9 @@ async function runStep<T>(store: Store, accountId: string, etapa: StepKey, fn: (
     const steps: ProvisionStep[] = [...((prov?.steps ?? []) as ProvisionStep[])];
     const i = steps.findIndex((s) => s.etapa === etapa);
     const prev = i >= 0 ? steps[i] : null;
-    const next: ProvisionStep = { etapa, estado, concluidaEm: estado === "concluida" ? nowIso() : (prev?.concluidaEm ?? null), erro, tentativas: (prev?.tentativas ?? 0) + (estado === "pendente" ? 0 : 1) };
+    // reexecução de etapa já concluída (reenvio/retomada) é só conferência: mantém a data da primeira conclusão
+    const concluidaEm = estado === "concluida" ? (prev?.estado === "concluida" && prev.concluidaEm ? prev.concluidaEm : nowIso()) : (prev?.concluidaEm ?? null);
+    const next: ProvisionStep = { etapa, estado, concluidaEm, erro, tentativas: (prev?.tentativas ?? 0) + (estado === "pendente" ? 0 : 1) };
     if (i >= 0) steps[i] = next;
     else steps.push(next);
     await saveProvisioning(store, accountId, { steps, ...(estado === "falhou" ? { status: "falhou", lastError: `${etapa}: ${erro}` } : {}) });
@@ -291,42 +302,61 @@ async function deliverInvite(companyId: string, company: Doc, user: Doc, token: 
 }
 
 /**
+ * Gera o link de convite (uso único, com validade) e o entrega; um link anterior deixa de valer. Só marca o convite
+ * como enviado depois da entrega — se ela cair no meio, a retomada da implantação gera e entrega outro.
+ */
+async function issueInvite(store: Store, actor: ServiceActor, company: Doc, user: Doc, entrega: "interos" | "erp", origin: string) {
+  const base = unscoped(store);
+  const days = await getSetting<number>(base, company.id, null, "users.inviteExpiryDays", 7);
+  const token = newToken();
+  const expiresAt = new Date(Date.now() + Math.max(1, days) * 86400000).toISOString();
+  await base.update("users", user.id, { inviteTokenHash: sha256(token), inviteExpiresAt: expiresAt });
+  const d = await deliverInvite(company.id, company, user, token, expiresAt, entrega, origin);
+  const after = await base.update("users", user.id, { inviteSentAt: nowIso(), inviteDelivery: d.detalhe, invitedBy: `servico:${actor.clientId}` });
+  return { user: after, invite: { ...d, expiraEm: expiresAt } };
+}
+
+/**
  * Administrador da empresa: usuário novo com convite (uso único, com validade) ou, se o e-mail já tem acesso ao ERP,
  * o vínculo com a empresa e o perfil de administrador (a pessoa entra com a senha que já tem).
- * Reenvio da implantação: convite ainda pendente é mantido (o link anterior continua valendo); para um link novo,
- * use "reenviar convite".
+ * Reenvio da implantação: convite já entregue e ainda pendente é mantido (o link anterior continua valendo; para um
+ * link novo, use "reenviar convite"); convite que nunca chegou a ser entregue (queda no meio) é gerado e entregue agora.
  */
 async function ensureTenantAdmin(store: Store, actor: ServiceActor, company: Doc, input: { nome: string; email: string; telefone?: string | null }, entrega: "interos" | "erp", origin: string) {
   const base = unscoped(store);
   const role = await adminRoleOf(store, company);
   const email = input.email.trim().toLowerCase();
-  const existing = await findOne(base, "users", [["eq", "email", email]]);
+  const id = detId("tenant-admin", company.id, email);
   const ctx = serviceCtx(store, actor, company.id);
+  const prev = await base.get("users", id);
+  if (prev) {
+    if (prev.status !== "invited" || prev.inviteSentAt) return { user: prev, invite: null };
+    // a implantação caiu entre criar o acesso e entregar o convite: o link nunca saiu — gera outro e entrega (a conta é a mesma)
+    const r = await issueInvite(store, actor, company, prev, entrega, origin);
+    await audit(ctx, { module: "admin", action: "user.invite", entityType: "user", entityId: prev.id, summary: `Convite do administrador ${prev.name} entregue na retomada da implantação (${r.invite.detalhe})`, after: { email, inviteExpiresAt: r.invite.expiraEm }, related: [`role:${role.id}`] });
+    return r;
+  }
+  const existing = await findOne(base, "users", [["eq", "email", email]]);
   if (existing) {
     if (existing.isAdmin || existing.isDemo || existing.loginDisabled) throw new ServiceError(409, "email_reservado", "Este e-mail não pode ser usado como administrador da empresa. Informe outro e-mail.");
+    // recusa antes de gravar qualquer coisa: uma resposta de erro não deixa vínculo para trás
+    if (existing.status === "suspended" || existing.status === "inactive") throw new ServiceError(409, "usuario_bloqueado", "O e-mail informado pertence a um acesso suspenso ou inativo no ERP. Informe outro e-mail ou peça a reativação.");
     const member = (existing.companyIds ?? []).includes(company.id);
     const roleByCompany = { ...(existing.roleByCompany ?? {}), [company.id]: role.id };
     if (!member || roleByCompany[company.id] !== (existing.roleByCompany ?? {})[company.id]) {
       await base.update("users", existing.id, { companyIds: [...new Set([...(existing.companyIds ?? []), company.id])], roleByCompany });
       await audit(ctx, { module: "admin", action: "user.grant_admin", entityType: "user", entityId: existing.id, summary: `${existing.name} vinculado(a) à empresa como administrador(a) pelo Interos`, related: [`role:${role.id}`] });
     }
-    if (existing.status === "suspended" || existing.status === "inactive") throw new ServiceError(409, "usuario_bloqueado", "O e-mail informado pertence a um acesso suspenso ou inativo no ERP. Informe outro e-mail ou peça a reativação.");
     const fresh = (await base.get("users", existing.id))!;
     return { user: fresh, invite: null as null | Awaited<ReturnType<typeof deliverInvite>> & { expiraEm: string } };
   }
-  const id = detId("tenant-admin", company.id, email);
-  const prev = await base.get("users", id);
-  if (prev) return { user: prev, invite: null };
-  const days = await getSetting<number>(base, company.id, null, "users.inviteExpiryDays", 7);
-  const token = newToken();
-  const expiresAt = new Date(Date.now() + Math.max(1, days) * 86400000).toISOString();
   let user: Doc;
   try {
     user = await base.create(
       "users",
       {
         name: input.nome.trim(), email, login: null, phone: onlyDigits(input.telefone ?? "") || null, status: "invited", isAdmin: false, roleId: role.id,
-        roleByCompany: { [company.id]: role.id }, companyIds: [company.id], branchIds: [], inviteTokenHash: sha256(token), inviteExpiresAt: expiresAt,
+        roleByCompany: { [company.id]: role.id }, companyIds: [company.id], branchIds: [], inviteTokenHash: null, inviteExpiresAt: null,
         invitedBy: ctx.user.id, createdBy: ctx.user.id,
       },
       id,
@@ -337,10 +367,9 @@ async function ensureTenantAdmin(store: Store, actor: ServiceActor, company: Doc
     if (again) return { user: again, invite: null };
     throw new ServiceError(409, "conflito", "E-mail já cadastrado por outra solicitação simultânea. Consulte o estado da empresa.");
   }
-  const d = await deliverInvite(company.id, company, user, token, expiresAt, entrega, origin);
-  user = await base.update("users", user.id, { inviteSentAt: nowIso(), inviteDelivery: d.detalhe });
-  await audit(ctx, { module: "admin", action: "user.invite", entityType: "user", entityId: user.id, summary: `Convite do administrador ${user.name} criado pelo Interos (${d.detalhe})`, after: { email, inviteExpiresAt: expiresAt }, related: [`role:${role.id}`] });
-  return { user, invite: { ...d, expiraEm: expiresAt } };
+  const r = await issueInvite(store, actor, company, user, entrega, origin);
+  await audit(ctx, { module: "admin", action: "user.invite", entityType: "user", entityId: user.id, summary: `Convite do administrador ${user.name} criado pelo Interos (${r.invite.detalhe})`, after: { email, inviteExpiresAt: r.invite.expiraEm }, related: [`role:${role.id}`] });
+  return r;
 }
 
 async function applyContract(store: Store, actor: ServiceActor, company: Doc, modules: string[], contrato: { referencia?: unknown; plano?: unknown } | null | undefined) {
@@ -497,14 +526,9 @@ export async function resendTenantInvite(store: Store, actor: ServiceActor, comp
   const u = body.idUsuario ? await base.get("users", String(body.idUsuario)) : await findOne(base, "users", [["eq", "email", String(body.email).trim().toLowerCase()]]);
   if (!u || !(u.companyIds ?? []).includes(company.id) || u.isAdmin) throw notFound("Usuária(o)");
   if (u.status !== "invited") throw new ServiceError(409, "convite_ja_aceito", "Este usuário já ativou o acesso: não há convite a reenviar. Para recuperar a senha, o próprio usuário usa “Esqueci minha senha”.");
-  const days = await getSetting<number>(base, company.id, null, "users.inviteExpiryDays", 7);
-  const token = newToken();
-  const expiresAt = new Date(Date.now() + Math.max(1, days) * 86400000).toISOString();
-  await base.update("users", u.id, { inviteTokenHash: sha256(token), inviteExpiresAt: expiresAt });
-  const d = await deliverInvite(company.id, company, u, token, expiresAt, entrega, origin);
-  const after = await base.update("users", u.id, { inviteSentAt: nowIso(), inviteDelivery: d.detalhe, invitedBy: `servico:${actor.clientId}` });
-  await audit(serviceCtx(store, actor, company.id), { module: "admin", action: "user.invite_resend", entityType: "user", entityId: u.id, summary: `Convite de ${u.name} reenviado pelo Interos (${d.detalhe}); link anterior invalidado`, after: { inviteExpiresAt: expiresAt } });
-  return { view: await tenantView(store, company.id), user: after, invite: { ...d, expiraEm: expiresAt } };
+  const r = await issueInvite(store, actor, company, u, entrega, origin);
+  await audit(serviceCtx(store, actor, company.id), { module: "admin", action: "user.invite_resend", entityType: "user", entityId: u.id, summary: `Convite de ${u.name} reenviado pelo Interos (${r.invite.detalhe}); link anterior invalidado`, after: { inviteExpiresAt: r.invite.expiraEm } });
+  return { view: await tenantView(store, company.id), user: r.user, invite: r.invite };
 }
 
 function assertOperable(company: Doc) {

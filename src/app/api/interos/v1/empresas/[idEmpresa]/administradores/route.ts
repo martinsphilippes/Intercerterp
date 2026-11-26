@@ -1,9 +1,9 @@
 import { serviceRoute } from "@/lib/service/http";
 import { inviteTenantAdmin } from "@/domain/tenancy/provisioning";
-import { actorOf, inviteBodies, MAX_DURATION } from "../../../_lib";
+import { actorOf, inviteBodies } from "../../../_lib";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = MAX_DURATION;
+export const maxDuration = 60; // literal: o Next lê a configuração da rota sem executar o código
 
 /** Convida (ou vincula, se o e-mail já tem acesso ao ERP) um administrador da empresa. */
 export const POST = serviceRoute({ scope: "provisionamento:escrita", operation: "empresas.administrador", mutation: true }, async (call) => {

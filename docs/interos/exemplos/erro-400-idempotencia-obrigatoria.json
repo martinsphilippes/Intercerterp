@@ -1,0 +1,29 @@
+{
+  "titulo": "Alteração sem Idempotency-Key",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/792018d6437e43897eb2aa4c3db45e9a/reativar",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e400",
+      "Content-Type": "application/json"
+    },
+    "corpo": {}
+  },
+  "resposta": {
+    "status": 400,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e400",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "idempotencia_obrigatoria",
+        "mensagem": "Envie o cabeçalho Idempotency-Key (8 a 128 caracteres: letras, números, . _ : -) em toda solicitação que altera dados."
+      },
+      "requestId": "req-exemplo-e400"
+    }
+  }
+}

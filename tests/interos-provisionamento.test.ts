@@ -221,9 +221,14 @@ describe("falha parcial — caminho verificável de recuperação", () => {
     expect(r2.status).toBe(200);
     expect(r2.body.empresa.implantacao.estado).toBe("concluida");
     expect((await listAll(store, "companies", { filters: [["eq", "interosAccountId", "acc-gama-001"]] })).length).toBe(1);
-    // o convite foi criado antes da queda e o link se perdeu: reenviar gera outro e invalida o anterior
+    // o acesso foi criado antes da queda, mas o convite nunca saiu: a retomada gera e entrega o convite (mesma conta)
+    expect(r2.body.convite).toMatchObject({ entrega: "erp", entregue: true, link: null });
+    expect(mail.sent.filter((to) => to === "gabriel@gama.example").length).toBe(1);
+    expect((await listAll(store, "users", { filters: [["eq", "email", "gabriel@gama.example"]] })).length).toBe(1);
     const admin = r2.body.empresa.administradores[0];
     expect(admin.situacao).toBe("convidado");
+    expect(admin.convite.enviadoEm).toBeTruthy();
+    // a pessoa não recebeu o e-mail (ex.: caiu no spam): reenviar gera outro link e invalida o anterior
     const rs = await call("POST", `/empresas/${company.id}/convites/reenviar`, { key: "k-gama-reenv-01", params: { idEmpresa: company.id }, body: { idUsuario: admin.idUsuario, entregaConvite: "interos" } });
     expect(rs.status).toBe(200);
     const token = rs.body.convite.link.split("/convite/")[1];

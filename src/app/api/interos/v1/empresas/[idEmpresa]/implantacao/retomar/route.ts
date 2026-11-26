@@ -1,9 +1,9 @@
 import { serviceRoute } from "@/lib/service/http";
 import { resumeProvisioning } from "@/domain/tenancy/provisioning";
-import { actorOf, inviteBodies, MAX_DURATION } from "../../../../_lib";
+import { actorOf, inviteBodies } from "../../../../_lib";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = MAX_DURATION;
+export const maxDuration = 60; // literal: o Next lê a configuração da rota sem executar o código
 
 /** Retoma uma implantação que falhou no meio, com a entrada guardada (sem reenviar o corpo original). */
 export const POST = serviceRoute({ scope: "provisionamento:escrita", operation: "empresas.retomar", mutation: true }, async (call) => {

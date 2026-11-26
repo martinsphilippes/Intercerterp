@@ -1,9 +1,9 @@
 import { serviceRoute } from "@/lib/service/http";
 import { suspendTenant } from "@/domain/tenancy/provisioning";
-import { actorOf, MAX_DURATION } from "../../../_lib";
+import { actorOf } from "../../../_lib";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = MAX_DURATION;
+export const maxDuration = 60; // literal: o Next lê a configuração da rota sem executar o código
 
 /** Suspende a operação conforme a regra de contrato: "bloqueio" ou "somente_leitura" (histórico preservado). */
 export const POST = serviceRoute({ scope: "provisionamento:escrita", operation: "empresas.suspender", mutation: true }, async (call) => {
