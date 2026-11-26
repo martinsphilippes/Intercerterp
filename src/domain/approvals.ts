@@ -279,7 +279,14 @@ export async function submitForApproval(ctx: Ctx, orderIds: string[], opts: { or
   // a decisão grava solicitação + pedidos numa única transação (limite de 100 gravações)
   assert(orders.length <= MAX_ORDERS_PER_REQUEST, `Uma solicitação aceita até ${MAX_ORDERS_PER_REQUEST} pedidos — envie em mais de uma solicitação.`);
   const policyDoc = await activePolicy(ctx.store, ctx.companyId);
-  const policy: PolicyInput = policyDoc ? { name: policyDoc.name, rules: policyDoc.rules, autoApproveBelow: policyDoc.autoApproveBelow ?? 0, allowSelfApproval: Boolean(policyDoc.allowSelfApproval), expiredProposalAction: policyDoc.expiredProposalAction ?? "warn", reviewOnRevision: policyDoc.reviewOnRevision ?? "relevant" } : DEFAULT_POLICY;
+  let policy: PolicyInput = policyDoc ? { name: policyDoc.name, rules: policyDoc.rules, autoApproveBelow: policyDoc.autoApproveBelow ?? 0, allowSelfApproval: Boolean(policyDoc.allowSelfApproval), expiredProposalAction: policyDoc.expiredProposalAction ?? "warn", reviewOnRevision: policyDoc.reviewOnRevision ?? "relevant" } : DEFAULT_POLICY;
+  // habilitação (docs/modulos): sem o módulo Aprovação de compras (não contratado ou em desligamento) não há quem aprove —
+  // o pedido segue aprovado automaticamente, registrado na solicitação. No modo legacy nada muda.
+  const { decide, loadCompanyModules } = await import("@/lib/modules/access");
+  const company = await ctx.store.get("companies", ctx.companyId);
+  if (decide(await loadCompanyModules(ctx.store, ctx.companyId), "compras.aprovacoes", company?.kind ?? "retail").level !== "full") {
+    policy = { ...policy, name: "Sem etapa de aprovação (módulo Aprovação de compras não habilitado)", autoApproveBelow: Number.MAX_SAFE_INTEGER, expiredProposalAction: "allow" };
+  }
   const total = orders.reduce((a, o) => a + o.total, 0);
   const freight = orders.reduce((a, o) => a + (o.freight ?? 0), 0);
   const tier = tierFor(policy.rules, total);

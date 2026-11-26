@@ -1,0 +1,105 @@
+# Auditoria módulos 09–12 (26/11/2026). Catálogo digital (11) e loja virtual (12) são a MESMA implementação.
+09.01	OP	src/lib/db/schema.ts:219; src/domain/products.ts:485; src/app/(app)/produtos/novo/page.tsx	Produto simples com 1 SKU [cadastros.produtos]
+09.02	OP	src/app/(app)/produtos/product-form.tsx:198; src/domain/products.ts:227	Eixo Tamanho na grade [cadastros.produtos]
+09.03	OP	src/app/(app)/produtos/product-form.tsx:198; src/domain/products.ts:227	Eixo Cor na grade [cadastros.produtos]
+09.04	OP	src/domain/products.ts:212; src/app/(app)/produtos/variants-editor.tsx:55	SKU por combinação de eixos, saldo próprio [cadastros.produtos]
+09.05	OP	src/lib/db/schema.ts:255; src/app/(app)/produtos/variants-editor.tsx:103	Código de barras por variação [cadastros.produtos]
+09.06	OP	src/domain/scale-barcode.ts:14; src/app/(app)/produtos/balanca/page.tsx	EAN prefixo 2, PLU, carga [produtos.balanca]
+09.07	PARC	src/lib/db/schema.ts:216; src/app/(app)/produtos/cadastros/aux-forms.tsx:62	Qtd em milésimos; casas decimais não validadas na venda [cadastros.produtos]
+09.08	OP	src/domain/product-components.ts:150; src/domain/product-components.ts:217	Kit baixa componentes [produtos.kits]
+09.09	PARC	src/domain/seed/modules/kits.ts:13; src/domain/promotions.ts:104	Combo só como kit ou leve-pague [produtos.kits]
+09.10	OP	src/domain/product-components.ts:346; src/app/(app)/estoque/montagem/page.tsx	Composto com montagem/desmembramento [produtos.kits]
+09.11	NAO	-	Sem produto personalizável
+09.12	OP	src/app/(app)/produtos/actions.ts:130; src/lib/db/schema.ts:223	1 foto no ERP; até 6 no anúncio [cadastros.produtos]
+09.13	OP	src/domain/labels.ts:16; src/app/(app)/produtos/etiquetas/page.tsx	Gôndola/adesiva/A4 [produtos.etiquetas]
+09.14	OP	src/domain/price-adjust.ts:61; src/domain/receipt-pricing.ts:20	Custo+adicionais, preço por margem alvo [compras.precificacao]
+09.15	OP	src/domain/pricing.ts:70; src/app/(app)/produtos/[id]/page.tsx:286	Margem e markup por preço [tec.precos]
+09.16	NAO	-	Sem produto equivalente
+09.17	NAO	-	Sem produto substituto
+09.18	OP	src/lib/db/schema.ts:255; src/app/api/pdv/products/route.ts:49	Códigos adicionais no PDV e inventário [cadastros.produtos]
+09.19	PARC	src/lib/db/schema.ts:255; docs/evolucao/04-ausentes.md:42	Só atributos de variação [cadastros.produtos]
+09.20	PARC	src/lib/db/schema.ts:228; src/lib/db/schema.ts:1294	Peso no produto; dimensões só no anúncio [cadastros.produtos]
+09.21	PARC	src/domain/products.ts:927; src/lib/db/schema.ts:305	Conversões sem uso na venda; fator do fornecedor na entrada [cadastros.produtos]
+09.22	OP	src/domain/product-import.ts:276; src/domain/product-bulk.ts:134	Importação CSV e alteração em massa [produtos.alteracao_massa]
+09.23	PARC	src/domain/products.ts:407	Só rascunho/ativo/inativo [cadastros.produtos]
+09.24	NAO	-	Sem sazonalidade
+10.01	OP	src/lib/db/schema.ts:335; src/app/(app)/estoque/page.tsx	Físico, reservado, trânsito, custo médio [estoque.gestao]
+10.02	OP	src/domain/receipts.ts:1257; src/domain/stock.ts:488	Recebimento e entrada manual [estoque.gestao]
+10.03	OP	src/domain/stock.ts:488	Venda, saída manual, devolução a fornecedor [estoque.gestao]
+10.04	OP	src/domain/stock.ts:122; src/app/(app)/estoque/movimentos/movement-form.tsx	Ajustes com motivo [estoque.gestao]
+10.05	OP	src/domain/transfers.ts:179	Entre depósitos e filiais com divergência [estoque.transferencias]
+10.06	OP	src/domain/warehouse-rules.ts:17; src/domain/warehouses.ts	Venda/almoxarifado/consumo/avarias [estoque.gestao]
+10.07	OP	src/lib/db/schema.ts:324; src/domain/stock.ts:572	Depósitos e saldo por filial [estoque.gestao]
+10.08	OP	src/lib/db/schema.ts:338; src/domain/sales.ts:882	Mínimo/máximo, alerta [estoque.gestao]
+10.09	OP	src/domain/inventory.ts:158; src/domain/inventory.ts:337	Contagem com bipagem e ajuste [estoque.inventario]
+10.10	OP	src/domain/lots.ts:54	Saldo por lote [estoque.lotes]
+10.11	OP	src/domain/lots.ts:209; src/domain/routines/stock.ts:62	Validade e alerta diário [estoque.lotes]
+10.12	NAO	-	Sem número de série
+10.13	OP	src/domain/stock.ts:367; src/domain/sales-documents.ts:548	Reservas pré-venda, pedido, loja [tec.estoque]
+10.14	OP	src/domain/stock.ts:25	Movimento perda [estoque.gestao]
+10.15	OP	src/domain/warehouse-rules.ts:21; src/domain/stock.ts:584	Depósito de avarias [estoque.gestao]
+10.16	OP	src/lib/db/schema.ts:347; src/app/(app)/estoque/movimentos/page.tsx	Saldo antes/depois e origem [estoque.gestao]
+10.17	OP	src/domain/abc.ts:91; src/app/(app)/relatorios/curva-abc/page.tsx	Curva ABC configurável [relatorios.curva_abc]
+10.18	PARC	src/domain/replenishment.ts:85	Só dias de cobertura [compras.reposicao]
+10.19	PARC	src/lib/db/schema.ts:342; src/domain/inventory.ts:73	Local texto livre [estoque.gestao]
+10.20	PARC	src/domain/ecommerce/catalog.ts:15	Loja e PDV compartilham saldo; marketplaces não [ecommerce.loja]
+10.21	OP	src/lib/db/schema.ts:337; src/domain/transfers.ts:61	Trânsito de transferência [estoque.transferencias]
+10.22	NAO	-	Sem estoque de terceiros
+10.23	NAO	src/domain/fiscal/tax-complete-codes.ts:176	Só CFOP 5917; sem saldo consignado
+10.24	PARC	src/domain/warehouse-rules.ts:9	Avarias fora do disponível; sem quarentena [estoque.gestao]
+10.25	PARC	src/domain/inventory.ts:47	Inventário por categoria/local; sem agenda cíclica [estoque.inventario]
+10.26	PARC	src/lib/db/schema.ts:355; src/lib/db/schema.ts:506	Lote no movimento e venda; sem consulta lote→cliente [estoque.lotes]
+10.27	OP	src/lib/db/schema.ts:338; src/domain/inventory-fiscal.ts:22	Custo médio e inventário em data-base [estoque.inventario_fiscal]
+10.28	OP	src/domain/replenishment.ts:115	Sugestão e rascunho de pedido [compras.reposicao]
+10.29	PARC	src/domain/lot-calc.ts:43; src/domain/lots.ts:57	Só FEFO [estoque.lotes]
+10.30	PARC	src/domain/replenishment.ts:85	Ruptura/próxima chegada só na reposição [compras.reposicao]
+11.01	OP	src/app/loja/[store]/page.tsx:13; src/domain/ecommerce/catalog.ts:376	Mesma vitrine da loja [ecommerce.loja]
+11.02	NAO	src/domain/ecommerce/storefront.ts:35	Só prévia interna por token
+11.03	OP	src/domain/ecommerce/templates.ts:22; src/domain/ecommerce/store.ts:370	Modelos, cor, logo, hero [ecommerce.loja]
+11.04	OP	src/app/loja/[store]/page.tsx:152; src/domain/ecommerce/catalog.ts:89	Preço de/por [ecommerce.loja]
+11.05	OP	src/domain/ecommerce/catalog.ts:102; src/app/loja/[store]/page.tsx:155	Indisponível pelo saldo [ecommerce.loja]
+11.06	OP	src/app/loja/[store]/page.tsx:94	Navegação por categoria [ecommerce.loja]
+11.07	PARC	src/app/(app)/comercio-digital/page.tsx:138; src/domain/ecommerce/store.ts:569	Endereço público; sem compartilhar [ecommerce.loja]
+11.08	NAO	-	Sem QR do catálogo
+11.09	OP	src/domain/ecommerce/cart.ts:56; src/app/loja/[store]/carrinho/page.tsx	Carrinho [ecommerce.loja]
+11.10	NAO	-	Sem pedido de orçamento na vitrine
+11.11	OP	src/domain/ecommerce/checkout.ts:137	Pedido on-line com reserva [ecommerce.loja]
+11.12	PARC	src/app/loja/[store]/layout.tsx:88	Só link Fale conosco wa.me [ecommerce.loja]
+11.13	NAO	src/domain/ecommerce/fiscal.ts:37	Sem catálogo B2B
+11.14	NAO	src/domain/ecommerce/catalog.ts:89	Preço único da loja
+11.15	NAO	src/lib/db/schema.ts:1277	Uma loja por empresa
+11.16	NAO	-	Sem catálogo por vendedor
+11.17	NAO	src/lib/db/schema.ts:1272	Uma loja por empresa
+11.18	OP	src/domain/ecommerce/domains.ts:62; src/middleware.ts	Domínio próprio com DNS [ecommerce.loja]
+11.19	NAO	-	Sem métricas de acesso
+11.20	NAO	src/domain/ecommerce/store.ts:546	Publicação só manual
+12.01	OP	src/app/loja/[store]/page.tsx; src/domain/ecommerce/store.ts:271	Vitrine publicada/pausada [ecommerce.loja]
+12.02	OP	src/domain/ecommerce/store.ts:346; src/app/(app)/comercio-digital/editor/page.tsx	Modelos, identidade, páginas [ecommerce.loja]
+12.03	PARC	src/domain/ecommerce/checkout.ts:102	Cliente criado no checkout; sem login [ecommerce.loja]
+12.04	OP	src/domain/ecommerce/cart.ts:18	Carrinho com cupom e frete [ecommerce.loja]
+12.05	OP	src/domain/ecommerce/checkout.ts:54; src/app/loja/[store]/checkout/page.tsx	Checkout completo; cobrança simulada [ecommerce.loja]
+12.06	EXT	src/domain/ecommerce/providers.ts:75	Gateway Intercert não ligado; simulação
+12.07	EXT	src/domain/ecommerce/providers.ts:80	Pix simulado na loja
+12.08	EXT	src/domain/ecommerce/providers.ts:101; src/domain/ecommerce/checkout.ts:23	Cartão simulado
+12.09	OP	src/domain/ecommerce/promotions.ts:42; src/domain/ecommerce/cart.ts:99	Cupons %/teto/frete grátis [ecommerce.promocoes]
+12.10	OP	src/domain/ecommerce/checkout.ts:137; src/app/(app)/comercio-digital/pedidos/page.tsx	Pedido entra direto no ERP [ecommerce.loja]
+12.11	OP	src/domain/ecommerce/orders.ts:304; src/app/(app)/comercio-digital/pedidos/[id]/page.tsx	Cancelar, separar, despachar, devolver [ecommerce.loja]
+12.12	OP	src/domain/ecommerce/catalog.ts:102	Saldo do ERP em tempo real [ecommerce.loja]
+12.13	OP	src/domain/ecommerce/catalog.ts:89	Preço da tabela ou override [ecommerce.loja]
+12.14	EXT	src/domain/ecommerce/fiscal.ts:12	NF-e do pedido pelo motor fiscal (Focus ou simulação) [fiscal.nfe]
+12.15	OP	src/domain/ecommerce/shipping.ts:88; src/domain/ecommerce/orders.ts:439	Retirada por filial com código [ecommerce.loja]
+12.16	PARC	src/domain/ecommerce/store.ts:94; src/domain/ecommerce/providers.ts:290	Entrega própria; transportadora simulada [ecommerce.loja]
+12.17	NAO	-	Sem agendamento de entrega
+12.18	OP	src/app/loja/[store]/pedido/[token]/page.tsx; src/domain/ecommerce/orders.ts:65	Etapas e rastreio [ecommerce.loja]
+12.19	NAO	src/app/(app)/clientes/[id]/page.tsx:105	Sem área do cliente
+12.20	DEV	src/domain/ecommerce/channels.ts:29	Contas só preparadas [ecommerce.canais]
+12.21	NAO	-	Sem avaliação de produtos
+12.22	NAO	-	Sem lista de desejos
+12.23	PARC	src/domain/ecommerce/promotions.ts:123	Lista abandonados; mensagem só rascunho [ecommerce.promocoes]
+12.24	OP	src/domain/ecommerce/domains.ts:62; src/middleware.ts	TXT+DNS real [ecommerce.loja]
+12.25	PARC	src/app/loja/[store]/page.tsx:30; src/domain/ecommerce/store.ts:404	Uma imagem hero [ecommerce.loja]
+12.26	OP	src/app/loja/[store]/layout.tsx:14; src/app/loja/[store]/sitemap.xml/route.ts	Meta/OG, sitemap e robots [ecommerce.loja]
+12.27	PARC	src/domain/ecommerce/templates.ts:43	Modelo Campanha + cupons [ecommerce.loja]
+12.28	NAO	src/domain/ecommerce/fiscal.ts:37	Sem B2B
+12.29	OP	src/domain/ecommerce/checkout.ts:137; src/domain/ecommerce/fiscal.ts:12	Venda ao consumidor final [ecommerce.loja]
+12.30	NAO	src/lib/db/schema.ts:1277	Uma loja por empresa

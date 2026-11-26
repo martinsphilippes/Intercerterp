@@ -5,7 +5,7 @@ import { addCashMovement, closeSession, openSession, previewClose, reopenSession
 import { formatMoney } from "@/lib/money";
 
 export async function openSessionAction(fd: FormData) {
-  return runAction({ module: "cash", op: "create", requireBranch: true, revalidate: ["/caixa", "/pdv"] }, async (s) => {
+  return runAction({ entitlement: "caixa.operacao", action: "openSessionAction", module: "cash", op: "create", requireBranch: true, revalidate: ["/caixa", "/pdv"] }, async (s) => {
     const terminalId = fstr(fd, "terminalId");
     const session = await openSession(s.ctx, { terminalId, openingFund: fint(fd, "openingFund"), notes: fopt(fd, "notes") ?? undefined, peripheralsCheck: fjson(fd, "peripherals", {}) });
     return { ok: true as const, message: `Caixa nº ${session.number} aberto — fundo ${formatMoney(session.openingFund)}.`, redirect: `/pdv?terminal=${terminalId}` };
@@ -13,7 +13,7 @@ export async function openSessionAction(fd: FormData) {
 }
 
 export async function addMovementAction(sessionId: string, fd: FormData) {
-  return runAction({ module: "cash", requireBranch: true, revalidate: ["/caixa/movimentos", `/caixa/${sessionId}`] }, async (s) => {
+  return runAction({ entitlement: "caixa.operacao", action: "addMovementAction", module: "cash", requireBranch: true, revalidate: ["/caixa/movimentos", `/caixa/${sessionId}`] }, async (s) => {
     const type = fstr(fd, "type") === "supply" ? "supply" : "withdrawal";
     const reason = fstr(fd, "reason") === "Outro" ? fstr(fd, "reasonOther") : fstr(fd, "reason");
     const login = fopt(fd, "approvalLogin");
@@ -26,11 +26,11 @@ export async function addMovementAction(sessionId: string, fd: FormData) {
 }
 
 export async function previewCloseAction(sessionId: string, counted: Record<string, number>) {
-  return runAction({ module: "cash", op: "edit", requireBranch: true }, async (s) => previewClose(s.ctx, sessionId, counted));
+  return runAction({ entitlement: "caixa.operacao", action: "previewCloseAction", module: "cash", op: "edit", requireBranch: true }, async (s) => previewClose(s.ctx, sessionId, counted));
 }
 
 export async function closeSessionAction(sessionId: string, fd: FormData) {
-  return runAction({ module: "cash", op: "edit", requireBranch: true, revalidate: ["/caixa", `/caixa/${sessionId}`, "/pdv"] }, async (s) => {
+  return runAction({ entitlement: "caixa.operacao", action: "closeSessionAction", module: "cash", op: "edit", requireBranch: true, revalidate: ["/caixa", `/caixa/${sessionId}`, "/pdv"] }, async (s) => {
     const counted = fjson<Record<string, number>>(fd, "counted", {});
     // conferência cega: decidida pelo parâmetro no servidor (a contagem registrada na apuração prevalece)
     const session = await closeSession(s.ctx, {
@@ -43,7 +43,7 @@ export async function closeSessionAction(sessionId: string, fd: FormData) {
 }
 
 export async function reopenSessionAction(sessionId: string, fd: FormData) {
-  return runAction({ module: "cash", requireBranch: true, revalidate: ["/caixa", `/caixa/${sessionId}`] }, async (s) => {
+  return runAction({ entitlement: "caixa.operacao", action: "reopenSessionAction", module: "cash", requireBranch: true, revalidate: ["/caixa", `/caixa/${sessionId}`] }, async (s) => {
     const r = await reopenSession(s.ctx, sessionId, fstr(fd, "reason"));
     return { ok: true as const, message: `Caixa nº ${(r as any).number} reaberto (versão ${r.version}). O fechamento anterior foi preservado.` };
   });
@@ -51,7 +51,7 @@ export async function reopenSessionAction(sessionId: string, fd: FormData) {
 
 /** Conclui o recolhimento de um fechamento interrompido (transferência Caixa → conta de destino). */
 export async function retryCloseTransferAction(sessionId: string) {
-  return runAction({ module: "cash", op: "edit", requireBranch: true, revalidate: [`/caixa/${sessionId}`, "/caixa"] }, async (s) => {
+  return runAction({ entitlement: "caixa.operacao", action: "retryCloseTransferAction", module: "cash", op: "edit", requireBranch: true, revalidate: [`/caixa/${sessionId}`, "/caixa"] }, async (s) => {
     const tr = await retryCloseTransfer(s.ctx, sessionId);
     return { ok: true as const, message: `Recolhimento de ${formatMoney(tr.amount)} transferido.` };
   });

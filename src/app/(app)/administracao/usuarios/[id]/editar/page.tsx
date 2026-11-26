@@ -6,7 +6,7 @@ import { listAll } from "@/lib/db";
 import { UserForm } from "../../user-form";
 import { canAssignRole, userFormOptions } from "../../form-data";
 import { branchScopeOf, userRoleIn } from "@/lib/auth/users";
-import { seesPlatformAdmins } from "@/domain/users";
+import { attributesIn, seesPlatformAdmins } from "@/domain/users";
 
 export const metadata = { title: "Editar usuário" };
 
@@ -29,7 +29,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const here = new Set((await listAll(s.ctx.store, "branches", { filters: [["eq", "companyId", s.ctx.companyId]] })).map((b) => b.id));
   const scope = branchScopeOf(u, s.ctx.companyId);
   const branchScope = scope === null ? null : scope.filter((b) => here.has(b));
-  const jobTitle = ((u.jobTitleByCompany ?? {})[s.ctx.companyId] as string | undefined) ?? null;
+  const attributes = attributesIn(u, s.ctx.companyId);
   // quem já tem acesso acima do editor não tem o perfil trocado por ele
   const roleLocked = !s.user.isAdmin && !(await canAssignRole(s, role));
   return (
@@ -47,7 +47,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         editorRestricted={o.editorRestricted}
         roleLocked={roleLocked}
         branchScope={branchScope}
-        jobTitle={jobTitle}
+        attributes={attributes}
       />
     </>
   );

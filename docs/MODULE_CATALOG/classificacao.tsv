@@ -1,0 +1,21 @@
+# Ajustes de classificação. código	classe	permissões (perfil)	observação
+07.10	PERMISSAO	sale.cancel	Cancelamento de venda é ação de perfil dentro do PDV
+07.11	PERMISSAO	sale.discount_over_limit	Desconto acima do limite com autorização de supervisor
+07.25	PERMISSAO	cash.reopen	Reabertura de caixa é ação de perfil
+08.16	PERMISSAO	sale.return_over_limit	Devolução acima do valor máximo
+18.29	PERMISSAO	finance.approve_payable	Autorização de contas a pagar
+24.18	CORE	-	Restrição por empresa/filial/módulo
+07.12	INTEGRACAO	-	TEF depende de conector local externo
+07.13	INTEGRACAO	-	Pix PDV (Mercado Pago)
+12.06	INTEGRACAO	-	Gateway da loja
+12.07	INTEGRACAO	-	Pix da loja
+12.08	INTEGRACAO	-	Cartão da loja
+17.10	INTEGRACAO	-	Entrega por aplicativo
+17.22	INTEGRACAO	-	Transportadoras
+17.28	INTEGRACAO	-	Cotação de fretes
+19.10	INTEGRACAO	-	PIX dinâmico (Mercado Pago)
+19.13	INTEGRACAO	-	Bradesco: só layout CNAB 400 de retorno
+19.14	INTEGRACAO	-	Outros bancos: CNAB 240/400 de retorno
+36.01	INTEGRACAO	-	Gateway Intercert
+36.04	INTEGRACAO	-	Pix (Mercado Pago)
+36.16	INTEGRACAO	-	Conectores por provedor

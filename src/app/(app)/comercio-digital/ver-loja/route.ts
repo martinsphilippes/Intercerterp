@@ -12,7 +12,7 @@ import { previewCookieName } from "@/domain/ecommerce/storefront";
  * comércio digital) e abre a vitrine com a faixa "Prévia".
  */
 export async function GET(req: Request) {
-  const s = await requireApiSession("text");
+  const s = await requireApiSession("text", { modules: ["ecommerce.loja"], surface: "ver loja" });
   if (s instanceof NextResponse) return s;
   // mesmo critério do menu: módulo Vendas + uma operação do comércio digital (inventário multiempresa D6)
   const allowed = can(s.user, "sales", "view") && ["ecommerce.manage", "ecommerce.catalog", "ecommerce.orders", "ecommerce.marketing"].some((a) => canDo(s.user, a as any));

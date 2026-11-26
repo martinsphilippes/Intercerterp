@@ -1,0 +1,201 @@
+# Auditoria módulos 13–19 (26/11/2026)
+13.01	PARC	src/lib/whatsapp.ts:14	Só links wa.me, sem API; envio manual pelo operador
+13.02	NAO	-	Sem caixa de atendimento; tickets é suporte interno
+13.03	NAO	-	Inexistente
+13.04	PLAN	src/domain/ecommerce/channels.ts:38	Canal WhatsApp só preparado; sem envio de catálogo
+13.05	OP	(app)/vendas/_documentos/actions.ts:104	Orçamento/pedido via wa.me com link público vendas.documentos
+13.06	PARC	src/domain/collection.ts:99	Só {link_pix} com chave Pix estática no modelo financeiro.cobranca_whatsapp
+13.07	PARC	(app)/vendas/[id]/conclusao/page.tsx:152	Comprovante da venda via wa.me; pedido online só e-mail vendas.pdv
+13.08	NAO	src/domain/ecommerce/orders.ts:71	Status do pedido online só por e-mail
+13.09	PARC	(app)/vendas/[id]/conclusao/page.tsx:45	Só chave da NFC-e no texto wa.me; sem PDF/XML vendas.pdv
+13.10	PARC	src/domain/collection.ts:131	Registra conversa aberta no título; sem conversa financeiro.cobranca_whatsapp
+13.11	NAO	-	Inexistente
+13.12	NAO	-	Inexistente
+13.13	NAO	-	Inexistente
+13.14	NAO	-	Inexistente
+13.15	NAO	-	Inexistente
+13.16	OP	src/domain/collection-templates.ts:1	Só modelos de cobrança financeiro.cobranca_whatsapp
+13.17	NAO	-	Inexistente
+13.18	NAO	-	Inexistente
+13.19	PLAN	src/domain/ecommerce/channels.ts:48	Contas preparadas sem conector
+13.20	NAO	-	Nenhuma IA no código
+14.01	NAO	-	Só loja genérica, não é cardápio
+14.02	NAO	-	Sem mesas
+14.03	NAO	-	Sem comandas
+14.04	PARC	(app)/pdv/page.tsx	PDV genérico de varejo vendas.pdv
+14.05	NAO	-	Inexistente
+14.06	NAO	-	Inexistente
+14.07	PARC	src/domain/ecommerce/orders.ts:439	Retirada com código na loja virtual ecommerce.loja
+14.08	PARC	src/domain/ecommerce/shipping.ts:113	Entrega própria por faixa de CEP na loja ecommerce.loja
+14.09	NAO	-	Sem KDS
+14.10	NAO	-	Inexistente
+14.11	NAO	-	Inexistente
+14.12	NAO	-	Sem adicionais/modificadores
+14.13	NAO	-	Inexistente
+14.14	PARC	src/domain/product-components.ts:26	Kit genérico serve de combo produtos.kits
+14.15	NAO	-	Inexistente
+14.16	NAO	-	Inexistente
+14.17	NAO	-	Inexistente
+14.18	NAO	-	Inexistente
+14.19	PARC	src/domain/product-components.ts:245	Composição genérica sem rendimento produtos.kits
+14.20	PARC	src/domain/product-components.ts:134	Ingrediente = componente com estoque comum produtos.kits
+14.21	PARC	src/domain/sales.ts:827	Venda de kit baixa componentes produtos.kits
+14.22	NAO	-	Sem iFood ou similares
+14.23	NAO	-	Só status ready_for_pickup, sem painel
+14.24	NAO	-	Inexistente
+14.25	NAO	-	Inexistente
+14.26	NAO	-	Inexistente
+14.27	NAO	-	Inexistente
+14.28	NAO	-	Inexistente
+14.29	PARC	src/domain/scale-barcode.ts:39	Balança etiquetadora genérica produtos.balanca
+14.30	NAO	-	Inexistente
+14.31	NAO	-	Inexistente
+14.32	NAO	-	Inexistente
+14.33	NAO	-	Inexistente
+14.34	NAO	-	Inexistente
+14.35	NAO	-	Inexistente
+15.01	OP	src/domain/product-components.ts:217	Kit e composto, até 20 componentes produtos.kits
+15.02	PARC	src/domain/products.ts:26	Sem tipo matéria-prima; só produto ou serviço cadastros.produtos
+15.03	PARC	src/lib/db/schema.ts:241	product_components: qtd e notas, sem processo produtos.kits
+15.04	PARC	src/domain/product-components.ts:265	Composto pode conter composto; kit não produtos.kits
+15.05	OP	(app)/produtos/[id]/page.tsx:468	Custo somado dos componentes produtos.kits
+15.06	OP	src/domain/product-components.ts:388	runAssembly, /estoque/montagem produtos.kits
+15.07	OP	src/domain/product-components.ts:313	Desmembramento rateia o custo produtos.kits
+15.08	PARC	src/domain/product-components.ts:388	Só via montagem do composto produtos.kits
+15.09	OP	src/domain/sales.ts:827	Kit baixa componentes; cancelamento estorna produtos.kits
+15.10	PARC	src/domain/product-components.ts:388	assembly_out na montagem; sem ordem de produção produtos.kits
+15.11	NAO	-	Inexistente
+15.12	NAO	-	Inexistente
+15.13	PARC	src/domain/products.ts:936	unit_conversions só no produto/compra cadastros.produtos
+15.14	NAO	-	Inexistente
+15.15	NAO	-	Só auditoria das alterações
+15.16	PARC	src/domain/product-components.ts:346	planAssembly mostra prévia de custo produtos.kits
+15.17	NAO	-	Inexistente
+15.18	NAO	-	Inexistente
+15.19	PARC	src/lib/db/schema.ts:245	Componentes por variação (parentSkuId) produtos.kits
+15.20	NAO	-	Inexistente
+16.01	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.02	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.03	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.04	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.05	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.06	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.07	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.08	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.09	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.10	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.11	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.12	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.13	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.14	NAO	-	Só lotes de estoque, não produção
+16.15	PARC	src/domain/product-components.ts:388	Montagem lança custo somado produtos.kits
+16.16	PARC	src/domain/product-components.ts:388	assembly_in do composto produtos.kits
+16.17	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.18	PARC	src/domain/product-components.ts:388	Montagem para estoque produtos.kits
+16.19	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.20	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.21	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.22	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.23	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.24	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.25	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.26	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.27	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.28	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.29	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+16.30	NAO	-	Inexistente (sem ordem de produção, MRP ou apontamento)
+17.01	OP	src/domain/ecommerce/shipping.ts:114	Zonas de entrega própria por faixa de CEP ecommerce.loja
+17.02	PARC	src/domain/ecommerce/shipping.ts:116	Preço fixo por zona de CEP ecommerce.loja
+17.03	NAO	-	Bairro só em endereço
+17.04	NAO	src/domain/ecommerce/store.ts:95	maxDistanceKm salvo mas nunca usado
+17.05	NAO	-	Inexistente
+17.06	NAO	-	Só mínimo para frete grátis
+17.07	OP	src/domain/ecommerce/shipping.ts:82	Frete grátis por mínimo e modalidades ecommerce.loja
+17.08	PARC	src/domain/ecommerce/shipping.ts:76	Zona própria real; transportadora simulada ecommerce.loja
+17.09	PARC	src/domain/ecommerce/orders.ts:381	Entrega própria com romaneio; sem cadastro de entregador ecommerce.loja
+17.10	EXT	src/domain/ecommerce/providers.ts:303	Entrega por app só simulada (delivery_api)
+17.11	NAO	-	Inexistente
+17.12	NAO	-	Inexistente
+17.13	NAO	-	Inexistente
+17.14	PARC	src/domain/ecommerce/orders.ts:65	Página pública do pedido; rastreio simulado ecommerce.loja
+17.15	PARC	src/domain/ecommerce/orders.ts:457	Confirmação manual; código de retirada ecommerce.loja
+17.16	PARC	src/domain/ecommerce/shipping.ts:43	Prazo real na zona; simulado na transportadora ecommerce.loja
+17.17	NAO	-	Inexistente
+17.18	NAO	-	Inexistente
+17.19	OP	src/domain/ecommerce/orders.ts:422	Despacho com baixa de estoque ecommerce.loja
+17.20	OP	src/domain/ecommerce/orders.ts:352	Separação exige NF-e emitida ecommerce.loja
+17.21	OP	src/domain/ecommerce/orders.ts:352	Conferência junto da separação ecommerce.loja
+17.22	EXT	src/domain/ecommerce/providers.ts:315	carrier_api não ligado; simulação
+17.23	NAO	-	Inexistente
+17.24	NAO	-	Inexistente
+17.25	NAO	-	Inexistente
+17.26	NAO	-	Inexistente
+17.27	PARC	src/domain/freight-cte.ts:17	Frete de compra por CT-e compras.cte
+17.28	EXT	src/domain/ecommerce/providers.ts:293	Cotação por tabela simulada
+17.29	NAO	-	MDF-e planejado
+17.30	NAO	-	Inexistente
+18.01	OP	src/domain/finance.ts:99	Títulos a pagar, baixa, estorno financeiro.contas_pagar
+18.02	OP	src/domain/finance.ts:99	Títulos a receber financeiro.contas_receber
+18.03	OP	src/domain/cashflow.ts:188	Realizado e previsto financeiro.fluxo_caixa
+18.04	OP	src/domain/finance.ts:1010	Caixa, banco e carteira com chave Pix tec.financeiro
+18.05	NAO	src/domain/finance.ts:1186	Boleto só como meio de venda com nosso número manual
+18.06	PARC	src/domain/payments/providers.ts:76	Pix dinâmico só no PDV; títulos só Pix estático tec.pagamentos
+18.07	NAO	-	Inexistente
+18.08	OP	src/domain/finance.ts:320	settleInstallment financeiro.contas_receber
+18.09	PARC	src/domain/reconciliation.ts:492	Retorno CNAB casa nosso número; usuário confirma financeiro.conciliacao
+18.10	OP	src/domain/reconciliation.ts:123	OFX, CSV e CNAB financeiro.conciliacao
+18.11	OP	src/domain/card-reconciliation.ts:151	Arquivo da adquirente financeiro.taxas_adquirente
+18.12	PARC	src/domain/payments/intents.ts:124	Confirmação do Pix PDV via MP; sem conciliação Pix tec.pagamentos
+18.13	OP	src/domain/delinquency.ts:37	Alerta e bloqueio na venda financeiro.inadimplencia
+18.14	OP	src/domain/finance.ts:1478	Renegociação com desfazer financeiro.contas_receber
+18.15	OP	src/domain/finance.ts:810	Multa e juros sugeridos na baixa financeiro.contas_receber
+18.16	OP	src/domain/finance.ts:1344	Centros de custo em 3 níveis tec.financeiro
+18.17	OP	src/domain/finance.ts:1311	Plano de contas até 6 níveis tec.financeiro
+18.18	OP	src/domain/finance-reports.ts:113	DRE por competência financeiro.relatorios
+18.19	OP	src/domain/finance.ts:845	Títulos manuais com categoria financeiro.contas_pagar
+18.20	OP	src/domain/finance.ts:845	Títulos a receber manuais financeiro.contas_receber
+18.21	OP	src/domain/cashflow.ts:13	Previsto pelas parcelas e cartões financeiro.fluxo_caixa
+18.22	PARC	src/domain/period-close.ts:75	Fechamento por empresa; DRE consolida filiais financeiro.fechamento_periodo
+18.23	OP	src/lib/db/schema.ts:564	Vale-troca (credit_vouchers) vendas.devolucoes
+18.24	OP	src/domain/sales.ts:416	Limite de crédito checado no crediário cadastros.clientes
+18.25	OP	src/domain/sales.ts:406	Crediário próprio com carnê vendas.pdv
+18.26	PARC	src/domain/finance-reports.ts:36	Só carteira pré-paga da rede rede.financeiro
+18.27	PARC	src/domain/sales.ts:950	Estorno em cancelamento e devolução vendas.devolucoes
+18.28	NAO	-	Um centro de custo por título
+18.29	OP	src/domain/finance.ts:724	Aprovação de contas a pagar financeiro.contas_pagar
+18.30	NAO	-	Budget existe só em compras
+18.31	NAO	src/domain/finance.ts:1273	Só grupo Investimentos no DRE
+18.32	NAO	-	Inexistente
+18.33	NAO	-	Inexistente
+18.34	NAO	-	Cheque só como ocorrência no CNAB
+18.35	NAO	-	Inexistente
+18.36	PARC	src/domain/finance.ts:737	Transferências e saldos entre contas financeiro.fluxo_caixa
+18.37	OP	src/domain/finance-reports.ts:73	Fluxo realizado e visão competência financeiro.relatorios
+18.38	PARC	(app)/relatorios/financeiros/page.tsx:86	DRE por filial; sem unidade de negócio financeiro.relatorios
+18.39	NAO	-	Inexistente
+18.40	OP	src/domain/finance.ts:74	Parcelas e condições com juros tec.financeiro
+19.01	PLAN	src/domain/integrations.ts:100	open_finance no catálogo, não implementado
+19.02	NAO	-	Sem registro de boleto
+19.03	NAO	-	Inexistente
+19.04	NAO	-	Inexistente
+19.05	PARC	src/domain/reconciliation.ts:492	Baixa pelo retorno CNAB, confirmada financeiro.conciliacao
+19.06	NAO	-	Sem geração de remessa
+19.07	OP	src/domain/bank/cnab240.ts:69; src/domain/bank/cnab400.ts:57	CNAB 240 T/U e 400 Itaú/Bradesco financeiro.conciliacao
+19.08	PARC	src/domain/bank/ofx.ts:25	Extrato só por arquivo OFX/CSV financeiro.conciliacao
+19.09	PARC	src/domain/reconciliation.ts:562	Saldo do último extrato importado financeiro.conciliacao
+19.10	EXT	src/domain/payments/providers.ts:76	Pix dinâmico Mercado Pago só no PDV tec.pagamentos
+19.11	EXT	src/domain/ecommerce/providers.ts:127	Webhook do Gateway Intercert reservado; simulação
+19.12	NAO	-	Pagamento só por baixa manual
+19.13	PARC	src/domain/bank/cnab400.ts:43	Só layout de retorno 400 Bradesco; sem API financeiro.conciliacao
+19.14	PARC	src/domain/bank/cnab240.ts:4	FEBRABAN 240 e Itaú 400; só retorno financeiro.conciliacao
+19.15	PARC	src/domain/finance.ts:929	Vencimento alterado só localmente financeiro.contas_receber
+19.16	NAO	-	Inexistente
+19.17	NAO	-	Inexistente
+19.18	NAO	src/domain/bank/cnab400.ts:20	Só rótulos de ocorrência
+19.19	PARC	src/domain/finance-batch.ts:172	Baixa em lote interna financeiro.baixa_lote
+19.20	PARC	src/domain/ecommerce/bank.ts:122	Repasse do Banco Intercert em rascunho ecommerce.banco
+19.21	NAO	src/lib/db/schema.ts:587	Conta só tem banco, agência e número
+19.22	PLAN	src/domain/integrations.ts:100	Igual a 19.01
+19.23	PARC	src/domain/integrations.ts:736	Logs de integração e monitor da loja plataforma.administracao
+19.24	PARC	src/domain/ecommerce/monitor.ts:43	Reprocessa só eventos do comércio digital ecommerce.loja
+19.25	NAO	-	Inexistente

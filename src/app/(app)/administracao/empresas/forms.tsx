@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, Input, Select, Textarea, FormGrid, FormSection, Checkbox } from "@/components/ui/form";
 import { Notice } from "@/components/ui/empty";
+import { CONTRACTABLE } from "@/lib/modules/catalog";
 import { saveCompanyAction, saveBranchAction, setCompanyUsersAction } from "./actions";
 
 type Opt = { value: string; label: string };
@@ -75,6 +76,21 @@ export function CompanyForm({ company, regimes, crts, ufs }: { company?: Record<
             </FormGrid>
             <Field label="Observações" className="mt-4"><Textarea name="notes" defaultValue={c.notes ?? ""} /></Field>
           </FormSection>
+          {!c.id && (
+            <FormSection title="Módulos contratados" description="A empresa nasce só com os módulos marcados (controle de módulos aplicado). Dependências obrigatórias são conferidas ao salvar. O Interos pode alterar depois.">
+              <div className="grid gap-1 sm:grid-cols-2">
+                {CONTRACTABLE.filter((m) => m.kinds.includes(kind as "retail")).map((m) => (
+                  <label key={m.key} className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" name="modules" value={m.key} defaultChecked className="mt-1" />
+                    <span>
+                      {m.name}
+                      {m.parent ? <span className="text-muted"> · função de {CONTRACTABLE.find((p) => p.key === m.parent)?.name ?? m.parent}</span> : null}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </FormSection>
+          )}
           {!c.id && kind === "accounting" && <Notice tone="info">Escritório contábil: ao salvar, são criados a unidade matriz, os perfis do escritório (sócio, gestor, analista, financeiro), os departamentos (fiscal, contábil, pessoal, societário, BPO), contas caixa/banco, meios de recebimento de honorários e categorias financeiras. A carteira de clientes fica em Gestão contábil.</Notice>}
           {!c.id && kind === "certification" && <Notice tone="info">Parceiro da rede de certificação: ao salvar, são criados a unidade matriz, os perfis do parceiro (administrador, gestor, vendedor, financeiro), contas caixa/banco, meios de recebimento e categorias financeiras de certificação. O lugar na rede (Master, Regional ou Revenda) é definido em Rede de certificação › Novo parceiro — prefira cadastrar por lá.</Notice>}
           {!c.id && kind === "retail" && <Notice tone="info">Ao salvar, são criados a filial matriz, depósitos (principal e avarias), perfis padrão, tabela de preço Varejo, contas caixa/banco, meios e condições de pagamento e categorias financeiras. A configuração fiscal fica pendente.</Notice>}

@@ -89,9 +89,17 @@ Erros        { "erro": { "codigo": "...", "mensagem": "...", ... }, "requestId":
 | `torre:transacoes` | Lista de transações (vendas, devoluções) com paginação (§12) |
 | qualquer um | `GET /status` (testa a credencial) |
 
+**Esquema único.** Provisionamento, Torre e licenças usam o mesmo registro (`INTEROS_CREDENCIAIS`), o mesmo formato
+de token e a mesma assinatura HMAC: `docs/interos/credenciais.md`. Lá estão também a restrição por empresa
+(`empresas`), a assinatura das gravações (`assinatura`) e a rotação sem parada.
+
 **Regras.**
-- A credencial de provisionamento tem só os escopos `provisionamento:*`. A da Torre, só `torre:*`. O gerador do ERP
-  recusa misturar os dois grupos numa credencial.
+- A credencial de provisionamento tem só os escopos `provisionamento:*`. A da Torre, só `torre:*`. A de licenças, só
+  `erp.*`. Uma credencial que misture famílias é recusada inteira, e o gerador do ERP também recusa.
+- Credencial com `empresas`: empresa fora da lista responde `403 empresa_nao_permitida`, e a credencial não cria nem
+  vincula empresas.
+- Credencial com `assinatura`: toda gravação exige `X-Interos-Signature` (`401 assinatura_obrigatoria` ou
+  `assinatura_invalida`).
 - O ERP guarda **somente o hash SHA-256** do segredo (variável `INTEROS_CREDENCIAIS`). Um vazamento do ERP não
   expõe o segredo.
 - A comparação é feita em tempo constante. Credencial ausente, malformada, desconhecida ou com segredo errado recebe
@@ -173,7 +181,9 @@ extras dentro de `erro`, como `campos` (validação) e `idEmpresa` (conflito de 
 | 400 | `json_invalido` | Corpo que não é um objeto JSON | Corrigir e enviar com **chave nova** |
 | 400 | `idempotencia_obrigatoria` | Alteração sem `Idempotency-Key` válida | Enviar com a chave |
 | 401 | `nao_autenticado` | Credencial ausente ou inválida | Conferir a credencial; não repetir em laço |
+| 401 | `assinatura_obrigatoria` / `assinatura_invalida` | Credencial com `assinatura` e gravação sem `X-Interos-Signature`, ou com assinatura errada ou fora da janela de ±5 min | Assinar o corpo bruto (`docs/interos/credenciais.md` §3) |
 | 403 | `sem_permissao` | Credencial sem o escopo da operação | Usar a credencial certa (§3) |
+| 403 | `empresa_nao_permitida` | Empresa fora de `empresas` da credencial, ou credencial restrita criando ou vinculando empresa | Usar a credencial certa; no piloto, só as empresas combinadas |
 | 404 | `nao_encontrado` | Empresa inexistente **ou não vinculada ao Interos**; usuário fora da empresa | Conferir o `idEmpresa`. Empresas não vinculadas não existem para o Interos. |
 | 409 | `solicitacao_em_andamento` | A mesma chave ainda está sendo processada | Esperar `Retry-After` e repetir **com a mesma chave** |
 | 409 | `cnpj_em_uso` | O CNPJ já pertence a uma empresa do ERP sem vínculo com esta conta | Usar a vinculação por código (§10) |
@@ -726,7 +736,9 @@ corpo) e `resposta` (status, cabeçalhos, corpo).
 | `16-empresas-listar.json` | 200 | Listar empresas vinculadas (cursor) |
 | `erro-400-idempotencia-obrigatoria.json` | 400 | Alteração sem `Idempotency-Key` |
 | `erro-401-nao-autenticado.json` | 401 | Credencial ausente ou inválida |
+| `erro-401-assinatura-obrigatoria.json` | 401 | Credencial com assinatura exigida gravando sem `X-Interos-Signature` |
 | `erro-403-sem-permissao.json` | 403 | Credencial da Torre tentando provisionar |
+| `erro-403-empresa-nao-permitida.json` | 403 | Credencial restrita ao piloto consultando outra empresa |
 | `erro-404-nao-encontrado.json` | 404 | Empresa inexistente ou não vinculada |
 | `erro-409-cnpj-em-uso.json` | 409 | CNPJ de empresa que já usa o ERP |
 | `erro-409-conta-ja-vinculada.json` | 409 | Conta que já tem outra empresa |

@@ -10,7 +10,7 @@ const RV = ["/financeiro/fechamento", "/financeiro/receber", "/financeiro/pagar"
 
 /** Fecha o período financeiro até a data (inclusive). Exige "Fechar e reabrir período financeiro". */
 export async function closePeriodAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.fechamento_periodo", action: "closePeriodAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     await requireFeature(s, "fechamentoPeriodo");
     requireAction(s.ctx, "finance.close_period");
     const date = fstr(fd, "date");
@@ -22,7 +22,7 @@ export async function closePeriodAction(fd: FormData) {
 
 /** Reabre o período: recua a data de fechamento (ou remove) — motivo obrigatório, auditado. */
 export async function reopenPeriodAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.fechamento_periodo", action: "reopenPeriodAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     await requireFeature(s, "fechamentoPeriodo");
     requireAction(s.ctx, "finance.close_period");
     const date = fopt(fd, "date");

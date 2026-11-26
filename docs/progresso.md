@@ -137,3 +137,43 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
   foi publicada no PR #7 (Minha conta › Segurança).
 - [ ] **Depende do titular e do Interos:** aceite da homologação, credenciais de produção, decisão sobre
   `ERP_AMBIENTE=producao` e próximas versões do contrato (`docs/pendencias-externas.md`, itens 18–21).
+
+
+## Modularização por empresa contratante e integração Interos (26/11)
+
+- [x] Catálogo `catalogo-modulos-erp-v1` (1.0.0): 81 entradas.
+  - 36 módulos comerciais, 31 funções opcionais, 5 componentes técnicos e 6 recursos da plataforma.
+  - 3 lacunas e 60 permissões mapeadas.
+  - Grafo validado, sem ciclos.
+  - Inventário e matriz gerados do código (`npm run modules:inventory`).
+- [x] Regra de acesso aplicada em: telas (pelo caminho real), menu, recursos, 392 server actions, APIs, exportações, rotinas e vitrine pública. Avisos do gateway e fila de tarefas são preservados como obrigações.
+- [x] Desligamento com simulação de impacto, cascata, pendências em andamento, conclusão automática e reativação com configuração preservada.
+- [x] API `/api/interos/v1`:
+  - catálogo, empresas, módulos, simulação, aplicação, histórico, linha de base e operações;
+  - token servidor a servidor com escopos, Idempotency-Key, If-Match e operação agendada.
+- [x] Migração: linha de base em `legacy` (rotina diária, `?step=modules-baseline` ou `npm run modules:baseline`); provisionamento seletivo de empresa nova; Administração › Módulos contratados.
+- [x] Verificação:
+  - 1033/1033 testes (memória), dos quais 50 são novos;
+  - 1033/1033 também na suíte inteira sobre o Postgres;
+  - typecheck, lint e build limpos.
+- [ ] Pendente: tabela de catálogo inicial do titular (não recebida), homologação com Postgres no ambiente de homologação (a local, em memória, foi feita) e credencial `INTEROS_CLIENTS` em produção.
+
+## Modularização integral — Fases 6 a 10 (26/11)
+
+- [x] Decisões do titular registradas: homologação antes da venda, carências de 7 dias, emissão fiscal nunca bloqueada, 67 unidades, oculto/oportunidade, token+HMAC, pull diário + reenvio, perfil por atributos.
+- [x] Licença versionada (`src/domain/licensing`).
+  - Estados, carências e agendamentos locais.
+  - Trava por empresa.
+  - Homologação e preservação de acesso.
+  - Limites.
+  - Eventos assinados.
+  - Reconciliação.
+  - Telemetria.
+  - Solicitação de contratação.
+- [x] API `/api/interos/v2`: catálogo, empresas, licença, simulação, histórico, sync, usage, errors, upsell-requests.
+- [x] Menu bloqueado/oportunidade. Cargo, departamento e função no usuário.
+- [x] Verificação: suíte completa verde em memória; testes de licença, habilitação e catálogo v2 também no Postgres; typecheck e lint limpos.
+- [ ] Pendente:
+  - tela da regra "perfil por cargo";
+  - configurar `INTEROS_*` e homologar com o Interos real;
+  - homologar Focus/SEFAZ e Banco Intercert.

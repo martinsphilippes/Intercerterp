@@ -1,5 +1,6 @@
 "use server";
 
+import { moduleDecision } from "@/lib/server/modules";
 import { runAction } from "@/lib/server/action";
 import { BusinessError } from "@/lib/core/errors";
 import { cancelCart, cartToSaleInput, createCart, ensureOpenCart, parkCart, removeCartItem, resumeCart, saveCart, type CartPatch } from "@/domain/carts";
@@ -38,11 +39,11 @@ export type PlainCart = ReturnType<typeof plainCart>;
 
 /** Autosalvamento do atendimento (preserva o atendimento em atualização acidental da página). */
 export async function saveCartAction(cartId: string, patch: CartPatch) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => plainCart(await saveCart(s.ctx, cartId, patch)));
+  return runAction({ entitlement: "vendas.pdv", action: "saveCartAction", module: "pdv", op: "create", requireBranch: true }, async (s) => plainCart(await saveCart(s.ctx, cartId, patch)));
 }
 
 export async function parkCartAction(cartId: string, name: string | null) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "parkCartAction", module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
     const { parked, fresh } = await parkCart(s.ctx, cartId, name);
     const r = parked.reservation;
     const reserved = r.enabled ? (r.shortage.length ? ` Estoque reservado parcialmente — sem disponível para: ${r.shortage.map((x) => x.sku).join(", ")}.` : " Estoque reservado.") : "";
@@ -51,14 +52,14 @@ export async function parkCartAction(cartId: string, name: string | null) {
 }
 
 export async function resumeCartAction(cartId: string, terminalId: string) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "resumeCartAction", module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
     const c = await resumeCart(s.ctx, cartId, terminalId);
     return { ok: true as const, message: `Pré-venda "${c.name ?? ""}" retomada.`, data: plainCart(c) };
   });
 }
 
 export async function cancelCartAction(cartId: string, reason: string | null, approval?: { login: string; password: string } | null) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "cancelCartAction", module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
     const c = await cancelCart(s.ctx, cartId, reason, { approval: approval?.login?.trim() ? approval : null });
     const current = await ensureOpenCart(s.ctx, c.terminalId);
     return { ok: true as const, message: "Atendimento cancelado.", data: plainCart(current!) };
@@ -70,7 +71,7 @@ export async function cancelCartAction(cartId: string, reason: string | null, ap
  * no terminal, conforme os parâmetros do PDV. Devolve o atendimento gravado (fonte de verdade para a tela).
  */
 export async function removeCartItemAction(cartId: string, input: { index: number; skuId: string; qty?: number | null; reason?: string | null; approval?: { login: string; password: string } | null }) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "removeCartItemAction", module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const r = await removeCartItem(s.ctx, cartId, {
       index: input.index, skuId: input.skuId, qty: input.qty ?? null, reason: input.reason ?? null, approval: input.approval?.login?.trim() ? input.approval : null,
     });
@@ -81,7 +82,7 @@ export async function removeCartItemAction(cartId: string, input: { index: numbe
 
 /** Inicia atendimento de troca: o atual (com itens) vai para espera e um novo recebe a devolução de origem. */
 export async function startExchangeAction(terminalId: string, returnId: string) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
+  return runAction({ entitlement: "vendas.devolucoes", action: "startExchangeAction", module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
     const ret = await s.ctx.store.getOrThrow("returns", returnId);
     if (ret.companyId !== s.ctx.companyId || ret.kind !== "exchange") throw new BusinessError("Devolução de troca inválida.");
     if (ret.exchangeSaleId) throw new BusinessError("Esta troca já foi concluída.");
@@ -96,14 +97,14 @@ export async function startExchangeAction(terminalId: string, returnId: string) 
 }
 
 export async function createPixAction(cartId: string, amount: number, payerEmail?: string | null) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "createPixAction", module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const i = await createPixIntent(s.ctx, { cartId, amount, description: `Venda PDV — atendimento ${cartId.slice(0, 8)}`, payerEmail: payerEmail ?? undefined });
     return { id: i.id, status: i.status, amount: i.amount, reference: i.reference, qrCode: i.qrCode ?? null, qrCodeImage: i.qrCodeImage ?? null, expiresAt: i.expiresAt ?? null, isSimulated: Boolean(i.isSimulated), provider: i.provider };
   });
 }
 
 export async function simulatePixAction(intentId: string, status: "confirmed" | "failed") {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "simulatePixAction", module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const i = await simulateIntent(s.ctx, intentId, status);
     return { id: i.id, status: i.status };
   });
@@ -111,7 +112,7 @@ export async function simulatePixAction(intentId: string, status: "confirmed" | 
 
 /** Cancela a cobrança no provedor; se ela já tiver sido paga, devolve "confirmed" para o PDV aplicar o Pix. */
 export async function cancelPixAction(intentId: string) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "cancelPixAction", module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const i = await cancelIntent(s.ctx, intentId);
     const message = i.status === "confirmed" ? "O Pix já foi pago: a cobrança não pode ser cancelada — aplique-o na venda ou providencie a devolução." : i.status === "cancelled" ? "Cobrança cancelada no provedor." : `Situação da cobrança no provedor: ${i.status}.`;
     return { ok: true as const, message, data: { id: i.id, status: i.status as string } };
@@ -120,7 +121,7 @@ export async function cancelPixAction(intentId: string) {
 
 /** Conclui a venda do atendimento. Idempotente pela chave do atendimento: repetir nunca cria outra venda ou cobrança. */
 export async function finalizeCartAction(cartId: string, payments: SalePaymentInput[], opts: { approval?: { login: string; password: string } | null; receipt?: string | null; overdueRelease?: { reason: string; login?: string; password?: string } | null } = {}) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv", "/vendas", "/caixa"] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "finalizeCartAction", module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv", "/vendas", "/caixa"] }, async (s) => {
     const cart = await s.ctx.store.getOrThrow("carts", cartId);
     if (cart.companyId !== s.ctx.companyId) throw new BusinessError("Atendimento de outra empresa.");
     if (cart.status === "converted" && cart.saleId) return { ok: true as const, message: "Venda já concluída.", redirect: `/vendas/${cart.saleId}/conclusao` };
@@ -130,12 +131,22 @@ export async function finalizeCartAction(cartId: string, payments: SalePaymentIn
       paymentTermId: p.paymentTermId ?? null, intentId: p.intentId ?? null, nsu: p.nsu?.trim() || null, authCode: p.authCode?.trim() || null, cardBrand: p.cardBrand?.trim() || null,
       voucherCode: p.voucherCode?.trim() || null, reference: p.reference?.trim() || null,
     }));
-    const sale = await finalizeSale(s.ctx, { ...cartToSaleInput(cart, clean), discountApproval: opts.approval?.login ? opts.approval : null,
+    // habilitação (docs/modulos §combinações): venda a prazo gera títulos → exige Contas a receber; NFC-e só com o módulo NFC-e
+    const methods = await Promise.all([...new Set(clean.map((p) => p.methodId))].map((id) => s.ctx.store.get("payment_methods", id)));
+    if (methods.some((m) => m && (m.kind === "crediario" || m.kind === "boleto"))) {
+      const d = await moduleDecision(s.ctx, s.company, "financeiro.contas_receber");
+      if (d.level !== "full") throw new BusinessError(`Venda a prazo (crediário/boleto) indisponível: ${d.reason}`, "module_disabled");
+    }
+    const nfce = await moduleDecision(s.ctx, s.company, "fiscal.nfce");
+    const saleInput = cartToSaleInput(cart, clean);
+    const noNfce = nfce.level !== "full" && saleInput.emitFiscal !== false;
+    if (noNfce) saleInput.emitFiscal = false;
+    const sale = await finalizeSale(s.ctx, { ...saleInput, discountApproval: opts.approval?.login ? opts.approval : null,
       // liberação de cliente inadimplente (VEN-07): motivo + permissão do operador ou login/senha de quem autoriza
       overdueRelease: opts.overdueRelease ? { reason: opts.overdueRelease.reason, approval: opts.overdueRelease.login?.trim() ? { login: opts.overdueRelease.login, password: opts.overdueRelease.password ?? "" } : null } : null,
     });
     const receipt = opts.receipt && ["imprimir", "email", "imprimir_email"].includes(opts.receipt) ? `?comprovante=${opts.receipt}` : "";
-    return { ok: true as const, message: `Venda nº ${sale.number} concluída.`, data: { saleId: sale.id }, redirect: `/vendas/${sale.id}/conclusao${receipt}` };
+    return { ok: true as const, message: `Venda nº ${sale.number} concluída.${noNfce ? " Sem NFC-e: o módulo NFC-e não está habilitado para a empresa (recibo não fiscal)." : ""}`, data: { saleId: sale.id }, redirect: `/vendas/${sale.id}/conclusao${receipt}` };
   });
 }
 
@@ -170,12 +181,12 @@ const RECEIVABLE_PATHS = ["/caixa", "/financeiro/receber"];
 
 /** Parcelas em aberto do cliente (valor atualizado com multa/juros, vencidas primeiro). */
 export async function pdvOpenInstallmentsAction(customerId: string) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => openInstallmentsForCustomer(s.ctx, customerId));
+  return runAction({ entitlement: "pdv.recebimento_crediario", action: "pdvOpenInstallmentsAction", module: "pdv", op: "create", requireBranch: true }, async (s) => openInstallmentsForCustomer(s.ctx, customerId));
 }
 
 /** Recebe as parcelas no caixa aberto do terminal. Idempotente pela chave do formulário. */
 export async function pdvReceiveInstallmentsAction(input: ReceiveInput) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: RECEIVABLE_PATHS }, async (s) => {
+  return runAction({ entitlement: "pdv.recebimento_crediario", action: "pdvReceiveInstallmentsAction", module: "pdv", op: "create", requireBranch: true, revalidate: RECEIVABLE_PATHS }, async (s) => {
     const op = await receiveInstallments(s.ctx, {
       terminalId: input.terminalId, installmentIds: input.installmentIds, methodId: input.methodId, received: input.received != null ? Math.round(input.received) : null,
       discount: Math.round(input.discount ?? 0), approval: input.approval?.login ? input.approval : null, reference: input.reference?.trim() || null, idemKey: input.idemKey,
@@ -190,7 +201,7 @@ export async function pdvReceiveInstallmentsAction(input: ReceiveInput) {
 
 /** Recebimentos registrados no caixa aberto do terminal (para recibo e estorno). */
 export async function pdvSessionReceiptsAction(terminalId: string) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "pdv.recebimento_crediario", action: "pdvSessionReceiptsAction", module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const session = await currentSession(s.ctx, terminalId);
     if (!session) return [] as PdvReceiptView[];
     return (await sessionReceipts(s.ctx, session.id)).map(receiptView);
@@ -199,7 +210,7 @@ export async function pdvSessionReceiptsAction(terminalId: string) {
 
 /** Estorno do recebimento (mesma sessão aberta): recompõe as parcelas e lança a saída no caixa. */
 export async function pdvReverseReceiptAction(receiptId: string, reason: string, approval?: { login: string; password: string } | null) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: RECEIVABLE_PATHS }, async (s) => {
+  return runAction({ entitlement: "pdv.recebimento_crediario", action: "pdvReverseReceiptAction", module: "pdv", op: "create", requireBranch: true, revalidate: RECEIVABLE_PATHS }, async (s) => {
     const op = await reverseReceipt(s.ctx, { receiptId, reason, approval: approval?.login ? approval : null });
     const v = receiptView(op);
     return { ok: true as const, message: `Recebimento nº ${v.number} estornado: parcelas reabertas e ${formatMoney(v.total)} lançado como saída ${v.methodKind === "cash" ? "do dinheiro do caixa" : `em ${v.methodName}`}.`, data: v };
@@ -210,7 +221,7 @@ export async function pdvReverseReceiptAction(receiptId: string, reason: string,
 
 /** Orçamentos válidos e pedidos com saldo da filial (busca por nº ou cliente). */
 export async function billableDocumentsAction(q: string) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "billableDocumentsAction", module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const { listBillableDocuments } = await import("@/domain/sales-documents");
     return listBillableDocuments(s.ctx, q);
   });
@@ -218,7 +229,7 @@ export async function billableDocumentsAction(q: string) {
 
 /** Itens do documento com o saldo faturável (para escolher as quantidades do faturamento parcial). */
 export async function documentLinesAction(documentId: string) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "documentLinesAction", module: "pdv", op: "create", requireBranch: true }, async (s) => {
     const { billableByItem, documentItems, docLabel } = await import("@/domain/sales-documents");
     const doc = await s.ctx.store.getOrThrow("sales_documents", documentId);
     if (doc.companyId !== s.ctx.companyId) throw new BusinessError("Documento de outra empresa.");
@@ -235,7 +246,7 @@ export async function documentLinesAction(documentId: string) {
 
 /** Importa o orçamento/pedido no atendimento do terminal (o atual com itens vai para espera). */
 export async function importDocumentAction(terminalId: string, documentId: string, quantities: Record<string, number> | null) {
-  return runAction({ module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "importDocumentAction", module: "pdv", op: "create", requireBranch: true, revalidate: ["/pdv"] }, async (s) => {
     const { importDocumentToCart } = await import("@/domain/sales-documents");
     const c = await importDocumentToCart(s.ctx, terminalId, documentId, quantities);
     return { ok: true as const, message: `${c.salesDocumentLabel ?? "Documento"} importado no atendimento.`, data: plainCart(c) };

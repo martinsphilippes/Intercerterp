@@ -13,7 +13,7 @@ async function browserTerminal(branchId: string | null) {
 }
 
 export async function cancelSaleAction(saleId: string, fd: FormData) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: [`/vendas/${saleId}`, "/vendas"] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "cancelSaleAction", module: "sales", requireBranch: true, revalidate: [`/vendas/${saleId}`, "/vendas"] }, async (s) => {
     const sale = await cancelSale(s.ctx, saleId, fstr(fd, "reason"), { terminalId: await browserTerminal(s.ctx.branchId) });
     const pays = await s.ctx.store.list("sale_payments", { filters: [["eq", "saleId", saleId]], limit: 50 });
     const pending = pays.items.filter((p) => p.status === "refund_pending");
@@ -34,7 +34,7 @@ export async function cancelSaleAction(saleId: string, fd: FormData) {
 }
 
 export async function refreshFiscalAction(saleId: string) {
-  return runAction({ module: "sales" }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "refreshFiscalAction", module: "sales" }, async (s) => {
     const r = await refreshSaleFiscal(s.ctx, saleId);
     const d = r.document;
     return {
@@ -45,7 +45,7 @@ export async function refreshFiscalAction(saleId: string) {
 }
 
 export async function sendReceiptAction(saleId: string, fd: FormData) {
-  return runAction({ module: "sales" }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "sendReceiptAction", module: "sales" }, async (s) => {
     const r = await sendSaleReceiptEmail(s.ctx, saleId, fstr(fd, "email"));
     if (!r.delivered) return { ok: false as const, error: r.channel === "not_configured" ? "Canal de e-mail não configurado (Administração → Integrações → E-mail). Nada foi enviado." : `E-mail não enviado: ${r.message ?? r.channel}` };
     return { ok: true as const, message: `Comprovante entregue ao provedor de e-mail (${r.channel}) para ${fstr(fd, "email")}.` };
@@ -53,7 +53,7 @@ export async function sendReceiptAction(saleId: string, fd: FormData) {
 }
 
 export async function processReturnAction(saleId: string, fd: FormData) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: [`/vendas/${saleId}`, "/vendas/devolucoes"] }, async (s) => {
+  return runAction({ entitlement: "vendas.devolucoes", action: "processReturnAction", module: "sales", requireBranch: true, revalidate: [`/vendas/${saleId}`, "/vendas/devolucoes"] }, async (s) => {
     const items = fjson<ReturnInput["items"]>(fd, "items", []).filter((i) => i.qty > 0);
     const compensation = (fstr(fd, "compensation") || "store_credit") as ReturnInput["compensation"];
     const ret = await processReturn(s.ctx, {
@@ -82,7 +82,7 @@ export async function processReturnAction(saleId: string, fd: FormData) {
 
 /** Confirma o estorno no cartão (retorno da adquirente): a devolução deixa de ficar "em processamento". */
 export async function confirmCardReversalAction(returnId: string, fd: FormData) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: [`/vendas/devolucoes/${returnId}`, "/vendas/devolucoes"] }, async (s) => {
+  return runAction({ entitlement: "vendas.devolucoes", action: "confirmCardReversalAction", module: "sales", requireBranch: true, revalidate: [`/vendas/devolucoes/${returnId}`, "/vendas/devolucoes"] }, async (s) => {
     const r = await confirmCardReversal(s.ctx, returnId, { reference: fstr(fd, "reason") });
     return { ok: true as const, message: `Estorno da devolução nº ${r.number} confirmado (ref. ${r.confirmationRef}).` };
   });

@@ -48,7 +48,7 @@ function parseInput(fd: FormData): SalesDocInput {
 export async function saveDocumentAction(fd: FormData) {
   const id = fopt(fd, "id");
   const type = (fstr(fd, "type") === "order" ? "order" : "quote") as SalesDocType;
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "saveDocumentAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     await requireFeature(s, "documentoComercial");
     const input = parseInput(fd);
     const doc = id ? await updateSalesDocument(s.ctx, id, input, fopt(fd, "reason")) : await createSalesDocument(s.ctx, type, input, { idemKey: `ui:${fstr(fd, "_idem")}` });
@@ -57,21 +57,21 @@ export async function saveDocumentAction(fd: FormData) {
 }
 
 export async function approveQuoteAction(id: string) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "approveQuoteAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const d = await approveQuote(s.ctx, id);
     return { ok: true as const, message: `${docLabel(d)} aprovado.` };
   });
 }
 
 export async function rejectQuoteAction(id: string, fd: FormData) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "rejectQuoteAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const d = await rejectQuote(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: `${docLabel(d)} marcado como recusado.` };
   });
 }
 
 export async function convertToOrderAction(id: string) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "convertToOrderAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const o = await convertQuoteToOrder(s.ctx, id);
     const short = (o.reservationShortage ?? []).length;
     return { ok: true as const, message: `Pedido nº ${o.number} gerado a partir do orçamento${short ? ` — ${short} produto(s) sem saldo para reservar` : ""}.`, redirect: docPath(o) };
@@ -79,21 +79,21 @@ export async function convertToOrderAction(id: string) {
 }
 
 export async function duplicateDocumentAction(id: string, fd: FormData) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "duplicateDocumentAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const d = await duplicateSalesDocument(s.ctx, id, fstr(fd, "_idem") || `${id}:${Date.now()}`);
     return { ok: true as const, message: `${docLabel(d)} criado como cópia (rascunho).`, redirect: docPath(d) };
   });
 }
 
 export async function cancelOrderAction(id: string, fd: FormData) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "cancelOrderAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const d = await cancelOrder(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: `${docLabel(d)} cancelado; reserva de estoque liberada.` };
   });
 }
 
 export async function renewReservationAction(id: string) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "renewReservationAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const d = await renewReservation(s.ctx, id);
     const short = (d.reservationShortage ?? []).length;
     return { ok: true as const, message: short ? `Reserva renovada parcialmente: ${short} produto(s) sem saldo disponível.` : "Reserva de estoque renovada." };
@@ -102,7 +102,7 @@ export async function renewReservationAction(id: string) {
 
 /** Monta o texto/link do WhatsApp e registra o envio (o operador conclui o envio no próprio WhatsApp). */
 export async function whatsappSendAction(id: string, phone: string | null) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "whatsappSendAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const doc = await s.ctx.store.getOrThrow("sales_documents", id);
     const company = await s.ctx.store.get("companies", s.ctx.companyId);
     const link = doc.shareToken ? `${await requestOrigin()}/documento/${doc.shareToken}` : null;
@@ -115,7 +115,7 @@ export async function whatsappSendAction(id: string, phone: string | null) {
 }
 
 export async function emailSendAction(id: string, fd: FormData) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "emailSendAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     const doc = await s.ctx.store.getOrThrow("sales_documents", id);
     const link = doc.shareToken ? `${await requestOrigin()}/documento/${doc.shareToken}` : null;
     await sendDocumentEmail(s.ctx, id, fstr(fd, "to"), link);
@@ -124,7 +124,7 @@ export async function emailSendAction(id: string, fd: FormData) {
 }
 
 export async function markPrintedAction(id: string) {
-  return runAction({ module: "sales", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "markPrintedAction", module: "sales", requireBranch: true, revalidate: R }, async (s) => {
     await markQuoteSent(s.ctx, id, "print");
     return { ok: true as const, message: "Entrega impressa registrada." };
   });
@@ -145,7 +145,7 @@ export interface DocSkuHit {
 
 /** Pesquisa de produtos com o preço vigente da tabela (mesma resolução do PDV) e o disponível na filial. */
 export async function searchDocSkusAction(q: string, priceTableId: string | null) {
-  return runAction({ module: "sales" }, async (s) => {
+  return runAction({ entitlement: "vendas.documentos", action: "searchDocSkusAction", module: "sales" }, async (s) => {
     const term = (q ?? "").trim();
     if (term.length < 2) return [] as DocSkuHit[];
     const store = s.ctx.store;

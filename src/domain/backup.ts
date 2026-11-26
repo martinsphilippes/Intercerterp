@@ -30,8 +30,12 @@ const PART_BYTES = 25 * 1024 * 1024;
 const MAX_FILES_BYTES = 300 * 1024 * 1024;
 const STALE_MINUTES = 30;
 
-/** Metadados do próprio backup não entram na cópia (o artefato não pode conter a si mesmo). */
-const SELF_EXCLUDED = new Set(["backups", "restore_jobs"]);
+/**
+ * Fora da cópia: os metadados do próprio backup (o artefato não pode conter a si mesmo) e a habilitação de módulos e
+ * licença — contrato vigente, fonte oficial no ERP e alterado só pelo Interos: restaurar uma cópia antiga nunca devolve
+ * nem remove módulos, e o histórico de alterações e as operações também não voltam no tempo.
+ */
+const SELF_EXCLUDED = new Set(["backups", "restore_jobs", "company_modules", "module_changes", "module_operations", "module_baselines", "company_licenses", "license_history", "interos_events"]);
 /** Segredos de autenticação: fora da cópia de uma empresa (a cópia é baixável pelo administrador dela). */
 const AUTH_SECRETS = ["passwordHash", "totpSecretEnc", "totpPendingEnc", "totpRecoveryHashes", "totpLastStep", "resetTokenHash", "resetExpiresAt", "inviteTokenHash"];
 function withoutAuthSecrets(u: Doc): Doc {

@@ -33,7 +33,7 @@ function parse(fd: FormData): SupplierInput {
 
 export async function saveSupplierAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "suppliers", op: id ? "edit" : "create", revalidate: ["/fornecedores"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.fornecedores", action: "saveSupplierAction", module: "suppliers", op: id ? "edit" : "create", revalidate: ["/fornecedores"] }, async (s) => {
     const input = parse(fd);
     // idempotência do cadastro: chave estável do formulário (o id não deriva do CNPJ)
     const sup = id ? await updateSupplier(s.ctx, id, input) : await createSupplier(s.ctx, input, { idemKey: fopt(fd, "_idem") ? `ui:${fstr(fd, "_idem")}` : null });
@@ -42,14 +42,14 @@ export async function saveSupplierAction(fd: FormData) {
 }
 
 export async function setSupplierStatusAction(id: string, status: "active" | "inactive" | "blocked", fd: FormData) {
-  return runAction({ module: "suppliers", op: "edit", revalidate: [`/fornecedores/${id}`, "/fornecedores"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.fornecedores", action: "setSupplierStatusAction", module: "suppliers", op: "edit", revalidate: [`/fornecedores/${id}`, "/fornecedores"] }, async (s) => {
     await setSupplierStatus(s.ctx, id, status, fopt(fd, "reason"));
     return { ok: true as const, message: status === "inactive" ? "Fornecedor inativado. O histórico foi preservado." : status === "blocked" ? "Fornecedor bloqueado para novas cotações e pedidos." : "Fornecedor reativado." };
   });
 }
 
 export async function deleteSupplierAction(id: string) {
-  return runAction({ module: "suppliers", op: "delete", revalidate: ["/fornecedores"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.fornecedores", action: "deleteSupplierAction", module: "suppliers", op: "delete", revalidate: ["/fornecedores"] }, async (s) => {
     await deleteSupplier(s.ctx, id);
     return { ok: true as const, message: "Fornecedor excluído.", redirect: "/fornecedores" };
   });
@@ -57,7 +57,7 @@ export async function deleteSupplierAction(id: string) {
 
 export async function saveSupplierProductAction(fd: FormData) {
   const supplierId = fstr(fd, "supplierId");
-  return runAction({ module: "suppliers", op: "edit", revalidate: [`/fornecedores/${supplierId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.fornecedores", action: "saveSupplierProductAction", module: "suppliers", op: "edit", revalidate: [`/fornecedores/${supplierId}`] }, async (s) => {
     const opt = (k: string) => (fstr(fd, k) === "" ? null : fint(fd, k));
     await upsertSupplierProduct(s.ctx, {
       supplierId,
@@ -76,12 +76,12 @@ export async function saveSupplierProductAction(fd: FormData) {
 }
 
 export async function removeSupplierProductAction(id: string, supplierId: string) {
-  return runAction({ module: "suppliers", op: "edit", revalidate: [`/fornecedores/${supplierId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.fornecedores", action: "removeSupplierProductAction", module: "suppliers", op: "edit", revalidate: [`/fornecedores/${supplierId}`] }, async (s) => {
     await removeSupplierProduct(s.ctx, id);
     return { ok: true as const, message: "Vínculo removido." };
   });
 }
 
 export async function lookupSupplierCnpjAction(cnpj: string) {
-  return runAction({ module: "suppliers" }, async () => ({ result: await lookupCnpj(cnpj) }));
+  return runAction({ entitlement: "cadastros.fornecedores", action: "lookupSupplierCnpjAction", module: "suppliers" }, async () => ({ result: await lookupCnpj(cnpj) }));
 }

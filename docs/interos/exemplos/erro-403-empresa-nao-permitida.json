@@ -1,0 +1,27 @@
+{
+  "titulo": "Credencial restrita às empresas do piloto consultando outra empresa",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/792018d6437e43897eb2aa4c3db45e9a",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-piloto.<segredo>",
+      "X-Request-Id": "req-exemplo-e403b"
+    }
+  },
+  "resposta": {
+    "status": 403,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e403b",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "empresa_nao_permitida",
+        "mensagem": "Esta credencial não alcança esta empresa."
+      },
+      "requestId": "req-exemplo-e403b"
+    }
+  }
+}

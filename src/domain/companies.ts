@@ -136,13 +136,15 @@ export function companyData(input: CompanyInput) {
 }
 
 /** Nova empresa com parametrização inicial (matriz, depósitos, perfis, tabela, contas, meios e condições). */
-export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName?: string }) {
+export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName?: string; modules?: string[] | null }) {
   requirePerm(ctx, "admin", "create");
   // multiempresa: empresa nova é empresa contratante — criada pelo Interos (provisionamento) ou pela administração da
   // plataforma, nunca a partir de outra empresa cliente (docs/multiempresa/arquitetura.md §4)
   if (isolationMode() === "estrito" && !ctx.user.isAdmin)
     throw new BusinessError("Empresas novas são contratadas pelo Interos (ou criadas pela administração da plataforma Intercert). Para uma nova filial desta empresa, use Empresas → Filiais.", "forbidden");
   const data = companyData(input);
+  const { validateSelection } = await import("./modules/baseline");
+  validateSelection((data.kind as "retail") ?? "retail", input.modules ?? null);
   const all = await listAll(unscoped(ctx.store), "companies");
   // sem revelar a outra empresa (que pode ser de outro cliente)
   if (data.cnpj && all.some((c) => c.cnpj === data.cnpj)) throw new BusinessError("Já existe empresa com este CNPJ no ERP.", "duplicate");
@@ -153,6 +155,10 @@ export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName
     cityCode: data.address.cityCode, branchName: input.branchName?.trim() || "Matriz", createdBy: ctx.user.id, kind: data.kind as "retail" | "accounting" | "certification",
   });
   const store = unscoped(ctx.store);
+  // habilitação de módulos (docs/modulos): a empresa nova recebe os módulos selecionados (sem seleção: o conjunto padrão
+  // do tipo) e já nasce com o controle aplicado; dependências inconsistentes recusam a criação antes de gravar o resto
+  const { provisionModules } = await import("./modules/baseline");
+  await provisionModules(store, company.id, input.modules ?? null, ctx.user.name || ctx.user.id);
   const updated = await store.update("companies", company.id, { ...data, status: "active" });
   await store.update("branches", branch.id, { ie: data.ie, im: data.im, address: data.address, phone: data.phone, email: data.email });
   // quem cria passa a ter acesso, com o perfil Administrador da nova empresa (administradores já enxergam todas)
@@ -269,6 +275,8 @@ export async function createBranch(ctx: Ctx, companyId: string, input: BranchInp
   const c = await companyAdminCtx(ctx, companyId, "create");
   const company = await c.store.getOrThrow("companies", companyId);
   assert(company.status !== "inactive", "Empresa inativa: reative-a antes de criar filiais.");
+  const { assertWithinLimit } = await import("./licensing/limits");
+  await assertWithinLimit(c.store, companyId, "branches");
   const data = branchData(input);
   const branches = await listAll(c.store, "branches", { filters: [["eq", "companyId", companyId]] });
   if (branches.some((b) => b.code === data.code)) throw new BusinessError(`Já existe filial com o código ${data.code} nesta empresa.`, "duplicate");
@@ -347,6 +355,10 @@ export async function setBranchStatus(ctx: Ctx, id: string, status: "active" | "
     const active = await listAll(c.store, "branches", { filters: [["eq", "companyId", b.companyId], ["eq", "status", "active"]] });
     assert(active.filter((x) => x.id !== id).length > 0, "A empresa precisa ter ao menos uma filial ativa.");
   }
+  if (status === "active" && b.status === "inactive") {
+    const { assertWithinLimit } = await import("./licensing/limits");
+    await assertWithinLimit(c.store, b.companyId, "branches");
+  }
   const after = await c.store.update("branches", id, { status });
   await audit({ ...c, branchId: id }, { module: "admin", action: `branch.${status}`, entityType: "branch", entityId: id, summary: `Filial ${b.name} ${status === "inactive" ? "inativada (não pode mais ser selecionada nem operar)" : "reativada"}`, reason: reason ?? null, related: [`company:${b.companyId}`] });
   return after;
@@ -386,14 +398,17 @@ export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: stri
       }
       const roleByCompany = { ...(u.roleByCompany ?? {}) };
       delete roleByCompany[companyId];
-      // cargo e filiais por empresa saem junto com o vínculo (nada fica apontando para a empresa desvinculada)
-      const jobTitleByCompany = { ...(u.jobTitleByCompany ?? {}) };
-      delete jobTitleByCompany[companyId];
-      const branchIdsByCompany = { ...(u.branchIdsByCompany ?? {}) };
-      delete branchIdsByCompany[companyId];
+      // cargo, departamento, função e filiais por empresa saem junto com o vínculo (nada fica apontando para a empresa
+      // desvinculada)
+      const perCompany: Record<string, Record<string, unknown>> = {};
+      for (const f of ["jobTitleByCompany", "departmentByCompany", "jobFunctionByCompany", "branchIdsByCompany"]) {
+        if (!u[f] || !(companyId in u[f])) continue;
+        perCompany[f] = { ...u[f] };
+        delete perCompany[f][companyId];
+      }
       plan.push({
         user: u,
-        patch: { companyIds: (u.companyIds ?? []).filter((x: string) => x !== companyId), branchIds: (u.branchIds ?? []).filter((b: string) => !branchIds.has(b)), roleByCompany, jobTitleByCompany, branchIdsByCompany },
+        patch: { companyIds: (u.companyIds ?? []).filter((x: string) => x !== companyId), branchIds: (u.branchIds ?? []).filter((b: string) => !branchIds.has(b)), roleByCompany, ...perCompany },
         change: `−${u.name}`,
       });
     }

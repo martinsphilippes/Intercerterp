@@ -9,7 +9,7 @@ const PATHS = ["/fiscal/entradas", "/compras/recebimentos", "/financeiro/pagar"]
 
 /** Nota de entrada sem estoque (serviço tomado, uso e consumo, despesa com nota) — com XML ou digitada. */
 export async function createNoStockEntryAction(fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "fiscal.livro_entradas", action: "createNoStockEntryAction", module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
     await requireFeature(s, "livroEntradas");
     const file = fd.get("xml");
     const hasFile = file instanceof File && file.size > 0;

@@ -6,7 +6,7 @@ import { recordWhatsappCollection, saveCollectionTemplates } from "@/domain/coll
 
 /** Registra no histórico do título a cobrança aberta no WhatsApp (o link wa.me é aberto pelo navegador do operador). */
 export async function registerWhatsappCollectionAction(installmentId: string, input: { template: string; phone: string; message: string }) {
-  return runAction({ module: "finance", op: "edit" }, async (s) => {
+  return runAction({ entitlement: "financeiro.cobranca_whatsapp", action: "registerWhatsappCollectionAction", module: "finance", op: "edit" }, async (s) => {
     const r = await recordWhatsappCollection(s.ctx, installmentId, { template: String(input.template ?? ""), phone: String(input.phone ?? ""), message: String(input.message ?? "") });
     return { ok: true as const, message: "Contato de cobrança registrado no histórico do título.", data: r };
   });
@@ -14,7 +14,7 @@ export async function registerWhatsappCollectionAction(installmentId: string, in
 
 /** Modelos de mensagem de cobrança (empresa). */
 export async function saveCollectionTemplatesAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: ["/financeiro/cobranca/modelos"] }, async (s) => {
+  return runAction({ entitlement: "financeiro.cobranca_whatsapp", action: "saveCollectionTemplatesAction", module: "finance", op: "edit", revalidate: ["/financeiro/cobranca/modelos"] }, async (s) => {
     await requireFeature(s, "cobrancaWhatsapp");
     const changed = await saveCollectionTemplates(
       s.ctx,

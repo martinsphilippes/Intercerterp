@@ -639,11 +639,13 @@ export async function resumeProvisioning(store: Store, actor: ServiceActor, comp
 }
 
 /** Lista as empresas vinculadas ao Interos (sincronização). */
-export async function listLinkedTenants(store: Store, query: URLSearchParams) {
+export async function listLinkedTenants(store: Store, query: URLSearchParams, onlyCompanies: string[] | null = null) {
   const base = unscoped(store);
   const limit = Math.min(100, Math.max(1, Number(query.get("limite") ?? 50) || 50));
   const account = query.get("contaInterosId");
   const filters: any[] = account ? [["eq", "interosAccountId", account]] : [["notNull", "interosAccountId"]];
+  // credencial restrita (empresas do piloto): só as empresas dela
+  if (onlyCompanies) filters.push(["eq", "id", onlyCompanies]);
   const all = (await listAll(base, "companies", { filters })).sort((a, b) => String(a.id).localeCompare(String(b.id)));
   const after = query.get("cursor");
   const page = (after ? all.filter((c) => c.id > after) : all).slice(0, limit);

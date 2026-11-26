@@ -13,7 +13,12 @@
     "db:setup": "tsx scripts/db-setup.ts",
     "seed": "tsx scripts/seed.ts",
     "jobs": "tsx scripts/run-jobs.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "modules:catalog": "tsx scripts/modules/build-catalog.ts",
+    "modules:baseline": "tsx scripts/modules/baseline.ts",
+    "modules:annotate": "node scripts/modules/annotate-actions.mjs",
+    "modules:inventory": "tsx scripts/modules/build-inventory.ts",
+    "modules:catalog-v2": "tsx scripts/modules/build-catalog-v2.ts"
   },
   "engines": {
     "node": "22.x"

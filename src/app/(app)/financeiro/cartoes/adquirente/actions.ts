@@ -22,7 +22,7 @@ async function input(fd: FormData) {
 
 /** Prévia do casamento (nada é gravado): colunas, linhas e situação de cada linha. */
 export async function previewAcquirerAction(fd: FormData) {
-  return runAction({ module: "finance" }, async (s) => {
+  return runAction({ entitlement: "financeiro.taxas_adquirente", action: "previewAcquirerAction", module: "finance" }, async (s) => {
     await requireFeature(s, "taxasCartao");
     const pv = await previewAcquirerFile(s.ctx, await input(fd));
     return { ...pv, sniff: { ...pv.sniff, rows: pv.sniff.rows.slice(0, 5) }, matches: pv.matches.slice(0, 1000), totalMatches: pv.matches.length, issues: pv.issues.slice(0, 300) };
@@ -31,7 +31,7 @@ export async function previewAcquirerAction(fd: FormData) {
 
 /** Baixa as linhas casadas e grava o relatório de divergências (idempotente pelo arquivo + conta). */
 export async function applyAcquirerAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.taxas_adquirente", action: "applyAcquirerAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     await requireFeature(s, "taxasCartao");
     requireAction(s.ctx, "finance.settle");
     const r = await applyAcquirerFile(s.ctx, await input(fd));

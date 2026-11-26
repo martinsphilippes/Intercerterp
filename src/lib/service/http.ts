@@ -3,7 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getStore, isConflict, isNotFound } from "../db";
 import type { Store } from "../db/types";
 import { BusinessError, PermissionError } from "../core/errors";
-import { authenticateService, hasScope, serviceConfigured, type ServiceClient, type ServiceScope } from "./credentials";
+import { authenticateService, hasScope, reachesCompany, serviceConfigured, signingSecrets, type ServiceClient, type ServiceScope } from "./credentials";
+import { verifySignature } from "./signature";
 import { beginIdempotent, finishIdempotent, recordRead, requestFingerprint } from "./idempotency";
 import { ServiceError } from "./errors";
 
@@ -50,6 +51,11 @@ interface RouteOptions {
   operation: string;
   /** altera dados: exige Idempotency-Key e guarda a resposta para reenvios */
   mutation?: boolean;
+  /**
+   * Cria ou vincula uma empresa (o alvo ainda não está na rota): credencial restrita a algumas empresas (`empresas`)
+   * não pode — ela existe para operar só as empresas já combinadas (piloto).
+   */
+  newCompany?: boolean;
 }
 
 const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{8,100}$/;
@@ -133,6 +139,11 @@ export function serviceRoute(opts: RouteOptions, handler: (call: ServiceCall) =>
         return json(429, errorBody(requestId, "limite_excedido", `Limite de solicitações por minuto atingido. Tente de novo em ${wait} s.`), requestId, { "Retry-After": String(wait) });
       }
       const params = (await ctx?.params) ?? {};
+      // credencial restrita (`empresas`): só as empresas dela — nem cria nem vincula outras
+      if (client.empresas) {
+        if (opts.newCompany) throw new ServiceError(403, "empresa_nao_permitida", "Esta credencial é restrita a empresas definidas e não cria nem vincula empresas.");
+        if (params.idEmpresa && !reachesCompany(client, String(params.idEmpresa))) throw new ServiceError(403, "empresa_nao_permitida", "Esta credencial não alcança esta empresa.");
+      }
       // sem carga automática da demonstração aqui: a interface de serviço só lê e grava o que existe no banco
       const store = getStore();
       const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null;
@@ -159,6 +170,15 @@ export function serviceRoute(opts: RouteOptions, handler: (call: ServiceCall) =>
         }
       }
       if (body === null || typeof body !== "object" || Array.isArray(body)) throw new ServiceError(400, "json_invalido", "O corpo da solicitação deve ser um objeto JSON.");
+      // credencial com segredo de assinatura (`assinatura`): toda gravação vai assinada, no mesmo formato das licenças
+      if (client.assinatura.length) {
+        const secrets = signingSecrets(client);
+        if (!secrets.length) throw new ServiceError(503, "assinatura_nao_configurada", "Segredo de assinatura desta credencial ausente no ERP (variável indicada em assinatura, com 32 caracteres ou mais).");
+        const header = req.headers.get("x-interos-signature");
+        const checks = secrets.map((secret) => verifySignature(secret, header, raw));
+        const bad = checks.find((c) => !c.ok);
+        if (!checks.some((c) => c.ok)) throw new ServiceError(401, header ? "assinatura_invalida" : "assinatura_obrigatoria", bad && !bad.ok ? bad.reason : "Assinatura inválida.");
+      }
       const path = req.nextUrl.pathname;
       const begin = await beginIdempotent(store, { clientId: client.id, key, fingerprint: requestFingerprint(req.method, path, body), operation: opts.operation, method: req.method, path, requestId });
       if (begin.kind === "conflict") throw new ServiceError(422, "idempotencia_conflito", "Esta Idempotency-Key já foi usada com outro conteúdo. Use uma chave nova para uma operação nova.");

@@ -80,3 +80,17 @@ Toda função de domínio recebe `ctx: Ctx` (`store`, `user`, `companyId`, `bran
 | `deliveries.ts` | caixa de entrada: `deliverPackageToFirm` (chamado por `fiscal/export.ts`), conferência, autorização de download por entrega |
 
 Pontos de integração: `companies.kind` decide parametrização (`setup.ts`), perfis (`roleTemplatesFor`), menu (`navFor`) e painel; a rota `/api/files/[id]` aceita arquivos de outra empresa somente quando existe uma entrega para o escritório; `src/lib/db/read-only.ts` é a única forma de ler outra empresa sem poder gravar.
+
+## Habilitação de módulos (`src/lib/modules`, `src/domain/modules`)
+
+| Arquivo | Conteúdo |
+|---|---|
+| `lib/modules/catalog.ts` | Catálogo versionado: chaves, classes, dependências, superfícies e políticas de desligamento |
+| `lib/modules/graph.ts` | Validação (ciclos, referências), dependências transitivas, dependentes, componentes ativos |
+| `lib/modules/access.ts` | Regra de acesso pura sobre o estado da empresa (`full`, `drain`, `read`, `none`; modos `legacy`, `shadow`, `enforced`) |
+| `lib/modules/surfaces.ts` | Superfície → módulo (rotas, exportações, rotinas, tarefas, recursos) |
+| `lib/server/modules.ts` | Conferência no servidor (telas, ações, APIs) e registro do modo shadow |
+| `domain/modules/changes.ts` | Simulação, aplicação atômica com versão, conclusão de desligamentos e situação da empresa |
+| `domain/modules/baseline.ts` | Linha de base da migração, divergências e provisionamento |
+| `domain/modules/operations.ts` | Operações do Interos (idempotência e agendamento) e a rotina `modules.maintenance` |
+| `app/api/interos/v1/*` | API servidor a servidor (`docs/modulos/contrato-interos-erp-v1.md`) |

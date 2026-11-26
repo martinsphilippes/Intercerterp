@@ -67,10 +67,42 @@ export interface UserInput {
   /** multiempresa: cargo NA empresa em uso (`jobTitleByCompany`), separado do perfil e das filiais. Ausente = não altera. */
   jobTitle?: string | null;
   /**
+   * Departamento e função NA empresa em uso (`departmentByCompany`, `jobFunctionByCompany`). Com o cargo, aplicam o perfil
+   * pela regra da empresa quando nenhum perfil é escolhido (`access.attributeRoles`). Ausente = não altera.
+   */
+  department?: string | null;
+  jobFunction?: string | null;
+  /**
    * multiempresa: filiais autorizadas NA empresa em uso (`branchIdsByCompany[empresa]`): [] = todas; lista = só essas.
    * Ausente = modo legado (`branchIds`, uma lista para todas as empresas do usuário), preservado para compatibilidade.
    */
   companyBranchIds?: string[];
+}
+
+export type UserAttribute = "jobTitle" | "department" | "jobFunction";
+/** Campo por empresa de cada atributo organizacional (nunca global: a mesma pessoa pode estar em empresas de clientes diferentes). */
+export const ATTRIBUTE_FIELDS: Record<UserAttribute, string> = { jobTitle: "jobTitleByCompany", department: "departmentByCompany", jobFunction: "jobFunctionByCompany" };
+export interface AttributeRoleRule {
+  attribute: UserAttribute;
+  value: string;
+  roleId: string;
+}
+export const ATTRIBUTE_ROLES_KEY = "access.attributeRoles";
+
+/** Atributos organizacionais da pessoa NA empresa. */
+export function attributesIn(u: Doc | Record<string, any>, companyId: string): Record<UserAttribute, string | null> {
+  const get = (f: string) => (((u as any)[f] ?? {})[companyId] as string | undefined) ?? null;
+  return { jobTitle: get("jobTitleByCompany"), department: get("departmentByCompany"), jobFunction: get("jobFunctionByCompany") };
+}
+
+/**
+ * Perfil pelo cargo, departamento ou função (decisão do titular, 26/11/2026): a regra da empresa aponta um perfil;
+ * o perfil continua sendo o ÚNICO contêiner de permissões. Primeira regra que casar (comparação sem caixa/acento).
+ */
+export function roleFromAttributes(rules: AttributeRoleRule[], attrs: Partial<Record<UserAttribute, string | null | undefined>>): string | null {
+  const norm = (v: string | null | undefined) => (v ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+  for (const r of rules) if (norm(attrs[r.attribute]) && norm(attrs[r.attribute]) === norm(r.value)) return r.roleId;
+  return null;
 }
 
 export const DEFAULT_INVITE_DAYS = 7;
@@ -337,13 +369,21 @@ async function validateInput(ctx: Ctx, input: UserInput, selfId?: string, opts: 
       assert(input.isAdmin || companyIds.includes(br.companyId), `A filial ${br.name} não pertence às empresas vinculadas.`);
     }
   }
+  // atributos da pessoa NESTA empresa (o que não veio no formulário fica como está no cadastro)
+  const current = selfId ? attributesIn((await base.get("users", selfId)) ?? {}, ctx.companyId) : { jobTitle: null, department: null, jobFunction: null };
+  const pick = (k: UserAttribute) => (input[k] === undefined ? current[k] : input[k]?.trim() || null);
+  const attrs = { jobTitle: pick("jobTitle"), department: pick("department"), jobFunction: pick("jobFunction") };
+  if (!input.roleId && !input.isAdmin) {
+    const rules = await getSetting<AttributeRoleRule[]>(ctx.store, ctx.companyId, null, ATTRIBUTE_ROLES_KEY, []);
+    input = { ...input, roleId: roleFromAttributes(Array.isArray(rules) ? rules : [], attrs) };
+  }
   if (input.roleId) {
     const role = await base.get("roles", input.roleId);
     assert(role, "Perfil inválido.");
     assert(role.companyId === ctx.companyId, "Perfil de outra empresa: escolha um perfil da empresa em uso.");
     assert(role.active !== false, "Perfil inativo.");
   } else {
-    assert(input.isAdmin, "Selecione o perfil de acesso.");
+    assert(input.isAdmin, "Selecione o perfil de acesso (ou informe cargo, departamento ou função com regra de perfil em Parâmetros).");
   }
   if (input.discountLimitBps != null) assert(Number.isInteger(input.discountLimitBps) && input.discountLimitBps >= 0 && input.discountLimitBps <= 10000, "Limite de desconto deve estar entre 0% e 100%.");
   return {
@@ -363,8 +403,15 @@ const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length &&
 
 /** Campos por empresa do cadastro (cargo e filiais da empresa em uso), validados. */
 async function validateCompanyFields(ctx: Ctx, input: UserInput) {
-  const jobTitle = input.jobTitle === undefined ? undefined : input.jobTitle?.trim() || null;
-  if (jobTitle) assert(jobTitle.length <= JOB_TITLE_MAX, `O cargo deve ter até ${JOB_TITLE_MAX} caracteres.`);
+  const attr = (v: string | null | undefined, label: string) => {
+    if (v === undefined) return undefined;
+    const t = v?.trim() || null;
+    if (t) assert(t.length <= JOB_TITLE_MAX, `${label} deve ter até ${JOB_TITLE_MAX} caracteres.`);
+    return t;
+  };
+  const jobTitle = attr(input.jobTitle, "O cargo");
+  const department = attr(input.department, "O departamento");
+  const jobFunction = attr(input.jobFunction, "A função");
   const branchesHere = await listAll(unscoped(ctx.store), "branches", { filters: [["eq", "companyId", ctx.companyId]] });
   const here = new Set(branchesHere.map((b) => b.id));
   let companyBranchIds: string[] | undefined;
@@ -373,7 +420,7 @@ async function validateCompanyFields(ctx: Ctx, input: UserInput) {
     // nunca nomeia a filial recusada: pode ser de outra empresa
     for (const b of companyBranchIds) assert(here.has(b), "Filial inválida: o cadastro só atribui filiais da empresa em uso.");
   }
-  return { jobTitle, companyBranchIds, here, branchNames: new Map(branchesHere.map((b) => [b.id, b.name as string])) };
+  return { jobTitle, department, jobFunction, companyBranchIds, here, branchNames: new Map(branchesHere.map((b) => [b.id, b.name as string])) };
 }
 
 /** Filiais autorizadas do usuário NA empresa, só as da própria empresa (null = todas). */
@@ -488,13 +535,18 @@ export async function createUser(
   const data = await validateInput(ctx, input, undefined, { legacyBranches: !perCompany });
   const extra = await validateCompanyFields(ctx, input);
   await assertCanManageCompanies(ctx, data.companyIds);
+  // limite contratado de usuários (licença do Interos): só barra o NOVO usuário; administradores da plataforma não contam
+  if (!data.isAdmin) {
+    const { assertWithinLimit } = await import("./licensing/limits");
+    for (const cid of data.companyIds ?? []) await assertWithinLimit(unscoped(ctx.store), cid, "users");
+  }
   // perfil por empresa: o escolhido vale na empresa em uso; nas demais vinculadas, o perfil de sistema equivalente
   const roleByCompany = data.isAdmin || !data.roleId ? {} : { ...(await materializeRoles(ctx.store, { roleId: data.roleId }, data.companyIds)), [ctx.companyId]: data.roleId };
   // multiempresa: perfil só dentro do próprio escopo (em cada empresa vinculada)
   if (!data.isAdmin) await assertRolesAssignable(ctx, roleByCompany, data.companyIds, data.name);
   // cargo e filiais por empresa; quem acessa só algumas filiais só concede filiais dentre as dele
   const companyFields: Record<string, any> = {};
-  if (extra.jobTitle) companyFields.jobTitleByCompany = { [ctx.companyId]: extra.jobTitle };
+  for (const k of ["jobTitle", "department", "jobFunction"] as const) if (extra[k]) companyFields[ATTRIBUTE_FIELDS[k]] = { [ctx.companyId]: extra[k] };
   if (perCompany && !data.isAdmin) {
     const map: Record<string, string[]> = { [ctx.companyId]: extra.companyBranchIds! };
     for (const c of data.companyIds) if (c !== ctx.companyId) map[c] = (await editorBranchScopeIn(ctx, c)) ?? [];
@@ -681,17 +733,22 @@ export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
     }
     if (branchChanged) companyPatch.branchIdsByCompany = branchMap;
   }
-  const titles: Record<string, string> = { ...(before.jobTitleByCompany ?? {}) };
-  if (extra.jobTitle !== undefined || removed.some((c: string) => c in titles)) {
-    if (extra.jobTitle) titles[ctx.companyId] = extra.jobTitle;
-    else if (extra.jobTitle !== undefined) delete titles[ctx.companyId];
-    for (const c of removed) delete titles[c];
-    companyPatch.jobTitleByCompany = titles;
+  // cargo, departamento e função: por empresa; desvincular apaga os da empresa removida
+  for (const k of ["jobTitle", "department", "jobFunction"] as const) {
+    const field = ATTRIBUTE_FIELDS[k];
+    const map: Record<string, string> = { ...(before[field] ?? {}) };
+    if (extra[k] === undefined && !removed.some((c: string) => c in map)) continue;
+    if (extra[k]) map[ctx.companyId] = extra[k]!;
+    else if (extra[k] !== undefined) delete map[ctx.companyId];
+    for (const c of removed) delete map[c];
+    companyPatch[field] = map;
   }
   const patch: Record<string, any> = { ...data, roleId, roleByCompany, ...companyPatch };
   const afterDoc = { ...before, ...patch };
   // autoproteção (quem não é administrador): nem as filiais nem o cargo desta empresa mudam no próprio cadastro
-  const ownTitleChanged = extra.jobTitle !== undefined && (extra.jobTitle ?? null) !== ((before.jobTitleByCompany ?? {})[ctx.companyId] ?? null);
+  // (departamento e função também: com regra de perfil por atributo, mudariam o próprio perfil)
+  const was = attributesIn(before, ctx.companyId);
+  const ownTitleChanged = (["jobTitle", "department", "jobFunction"] as const).some((k) => extra[k] !== undefined && (extra[k] ?? null) !== was[k]);
   if (!ctx.user.isAdmin && id === ctx.user.id && ownTitleChanged) throw new PermissionError("Você não pode alterar o próprio vínculo, cargo, perfil ou limite de desconto. Peça a outro gestor de usuários.");
   if (!data.isAdmin) {
     const had = scopeIn(before, ctx.companyId, extra.here);
@@ -739,6 +796,10 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
   await guard(ctx, "edit", `alterar situação de usuário para ${status}`, id);
   const u = await loadManagedUser(ctx, id);
   assert(u.id !== ctx.user.id, "Você não pode alterar a situação do seu próprio acesso.");
+  if (status === "active" && u.status !== "active" && u.status !== "invited" && !u.isAdmin) {
+    const { assertWithinLimit } = await import("./licensing/limits");
+    for (const cid of u.companyIds ?? []) await assertWithinLimit(unscoped(ctx.store), cid, "users");
+  }
   await assertManagesWholeUser(ctx, u, "Alterar a situação do acesso");
   // acesso rápido da tela de login (decisão do titular): o usuário não sai da lista
   if (status !== "active" && isQuickAccessUser(u)) throw new BusinessError(quickAccessLockedMessage(status === "suspended" ? "Não é possível suspender" : "Não é possível inativar", u.name), QUICK_ACCESS_LOCKED);

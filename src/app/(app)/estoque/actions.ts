@@ -22,7 +22,7 @@ async function visibleWarehouse(ctx: Ctx, warehouseId: string | null | undefined
 
 /** Pesquisa de SKUs para os seletores (nome, SKU, código de barras); traz o saldo do depósito informado. */
 export async function searchSkusAction(q: string, warehouseId?: string | null) {
-  return runAction({ module: "stock" }, async (s) => {
+  return runAction({ entitlement: "estoque.gestao", action: "searchSkusAction", module: "stock" }, async (s) => {
     const term = q.trim();
     if (term.length < 2) return [];
     const n = normalizeSearch(term);
@@ -47,7 +47,7 @@ export async function searchSkusAction(q: string, warehouseId?: string | null) {
 
 /** Saldo de um SKU num depósito (para o resumo "saldo anterior → novo saldo"). */
 export async function skuBalanceAction(skuId: string, warehouseId: string) {
-  return runAction({ module: "stock" }, async (s) => {
+  return runAction({ entitlement: "estoque.gestao", action: "skuBalanceAction", module: "stock" }, async (s) => {
     const sku = await s.ctx.store.get("skus", skuId);
     if (!sku || sku.companyId !== s.ctx.companyId) return null;
     const wh = await visibleWarehouse(s.ctx, warehouseId);
@@ -59,7 +59,7 @@ export async function skuBalanceAction(skuId: string, warehouseId: string) {
 // ───────────────────────────── Montagem e desmembramento (CAD-13)
 
 export async function runAssemblyAction(fd: FormData) {
-  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: ["/estoque/montagem", "/estoque/movimentos", "/estoque"] }, async (s) => {
+  return runAction({ entitlement: "produtos.kits", action: "runAssemblyAction", module: "stock", op: "create", requireBranch: true, revalidate: ["/estoque/montagem", "/estoque/movimentos", "/estoque"] }, async (s) => {
     const { runAssembly, ASSEMBLY_LABEL } = await import("@/domain/product-components");
     const direction = fstr(fd, "direction") === "disassemble" ? "disassemble" : "assemble";
     const r = await runAssembly(s.ctx, { skuId: fstr(fd, "skuId"), warehouseId: fstr(fd, "warehouseId"), qty: fint(fd, "qty"), direction, idemKey: fstr(fd, "_idem"), notes: fopt(fd, "notes") });
@@ -70,7 +70,7 @@ export async function runAssemblyAction(fd: FormData) {
 // ───────────────────────────── Ajustes
 
 export async function adjustStockAction(fd: FormData) {
-  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: ["/estoque/movimentos", "/estoque"] }, async (s) => {
+  return runAction({ entitlement: "estoque.gestao", action: "adjustStockAction", module: "stock", op: "create", requireBranch: true, revalidate: ["/estoque/movimentos", "/estoque"] }, async (s) => {
     const occurred = fopt(fd, "occurredAt");
     let occurredAt: string | undefined;
     if (occurred) {
@@ -117,7 +117,7 @@ function parseTransfer(fd: FormData) {
 
 export async function saveTransferAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "stock", op: id ? "edit" : "create", requireBranch: true, revalidate: [T] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "saveTransferAction", module: "stock", op: id ? "edit" : "create", requireBranch: true, revalidate: [T] }, async (s) => {
     // sem id: o reenvio do mesmo formulário (mesma _idem) reaplica os dados corrigidos ao rascunho já criado
     const t = id ? await updateTransferDraft(s.ctx, id, parseTransfer(fd)) : await createTransfer(s.ctx, parseTransfer(fd), { idemKey: fopt(fd, "_idem") });
     if (fstr(fd, "mode") === "send") {
@@ -137,7 +137,7 @@ export async function saveTransferAction(fd: FormData) {
 
 /** §39 — transferência imediata entre depósitos da mesma filial. */
 export async function warehouseTransferAction(fd: FormData) {
-  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: [T, "/estoque"] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "warehouseTransferAction", module: "stock", op: "create", requireBranch: true, revalidate: [T, "/estoque"] }, async (s) => {
     const t = await transferBetweenWarehouses(
       s.ctx,
       { fromWarehouseId: fstr(fd, "fromWarehouseId"), toWarehouseId: fstr(fd, "toWarehouseId"), items: fjson<Array<{ skuId: string; qty: number; lot?: string | null }>>(fd, "items", []), reason: fstr(fd, "reason"), notes: fopt(fd, "notes") },
@@ -149,7 +149,7 @@ export async function warehouseTransferAction(fd: FormData) {
 
 /** Lotes com saldo de um SKU num depósito (seleção do lote na transferência entre depósitos). */
 export async function skuLotsAction(skuId: string, warehouseId: string) {
-  return runAction({ module: "stock" }, async (s) => {
+  return runAction({ entitlement: "estoque.gestao", action: "skuLotsAction", module: "stock" }, async (s) => {
     const sku = await s.ctx.store.get("skus", skuId);
     const wh = await visibleWarehouse(s.ctx, warehouseId);
     if (!sku || sku.companyId !== s.ctx.companyId || !wh) return [];
@@ -161,14 +161,14 @@ export async function skuLotsAction(skuId: string, warehouseId: string) {
 }
 
 export async function separateTransferAction(id: string) {
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "separateTransferAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T] }, async (s) => {
     await separateTransfer(s.ctx, id);
     return { ok: true as const, message: "Itens separados e reservados na origem." };
   });
 }
 
 export async function shipTransferAction(id: string) {
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "shipTransferAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
     await shipTransfer(s.ctx, id);
     return { ok: true as const, message: "Transferência expedida — saldo em trânsito no destino." };
   });
@@ -176,7 +176,7 @@ export async function shipTransferAction(id: string) {
 
 export async function receiveTransferAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "receiveTransferAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
     const t = await receiveTransfer(s.ctx, id, { idemKey: fstr(fd, "_idem"), lines: fjson<TransferReceiptLine[]>(fd, "lines", []), notes: fopt(fd, "notes") });
     return { ok: true as const, message: t.status === "received" ? "Recebimento total registrado." : "Recebimento parcial registrado; o restante continua em trânsito." };
   });
@@ -184,7 +184,7 @@ export async function receiveTransferAction(fd: FormData) {
 
 export async function resolveTransferAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "resolveTransferAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
     const mode = fstr(fd, "mode") as "return" | "loss";
     await resolveTransferPending(s.ctx, id, { mode, reason: fstr(fd, "reason") });
     return { ok: true as const, message: mode === "return" ? "Pendente devolvido à origem." : "Falta baixada como perda na origem." };
@@ -192,7 +192,7 @@ export async function resolveTransferAction(fd: FormData) {
 }
 
 export async function cancelTransferAction(id: string, fd: FormData) {
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "cancelTransferAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`, T, "/estoque"] }, async (s) => {
     const t = await cancelTransfer(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: t.returnedAt ? "Transferência cancelada; o que já tinha saído voltou à origem e as reservas foram liberadas." : "Transferência cancelada; reservas liberadas." };
   });
@@ -200,7 +200,7 @@ export async function cancelTransferAction(id: string, fd: FormData) {
 
 export async function setTransferDocumentAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`] }, async (s) => {
+  return runAction({ entitlement: "estoque.transferencias", action: "setTransferDocumentAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${T}/${id}`] }, async (s) => {
     await setTransferDocument(s.ctx, id, fopt(fd, "documentRef"));
     return { ok: true as const, message: "Referência do documento salva." };
   });
@@ -211,7 +211,7 @@ export async function setTransferDocumentAction(fd: FormData) {
 const I = "/estoque/inventarios";
 
 export async function createInventoryAction(fd: FormData) {
-  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: [I] }, async (s) => {
+  return runAction({ entitlement: "estoque.inventario", action: "createInventoryAction", module: "stock", op: "create", requireBranch: true, revalidate: [I] }, async (s) => {
     const inv = await createInventory(
       s.ctx,
       { warehouseId: fstr(fd, "warehouseId"), scope: (fstr(fd, "scope") as "all" | "category" | "location") || "all", categoryId: fopt(fd, "categoryId"), location: fopt(fd, "location"), notes: fopt(fd, "notes"), responsibleId: fopt(fd, "responsibleId") },
@@ -222,7 +222,7 @@ export async function createInventoryAction(fd: FormData) {
 }
 
 export async function resumeInventoryAction(id: string) {
-  return runAction({ module: "stock", op: "create", requireBranch: true, revalidate: [`${I}/${id}`, I] }, async (s) => {
+  return runAction({ entitlement: "estoque.inventario", action: "resumeInventoryAction", module: "stock", op: "create", requireBranch: true, revalidate: [`${I}/${id}`, I] }, async (s) => {
     const inv = await resumeInventoryOpening(s.ctx, id);
     return { ok: true as const, message: `Inventário ${inv.code ?? inv.number} aberto — base registrada.` };
   });
@@ -230,14 +230,14 @@ export async function resumeInventoryAction(id: string) {
 
 export async function saveCountsAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`] }, async (s) => {
+  return runAction({ entitlement: "estoque.inventario", action: "saveCountsAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`] }, async (s) => {
     const r = await saveCounts(s.ctx, id, fjson<CountEntry[]>(fd, "entries", []));
     return { ok: true as const, message: r.saved ? `${r.saved} contagem(ns) salva(s).` : "Nenhuma alteração para salvar." };
   });
 }
 
 export async function addInventoryItemAction(id: string, skuId: string) {
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`] }, async (s) => {
+  return runAction({ entitlement: "estoque.inventario", action: "addInventoryItemAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`] }, async (s) => {
     await addInventoryItem(s.ctx, id, skuId);
     return { ok: true as const, message: "Item incluído no inventário." };
   });
@@ -245,14 +245,14 @@ export async function addInventoryItemAction(id: string, skuId: string) {
 
 export async function concludeInventoryAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`, I, "/estoque", "/estoque/movimentos"] }, async (s) => {
+  return runAction({ entitlement: "estoque.inventario", action: "concludeInventoryAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`, I, "/estoque", "/estoque/movimentos"] }, async (s) => {
     const inv = await concludeInventory(s.ctx, id, { uncounted: (fstr(fd, "uncounted") as "keep" | "zero") || "keep" });
     return { ok: true as const, message: `Inventário concluído: ${inv.summary?.itemsAdjusted ?? 0} ajuste(s) lançado(s).` };
   });
 }
 
 export async function cancelInventoryAction(id: string, fd: FormData) {
-  return runAction({ module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`, I] }, async (s) => {
+  return runAction({ entitlement: "estoque.inventario", action: "cancelInventoryAction", module: "stock", op: "edit", requireBranch: true, revalidate: [`${I}/${id}`, I] }, async (s) => {
     await cancelInventory(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Inventário cancelado (nenhum ajuste lançado)." };
   });

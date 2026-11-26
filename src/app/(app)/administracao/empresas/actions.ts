@@ -19,7 +19,7 @@ function address(fd: FormData): AddressInput {
 
 export async function saveCompanyAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/empresas"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "saveCompanyAction", module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/empresas"] }, async (s) => {
     const input = {
       name: fstr(fd, "name"), tradeName: fopt(fd, "tradeName"), cnpj: fopt(fd, "cnpj"), ie: fopt(fd, "ie"), im: fopt(fd, "im"), regime: fopt(fd, "regime"), crt: fopt(fd, "crt"), kind: fopt(fd, "kind"),
       cnae: fopt(fd, "cnae"), email: fopt(fd, "email"), phone: fopt(fd, "phone"), address: address(fd), notes: fopt(fd, "notes"),
@@ -28,13 +28,14 @@ export async function saveCompanyAction(fd: FormData) {
       await updateCompany(s.ctx, id, input);
       return { ok: true as const, message: "Empresa atualizada.", redirect: `/administracao/empresas/${id}` };
     }
-    const r = await createCompany(s.ctx, { ...input, branchName: fopt(fd, "branchName") ?? undefined });
+    const selected = fd.getAll("modules").map(String).filter(Boolean);
+    const r = await createCompany(s.ctx, { ...input, branchName: fopt(fd, "branchName") ?? undefined, modules: fd.has("modules") ? selected : null });
     return { ok: true as const, message: "Empresa criada com a filial matriz e parametrização inicial. Configure o fiscal antes de emitir documentos.", redirect: `/administracao/empresas/${r.company.id}` };
   });
 }
 
 export async function setCompanyStatusAction(id: string, status: "active" | "inactive", fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/empresas/${id}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "setCompanyStatusAction", module: "admin", op: "edit", revalidate: [`/administracao/empresas/${id}`] }, async (s) => {
     await setCompanyStatus(s.ctx, id, status, fopt(fd, "reason"));
     return { ok: true as const, message: status === "inactive" ? "Empresa inativada." : "Empresa reativada." };
   });
@@ -50,7 +51,7 @@ function branchInput(fd: FormData) {
 export async function saveBranchAction(fd: FormData) {
   const id = fopt(fd, "id");
   const companyId = fstr(fd, "companyId");
-  return runAction({ module: "admin", op: id ? "edit" : "create", revalidate: [`/administracao/empresas/${companyId}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "saveBranchAction", module: "admin", op: id ? "edit" : "create", revalidate: [`/administracao/empresas/${companyId}`] }, async (s) => {
     if (id) {
       await updateBranch(s.ctx, id, branchInput(fd));
       return { ok: true as const, message: "Filial atualizada.", redirect: `/administracao/empresas/filiais/${id}` };
@@ -61,7 +62,7 @@ export async function saveBranchAction(fd: FormData) {
 }
 
 export async function setBranchStatusAction(id: string, status: "active" | "inactive", fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/empresas/filiais/${id}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "setBranchStatusAction", module: "admin", op: "edit", revalidate: [`/administracao/empresas/filiais/${id}`] }, async (s) => {
     await setBranchStatus(s.ctx, id, status, fopt(fd, "reason"));
     return { ok: true as const, message: status === "inactive" ? "Filial inativada." : "Filial reativada." };
   });
@@ -69,7 +70,7 @@ export async function setBranchStatusAction(id: string, status: "active" | "inac
 
 export async function setCompanyUsersAction(fd: FormData) {
   const companyId = fstr(fd, "companyId");
-  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/empresas/${companyId}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "setCompanyUsersAction", module: "admin", op: "edit", revalidate: [`/administracao/empresas/${companyId}`] }, async (s) => {
     const { changes, noRole } = await setCompanyUsers(s.ctx, companyId, fd.getAll("userIds").map(String));
     const warn = noRole.length
       ? ` Atenção: ${noRole.join(", ")} ficou(aram) sem perfil nesta empresa (não há perfil equivalente) e não acessa(m) nenhum módulo nela até você definir o perfil — troque para esta empresa e edite o usuário em Administração → Usuários.`
@@ -83,7 +84,7 @@ export async function setCompanyUsersAction(fd: FormData) {
 export async function saveWarehouseAction(fd: FormData) {
   const id = fopt(fd, "id");
   const branchId = fstr(fd, "branchId");
-  return runAction({ revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "saveWarehouseAction", revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
     const priority = fstr(fd, "salePriority");
     const input = { name: fstr(fd, "name"), code: fstr(fd, "code"), type: fstr(fd, "type") as WarehouseType, salePriority: priority === "" ? null : Number(priority), notes: fopt(fd, "notes") };
     if (id) {
@@ -96,14 +97,14 @@ export async function saveWarehouseAction(fd: FormData) {
 }
 
 export async function setWarehouseStatusAction(id: string, branchId: string, status: "active" | "inactive", fd: FormData) {
-  return runAction({ revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "setWarehouseStatusAction", revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
     const w = await setWarehouseStatus(s.ctx, id, status, fopt(fd, "reason"));
     return { ok: true as const, message: status === "inactive" ? `Depósito ${w.name} desativado.` : `Depósito ${w.name} reativado.` };
   });
 }
 
 export async function setDefaultWarehouseAction(id: string, branchId: string) {
-  return runAction({ revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "setDefaultWarehouseAction", revalidate: [`/administracao/empresas/filiais/${branchId}`] }, async (s) => {
     const w = await setBranchDefaultWarehouse(s.ctx, id);
     return { ok: true as const, message: `${w.name} é agora o depósito padrão da filial.` };
   });
@@ -112,7 +113,7 @@ export async function setDefaultWarehouseAction(id: string, branchId: string) {
 /** Código de vínculo com o Interos (uso único, 72 h): gerado pelo administrador da empresa-alvo (contrato §4.3). */
 export async function createInterosLinkCodeAction(fd: FormData) {
   const companyId = fstr(fd, "companyId");
-  return runAction({ module: "admin", op: "edit", revalidate: ["/administracao/empresas"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "createInterosLinkCodeAction", module: "admin", op: "edit", revalidate: ["/administracao/empresas"] }, async (s) => {
     const { companyAdminCtx } = await import("@/domain/companies");
     const { createInterosLinkCode } = await import("@/domain/tenancy/link-code");
     const ctx = await companyAdminCtx(s.ctx, companyId, "edit");

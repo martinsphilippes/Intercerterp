@@ -23,7 +23,7 @@ export function UserForm({
   editorRestricted = false,
   roleLocked = false,
   branchScope,
-  jobTitle,
+  attributes,
 }: {
   user?: Record<string, any> | null;
   roles: RoleOpt[];
@@ -42,8 +42,8 @@ export function UserForm({
   roleLocked?: boolean;
   /** filiais do usuário NESTA empresa (null = todas; ausente = usuário novo) */
   branchScope?: string[] | null;
-  /** cargo do usuário NESTA empresa */
-  jobTitle?: string | null;
+  /** cargo, departamento e função do usuário NESTA empresa */
+  attributes?: { jobTitle: string | null; department: string | null; jobFunction: string | null };
 }) {
   const u = user ?? {};
   const router = useRouter();
@@ -102,8 +102,14 @@ export function UserForm({
               <Field label="Telefone">
                 <Input name="phone" defaultValue={u.phone ?? ""} inputMode="tel" />
               </Field>
-              <Field label="Cargo nesta empresa" hint="Função da pessoa (ex.: Gerente de loja). Não dá permissões: o acesso vem do perfil." className="sm:col-span-2">
-                {self ? <Input defaultValue={jobTitle ?? ""} disabled aria-label="Cargo nesta empresa" /> : <Input name="jobTitle" defaultValue={jobTitle ?? ""} maxLength={80} autoComplete="off" />}
+              <Field label="Cargo nesta empresa" hint="Função da pessoa (ex.: Gerente de loja). Não dá permissões: o acesso vem do perfil — ou da regra de Parâmetros › Perfil por cargo, quando nenhum perfil é escolhido." className="sm:col-span-2">
+                {self ? <Input defaultValue={attributes?.jobTitle ?? ""} disabled aria-label="Cargo nesta empresa" /> : <Input name="jobTitle" defaultValue={attributes?.jobTitle ?? ""} maxLength={80} autoComplete="off" />}
+              </Field>
+              <Field label="Departamento nesta empresa">
+                {self ? <Input defaultValue={attributes?.department ?? ""} disabled aria-label="Departamento nesta empresa" /> : <Input name="department" defaultValue={attributes?.department ?? ""} maxLength={80} autoComplete="off" />}
+              </Field>
+              <Field label="Função nesta empresa">
+                {self ? <Input defaultValue={attributes?.jobFunction ?? ""} disabled aria-label="Função nesta empresa" /> : <Input name="jobFunction" defaultValue={attributes?.jobFunction ?? ""} maxLength={80} autoComplete="off" />}
               </Field>
             </FormGrid>
           </FormSection>

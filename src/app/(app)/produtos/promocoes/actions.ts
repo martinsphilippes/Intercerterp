@@ -41,7 +41,7 @@ function parse(fd: FormData): PromotionInput {
 
 export async function savePromotionAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "products", op: id ? "edit" : "create", revalidate: ["/produtos/promocoes", "/pdv"] }, async (s) => {
+  return runAction({ entitlement: "produtos.promocoes", action: "savePromotionAction", module: "products", op: id ? "edit" : "create", revalidate: ["/produtos/promocoes", "/pdv"] }, async (s) => {
     await requireFeature(s, "promocoes");
     const doc = await savePromotion(s.ctx, { ...parse(fd), id, idemKey: fstr(fd, "_idem") || null });
     return { ok: true as const, data: { id: doc.id }, message: id ? "Promoção atualizada." : "Promoção cadastrada.", redirect: "/produtos/promocoes" };
@@ -49,7 +49,7 @@ export async function savePromotionAction(fd: FormData) {
 }
 
 export async function setPromotionActiveAction(id: string, active: boolean, _fd: FormData) {
-  return runAction({ module: "products", op: "edit", revalidate: ["/produtos/promocoes", "/pdv"] }, async (s) => {
+  return runAction({ entitlement: "produtos.promocoes", action: "setPromotionActiveAction", module: "products", op: "edit", revalidate: ["/produtos/promocoes", "/pdv"] }, async (s) => {
     await requireFeature(s, "promocoes");
     await setPromotionActive(s.ctx, id, active);
     return { ok: true as const, message: active ? "Promoção ativada." : "Promoção inativada." };

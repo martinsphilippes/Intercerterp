@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { BusinessError } from "@/lib/core/errors";
 import { featureDefaultFor, isFeatureOn } from "@/lib/core/settings";
 import type { SessionInfo } from "./session";
+import { modulesForFeature } from "../modules/surfaces";
+import { moduleDecision } from "./modules";
 
 /**
  * Recursos novos (telas aditivas) controlados por `feature.<chave>` em Parâmetros — ligados por padrão, exceto os de
@@ -10,7 +12,15 @@ import type { SessionInfo } from "./session";
  */
 export type FeatureKey = "precificacaoEntrada" | "alteracaoMassa" | "etiquetas" | "inadimplencia" | "cobrancaWhatsapp" | "baixaLote" | "carne" | "comissoes" | "documentoComercial" | "balanca" | "kits" | "promocoes" | "fidelidade" | "lotes" | "reservaPreVenda" | "bipagemContagem" | "livroEntradas" | "cteEntrada" | "exportacaoDominio" | "inventarioFiscal" | "importacaoCadastros" | "taxasCartao" | "dre" | "fechamentoPeriodo" | "reformaTributaria" | "tributacaoCompleta" | "naturezasOperacao" | "creditoSimples" | "notaAConfirmar" | "arquivosFiscais" | "redeCertificacao" | "comercioDigital";
 
-export function featureOn(s: SessionInfo, key: FeatureKey): Promise<boolean> {
+/**
+ * Recurso disponível na interface = módulo do catálogo habilitado para a empresa (habilitação, docs/modulos) E recurso
+ * ligado em Parâmetros (configuração). Assim toda aba, botão e tela já condicionados ao recurso respeitam o contrato.
+ * As regras de domínio (isFeatureOn) não mudam com a habilitação: a integridade operacional (ex.: saldo por lote)
+ * segue a configuração, e a política de desligamento do módulo cuida da transição.
+ */
+export async function featureOn(s: SessionInfo, key: FeatureKey): Promise<boolean> {
+  const owners = modulesForFeature(key);
+  if (owners.length && (await moduleDecision(s.ctx, s.company, owners)).level === "none") return false;
   return isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, key, featureDefaultFor(key, s.company.kind));
 }
 

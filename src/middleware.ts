@@ -26,15 +26,26 @@ export function isErpHost(host: string): boolean {
   return erpHosts().includes(h);
 }
 
+/**
+ * Caminho da requisição para o controle de módulos (requireSession decide a tela pelo caminho). O valor do cliente é
+ * sempre sobrescrito: o cabeçalho só chega ao servidor com o caminho real.
+ */
+export const PATH_HEADER = "x-ic-path";
+function withPath(req: NextRequest, pathname: string) {
+  const headers = new Headers(req.headers);
+  headers.set(PATH_HEADER, pathname);
+  return headers;
+}
+
 export function middleware(req: NextRequest) {
   const host = (req.headers.get("host") ?? "").toLowerCase();
-  if (isErpHost(host)) return NextResponse.next();
+  if (isErpHost(host)) return NextResponse.next({ request: { headers: withPath(req, req.nextUrl.pathname) } });
   const url = req.nextUrl.clone();
   const path = url.pathname;
   // no domínio da loja, o caminho do ERP /loja/... não existe (evita abrir outra loja pelo domínio desta)
   if (path.startsWith("/loja/")) return new NextResponse("Não encontrado", { status: 404 });
   url.pathname = `/loja/~${host.replace(/:\d+$/, "")}${path === "/" ? "" : path}`;
-  return NextResponse.rewrite(url);
+  return NextResponse.rewrite(url, { request: { headers: withPath(req, url.pathname) } });
 }
 
 export const config = {

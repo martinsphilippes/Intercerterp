@@ -97,6 +97,8 @@ O Appwrite saiu do código em 26/11/2026, e as variáveis `APPWRITE_*` foram apa
 | `MEMORY_TX_MODE=deferred npm test` | Mesmos testes com transação adiada, a semântica mais restrita (escritas visíveis só no commit, máx. 100 operações) |
 | `node scripts/dev/crawl.mjs` | Varredura de navegação: login real, todos os links internos, erros de página/console e telas de erro |
 | `node scripts/dev/evidence.mjs` | Captura as evidências de interface (48 telas + 14 visões) em `docs/evidencias/` |
+| `npm run modules:catalog` / `modules:inventory` | Regenera o catálogo de módulos (JSON) e o inventário/matriz em `docs/modulos/` |
+| `npm run modules:baseline` | Linha de base de módulos das empresas sem estado (modo legacy, idempotente) |
 | `node scripts/docs/build-matrix.mjs` | Regenera `docs/matriz-cobertura.md` a partir de `scripts/docs/coverage-map.json` |
 
 ## Documentação
@@ -108,3 +110,4 @@ O Appwrite saiu do código em 26/11/2026, e as variáveis `APPWRITE_*` foram apa
 - `docs/validacao.md` — cenários executados e resultados
 - `docs/pendencias-externas.md` — dependências externas restantes
 - `docs/progresso.md` — registro para retomar o trabalho
+- `docs/modulos/` — módulos contratáveis por empresa: catálogo (`catalogo-modulos-erp-v1.json`), matriz de dependências, inventário de capacidades, política de desligamento, contrato com o Interos (`contrato-interos-erp-v1.md`) e lançamento gradual

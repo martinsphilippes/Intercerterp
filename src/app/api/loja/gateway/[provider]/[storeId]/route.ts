@@ -12,6 +12,10 @@ export const dynamic = "force-dynamic";
  * Avisos do gateway da loja (Tela 56): POST /api/loja/gateway/<provedor>/<loja>. Só aviso com assinatura válida é
  * processado (o segredo vem da variável vinculada na Central de integrações); cada evento é aplicado uma única vez pela
  * chave do provedor — repetições respondem 200 sem novo efeito, para o provedor parar de reenviar.
+ *
+ * Habilitação (docs/modulos): este aviso NÃO é bloqueado quando o módulo de loja virtual está em desligamento ou
+ * desligado — ele só atualiza pedidos JÁ existentes (pagamento, estorno, chargeback), que são obrigações em curso.
+ * Pedido novo nunca nasce aqui: a vitrine é que deixa de aceitar pedidos.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ provider: string; storeId: string }> }) {
   const { provider, storeId } = await params;

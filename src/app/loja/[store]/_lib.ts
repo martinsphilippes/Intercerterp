@@ -9,6 +9,7 @@ import { featureDefaultFor, isFeatureOn } from "@/lib/core/settings";
 import { cartCookieName, previewCookieName, resolveStore, storeAccess, type StoreAccess } from "@/domain/ecommerce/storefront";
 import { themeOf } from "@/domain/ecommerce/store";
 import { onAccent } from "@/domain/ecommerce/templates";
+import { decide, loadCompanyModules } from "@/lib/modules/access";
 
 export interface StoreRequest {
   store: Store;
@@ -32,8 +33,13 @@ export const loadStore = cache(async (ref: string): Promise<StoreRequest | null>
   if (!company || company.status === "inactive" || company.status === "suspended") return null;
   // comércio digital desligado na empresa: a vitrine sai do ar junto
   if (!(await isFeatureOn(store, r.st.companyId, null, "comercioDigital", featureDefaultFor("comercioDigital", company.kind)))) return null;
+  // habilitação (docs/modulos): sem o módulo a vitrine sai do ar; em desligamento ou consulta histórica ela fica em pausa —
+  // nenhum carrinho ou pedido novo, mas o cliente continua acompanhando o pedido já feito
+  const level = decide(await loadCompanyModules(store, r.st.companyId), "ecommerce.loja", company.kind ?? "retail").level;
+  if (level === "none") return null;
   const jar = await cookies();
-  const access = storeAccess(r.st, jar.get(previewCookieName(r.st.id))?.value);
+  const baseAccess = storeAccess(r.st, jar.get(previewCookieName(r.st.id))?.value);
+  const access: StoreAccess = level === "full" || baseAccess === "closed" ? baseAccess : "paused";
   const raw = jar.get(cartCookieName(r.st.id))?.value ?? null;
   const theme = themeOf(r.st);
   return { store, st: r.st, basePath: r.basePath, viaDomain: r.viaDomain, access, cartToken: raw && /^[0-9a-f]{32}$/.test(raw) ? raw : null, accent: theme.accentColor, onAccent: onAccent(theme.accentColor) };

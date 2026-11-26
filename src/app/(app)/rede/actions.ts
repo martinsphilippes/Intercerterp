@@ -22,7 +22,7 @@ function level(v: string): NetworkLevel {
 }
 
 export async function createNodeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.parceiro", action: "createNodeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "redeCertificacao");
     const mode = fstr(fd, "mode");
     const r = await createNode(s.ctx, {
@@ -39,7 +39,7 @@ export async function createNodeAction(fd: FormData) {
 }
 
 export async function moveNodeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.parceiro", action: "moveNodeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "redeCertificacao");
     const parent = fstr(fd, "parentNodeId");
     await moveNode(s.ctx, fstr(fd, "id"), { parentNodeId: parent === "__platform" ? null : parent || null, reason: fstr(fd, "reason") });
@@ -48,7 +48,7 @@ export async function moveNodeAction(fd: FormData) {
 }
 
 export async function setNodeStatusAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.parceiro", action: "setNodeStatusAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "redeCertificacao");
     const status = fstr(fd, "status") as NodeStatus;
     await setNodeStatus(s.ctx, fstr(fd, "id"), status, fopt(fd, "reason"));
@@ -57,7 +57,7 @@ export async function setNodeStatusAction(fd: FormData) {
 }
 
 export async function saveLevelLabelsAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.parceiro", action: "saveLevelLabelsAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "redeCertificacao");
     await saveLevelLabels(s.ctx, { master: fstr(fd, "master"), regional: fstr(fd, "regional"), revenda: fstr(fd, "revenda"), contador: fstr(fd, "contador") });
     return { ok: true as const, message: "Rótulos dos níveis salvos." };
@@ -70,7 +70,7 @@ function ruleInput(fd: FormData): PriceRuleInput {
 
 /** Preço de um filho (exceção) ou da tabela padrão por nível (dono = nó ou plataforma). */
 export async function savePriceRuleAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.parceiro", action: "savePriceRuleAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "redeCertificacao");
     const target = fstr(fd, "target");
     if (target === "node") await saveNodePriceRule(s.ctx, fstr(fd, "nodeId"), ruleInput(fd));
@@ -80,7 +80,7 @@ export async function savePriceRuleAction(fd: FormData) {
 }
 
 export async function clearNodePriceRuleAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.parceiro", action: "clearNodePriceRuleAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "redeCertificacao");
     await clearNodePriceRule(s.ctx, fstr(fd, "nodeId"), fstr(fd, "productKey"), fopt(fd, "reason"));
     return { ok: true as const, message: "Exceção retirada: vale a tabela padrão do parceiro acima." };

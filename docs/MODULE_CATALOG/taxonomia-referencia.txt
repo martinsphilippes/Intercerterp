@@ -1,0 +1,1023 @@
+# Taxonomia de referência mínima (fornecida pelo titular, 26/11/2026) — 50 módulos. Transcrição literal; não editar.
+# Formato: "MÓDULO NN — Nome" seguido de "NN.SS — Submódulo".
+MÓDULO 01 — CADASTROS BÁSICOS
+01.01 — Cadastro de empresas e filiais
+01.02 — Cadastro de clientes
+01.03 — Cadastro de fornecedores
+01.04 — Cadastro de produtos
+01.05 — Cadastro de serviços
+01.06 — Categorias e subcategorias
+01.07 — Cadastro de marcas
+01.08 — Unidades de medida
+01.09 — Cadastro de vendedores
+01.10 — Cadastro de transportadoras
+01.11 — Cadastro de entregadores
+01.12 — Formas de pagamento
+01.13 — Tabelas de preços
+01.14 — Cadastro de representantes
+01.15 — Cadastro de fabricantes
+01.16 — Cadastro de parceiros
+01.17 — Cadastro de contatos
+01.18 — Cadastro de endereços
+01.19 — Campos personalizados
+01.20 — Cadastro de condições comerciais
+MÓDULO 02 — CADASTRO E CONFIGURAÇÃO FISCAL
+02.01 — Cadastro fiscal de produtos
+02.02 — Classificação NCM
+02.03 — Cadastro CEST
+02.04 — Cadastro CFOP
+02.05 — Cadastro CST e CSOSN
+02.06 — Configuração de ICMS
+02.07 — Configuração de IPI
+02.08 — Configuração de PIS e COFINS
+02.09 — Substituição tributária
+02.10 — Naturezas de operação
+02.11 — Regimes tributários
+02.12 — Certificados digitais
+02.13 — Regras tributárias por operação
+02.14 — Configuração IBS e CBS
+02.15 — Benefícios fiscais
+02.16 — DIFAL
+02.17 — Fundo de combate à pobreza
+02.18 — Retenções tributárias
+02.19 — Tributação por estado
+02.20 — Tributação por município
+02.21 — Tributação por cliente
+02.22 — Tributação por produto
+02.23 — Validação de cadastros fiscais
+02.24 — Atualização de tabelas tributárias
+MÓDULO 03 — DOCUMENTOS FISCAIS DE ENTRADA
+03.01 — Cadastro manual de nota fiscal de compra
+03.02 — Importação de XML
+03.03 — Consulta de documentos fiscais recebidos
+03.04 — Manifestação do destinatário
+03.05 — Conferência de notas fiscais
+03.06 — Entrada automática no estoque
+03.07 — Geração de contas a pagar
+03.08 — Devolução de compras
+03.09 — Atualização de custos pela nota
+03.10 — Vinculação com pedidos de compra
+03.11 — Conferência de impostos
+03.12 — Recebimento parcial de notas
+03.13 — Importação de CT-e recebido
+03.14 — Importação de documentos de serviço
+03.15 — Gestão de divergências fiscais
+03.16 — Histórico de documentos recebidos
+MÓDULO 04 — EMISSÃO DE DOCUMENTOS FISCAIS
+04.01 — Emissão de NF-e
+04.02 — Emissão de NFC-e
+04.03 — Emissão de NFS-e
+04.04 — Emissão de CT-e
+04.05 — Emissão de MDF-e
+04.06 — Nota fiscal de devolução
+04.07 — Nota fiscal de transferência
+04.08 — Nota fiscal de remessa
+04.09 — Cancelamento de documentos fiscais
+04.10 — Carta de correção eletrônica
+04.11 — Inutilização de numeração
+04.12 — Armazenamento de XML
+04.13 — Emissão em contingência
+04.14 — Envio de documentos fiscais
+04.15 — Nota fiscal complementar
+04.16 — Nota fiscal de ajuste
+04.17 — Nota fiscal de exportação
+04.18 — Nota fiscal de importação
+04.19 — Emissão fiscal em lote
+04.20 — Monitoramento de rejeições
+04.21 — Consulta de situação fiscal
+04.22 — Impressão de documentos auxiliares
+04.23 — Encerramento de MDF-e
+04.24 — Gestão de eventos fiscais
+04.25 — Numeração e séries fiscais
+04.26 — Reprocessamento de documentos fiscais
+MÓDULO 05 — GESTÃO DE COMPRAS
+05.01 — Solicitação de compra
+05.02 — Cotação com fornecedores
+05.03 — Comparação de cotações
+05.04 — Pedido de compra
+05.05 — Aprovação de compras
+05.06 — Recebimento de mercadorias
+05.07 — Compras pendentes
+05.08 — Sugestão de reposição
+05.09 — Histórico de compras
+05.10 — Custos de aquisição
+05.11 — Compras recorrentes
+05.12 — Compras programadas
+05.13 — Contratos de fornecimento
+05.14 — Avaliação de fornecedores
+05.15 — Compras por centro de custo
+05.16 — Controle de entregas de fornecedores
+05.17 — Compras emergenciais
+05.18 — Portal do fornecedor
+MÓDULO 06 — GESTÃO COMERCIAL E VENDAS
+06.01 — Orçamentos
+06.02 — Propostas comerciais
+06.03 — Pedidos de venda
+06.04 — Aprovação de pedidos
+06.05 — Conversão de orçamento em pedido
+06.06 — Faturamento de pedidos
+06.07 — Venda direta
+06.08 — Venda futura
+06.09 — Reserva de mercadorias
+06.10 — Gestão de descontos
+06.11 — Tabelas de preços comerciais
+06.12 — Comissões de vendedores
+06.13 — Metas comerciais
+06.14 — Histórico de vendas
+06.15 — Cancelamento de pedidos
+06.16 — Acompanhamento de pedidos
+06.17 — Venda por atacado
+06.18 — Venda por varejo
+06.19 — Venda em consignação
+06.20 — Venda sob encomenda
+06.21 — Venda por representantes
+06.22 — Carteira de clientes
+06.23 — Políticas comerciais
+06.24 — Pedidos recorrentes
+06.25 — Central de pedidos omnichannel
+MÓDULO 07 — PDV — PONTO DE VENDA
+07.01 — Frente de caixa
+07.02 — Abertura de caixa
+07.03 — Fechamento de caixa
+07.04 — Sangria de caixa
+07.05 — Suprimento de caixa
+07.06 — Venda por código de barras
+07.07 — Venda por balança
+07.08 — Múltiplas formas de pagamento
+07.09 — Venda suspensa
+07.10 — Cancelamento de venda
+07.11 — Desconto mediante autorização
+07.12 — Integração TEF
+07.13 — Integração PIX
+07.14 — Impressão de comprovantes
+07.15 — Conferência de caixa
+07.16 — Múltiplos caixas
+07.17 — Gestão de operadores
+07.18 — PDV offline e sincronização
+07.19 — Fechamento consolidado
+07.20 — Consulta rápida de preços
+07.21 — Identificação de vendedor
+07.22 — Identificação de cliente
+07.23 — Autoatendimento
+07.24 — PDV móvel
+07.25 — Reabertura de caixa
+07.26 — Controle de divergências de caixa
+MÓDULO 08 — TROCAS E DEVOLUÇÕES
+08.01 — Solicitação de troca
+08.02 — Troca de produto
+08.03 — Troca por tamanho ou cor
+08.04 — Devolução de produto
+08.05 — Política e prazo de troca
+08.06 — Vale-troca
+08.07 — Crédito para cliente
+08.08 — Restituição financeira
+08.09 — Pagamento de diferença
+08.10 — Reintegração ao estoque
+08.11 — Histórico de trocas
+08.12 — Avarias e defeitos
+08.13 — Troca parcial
+08.14 — Devolução de vendas online
+08.15 — Logística reversa
+08.16 — Aprovação de devoluções
+MÓDULO 09 — GESTÃO DE PRODUTOS E GRADES
+09.01 — Produtos simples
+09.02 — Grade de tamanhos
+09.03 — Grade de cores
+09.04 — Variações de produtos
+09.05 — Código de barras por variação
+09.06 — Produtos vendidos por peso
+09.07 — Produtos fracionados
+09.08 — Kits de produtos
+09.09 — Combos de produtos
+09.10 — Produtos compostos
+09.11 — Produtos personalizados
+09.12 — Fotos e imagens
+09.13 — Etiquetas de produtos
+09.14 — Formação de preço
+09.15 — Margem de lucro
+09.16 — Produtos equivalentes
+09.17 — Produtos substitutos
+09.18 — Múltiplos códigos de barras
+09.19 — Características e atributos
+09.20 — Dimensões e peso
+09.21 — Embalagens comerciais
+09.22 — Cadastro em massa
+09.23 — Ciclo de vida do produto
+09.24 — Produtos sazonais
+MÓDULO 10 — GESTÃO DE ESTOQUE
+10.01 — Saldo de estoque
+10.02 — Entrada de mercadorias
+10.03 — Saída de mercadorias
+10.04 — Ajustes de estoque
+10.05 — Transferência entre estoques
+10.06 — Múltiplos depósitos
+10.07 — Estoque por filial
+10.08 — Estoque mínimo e máximo
+10.09 — Inventário
+10.10 — Controle de lotes
+10.11 — Controle de validade
+10.12 — Controle de número de série
+10.13 — Reserva de estoque
+10.14 — Controle de perdas
+10.15 — Controle de avarias
+10.16 — Histórico de movimentações
+10.17 — Curva ABC
+10.18 — Giro de estoque
+10.19 — Endereçamento
+10.20 — Estoque multicanal
+10.21 — Estoque em trânsito
+10.22 — Estoque de terceiros
+10.23 — Estoque consignado
+10.24 — Estoque bloqueado
+10.25 — Contagem cíclica
+10.26 — Rastreabilidade
+10.27 — Valoração de estoque
+10.28 — Sugestão de reposição
+10.29 — Controle FEFO e FIFO
+10.30 — Disponibilidade futura
+MÓDULO 11 — CATÁLOGO DIGITAL
+11.01 — Catálogo público
+11.02 — Catálogo privado
+11.03 — Personalização visual
+11.04 — Exibição de preços
+11.05 — Exibição de disponibilidade
+11.06 — Categorias de produtos
+11.07 — Compartilhamento por link
+11.08 — Compartilhamento por QR Code
+11.09 — Sacola de compras
+11.10 — Solicitação de orçamento
+11.11 — Realização de pedidos
+11.12 — Redirecionamento ao WhatsApp
+11.13 — Catálogo B2B
+11.14 — Preços personalizados
+11.15 — Múltiplos catálogos
+11.16 — Catálogo por vendedor
+11.17 — Catálogo por filial
+11.18 — Domínio personalizado
+11.19 — Indicadores de acesso
+11.20 — Publicação programada
+MÓDULO 12 — E-COMMERCE E VENDAS DIGITAIS
+12.01 — Loja virtual
+12.02 — Personalização da loja
+12.03 — Cadastro online de clientes
+12.04 — Carrinho de compras
+12.05 — Checkout
+12.06 — Pagamentos online
+12.07 — PIX online
+12.08 — Cartão de crédito online
+12.09 — Cupons promocionais
+12.10 — Recebimento automático de pedidos
+12.11 — Gestão de pedidos online
+12.12 — Sincronização de estoque
+12.13 — Sincronização de preços
+12.14 — Faturamento de pedidos online
+12.15 — Retirada na loja
+12.16 — Entrega em domicílio
+12.17 — Agendamento de entrega
+12.18 — Acompanhamento de pedidos
+12.19 — Histórico de compras
+12.20 — Integração com marketplaces
+12.21 — Avaliação de produtos
+12.22 — Lista de desejos
+12.23 — Recuperação de carrinho
+12.24 — Domínio próprio
+12.25 — Gestão de banners
+12.26 — SEO e metadados
+12.27 — Gestão de campanhas
+12.28 — Venda digital B2B
+12.29 — Venda digital B2C
+12.30 — Loja virtual por filial
+MÓDULO 13 — WHATSAPP E ATENDIMENTO DIGITAL
+13.01 — Integração com WhatsApp
+13.02 — Atendimento centralizado
+13.03 — Múltiplos atendentes
+13.04 — Envio de catálogo
+13.05 — Envio de orçamento
+13.06 — Envio de link de pagamento
+13.07 — Confirmação de pedido
+13.08 — Notificação de status
+13.09 — Envio de documentos fiscais
+13.10 — Histórico de atendimento
+13.11 — Automação de atendimento
+13.12 — Chatbot
+13.13 — Distribuição de atendimentos
+13.14 — Filas de atendimento
+13.15 — Respostas rápidas
+13.16 — Modelos de mensagens
+13.17 — Atendimento por departamentos
+13.18 — Indicadores de atendimento
+13.19 — Integração com outros canais
+13.20 — Atendimento assistido por IA
+MÓDULO 14 — FOOD SERVICE
+14.01 — Cardápio digital
+14.02 — Gestão de mesas
+14.03 — Gestão de comandas
+14.04 — Atendimento de balcão
+14.05 — Aplicativo do garçom
+14.06 — Pedido por QR Code na mesa
+14.07 — Pedido para retirada
+14.08 — Pedido para delivery
+14.09 — Painel de cozinha — KDS
+14.10 — Impressão de pedidos na cozinha
+14.11 — Setores de preparação
+14.12 — Adicionais de produtos
+14.13 — Personalização de pedidos
+14.14 — Combos de alimentação
+14.15 — Tempo de preparo
+14.16 — Divisão de conta
+14.17 — Taxa de serviço
+14.18 — Fechamento de mesa
+14.19 — Ficha técnica de alimentos
+14.20 — Controle de ingredientes
+14.21 — Baixa automática de ingredientes
+14.22 — Integração com plataformas de delivery
+14.23 — Painel de retirada
+14.24 — Transferência de mesas
+14.25 — Junção de comandas
+14.26 — Reservas de mesas
+14.27 — Fila de espera
+14.28 — Rodízio
+14.29 — Buffet por peso
+14.30 — Buffet por pessoa
+14.31 — Autoatendimento por totem
+14.32 — Controle de disponibilidade do cardápio
+14.33 — Programação de cardápios
+14.34 — Controle de desperdício alimentar
+14.35 — Monitoramento da operação de cozinha
+MÓDULO 15 — COMPOSIÇÃO DE PRODUTOS E FICHA TÉCNICA
+15.01 — Composição de produtos
+15.02 — Cadastro de matérias-primas
+15.03 — Ficha técnica
+15.04 — Composição multinível
+15.05 — Custo da composição
+15.06 — Montagem de kits
+15.07 — Desmontagem de kits
+15.08 — Transformação de matérias-primas
+15.09 — Baixa de componentes na venda
+15.10 — Baixa de componentes na produção
+15.11 — Controle de rendimento
+15.12 — Controle de desperdício
+15.13 — Conversão de unidades
+15.14 — Substituição de componentes
+15.15 — Versionamento de composição
+15.16 — Simulação de custos
+15.17 — Subprodutos
+15.18 — Coprodutos
+15.19 — Composição variável
+15.20 — Composição por encomenda
+MÓDULO 16 — PRODUÇÃO E PCP
+16.01 — Ordem de produção
+16.02 — Planejamento de produção
+16.03 — Programação de produção
+16.04 — Capacidade produtiva
+16.05 — Necessidade de materiais — MRP
+16.06 — Reserva de matéria-prima
+16.07 — Requisição de matéria-prima
+16.08 — Etapas de produção
+16.09 — Apontamento de produção
+16.10 — Controle de mão de obra
+16.11 — Controle de máquinas
+16.12 — Perdas produtivas
+16.13 — Controle de qualidade
+16.14 — Rastreabilidade produtiva
+16.15 — Custo de produção
+16.16 — Entrada de produto acabado
+16.17 — Produção sob encomenda
+16.18 — Produção para estoque
+16.19 — Indicadores de produtividade
+16.20 — Centros de trabalho
+16.21 — Roteiro de fabricação
+16.22 — Terceirização de produção
+16.23 — Produção parcial
+16.24 — Reprocessamento
+16.25 — Controle de refugos
+16.26 — Planejamento de capacidade
+16.27 — Sequenciamento de produção
+16.28 — Ordens de produção recorrentes
+16.29 — Painel de chão de fábrica
+16.30 — Eficiência de equipamentos
+MÓDULO 17 — LOGÍSTICA E ENTREGAS
+17.01 — Regiões de entrega
+17.02 — Taxa de entrega fixa
+17.03 — Taxa por bairro
+17.04 — Taxa por quilometragem
+17.05 — Taxa por faixa de distância
+17.06 — Taxa por valor do pedido
+17.07 — Frete grátis condicionado
+17.08 — Cálculo automático de frete
+17.09 — Entregadores próprios
+17.10 — Entregadores terceirizados
+17.11 — Distribuição de entregas
+17.12 — Roteirização
+17.13 — Aplicativo do entregador
+17.14 — Rastreamento de entrega
+17.15 — Comprovante de entrega
+17.16 — Previsão de entrega
+17.17 — Ocorrências de entrega
+17.18 — Acerto com entregadores
+17.19 — Expedição
+17.20 — Separação de pedidos
+17.21 — Conferência de pedidos
+17.22 — Integração com transportadoras
+17.23 — Gestão de coletas
+17.24 — Agendamento logístico
+17.25 — Entrega parcial
+17.26 — Reentrega
+17.27 — Controle de fretes
+17.28 — Cotação de fretes
+17.29 — Gestão de cargas
+17.30 — Indicadores logísticos
+MÓDULO 18 — GESTÃO FINANCEIRA
+18.01 — Contas a pagar
+18.02 — Contas a receber
+18.03 — Fluxo de caixa
+18.04 — Contas bancárias
+18.05 — Emissão de boletos
+18.06 — Cobrança PIX
+18.07 — Cobranças recorrentes
+18.08 — Baixa manual de títulos
+18.09 — Baixa automática de títulos
+18.10 — Conciliação bancária
+18.11 — Conciliação de cartões
+18.12 — Conciliação PIX
+18.13 — Inadimplência
+18.14 — Renegociação de dívidas
+18.15 — Juros e multas
+18.16 — Centros de custos
+18.17 — Plano de contas
+18.18 — DRE gerencial
+18.19 — Controle de despesas
+18.20 — Controle de receitas
+18.21 — Previsão financeira
+18.22 — Fechamento consolidado
+18.23 — Crédito de clientes
+18.24 — Limite de crédito
+18.25 — Crediário
+18.26 — Adiantamentos
+18.27 — Reembolsos
+18.28 — Rateio financeiro
+18.29 — Aprovação de pagamentos
+18.30 — Orçamento financeiro
+18.31 — Gestão de investimentos
+18.32 — Empréstimos e financiamentos
+18.33 — Antecipação de recebíveis
+18.34 — Controle de cheques
+18.35 — Gestão de cartões corporativos
+18.36 — Tesouraria
+18.37 — Regime de caixa e competência
+18.38 — Resultado por unidade de negócio
+18.39 — Gestão de moedas e câmbio
+18.40 — Gestão de parcelamentos
+MÓDULO 19 — INTEGRAÇÕES BANCÁRIAS
+19.01 — Integração bancária por API
+19.02 — Registro de boletos
+19.03 — Consulta de boletos
+19.04 — Cancelamento de boletos
+19.05 — Liquidação automática
+19.06 — Remessa CNAB
+19.07 — Retorno CNAB
+19.08 — Consulta de extrato
+19.09 — Consulta de saldo
+19.10 — PIX dinâmico
+19.11 — Notificações bancárias
+19.12 — Pagamento de fornecedores
+19.13 — Integração Bradesco
+19.14 — Integração com outros bancos
+19.15 — Alteração de vencimento
+19.16 — Alteração de instruções de cobrança
+19.17 — Segunda via de boleto
+19.18 — Protesto de títulos
+19.19 — Pagamentos em lote
+19.20 — Transferências bancárias
+19.21 — Gestão de convênios bancários
+19.22 — Open Finance
+19.23 — Monitoramento de integrações
+19.24 — Reprocessamento bancário
+19.25 — PIX recorrente e automático
+MÓDULO 20 — CRM E FIDELIZAÇÃO DO CLIENTE DO ERP
+20.01 — Histórico de relacionamento
+20.02 — Segmentação de clientes
+20.03 — Programa de fidelidade
+20.04 — Pontuação
+20.05 — Cashback
+20.06 — Vale-presente
+20.07 — Campanhas promocionais
+20.08 — Recuperação de clientes inativos
+20.09 — Recuperação de carrinhos abandonados
+20.10 — Frequência de compras
+20.11 — Funil comercial
+20.12 — Gestão de oportunidades
+20.13 — Cadastro de leads
+20.14 — Agenda comercial
+20.15 — Follow-up
+20.16 — Pesquisa de satisfação
+20.17 — Gestão de reclamações
+20.18 — Perfil de consumo
+20.19 — Aniversariantes
+20.20 — Indicação de clientes
+20.21 — Clube de benefícios
+20.22 — Gestão de vouchers
+MÓDULO 21 — RELATÓRIOS E INTELIGÊNCIA DE NEGÓCIO
+21.01 — Dashboard gerencial
+21.02 — Relatórios de vendas
+21.03 — Relatórios de compras
+21.04 — Relatórios financeiros
+21.05 — Relatórios fiscais
+21.06 — Relatórios de estoque
+21.07 — Relatórios de produção
+21.08 — Relatórios de logística
+21.09 — Relatórios de PDV
+21.10 — Relatórios de e-commerce
+21.11 — Relatórios de lucratividade
+21.12 — Relatórios de comissões
+21.13 — Comparativo entre filiais
+21.14 — Comparativo entre canais
+21.15 — Exportação de relatórios
+21.16 — Indicadores personalizados
+21.17 — Construtor de relatórios
+21.18 — Relatórios programados
+21.19 — Análise de ticket médio
+21.20 — Análise de rentabilidade
+21.21 — Análise de sazonalidade
+21.22 — Análise de clientes
+21.23 — Projeção de demanda
+21.24 — Projeção de vendas
+21.25 — Dashboards personalizados
+21.26 — Integração com ferramentas de BI
+MÓDULO 22 — GESTÃO CONTÁBIL E OBRIGAÇÕES FISCAIS
+22.01 — Exportação para contabilidade
+22.02 — SPED Fiscal
+22.03 — EFD Contribuições
+22.04 — Apuração de impostos
+22.05 — Livros fiscais
+22.06 — Relatórios tributários
+22.07 — Integração contábil
+22.08 — Portal do contador
+22.09 — Escrituração contábil
+22.10 — Lançamentos contábeis
+22.11 — Plano de contas contábil
+22.12 — Balancete
+22.13 — Balanço patrimonial
+22.14 — DRE contábil
+22.15 — ECD
+22.16 — ECF
+22.17 — Controle de retenções
+22.18 — Calendário de obrigações
+22.19 — Fechamento contábil
+22.20 — Conciliação contábil
+MÓDULO 23 — INTEGRAÇÃO COM EQUIPAMENTOS
+23.01 — Impressora térmica
+23.02 — Impressora de etiquetas
+23.03 — Leitor de código de barras
+23.04 — Balança eletrônica
+23.05 — Gaveta de dinheiro
+23.06 — Pin Pad
+23.07 — Smart POS
+23.08 — Terminal de autoatendimento
+23.09 — Coletor de dados
+23.10 — Display de atendimento
+23.11 — Impressora de cozinha
+23.12 — Impressora de escritório
+23.13 — Equipamentos RFID
+23.14 — Dispositivos móveis
+23.15 — Gerenciamento de dispositivos
+23.16 — Monitoramento de equipamentos
+MÓDULO 24 — ADMINISTRAÇÃO E SEGURANÇA
+24.01 — Gestão de usuários
+24.02 — Gestão de cargos
+24.03 — Gestão de permissões
+24.04 — Gestão de filiais
+24.05 — Auditoria de operações
+24.06 — Histórico de alterações
+24.07 — Autenticação em dois fatores
+24.08 — Gestão de sessões
+24.09 — Aprovação de operações
+24.10 — Configurações empresariais
+24.11 — API para integrações externas
+24.12 — Webhooks
+24.13 — Importação de dados
+24.14 — Exportação de dados
+24.15 — Gestão de departamentos
+24.16 — Gestão de funções
+24.17 — Políticas de segurança
+24.18 — Restrição de acesso
+24.19 — Gestão de dispositivos autorizados
+24.20 — Backup e recuperação
+24.21 — Privacidade e LGPD
+24.22 — Gestão de consentimentos
+24.23 — Gestão de credenciais
+24.24 — Configurações de notificações
+24.25 — Gestão de acessos externos
+MÓDULO 25 — PROMOÇÕES E PRECIFICAÇÃO AVANÇADA
+25.01 — Promoção por produto
+25.02 — Promoção por categoria
+25.03 — Promoção por quantidade
+25.04 — Promoção progressiva
+25.05 — Leve mais e pague menos
+25.06 — Combos promocionais
+25.07 — Desconto por forma de pagamento
+25.08 — Desconto por perfil de cliente
+25.09 — Preços por filial
+25.10 — Preços por canal de venda
+25.11 — Preços por região
+25.12 — Preços por período
+25.13 — Reajuste em massa
+25.14 — Simulação de margem
+25.15 — Precificação automática
+25.16 — Aprovação de alterações de preço
+MÓDULO 26 — SERVIÇOS E ORDENS DE SERVIÇO
+26.01 — Cadastro de serviços
+26.02 — Ordem de serviço
+26.03 — Orçamento de serviço
+26.04 — Aprovação de orçamento
+26.05 — Agendamento de serviço
+26.06 — Distribuição de técnicos
+26.07 — Apontamento de horas
+26.08 — Controle de materiais utilizados
+26.09 — Serviço externo
+26.10 — Aplicativo do técnico
+26.11 — Checklist de atendimento
+26.12 — Assinatura do cliente
+26.13 — Laudos técnicos
+26.14 — Garantia de serviço
+26.15 — Faturamento de serviço
+26.16 — Serviços recorrentes
+26.17 — Histórico de atendimentos
+26.18 — Indicadores de serviço
+MÓDULO 27 — CONTRATOS E RECORRÊNCIA
+27.01 — Cadastro de contratos
+27.02 — Modelos de contratos
+27.03 — Assinatura eletrônica
+27.04 — Gestão de vigência
+27.05 — Renovação contratual
+27.06 — Reajuste contratual
+27.07 — Faturamento recorrente
+27.08 — Contratos de prestação de serviços
+27.09 — Contratos de fornecimento
+27.10 — Contratos de locação
+27.11 — Aditivos contratuais
+27.12 — Rescisões
+27.13 — Gestão de SLA
+27.14 — Controle de obrigações contratuais
+27.15 — Alertas de vencimento
+27.16 — Histórico contratual
+MÓDULO 28 — LOCAÇÕES E RESERVAS
+28.01 — Cadastro de itens locáveis
+28.02 — Disponibilidade de locação
+28.03 — Reserva de equipamentos
+28.04 — Reserva de espaços
+28.05 — Contrato de locação
+28.06 — Retirada de itens
+28.07 — Devolução de itens
+28.08 — Cobrança por período
+28.09 — Controle de caução
+28.10 — Controle de avarias
+28.11 — Renovação de locação
+28.12 — Controle de atrasos
+28.13 — Inspeção de devolução
+28.14 — Histórico de locações
+MÓDULO 29 — PATRIMÔNIO E ATIVO IMOBILIZADO
+29.01 — Cadastro patrimonial
+29.02 — Identificação patrimonial
+29.03 — Inventário patrimonial
+29.04 — Depreciação
+29.05 — Transferência de patrimônio
+29.06 — Baixa patrimonial
+29.07 — Controle de responsáveis
+29.08 — Localização de ativos
+29.09 — Valoração de ativos
+29.10 — Histórico patrimonial
+29.11 — Controle de garantias
+29.12 — Gestão de documentos patrimoniais
+MÓDULO 30 — MANUTENÇÃO
+30.01 — Cadastro de equipamentos
+30.02 — Manutenção preventiva
+30.03 — Manutenção corretiva
+30.04 — Manutenção preditiva
+30.05 — Ordem de manutenção
+30.06 — Plano de manutenção
+30.07 — Controle de peças
+30.08 — Controle de custos
+30.09 — Controle de paradas
+30.10 — Agenda de manutenção
+30.11 — Checklist de manutenção
+30.12 — Histórico de equipamentos
+30.13 — Indicadores de manutenção
+MÓDULO 31 — RECURSOS HUMANOS E DEPARTAMENTO PESSOAL
+31.01 — Cadastro de colaboradores
+31.02 — Gestão de departamentos
+31.03 — Gestão de cargos
+31.04 — Organograma
+31.05 — Controle de ponto
+31.06 — Escalas de trabalho
+31.07 — Banco de horas
+31.08 — Gestão de férias
+31.09 — Gestão de afastamentos
+31.10 — Gestão de benefícios
+31.11 — Gestão de documentos
+31.12 — Folha de pagamento
+31.13 — Integração com eSocial
+31.14 — Recrutamento e seleção
+31.15 — Avaliação de desempenho
+31.16 — Treinamentos
+31.17 — Portal do colaborador
+31.18 — Gestão de admissões
+31.19 — Gestão de desligamentos
+31.20 — Saúde e segurança ocupacional
+MÓDULO 32 — GESTÃO DE TAREFAS E PROCESSOS
+32.01 — Cadastro de tarefas
+32.02 — Distribuição de tarefas
+32.03 — Gestão de responsáveis
+32.04 — Agenda operacional
+32.05 — Checklists
+32.06 — Tarefas recorrentes
+32.07 — Fluxos de aprovação
+32.08 — Gestão de prazos
+32.09 — Gestão de projetos
+32.10 — Kanban
+32.11 — Gestão de SLA
+32.12 — Automação de processos
+32.13 — Gestão de ocorrências
+32.14 — Indicadores de produtividade
+32.15 — Construtor de fluxos operacionais
+MÓDULO 33 — GESTÃO DOCUMENTAL
+33.01 — Armazenamento de documentos
+33.02 — Organização de pastas
+33.03 — Classificação documental
+33.04 — Controle de versões
+33.05 — Aprovação de documentos
+33.06 — Assinatura eletrônica
+33.07 — Controle de vencimentos
+33.08 — Compartilhamento de documentos
+33.09 — Permissões documentais
+33.10 — Digitalização e OCR
+33.11 — Modelos de documentos
+33.12 — Geração automática de documentos
+33.13 — Histórico de alterações
+MÓDULO 34 — MULTIEMPRESA E MULTIFILIAL
+34.01 — Gestão de múltiplas empresas
+34.02 — Gestão de múltiplas filiais
+34.03 — Consolidação de vendas
+34.04 — Consolidação financeira
+34.05 — Consolidação de estoque
+34.06 — Transferências entre filiais
+34.07 — Operações entre empresas
+34.08 — Preços por unidade
+34.09 — Compras centralizadas
+34.10 — Cadastros compartilhados autorizados
+34.11 — Permissões por filial
+34.12 — Indicadores consolidados
+34.13 — Gestão de grupos econômicos
+34.14 — Gestão de franquias
+34.15 — Gestão de unidades de negócio
+MÓDULO 35 — MARKETPLACES E INTEGRAÇÕES COMERCIAIS
+35.01 — Mercado Livre
+35.02 — Shopee
+35.03 — Amazon
+35.04 — Magalu
+35.05 — iFood
+35.06 — Shopify
+35.07 — WooCommerce
+35.08 — Nuvemshop
+35.09 — VTEX
+35.10 — Sincronização de anúncios
+35.11 — Sincronização de pedidos
+35.12 — Sincronização de preços
+35.13 — Sincronização de estoque
+35.14 — Gestão de comissões de marketplaces
+35.15 — Conciliação de recebíveis
+35.16 — Gestão de reputação
+35.17 — Gestão de devoluções
+35.18 — Hub multicanal
+MÓDULO 36 — PAGAMENTOS E GATEWAYS
+36.01 — Gateway de pagamento
+36.02 — Link de pagamento
+36.03 — Pagamento por cartão
+36.04 — Pagamento por PIX
+36.05 — Pagamento por boleto
+36.06 — Pagamento recorrente
+36.07 — Split de pagamento
+36.08 — Estorno de pagamento
+36.09 — Gestão de chargeback
+36.10 — Antifraude
+36.11 — Conciliação de transações
+36.12 — Tokenização por provedor
+36.13 — Gestão de taxas
+36.14 — Gestão de adquirentes
+36.15 — Gestão de subadquirentes
+36.16 — Integrações individuais por provedor
+MÓDULO 37 — APLICATIVOS E PORTAIS EXTERNOS
+37.01 — Aplicativo do vendedor
+37.02 — Aplicativo do representante
+37.03 — Aplicativo do entregador
+37.04 — Aplicativo do garçom
+37.05 — Aplicativo do gestor
+37.06 — Aplicativo do cliente
+37.07 — Aplicativo do técnico
+37.08 — Portal do fornecedor
+37.09 — Portal do contador
+37.10 — Portal do cliente
+37.11 — Portal do colaborador
+37.12 — Portal B2B
+37.13 — Aplicativo de inventário
+37.14 — Aplicativo de separação
+37.15 — Aplicativo de produção
+37.16 — Aplicativo de autoatendimento
+MÓDULO 38 — AUTOMAÇÕES E INTELIGÊNCIA ARTIFICIAL
+38.01 — Automação de cobranças
+38.02 — Automação de notificações
+38.03 — Automação de compras
+38.04 — Automação de reposição
+38.05 — Automação de relatórios
+38.06 — Automação de atendimento
+38.07 — Assistente inteligente do ERP
+38.08 — Consulta de dados por linguagem natural
+38.09 — Análise inteligente de vendas
+38.10 — Análise inteligente de estoque
+38.11 — Previsão de demanda
+38.12 — Sugestão de compras
+38.13 — Sugestão de preços
+38.14 — Identificação de anomalias
+38.15 — Classificação automática de documentos
+38.16 — Construtor de automações
+38.17 — Aprovação humana de ações automatizadas
+38.18 — Histórico de execuções automatizadas
+MÓDULO 39 — GESTÃO DE QUALIDADE
+39.01 — Inspeção de recebimento
+39.02 — Inspeção de produção
+39.03 — Inspeção de produto acabado
+39.04 — Controle de não conformidades
+39.05 — Ações corretivas
+39.06 — Ações preventivas
+39.07 — Gestão de certificações
+39.08 — Controle de amostras
+39.09 — Laudos de qualidade
+39.10 — Rastreabilidade de inspeções
+39.11 — Auditorias internas
+39.12 — Indicadores de qualidade
+39.13 — Controle de produtos bloqueados
+39.14 — Gestão de recolhimento de produtos
+MÓDULO 40 — TRANSPORTES E GESTÃO DE FROTAS
+40.01 — Cadastro de veículos
+40.02 — Cadastro de motoristas
+40.03 — Controle de viagens
+40.04 — Controle de abastecimento
+40.05 — Controle de quilometragem
+40.06 — Manutenção de veículos
+40.07 — Controle de pneus
+40.08 — Gestão de documentos veiculares
+40.09 — Controle de multas
+40.10 — Controle de custos por veículo
+40.11 — Controle de pedágios
+40.12 — Rastreamento de veículos
+40.13 — Gestão de ocorrências
+40.14 — Indicadores de frota
+40.15 — Gestão de fretes contratados
+MÓDULO 41 — WMS E ARMAZENAGEM AVANÇADA
+41.01 — Gestão de armazéns
+41.02 — Mapeamento de endereços
+41.03 — Recebimento por doca
+41.04 — Agendamento de docas
+41.05 — Armazenagem direcionada
+41.06 — Picking
+41.07 — Packing
+41.08 — Cross-docking
+41.09 — Separação por ondas
+41.10 — Separação por lotes
+41.11 — Reposição de posições
+41.12 — Controle de ocupação
+41.13 — Conferência por coletor
+41.14 — Etiquetas logísticas
+41.15 — Gestão de pallets
+41.16 — Gestão de volumes
+41.17 — Expedição avançada
+41.18 — Indicadores de armazenagem
+MÓDULO 42 — COMÉRCIO EXTERIOR
+42.01 — Cadastro de fornecedores internacionais
+42.02 — Pedidos internacionais
+42.03 — Processos de importação
+42.04 — Processos de exportação
+42.05 — Gestão de embarques
+42.06 — Gestão de containers
+42.07 — Documentação internacional
+42.08 — Commercial invoice
+42.09 — Packing list
+42.10 — Controle cambial
+42.11 — Custos de importação
+42.12 — Nacionalização de mercadorias
+42.13 — Desembaraço aduaneiro
+42.14 — Controle de Incoterms
+42.15 — Acompanhamento de cargas internacionais
+42.16 — Rateio de despesas de importação
+MÓDULO 43 — VENDAS EXTERNAS E REPRESENTANTES
+43.01 — Carteira de representantes
+43.02 — Territórios comerciais
+43.03 — Rotas de visitas
+43.04 — Registro de visitas
+43.05 — Pedido externo
+43.06 — Pedido offline
+43.07 — Catálogo do representante
+43.08 — Comissão por representante
+43.09 — Comissão por produto
+43.10 — Comissão por recebimento
+43.11 — Prestação de contas
+43.12 — Metas individuais
+43.13 — Supervisão comercial
+43.14 — Indicadores de vendas externas
+MÓDULO 44 — AGENDAMENTOS E ATENDIMENTOS
+44.01 — Agenda de atendimentos
+44.02 — Agenda por profissional
+44.03 — Agenda por recurso
+44.04 — Agendamento online
+44.05 — Confirmação automática
+44.06 — Lembretes de atendimento
+44.07 — Reagendamento
+44.08 — Cancelamento de agendamento
+44.09 — Lista de espera
+44.10 — Atendimento recorrente
+44.11 — Gestão de disponibilidade
+44.12 — Gestão de horários
+44.13 — Controle de comparecimento
+44.14 — Histórico de atendimentos
+MÓDULO 45 — GESTÃO DE GARANTIAS E PÓS-VENDA
+45.01 — Registro de garantia
+45.02 — Garantia por número de série
+45.03 — Garantia estendida
+45.04 — Solicitação de assistência
+45.05 — Autorização de assistência
+45.06 — Envio para fabricante
+45.07 — Acompanhamento de reparos
+45.08 — Substituição de produtos
+45.09 — Controle de prazos
+45.10 — Gestão de reclamações
+45.11 — Histórico de garantias
+45.12 — Indicadores de pós-venda
+MÓDULO 46 — GESTÃO DE SUPERMERCADOS E VAREJO ALIMENTAR
+46.01 — Integração com balanças etiquetadoras
+46.02 — Produtos com código de peso variável
+46.03 — Controle de perecíveis
+46.04 — Controle de hortifrúti
+46.05 — Controle de açougue
+46.06 — Controle de padaria
+46.07 — Transformação e desossa
+46.08 — Fracionamento de produtos
+46.09 — Controle de perdas alimentares
+46.10 — Etiquetas de gôndola
+46.11 — Consulta de preços em loja
+46.12 — Promoções de encarte
+46.13 — Gestão de vasilhames retornáveis
+46.14 — Gestão de embalagens retornáveis
+MÓDULO 47 — GESTÃO DE MODA E CONFECÇÃO
+47.01 — Gestão de coleções
+47.02 — Gestão de estações
+47.03 — Matriz de cores e tamanhos
+47.04 — Compra por grade
+47.05 — Venda por grade
+47.06 — Reposição por grade
+47.07 — Transferência por grade
+47.08 — Inventário por grade
+47.09 — Curva de tamanhos
+47.10 — Curva de cores
+47.11 — Etiquetagem por variação
+47.12 — Análise de desempenho de coleções
+MÓDULO 48 — GESTÃO DE DOCUMENTOS E CERTIFICAÇÃO DIGITAL
+48.01 — Cadastro de certificados digitais
+48.02 — Controle de validade de certificados
+48.03 — Alertas de vencimento
+48.04 — Assinatura digital de documentos
+48.05 — Validação de assinaturas
+48.06 — Gestão de solicitações de certificados
+48.07 — Renovação de certificados
+48.08 — Integração com provedores de certificação
+48.09 — Histórico de utilização
+48.10 — Controle de credenciais de certificação
+MÓDULO 49 — SUPORTE E CENTRAL DE AJUDA
+49.01 — Abertura de chamados
+49.02 — Acompanhamento de chamados
+49.03 — Base de conhecimento
+49.04 — Tutoriais
+49.05 — Onboarding guiado
+49.06 — Comunicação de atualizações
+49.07 — Diagnóstico de problemas
+49.08 — Solicitação de funcionalidades
+49.09 — Status dos serviços
+49.10 — Atendimento remoto autorizado
+49.11 — Avaliação de suporte
+49.12 — Histórico de atendimento
+MÓDULO 50 — CONFIGURAÇÕES E PERSONALIZAÇÃO
+50.01 — Identidade visual da empresa
+50.02 — Personalização de menus
+50.03 — Personalização de dashboards
+50.04 — Personalização de documentos
+50.05 — Personalização de formulários
+50.06 — Campos personalizados
+50.07 — Configuração de idiomas
+50.08 — Configuração de moedas
+50.09 — Configuração de unidades
+50.10 — Configuração de notificações
+50.11 — Configuração de numerações
+50.12 — Configuração de fluxos
+50.13 — Configuração de aprovações
+50.14 — Personalização de relatórios
+50.15 — Domínios personalizados
+50.16 — Gestão de configurações por filial

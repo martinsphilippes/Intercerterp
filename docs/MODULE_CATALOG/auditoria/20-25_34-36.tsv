@@ -1,0 +1,175 @@
+# Auditoria módulos 20–25 e 34–36 (26/11/2026)
+20.01	PARC	src/domain/customers.ts:247	Ficha com compras, títulos, créditos e auditoria; sem registro de contatos cadastros.clientes
+20.02	PARC	src/app/(app)/clientes/queries.ts:9	Só filtros; sem segmentos salvos cadastros.clientes
+20.03	OP	src/domain/loyalty.ts:10	Pontos por venda, resgate no PDV, validade, estorno clientes.fidelidade
+20.04	OP	src/domain/loyalty.ts:59	Pontos por R$ e extrato clientes.fidelidade
+20.05	NAO	-	Sem cashback
+20.06	NAO	src/lib/db/schema.ts:564	Só vale-crédito de devolução; sem vale-presente vendável
+20.07	PARC	src/domain/promotions.ts:78	Promoções de PDV e cupons; sem campanha de CRM produtos.promocoes
+20.08	NAO	src/app/(app)/clientes/queries.ts:48	Só filtro comprou em 90 dias
+20.09	PARC	src/domain/ecommerce/promotions.ts:123	Carrinhos parados; mensagem só rascunho ecommerce.promocoes
+20.10	PARC	src/app/(app)/clientes/queries.ts:21	Nº de compras e última compra cadastros.clientes
+20.11	NAO	-	Sem funil comercial
+20.12	NAO	-	Sem oportunidades
+20.13	NAO	-	Sem leads
+20.14	NAO	-	Sem agenda comercial
+20.15	PARC	src/domain/network/renewals.ts:108	Só contatos de renovação da rede rede.renovacoes
+20.16	NAO	-	Sem pesquisa de satisfação
+20.17	NAO	-	Sem reclamações de cliente
+20.18	PARC	src/domain/customers.ts:268	Ticket médio e última compra cadastros.clientes
+20.19	OP	src/app/(app)/clientes/queries.ts:79	Aniversariantes dos próximos 7 dias cadastros.clientes
+20.20	PARC	src/domain/network/billing-plan.ts:48	Só indicação de contador na rede rede.financeiro
+20.21	NAO	-	Sem clube de benefícios
+20.22	PARC	src/domain/network/vouchers.ts:65	Vouchers só da rede rede.vouchers_cupons
+21.01	OP	src/app/(app)/dashboard/page.tsx	Painel com faturamento, ticket, margem e alertas plataforma.painel
+21.02	OP	src/domain/reports.ts:505	Gerenciais por dia, categoria, operador, pagamento relatorios.gerenciais
+21.03	OP	src/exports/purchases.ts:11	Pedidos, recebimentos, cotações compras.pedidos
+21.04	OP	src/domain/finance-reports.ts:113	DRE, aging, fluxo financeiro.relatorios
+21.05	OP	src/domain/fiscal/reports.ts:79	Resumo, livro de saídas, NCM, CFOP tec.fiscal
+21.06	OP	src/exports/stock.ts:10	Saldos, kardex, inventários, validades estoque.gestao
+21.07	NAO	-	Sem produção
+21.08	PARC	src/app/(app)/comercio-digital/expedicao/page.tsx	Só a tela de expedição ecommerce.loja
+21.09	OP	src/exports/cash.ts:7	Sessões e operações de caixa caixa.operacao
+21.10	PARC	src/app/(app)/comercio-digital/page.tsx:126	Contadores e lista de pedidos ecommerce.loja
+21.11	OP	src/domain/abc.ts:150	Margem e curva ABC por margem relatorios.curva_abc
+21.12	OP	src/exports/commissions.ts:8	Apuração e fechamento vendas.comissoes
+21.13	OP	src/exports/reports.ts:33	Resultado por unidade e filial relatorios.gerenciais
+21.14	NAO	-	Sem separação PDV × loja
+21.15	OP	src/lib/exporters.ts:102	CSV/XLSX por chave plataforma.administracao
+21.16	NAO	-	Só limites da ABC configuráveis
+21.17	NAO	src/lib/report-catalog.ts:28	Catálogo fixo
+21.18	NAO	-	Sem relatório programado
+21.19	OP	src/app/(app)/dashboard/page.tsx	Ticket médio com comparativo plataforma.painel
+21.20	OP	src/domain/finance-reports.ts:113	DRE com CMV financeiro.relatorios
+21.21	NAO	-	Sem sazonalidade
+21.22	PARC	src/app/(app)/clientes/page.tsx:75	Indicadores básicos de clientes cadastros.clientes
+21.23	PARC	src/domain/replenishment.ts:21	Consumo médio, sem previsão compras.reposicao
+21.24	PARC	src/domain/goals.ts:198	Projeção de fim de mês das metas gestao.metas
+21.25	NAO	-	Cartões fixos
+21.26	NAO	-	Sem conector de BI
+22.01	OP	src/domain/fiscal/export.ts:166	Pacote ZIP de XML+CSV ao contador integracao.contabilidade
+22.02	OP	src/domain/fiscal/files/sped-fiscal.ts:82	EFD ICMS/IPI gerada; validar no PVA fiscal.sped
+22.03	OP	src/domain/fiscal/files/efd-contribuicoes.ts:100	EFD Contribuições gerada fiscal.sped
+22.04	PARC	src/domain/fiscal/files/sped-fiscal.ts:164	Só E110 e PIS/COFINS fiscal.sped
+22.05	OP	src/domain/fiscal/entries.ts:340	Livros de entradas e saídas fiscal.livro_entradas
+22.06	OP	src/domain/fiscal/reports.ts:222	Tributos por NCM e CFOP tec.fiscal
+22.07	OP	src/domain/accounting/link.ts:64	Vínculo empresa–escritório com envio automático integracao.contabilidade
+22.08	PARC	src/domain/accounting/deliveries.ts:31	Escritório recebe pacotes; não é portal completo contabil.entregas
+22.09	NAO	-	Sem escrituração
+22.10	PARC	src/domain/accounting/dominio.ts:146	Débito/crédito só no arquivo Domínio financeiro.exportacao_dominio
+22.11	PARC	src/lib/db/schema.ts:590	Categorias com código contábil tec.financeiro
+22.12	NAO	-	Sem balancete
+22.13	NAO	-	Sem balanço
+22.14	NAO	-	Só DRE gerencial
+22.15	NAO	-	Sem ECD
+22.16	NAO	-	Sem ECF
+22.17	PARC	src/domain/fiscal/calc.ts:22	Retenções só na NFS-e fiscal.nfse
+22.18	OP	src/domain/fiscal/obligations.ts:18	Calendário e comprovação tec.fiscal
+22.19	PARC	src/domain/period-close.ts:100	Fechamento é financeiro financeiro.fechamento_periodo
+22.20	NAO	-	Sem conciliação contábil
+23.01	PARC	src/domain/terminals.ts:20	Impressão pelo navegador; conector ESC/POS externo vendas.pdv
+23.02	PARC	src/domain/labels.ts:18	Etiquetas em folha; sem ZPL produtos.etiquetas
+23.03	OP	src/domain/terminals.ts:25	Leitor como teclado no PDV e inventário vendas.pdv
+23.04	OP	src/domain/scale.ts:277	EAN 2 e carga Toledo/Filizola produtos.balanca
+23.05	DEV	src/app/(app)/administracao/terminais/terminal-form.tsx:70	drawerOnCash salvo mas nunca usado
+23.06	DEV	src/domain/terminals.ts:30	TEF por conector: só contrato e teste
+23.07	PARC	src/app/(app)/pdv/pagamento/payment-app.tsx:408	Maquininha avulsa com NSU manual vendas.pdv
+23.08	NAO	-	Sem totem
+23.09	PARC	src/domain/count-scan.ts:33	Bipagem na contagem estoque.inventario
+23.10	NAO	-	Sem display
+23.11	NAO	-	Sem impressora de cozinha
+23.12	OP	src/app/(app)/fiscal/_components/print-page.tsx:6	A4 pelo navegador tec.fiscal
+23.13	NAO	-	Sem RFID
+23.14	PARC	src/app/manifest.ts:14	PWA instalável; offline só página plataforma.painel
+23.15	OP	src/domain/terminals.ts:148	Cadastro de terminais vendas.pdv
+23.16	PARC	src/domain/terminals.ts:178	Teste do conector gravado vendas.pdv
+24.01	OP	src/domain/users.ts:256	Usuários com convite, suspensão e escopo plataforma.administracao
+24.02	NAO	src/lib/db/schema.ts:97	Sem cargo
+24.03	OP	src/domain/roles.ts:212	Perfis com módulos e ações plataforma.administracao
+24.04	OP	src/domain/companies.ts:273	Filiais plataforma.administracao
+24.05	OP	src/lib/core/audit.ts:35	Auditoria com antes/depois plataforma.administracao
+24.06	OP	src/lib/core/audit.ts:64	Diff na auditoria plataforma.administracao
+24.07	OP	src/domain/two-factor.ts:68	TOTP e recuperação plataforma.acesso
+24.08	PARC	src/domain/users.ts:439	Sessões encerradas ao suspender; sem tela plataforma.acesso
+24.09	OP	src/domain/approvals.ts:95	Política de compras, autorização de pagar, supervisor compras.aprovacoes
+24.10	OP	src/app/(app)/administracao/parametros/page.tsx	Parâmetros por empresa/filial plataforma.administracao
+24.11	PARC	src/app/api/interos/v1/_lib.ts:12	API só para o Interos plataforma.administracao
+24.12	PARC	src/app/api/loja/gateway/[provider]/[storeId]/route.ts:30	Só recebe avisos ecommerce.loja
+24.13	OP	src/domain/data-import.ts:579	CSV de cadastros, saldos e títulos implantacao.importacao
+24.14	OP	src/lib/exporters.ts:102	Exportação CSV/XLSX plataforma.administracao
+24.15	PARC	src/lib/db/schema.ts:1044	Departamentos só no escritório contabil.carteira
+24.16	PARC	src/domain/roles.ts:212	Funções = perfis plataforma.administracao
+24.17	PARC	src/app/actions/session.ts:60	Bloqueio após 5 falhas, 2FA por perfil plataforma.acesso
+24.18	OP	src/lib/server/session.ts:49	Restrição por empresa, filial, módulo plataforma.acesso
+24.19	NAO	-	Sem dispositivos confiáveis
+24.20	OP	src/domain/backup.ts:168	Backup, verificação e restauração plataforma.backup
+24.21	PARC	src/domain/ecommerce/store.ts:237	Texto de privacidade; sem direitos do titular ecommerce.loja
+24.22	PARC	src/lib/db/schema.ts:189	Opt-in de promoções cadastros.clientes
+24.23	OP	src/domain/integrations.ts:9	Credenciais por referência; segredos cifrados plataforma.administracao
+24.24	OP	src/domain/notifications.ts:177	Silenciar tipos por usuário plataforma.painel
+24.25	PARC	src/domain/accounting/link.ts:36	Acesso externo só do escritório e do Interos integracao.contabilidade
+25.01	OP	src/domain/promotions-calc.ts:21	Escopo por SKU ou produto produtos.promocoes
+25.02	OP	src/domain/promotions-calc.ts:21	Escopo por categoria produtos.promocoes
+25.03	OP	src/domain/promotions-calc.ts:20	A partir de N produtos.promocoes
+25.04	NAO	src/domain/promotions-calc.ts:16	Uma faixa por regra
+25.05	OP	src/domain/promotions-calc.ts:20	Leve X pague Y produtos.promocoes
+25.06	NAO	-	Sem combo promocional
+25.07	NAO	-	Sem desconto por forma de pagamento
+25.08	PARC	src/lib/db/schema.ts:191	Tabela de preço do cliente no PDV tec.precos
+25.09	OP	src/domain/pricing.ts:10	Preço da filial tec.precos
+25.10	PARC	src/domain/ecommerce/catalog.ts:36	Só preço on-line da loja ecommerce.loja
+25.11	NAO	-	Sem preço por região
+25.12	OP	src/domain/promotions-calc.ts:16	Vigência, dias e horário produtos.promocoes
+25.13	OP	src/domain/price-adjust.ts:82	Reajuste em massa com prévia produtos.alteracao_massa
+25.14	OP	src/domain/receipt-pricing.ts:96	Margem antes/depois compras.precificacao
+25.15	PARC	src/domain/receipt-pricing.ts:14	Sugestão por margem-alvo; aplicação manual compras.precificacao
+25.16	NAO	-	Sem fluxo de aprovação de preço
+34.01	OP	src/domain/companies.ts:139	Várias empresas por usuário plataforma.administracao
+34.02	OP	src/domain/companies.ts:273	Várias filiais plataforma.administracao
+34.03	OP	src/exports/reports.ts:33	Consolidado e resultado por unidade relatorios.gerenciais
+34.04	OP	src/domain/cashflow.ts:28	Fluxo e painel consolidados financeiro.fluxo_caixa
+34.05	OP	src/app/(app)/estoque/page.tsx:73	Saldos consolidados estoque.gestao
+34.06	OP	src/domain/transfers.ts:179	Transferência entre filiais estoque.transferencias
+34.07	NAO	src/domain/transfers.ts:120	Outra empresa é recusada
+34.08	OP	src/domain/pricing.ts:10	Preço por filial tec.precos
+34.09	NAO	src/domain/purchases.ts:55	Pedido amarrado à filial
+34.10	PARC	src/lib/db/scoped-store.ts	Cadastros compartilhados entre filiais, não entre empresas plataforma.administracao
+34.11	OP	src/domain/users.ts:32	branchIds restringe filiais plataforma.administracao
+34.12	OP	src/app/(app)/dashboard/page.tsx	Painel consolidado plataforma.painel
+34.13	PARC	src/domain/accounting/common.ts:55	Grupo econômico só no escritório contabil.carteira
+34.14	PARC	src/domain/network/nodes.ts:50	Hierarquia só na rede rede.parceiro
+34.15	PARC	src/lib/db/schema.ts:632	Só centros de custo tec.financeiro
+35.01	DEV	src/domain/ecommerce/channels.ts:28	Conta só preparada ecommerce.canais
+35.02	DEV	src/domain/ecommerce/channels.ts:28	Conta só preparada ecommerce.canais
+35.03	DEV	src/domain/ecommerce/channels.ts:28	Conta só preparada ecommerce.canais
+35.04	DEV	src/domain/ecommerce/channels.ts:28	Conta só preparada ecommerce.canais
+35.05	NAO	-	iFood inexistente
+35.06	NAO	-	Shopify inexistente
+35.07	NAO	-	WooCommerce inexistente
+35.08	NAO	-	Nuvemshop inexistente
+35.09	NAO	-	VTEX inexistente
+35.10	PLAN	src/lib/modules/catalog.ts:637	Lacuna documentada ecommerce.marketplaces
+35.11	PLAN	src/lib/modules/catalog.ts:637	Lacuna documentada ecommerce.marketplaces
+35.12	PLAN	src/lib/modules/catalog.ts:637	Lacuna documentada ecommerce.marketplaces
+35.13	PLAN	src/lib/modules/catalog.ts:637	Lacuna documentada ecommerce.marketplaces
+35.14	NAO	-	Sem comissões de marketplace
+35.15	PARC	src/domain/card-reconciliation.ts:151	Só adquirente e Banco Intercert financeiro.taxas_adquirente
+35.16	NAO	-	Sem reputação
+35.17	PARC	src/domain/ecommerce/orders.ts:476	Só devoluções da loja própria ecommerce.loja
+35.18	DEV	src/domain/ecommerce/channels.ts:48	Tela só prepara contas ecommerce.canais
+36.01	EXT	src/domain/ecommerce/providers.ts:134	Gateway Intercert não conectado; simulação ecommerce.loja
+36.02	PARC	src/domain/accounting/certificates.ts:80	Só URL fixa da certificação e {link_pix} contabil.certificados
+36.03	PARC	src/app/(app)/pdv/pagamento/payment-app.tsx:408	PDV com NSU manual; cartão da loja simulado vendas.pdv
+36.04	EXT	src/domain/payments/providers.ts:76; src/lib/pix.ts	Pix dinâmico Mercado Pago (sem credencial: simulação) e estático tec.pagamentos
+36.05	EXT	src/domain/ecommerce/providers.ts:90	Boleto só simulado na loja
+36.06	NAO	-	Sem cobrança recorrente
+36.07	PARC	src/domain/network/ledger.ts:257	Split modelado na rede rede.financeiro
+36.08	PARC	src/domain/payments/intents.ts:124	Estorno Pix pelo Mercado Pago tec.pagamentos
+36.09	EXT	src/domain/ecommerce/orders.ts:150	Chargeback via aviso do gateway (não conectado)
+36.10	NAO	-	Sem antifraude
+36.11	OP	src/domain/card-reconciliation.ts:151; src/domain/ecommerce/bank.ts:82	Adquirente × vendas e gateway financeiro.taxas_adquirente
+36.12	EXT	src/domain/ecommerce/providers.ts:32	Token de cartão só simulado
+36.13	OP	src/domain/card-fees.ts:25	Taxas por bandeira e parcela financeiro.taxas_adquirente
+36.14	OP	src/domain/card-reconciliation.ts:90	Layouts por adquirente financeiro.cartoes
+36.15	NAO	-	Sem subadquirentes
+36.16	PARC	src/domain/integrations.ts:54	Só Mercado Pago e Focus reais plataforma.administracao

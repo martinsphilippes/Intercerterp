@@ -19,7 +19,7 @@ import { pendingInvoiceSkus } from "@/domain/pending-invoice";
  * `scale` com a quantidade (peso ou valor ÷ preço da tabela); o preço continua vindo da tabela.
  */
 export async function GET(req: NextRequest) {
-  const s = await requireApiSession();
+  const s = await requireApiSession("json", { modules: ["vendas.pdv"], surface: "api pdv/products" });
   if (s instanceof NextResponse) return s;
   if (!can(s.user, "pdv")) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   const branchId = s.ctx.branchId;

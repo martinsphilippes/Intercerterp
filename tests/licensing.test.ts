@@ -1,0 +1,324 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/server/bootstrap", () => ({ ensureBootstrap: async () => undefined }));
+import crypto from "node:crypto";
+import { freshStore } from "./helpers";
+import type { MemoryStore } from "@/lib/db/memory-store";
+import type { Doc } from "@/lib/db/types";
+import { listAll } from "@/lib/db";
+import { unscoped } from "@/lib/db/scoped-store";
+import { createCompanyWithDefaults } from "@/domain/setup";
+import { takeBaseline, provisionModules } from "@/domain/modules/baseline";
+import { decide, loadCompanyModules } from "@/lib/modules/access";
+import { companyCap, itemEffective, resolveCode, type LicenseSnapshot } from "@/domain/licensing/effective";
+import { applyLicense, displayMode, licenseStatus, maintainLicense, planLicense } from "@/domain/licensing/license";
+import { assertWithinLimit, noteFiscalDocumentUsage } from "@/domain/licensing/limits";
+import { reconcileLicense } from "@/domain/licensing/sync";
+import { signBody, verifySignature } from "@/domain/licensing/events";
+import { companyUsage } from "@/domain/licensing/usage";
+import { requestUpsell } from "@/domain/licensing/upsell";
+import { runDueJobs } from "@/domain/jobs-registry";
+import { systemCtx } from "@/lib/core/ctx";
+import { roleFromAttributes } from "@/domain/users";
+import { UNITS_V2 } from "@/lib/modules/units-v2.generated";
+
+/**
+ * Licenciamento comercial (contrato Interos v2) sobre o runtime de habilitação: estados, carências e agendamentos
+ * locais, versão monotônica (repetição e fora de ordem), homologação, limites, eventos assinados, reconciliação com o
+ * Interos indisponível, isolamento entre empresas, oportunidade de contratação e perfil por cargo.
+ */
+let store: MemoryStore;
+let A: Doc;
+let B: Doc;
+const day = 86400000;
+const iso = (ms: number) => new Date(ms).toISOString();
+const ALL_SELLABLE_RETAIL = UNITS_V2.filter((u) => u.sellable && u.v1Key && !u.v1Key.startsWith("contabil.") && !u.v1Key.startsWith("rede.") && u.v1Key !== "ecommerce.loja" && !u.v1Key.startsWith("ecommerce.")).map((u) => u.code);
+
+function snap(companyId: string, version: number, items: LicenseSnapshot["items"], extra: Partial<LicenseSnapshot> = {}): LicenseSnapshot {
+  return { licenseVersion: version, companyId, product: "erp-intercert", commercialStatus: "active", items, issuedAt: new Date().toISOString(), ...extra };
+}
+const meta = { clientId: "interos-test", source: "push" as const };
+
+beforeEach(async () => {
+  store = freshStore();
+  A = (await createCompanyWithDefaults(store, { name: "Alfa Licença Ficticia", cnpj: "33333333000191", key: "alfa-lic" })).company;
+  B = (await createCompanyWithDefaults(store, { name: "Beta Licença Ficticia", cnpj: "44444444000191", key: "beta-lic" })).company;
+  await takeBaseline(store, A.id);
+  await takeBaseline(store, B.id);
+});
+
+describe("estado efetivo (puro)", () => {
+  const now = new Date("2026-12-10T12:00:00Z");
+  it("teste: dentro do prazo, carência de 7 dias e suspensão depois", () => {
+    expect(itemEffective({ state: "trial", until: "2026-12-15T00:00:00Z" }, now)).toMatchObject({ on: true, state: "trial" });
+    const grace = itemEffective({ state: "trial", until: "2026-12-05T00:00:00Z" }, now);
+    expect(grace.on).toBe(true);
+    expect(grace.notice).toMatch(/carência até 2026-12-12/);
+    expect(itemEffective({ state: "trial", until: "2026-12-01T00:00:00Z" }, now)).toMatchObject({ on: false, state: "suspended" });
+  });
+  it("agendamentos e estados de bloqueio", () => {
+    expect(itemEffective({ state: "activation_scheduled", effectiveAt: "2026-12-20T00:00:00Z" }, now).on).toBe(false);
+    expect(itemEffective({ state: "activation_scheduled", effectiveAt: "2026-12-01T00:00:00Z" }, now).on).toBe(true);
+    expect(itemEffective({ state: "suspension_scheduled", effectiveAt: "2026-12-20T00:00:00Z" }, now).on).toBe(true);
+    expect(itemEffective({ state: "suspension_scheduled", effectiveAt: "2026-12-01T00:00:00Z" }, now)).toMatchObject({ on: false, state: "suspended" });
+    for (const s of ["suspended", "expired", "read_only", "inactive"] as const) expect(itemEffective({ state: s }, now).on).toBe(false);
+  });
+  it("vigência vencida: 7 dias de carência e depois somente leitura; empresa suspensa limita tudo", () => {
+    expect(companyCap({ commercialStatus: "active", validUntil: "2026-12-05T00:00:00Z" }, now)).toMatchObject({ allowOn: true });
+    expect(companyCap({ commercialStatus: "active", validUntil: "2026-12-01T00:00:00Z" }, now)).toMatchObject({ allowOn: false, state: "read_only" });
+    expect(companyCap({ commercialStatus: "suspended" }, now).allowOn).toBe(false);
+    expect(companyCap({ commercialStatus: "active", activationAt: "2026-12-20T00:00:00Z" }, now)).toMatchObject({ allowOn: false, state: "activation_scheduled" });
+  });
+  it("resolução de códigos: unidade, alias, incluído, módulo inteiro, não contratável e inexistente", () => {
+    expect(resolveCode("07.01").units).toEqual(["07.01"]);
+    expect(resolveCode("09.02")).toMatchObject({ units: ["01.04"], issue: { reason: "alias_resolved" } }); // grade de tamanhos ≡ variações (incluídas no cadastro de produtos)
+    expect(resolveCode("07.13").issue?.reason).toBe("not_contractable"); // PIX do PDV ≡ 36.04: componente compartilhado, não se vende à parte
+    expect(resolveCode("07.03")).toMatchObject({ units: ["07.02"], issue: { reason: "included_item" } }); // fechamento vem com o caixa
+    expect(resolveCode("05").units).toEqual(expect.arrayContaining(["05.02", "05.04", "05.05", "05.06", "05.08"]));
+    expect(resolveCode("14.02").issue?.reason).toBe("not_contractable"); // food service: futuro
+    expect(resolveCode("99.99").issue?.reason).toBe("unknown_code");
+  });
+});
+
+describe("aplicação do retrato de licença", () => {
+  it("aplica em A sem afetar B; repetição devolve duplicate; versão menor (fora de ordem) é ignorada", async () => {
+    const bBefore = await loadCompanyModules(store, B.id);
+    const items = [...ALL_SELLABLE_RETAIL.filter((c) => c !== "05.02").map((code) => ({ code, state: "active" as const })), { code: "04.01", state: "active" as const }, { code: "04.02", state: "active" as const }];
+    const r = await applyLicense(store, A.id, snap(A.id, 5, items, { controlMode: "enforced" }), meta);
+    expect(r.status).toBe("applied");
+    const a = await loadCompanyModules(store, A.id);
+    expect(a!.mode).toBe("enforced");
+    expect(decide(a, "compras.cotacoes").level).toBe("read"); // não licenciada: desligada com consulta
+    expect(decide(a, "compras.pedidos").level).toBe("full");
+    expect(await loadCompanyModules(store, B.id)).toEqual(bBefore);
+    // repetição da mesma versão
+    expect((await applyLicense(store, A.id, snap(A.id, 5, items, { controlMode: "enforced" }), meta)).status).toBe("duplicate");
+    // fora de ordem: versão antiga chegando depois
+    const old = await applyLicense(store, A.id, snap(A.id, 3, [{ code: "05.02", state: "active" }]), meta);
+    expect(old).toMatchObject({ status: "stale", appliedVersion: 5 });
+    expect(decide(await loadCompanyModules(store, A.id), "compras.cotacoes").level).toBe("read");
+    const hist = await listAll(store, "license_history", { filters: [["eq", "companyId", A.id]] });
+    expect(hist.map((h) => `${h.licenseVersion}:${h.status}`).sort()).toEqual(["3:stale", "5:applied"]);
+  });
+
+  it("homologação: NF-e/NFC-e preservadas para quem já tinha; empresa nova não recebe unidade não homologada", async () => {
+    const items = [...ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const })), { code: "04.01", state: "active" as const }];
+    const plan = await planLicense(store, A.id, snap(A.id, 1, items));
+    expect(plan.warnings.some((w) => w.reason === "preserved_access" && w.code === "04.01")).toBe(true);
+    const C = (await createCompanyWithDefaults(store, { name: "Gama Nova Ficticia", key: "gama-lic" })).company;
+    await provisionModules(store, C.id, ["cadastros.produtos"], "teste");
+    const r = await applyLicense(store, C.id, snap(C.id, 1, [{ code: "01.04", state: "active" }, { code: "04.01", state: "active" }]), meta);
+    expect(r.status).toBe("applied");
+    expect(r.plan!.rejectedItems.some((i) => i.reason === "not_homologated" && i.code === "04.01")).toBe(true);
+    expect(decide(await loadCompanyModules(store, C.id), "fiscal.nfe").level).toBe("none");
+  });
+
+  it("dependência ausente recusa o retrato inteiro (nada muda)", async () => {
+    const C = (await createCompanyWithDefaults(store, { name: "Delta Ficticia", key: "delta-lic" })).company;
+    await provisionModules(store, C.id, ["cadastros.produtos"], "teste");
+    const before = await loadCompanyModules(store, C.id);
+    const r = await applyLicense(store, C.id, snap(C.id, 1, [{ code: "05.02", state: "active" }]), meta); // cotações sem pedidos/fornecedores
+    expect(r.status).toBe("rejected");
+    expect(r.plan!.rejectedItems.some((i) => i.reason === "dependency_missing")).toBe(true);
+    expect(await loadCompanyModules(store, C.id)).toEqual(before);
+  });
+
+  it("teste vencido e suspensão programada são executados localmente pela manutenção (sem o Interos)", async () => {
+    const t0 = Date.now();
+    const items = [...ALL_SELLABLE_RETAIL.filter((c) => !["05.02", "18.10"].includes(c)).map((code) => ({ code, state: "active" as const })),
+      { code: "05.02", state: "trial" as const, until: iso(t0 + 2 * day) }, { code: "18.10", state: "suspension_scheduled" as const, effectiveAt: iso(t0 + 5 * day) }];
+    await applyLicense(store, A.id, snap(A.id, 1, items, { controlMode: "enforced" }), meta);
+    expect(decide(await loadCompanyModules(store, A.id), "compras.cotacoes").level).toBe("full");
+    // dia 6: suspensão programada vale; teste ainda em carência
+    await maintainLicense(store, A.id, new Date(t0 + 6 * day));
+    let doc = await loadCompanyModules(store, A.id);
+    expect(decide(doc, "financeiro.conciliacao").level).toBe("read");
+    expect(decide(doc, "compras.cotacoes").level).toBe("full");
+    // dia 10: teste vencido há mais de 7 dias → suspenso
+    await maintainLicense(store, A.id, new Date(t0 + 10 * day));
+    doc = await loadCompanyModules(store, A.id);
+    expect(decide(doc, "compras.cotacoes").level).toBe("read");
+    const changes = await listAll(store, "module_changes", { filters: [["eq", "companyId", A.id], ["eq", "actorType", "system"]] });
+    expect(changes.length).toBe(2);
+  });
+
+  it("vigência vencida sem renovação: carência e depois somente leitura; em modo legacy nada é bloqueado", async () => {
+    const t0 = Date.now();
+    const items = ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }));
+    await applyLicense(store, A.id, snap(A.id, 1, items, { validUntil: iso(t0 + day) }), meta);
+    await maintainLicense(store, A.id, new Date(t0 + 5 * day));
+    expect((await loadCompanyModules(store, A.id))!.modules["vendas.pdv"].state).toBe("enabled"); // carência
+    await maintainLicense(store, A.id, new Date(t0 + 10 * day));
+    const doc = await loadCompanyModules(store, A.id);
+    expect(doc!.modules["vendas.pdv"].state).toBe("disabled"); // somente leitura (histórico em consulta)
+    expect(doc!.modules["vendas.pdv"].history).toBe("read");
+    expect(decide(doc, "vendas.pdv").level).toBe("full"); // A segue em legacy: o estado é gravado, nada é bloqueado ainda
+    expect((await licenseStatus(store, A.id)).effective!["vendas.pdv"].state).toBe("read_only");
+  });
+});
+
+describe("limites contratados", () => {
+  it("usuários/dispositivos/filiais barram só novos cadastros; emissão fiscal nunca é bloqueada", async () => {
+    const items = ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }));
+    await applyLicense(store, A.id, snap(A.id, 1, items, { limits: { users: 0, devices: 0, branches: 1, fiscalDocumentsPerMonth: 0 } }), meta);
+    await expect(assertWithinLimit(store, A.id, "users")).rejects.toMatchObject({ code: "license_limit" });
+    await expect(assertWithinLimit(store, A.id, "devices")).rejects.toMatchObject({ code: "license_limit" });
+    await expect(assertWithinLimit(store, A.id, "branches")).rejects.toMatchObject({ code: "license_limit" }); // já há a matriz
+    await expect(assertWithinLimit(store, B.id, "users")).resolves.toBeUndefined(); // B sem licença: livre
+    await store.create("fiscal_documents", { companyId: A.id, ref: "ref-1", model: "nfce", status: "authorized", branchId: null });
+    await expect(noteFiscalDocumentUsage(store, A.id)).resolves.toBeUndefined();
+    const ev = await listAll(store, "jobs", { filters: [["eq", "type", "interos.event"]] });
+    expect(ev.some((j) => j.payload.event.type === "limit.reached" && j.payload.event.data.kind === "fiscalDocumentsPerMonth" && j.payload.event.data.blocking === false)).toBe(true);
+  });
+});
+
+describe("eventos, assinatura e reconciliação", () => {
+  const env = { ...process.env };
+  afterEach(() => {
+    process.env = { ...env };
+  });
+
+  it("assinatura HMAC: válida, adulterada, fora da janela", () => {
+    const secret = "s".repeat(40);
+    const body = '{"a":1}';
+    const sig = signBody(secret, body);
+    expect(verifySignature(secret, sig, body).ok).toBe(true);
+    expect(verifySignature(secret, sig, '{"a":2}').ok).toBe(false);
+    expect(verifySignature(secret, signBody(secret, body, Math.floor(Date.now() / 1000) - 600), body).ok).toBe(false);
+  });
+
+  it("eventos de saída: sem configuração ficam registrados como não enviados; com configuração vão assinados", async () => {
+    await applyLicense(store, A.id, snap(A.id, 1, ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }))), meta);
+    let r = await runDueJobs(store, { types: ["interos.event"] });
+    expect(r.every((x) => x.status === "done")).toBe(true);
+    expect((await listAll(store, "jobs", { filters: [["eq", "type", "interos.event"]] }))[0].result).toMatchObject({ delivered: false, reason: "not_configured" });
+    process.env.INTEROS_EVENTS_URL = "https://interos.example/events";
+    process.env.INTEROS_OUTBOUND_SECRET = "x".repeat(40);
+    const calls: { headers: any; body: string }[] = [];
+    vi.stubGlobal("fetch", async (_u: string, init: any) => {
+      calls.push({ headers: init.headers, body: init.body });
+      return new Response("{}", { status: 200 });
+    });
+    await applyLicense(store, A.id, snap(A.id, 2, ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }))), meta);
+    r = await runDueJobs(store, { types: ["interos.event"] });
+    vi.unstubAllGlobals();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(verifySignature("x".repeat(40), calls[0].headers["x-erp-signature"], calls[0].body).ok).toBe(true);
+  });
+
+  it("reconciliação: aplica retrato mais novo do Interos; Interos fora do ar mantém a última licença; retrato velho gera sync.stale", async () => {
+    const items = ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }));
+    await applyLicense(store, A.id, snap(A.id, 1, items), meta);
+    process.env.INTEROS_LICENSE_URL = "https://interos.example/licenses/{companyId}";
+    process.env.INTEROS_OUTBOUND_TOKEN = "tok";
+    const newer = snap(A.id, 2, items.filter((i) => i.code !== "05.02"));
+    const r1 = await reconcileLicense(store, A.id, (async () => new Response(JSON.stringify({ data: newer }), { status: 200 })) as any);
+    expect(r1.pull).toBe("applied");
+    expect((await licenseStatus(store, A.id)).appliedVersion).toBe(2);
+    const r2 = await reconcileLicense(store, A.id, (async () => { throw new Error("ECONNREFUSED"); }) as any);
+    expect(String(r2.pull)).toMatch(/ECONNREFUSED/);
+    expect((await licenseStatus(store, A.id)).appliedVersion).toBe(2);
+    await store.update("company_licenses", (await store.list("company_licenses", { filters: [["eq", "companyId", A.id]] })).items[0].id, { lastSnapshotAt: iso(Date.now() - 5 * day) });
+    const r3 = await reconcileLicense(store, A.id, (async () => new Response(JSON.stringify({ data: newer }), { status: 200 })) as any);
+    expect(r3).toMatchObject({ pull: "up_to_date", stale: true });
+  });
+});
+
+describe("telemetria, exibição e oportunidade de contratação", () => {
+  it("telemetria agregada sem dados pessoais", async () => {
+    const u = await companyUsage(store, A.id, iso(Date.now() - 30 * day), iso(Date.now() + day));
+    expect(u.totals).toMatchObject({ sales: 0, branches: 1 });
+    expect(JSON.stringify(u)).not.toMatch(/@|cpf|cnpj/i);
+  });
+  it("exibição: oculto para clientes atuais, oportunidade para empresa nova; solicitação só no modo oportunidade", async () => {
+    expect(await displayMode(store, A.id)).toBe("hidden");
+    const C = (await createCompanyWithDefaults(store, { name: "Épsilon Ficticia", key: "eps-lic" })).company;
+    await provisionModules(store, C.id, ["cadastros.produtos"], "teste");
+    expect(await displayMode(store, C.id)).toBe("upsell");
+    const ctxC = { ...systemCtx(store, C.id), user: { ...systemCtx(store, C.id).user, id: "u-c", name: "Usuária C" } };
+    const r = await requestUpsell(ctxC, "compras.cotacoes", "Queremos cotações");
+    expect(r.duplicate).toBe(false);
+    expect((await requestUpsell(ctxC, "compras.cotacoes", "")).duplicate).toBe(true);
+    const ev = await listAll(unscoped(store), "jobs", { filters: [["eq", "type", "interos.event"]] });
+    expect(ev.some((j) => j.payload.event.type === "upsell.requested" && j.companyId === C.id)).toBe(true);
+    await expect(requestUpsell(systemCtx(store, A.id), "compras.cotacoes", "")).rejects.toMatchObject({ code: "forbidden" });
+  });
+});
+
+describe("perfil por cargo/departamento/função (o perfil segue único contêiner de permissões)", () => {
+  it("primeira regra que casa, sem diferenciar caixa e acento", () => {
+    const rules = [{ attribute: "department" as const, value: "Financeiro", roleId: "r-fin" }, { attribute: "jobTitle" as const, value: "Operador de Caixa", roleId: "r-cx" }];
+    expect(roleFromAttributes(rules, { jobTitle: "operador de caixa" })).toBe("r-cx");
+    expect(roleFromAttributes(rules, { department: "FINANCEIRO", jobTitle: "operador de caixa" })).toBe("r-fin");
+    expect(roleFromAttributes(rules, { jobFunction: "x" })).toBeNull();
+  });
+});
+
+describe("API /api/interos/v2", () => {
+  // registro único de credenciais (INTEROS_CREDENCIAIS): token `<id>.<segredo>`; HMAC pelo nome da variável em `assinatura`
+  const tokenSecret = crypto.randomBytes(32).toString("base64url");
+  const roSecret = crypto.randomBytes(32).toString("base64url");
+  const token = `interos-v2.${tokenSecret}`;
+  const roToken = `interos-ro.${roSecret}`;
+  const secret = "z".repeat(48);
+  const h = (t: string) => `sha256:${crypto.createHash("sha256").update(t).digest("hex")}`;
+  beforeEach(() => {
+    process.env.INTEROS_SIGN_TEST = secret;
+    process.env.INTEROS_CREDENCIAIS = JSON.stringify([
+      { id: "interos-v2", escopos: ["erp.license.read", "erp.license.write", "erp.usage.read"], hash: h(tokenSecret), assinatura: "INTEROS_SIGN_TEST" },
+      { id: "interos-ro", escopos: ["erp.license.read"], hash: h(roSecret), empresas: ["outra"] },
+    ]);
+  });
+  const req = (body: string, headers: Record<string, string> = {}, t = token) => new Request("http://erp.local/x", { method: "PUT", body, headers: { authorization: `Bearer ${t}`, "content-type": "application/json", ...headers } });
+  const params = () => ({ params: Promise.resolve({ companyId: A.id }) });
+
+  it("PUT assinado aplica; repetição do evento devolve a mesma resposta; corpo diferente no mesmo evento é recusado", async () => {
+    const { PUT, GET } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
+    const body = JSON.stringify(snap(A.id, 7, ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }))));
+    const sig = signBody(secret, body);
+    const r1 = await PUT(req(body, { "x-interos-signature": sig, "x-interos-event-id": "evt-0001-abcdef" }), params());
+    expect(r1.status).toBe(201);
+    expect((await r1.json()).data).toMatchObject({ status: "applied", appliedVersion: 7 });
+    const r2 = await PUT(req(body, { "x-interos-signature": sig, "x-interos-event-id": "evt-0001-abcdef" }), params());
+    expect(r2.status).toBe(201);
+    expect(r2.headers.get("idempotent-replayed")).toBe("true");
+    const other = JSON.stringify(snap(A.id, 8, []));
+    const r3 = await PUT(req(other, { "x-interos-signature": signBody(secret, other), "x-interos-event-id": "evt-0001-abcdef" }), params());
+    expect(r3.status).toBe(409);
+    const bad = await PUT(req(body, { "x-interos-signature": "t=1,v1=00", "x-interos-event-id": "evt-0002-abcdef" }), params());
+    expect(bad.status).toBe(401);
+    const st = await GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${token}` } }), params());
+    expect(st.headers.get("etag")).toBe('"7"');
+  });
+
+  it("escopo e restrição de empresa por credencial", async () => {
+    const { PUT, GET } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
+    const body = JSON.stringify(snap(A.id, 1, []));
+    expect((await PUT(req(body, {}, roToken), params())).status).toBe(403); // sem escopo de escrita
+    expect((await GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${roToken}` } }), params())).status).toBe(403); // empresa não permitida
+  });
+
+  it("catálogo, sincronização, telemetria, erros e solicitações", async () => {
+    const auth = { headers: { authorization: `Bearer ${token}` } };
+    const cat = await (await import("@/app/api/interos/v2/catalog/route")).GET(new Request("http://erp.local/x", auth));
+    expect((await cat.json()).data.catalog).toBe("catalogo-modulos-erp-v2");
+    const item = await (await import("@/app/api/interos/v2/catalog/[code]/route")).GET(new Request("http://erp.local/x", auth), { params: Promise.resolve({ code: "07" }) });
+    expect((await item.json()).data.children.length).toBeGreaterThan(20);
+    const sync = await (await import("@/app/api/interos/v2/companies/[companyId]/sync/route")).GET(new Request("http://erp.local/x", auth), params());
+    expect((await sync.json()).data).toMatchObject({ companyId: A.id, appliedVersion: 0 });
+    const usage = await (await import("@/app/api/interos/v2/companies/[companyId]/usage/route")).GET(new Request("http://erp.local/x?from=2026-01-01T00:00:00Z", auth), params());
+    expect(usage.status).toBe(200);
+    const errs = await (await import("@/app/api/interos/v2/errors/route")).GET(new Request("http://erp.local/x", auth));
+    expect(Array.isArray((await errs.json()).data)).toBe(true);
+    const ups = await (await import("@/app/api/interos/v2/upsell-requests/route")).GET(new Request("http://erp.local/x", auth));
+    expect(ups.status).toBe(200);
+  });
+
+  it("sem segredo de assinatura configurado as escritas respondem 503", async () => {
+    delete process.env.INTEROS_SIGN_TEST;
+    delete process.env.INTEROS_CREDENCIAIS;
+    const { PUT } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
+    const body = JSON.stringify(snap(A.id, 1, []));
+    expect((await PUT(req(body, { "x-interos-signature": signBody(secret, body), "x-interos-event-id": "evt-0003-abcdef" }), params())).status).toBe(503);
+  });
+});

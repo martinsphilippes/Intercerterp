@@ -7,7 +7,9 @@ import { configuredBackend, getStore, findOne, detId } from "@/lib/db";
  *   ?step=provision — cria no Postgres as tabelas, colunas e índices que faltam (a primeira consulta já faz isso sozinha)
  *   ?step=demo      — carrega a empresa de demonstração (idempotente; repita se o tempo acabar)
  *   ?step=owner     — cria o administrador geral (e-mail informado; senha gerada e devolvida UMA vez)
- *   ?step=finish    — encerra a instalação: a rota deixa de funcionar (exceto provision e demo-update, idempotentes)
+ *   ?step=modules-baseline — linha de base dos módulos das empresas sem estado (modo legacy; aditiva e idempotente)
+ *   ?step=finish    — encerra a instalação: a rota deixa de funcionar (exceto provision, demo-update, multiempresa e
+ *                     modules-baseline, idempotentes)
  *   ?step=diagnostico — região, tempo de resposta e tamanho do banco, esquema aplicado, arquivos, chave de cifra, avisos e notas (só leitura)
  * Exige o SETUP_TOKEN (cabeçalho x-setup-token ou ?token=). Depois de "finish" responde 410.
  */
@@ -118,6 +120,14 @@ async function runStep(req: NextRequest, backend: "postgres", step: string, star
     }
   }
 
+  // habilitação de módulos (docs/modulos/lancamento-gradual.md): linha de base de todas as empresas sem estado. Aditiva e
+  // idempotente — grava o estado em modo "legacy" (nada muda para ninguém); permitida também depois de "finish"
+  if (step === "modules-baseline") {
+    const { baselineAllCompanies } = await import("@/domain/modules/baseline");
+    const companies = await baselineAllCompanies(store);
+    return NextResponse.json({ ok: true, step, companies, ms: Date.now() - started });
+  }
+
   // a partir daqui o banco precisa estar provisionado
   const completed = await store.get("operations", DONE_ID).catch(() => null);
 
@@ -205,5 +215,5 @@ async function runStep(req: NextRequest, backend: "postgres", step: string, star
     return NextResponse.json({ ok: true, step, completed: true });
   }
 
-  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | demo-update | multiempresa | status | check-login | owner | finish | diagnostico)." }, { status: 400 });
+  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | demo-update | multiempresa | modules-baseline | status | check-login | owner | finish | diagnostico)." }, { status: 400 });
 }
