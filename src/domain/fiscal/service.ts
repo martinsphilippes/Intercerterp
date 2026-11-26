@@ -128,6 +128,11 @@ export function providerFor(store: Store, cfg: Doc | null) {
 
 export async function saveFiscalConfig(ctx: Ctx, branchId: string | null, data: Record<string, any>) {
   requireAction(ctx, "fiscal.configure");
+  // multiempresa: filial de outra empresa (ou inexistente) não vira configuração órfã nesta
+  if (branchId) {
+    const b = await ctx.store.get("branches", branchId);
+    assert(b && b.companyId === ctx.companyId, "Filial não encontrada nesta empresa.");
+  }
   // nomes de variáveis de credencial: só variáveis do provedor (o valor do token é enviado à Focus NFe), nunca do sistema
   if ("tokenRef" in data && data.tokenRef !== "" && data.tokenRef != null) {
     const p = fiscalTokenRefProblem(data.tokenRef);

@@ -403,6 +403,11 @@ export async function saveIntegration(
   assert(cat, "Tipo de integração desconhecido.");
   // a loja virtual é uma por empresa: as integrações dela valem para a empresa inteira (nunca por filial)
   if (STORE_INTEGRATION_KINDS.includes(input.kind)) input = { ...input, branchId: null };
+  // multiempresa: filial de outra empresa (ou inexistente) não vira integração órfã nesta
+  if (input.branchId) {
+    const b = await ctx.store.get("branches", input.branchId);
+    assert(b && b.companyId === ctx.companyId, "Filial não encontrada nesta empresa.");
+  }
   const prov = cat.providers.find((p) => p.id === input.provider);
   assert(prov, "Provedor não suportado para esta integração.");
   // o endereço da API é fixo no código de cada provedor: nunca configurável (o servidor enviaria a credencial a ele)

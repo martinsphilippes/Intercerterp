@@ -22,7 +22,12 @@ export interface NotifyInput {
 }
 
 async function resolveAudience(store: Store, input: NotifyInput): Promise<string[]> {
-  if (input.audience.userIds) return input.audience.userIds;
+  if (input.audience.userIds) {
+    // destinatários informados: só quem é vinculado à empresa da notificação (ou administrador da plataforma)
+    const wanted = [...new Set(input.audience.userIds.filter(Boolean))];
+    const found = await Promise.all(wanted.map((id) => unscoped(store).get("users", id)));
+    return found.filter((u): u is NonNullable<typeof u> => Boolean(u && ((u.companyIds ?? []).includes(input.companyId) || u.isAdmin))).map((u) => u.id);
+  }
   // identidades são globais: a lista sai sem escopo e é filtrada pelo vínculo com a empresa da notificação
   const users = await listAll(unscoped(store), "users", { filters: [["eq", "status", "active"]] });
   // perfis lidos sem restrição de empresa: o perfil legado do usuário pode ser de outra empresa (perfil de sistema equivalente)
