@@ -112,6 +112,23 @@ A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empr
 
 ## 7. Entrega dos valores
 
+**Passo a passo (homologação)**, feito por quem tem acesso às duas contas da Vercel, no próprio computador:
+1. Gere as três credenciais com o gerador do ERP (`node scripts/interos/credencial.mjs`, que usa gerador
+   criptográfico e mostra cada valor uma única vez, só no terminal):
+   - licenças: `interos-licencas-hml erp.license.read erp.license.write erp.modules.read erp.usage.read --empresas=<ids do piloto> --assinatura=INTEROS_ASSINATURA_HML`;
+   - provisionamento: `interos-prov-hml provisionamento:leitura provisionamento:escrita`;
+   - Torre: `interos-torre-hml torre:resumo torre:detalhe torre:transacoes`.
+2. Cole na Vercel do **Interos** (ambiente Preview):
+   - `ERP_INTERCERT_URL`: o endereço da homologação do ERP;
+   - `ERP_INTERCERT_TOKEN_LICENCAS`, `ERP_INTERCERT_CREDENCIAL_PROVISIONAMENTO` e `ERP_INTERCERT_CREDENCIAL_TORRE`: os tokens;
+   - `ERP_INTERCERT_SEGREDO_ASSINATURA`: o segredo de assinatura.
+3. Cole na Vercel do **ERP** (Preview da branch de homologação) o mesmo segredo de assinatura em
+   `INTEROS_ASSINATURA_HML`.
+4. Acrescente ao `INTEROS_CREDENCIAIS` do ERP as três "entradas" que o gerador imprimiu. São só hashes, não
+   segredos.
+5. Publique de novo os dois projetos: a Vercel só aplica variável nova na próxima publicação.
+6. Depois que o Interos confirmar as credenciais novas, retire do registro as anteriores (`interos-equipe-*`).
+
 - Cada valor vai **direto para as variáveis da Vercel**, colado por quem tem acesso a elas. Do lado do ERP, isso
   vale para `INTEROS_CREDENCIAIS` (só hashes) e para a variável do segredo de assinatura. Do lado do Interos, para o
   token e o segredo.
