@@ -74,6 +74,13 @@ Na prática:
     provisionamento);
   - `PUT /empresas/{id}/modulos` responde `409 licenca_governa`. Uma referência só, sem duas fontes brigando.
 
+**Duas alavancas de suspensão, papéis diferentes.** Vale sempre a mais restritiva:
+
+| Alavanca | Uso | Efeito |
+|---|---|---|
+| Conta (`POST /empresas/{id}/suspender`, provisionamento) | Encerramento, fraude, bloqueio total | `bloqueio`: ninguém entra. `somente_leitura`: entra, consulta e exporta, sem gravar. |
+| Licença (`commercialStatus` no retrato v2) | Situação comercial do contrato (inadimplência, vigência) | Módulos suspensos ou em consulta. Login, administração e obrigações em curso continuam. |
+
 ## 5. Catálogo v2 (pendência 5): o que falta é a validação do titular
 
 Já está no catálogo:
