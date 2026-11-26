@@ -7,7 +7,7 @@ import { searchable } from "@/lib/core/text";
 import { unscoped } from "@/lib/db/scoped-store";
 import { resolveRoleId } from "@/lib/auth/users";
 import { syncRoleTemplate, templateSyncPlan } from "@/lib/auth/role-sync";
-import { MODULES, SPECIAL_ACTIONS, type Crud, type ModuleKey, type PermissionMatrix, type SpecialAction } from "@/lib/permissions";
+import { MODULES, PLATFORM_ACTIONS, SPECIAL_ACTIONS, type Crud, type ModuleKey, type PermissionMatrix, type SpecialAction } from "@/lib/permissions";
 
 /**
  * Perfis de acesso (Tela 36 / visão complementar 9 — Perfis e permissões).
@@ -204,6 +204,33 @@ export async function roleUsers(store: Store, roleId: string) {
   return users.filter((u) => !u.isAdmin && (!companyId || (u.companyIds ?? []).includes(companyId)) && resolveRoleId(u, companyId, rolesById, roles) === roleId);
 }
 
+const actionLabel = (k: string) => SPECIAL_ACTIONS.find((a) => a.key === k)?.label ?? k;
+const moduleLabel = (k: string) => MODULES.find((m) => m.key === k)?.label ?? k;
+const opLabel = (k: string) => CRUD_OPS.find((o) => o.key === k)?.label ?? k;
+
+/**
+ * Multiempresa — o que um perfil pode receber (docs/multiempresa/arquitetura.md §4):
+ *  - operações da PLATAFORMA (rede inteira, fila de certificação de todos) só em perfis da empresa da plataforma;
+ *    gravadas antes num perfil de outra empresa, ficam sem efeito (`toCtxUser`) e podem ser mantidas, nunca acrescentadas;
+ *  - quem edita só concede o que ele mesmo tem na empresa (módulo × operação e operações específicas); o que o perfil
+ *    já tinha antes da edição pode ser mantido. O administrador da plataforma (`isAdmin`) não tem esse limite.
+ */
+export async function assertGrantable(ctx: Ctx, wanted: { permissions: PermissionMatrix; actions: string[] }, before?: { permissions?: PermissionMatrix | null; actions?: string[] | null } | null) {
+  const had = new Set(before?.actions ?? []);
+  const company = await unscoped(ctx.store).get("companies", ctx.companyId);
+  const platform = wanted.actions.filter((a) => (PLATFORM_ACTIONS as string[]).includes(a) && !had.has(a));
+  if (platform.length && !company?.isPlatform)
+    throw new BusinessError(`Operação da plataforma Intercert não pode ser concedida num perfil desta empresa: ${platform.map(actionLabel).join(", ")}.`, "forbidden");
+  if (ctx.user.isAdmin) return;
+  const outActions = wanted.actions.filter((a) => !had.has(a) && !(ctx.user.actions ?? []).includes(a));
+  const outOps: string[] = [];
+  for (const [mod, ops] of Object.entries(wanted.permissions ?? {}))
+    for (const [op, on] of Object.entries(ops ?? {}))
+      if (on && !(before?.permissions as any)?.[mod]?.[op] && !(ctx.user.permissions as any)?.[mod]?.[op]) outOps.push(`${moduleLabel(mod)} · ${opLabel(op)}`);
+  if (outActions.length || outOps.length)
+    throw new BusinessError(`Você só pode conceder acessos que você mesmo tem nesta empresa. Fora do seu perfil: ${[...outOps, ...outActions.map(actionLabel)].join("; ")}.`, "forbidden");
+}
+
 function validate(input: RoleInput) {
   assert(input.name?.trim(), "Informe o nome do perfil.");
   assert(Number.isInteger(input.discountLimitBps) && input.discountLimitBps >= 0 && input.discountLimitBps <= 10000, "Limite de desconto deve estar entre 0% e 100%.");
@@ -217,6 +244,7 @@ export async function createRole(ctx: Ctx, input: RoleInput, opts: { idemKey?: s
   let key = slug(input.name);
   while (existing.some((r) => r.key === key)) key = `${key.slice(0, 32)}_${Math.floor(Math.random() * 900 + 100)}`;
   const id = opts.idemKey ? detId("role", ctx.companyId, opts.idemKey) : undefined;
+  await assertGrantable(ctx, { permissions: normalizeMatrix(input.permissions), actions: normalizeActions(input.actions) });
   try {
     const role = await ctx.store.create(
       "roles",
@@ -257,6 +285,7 @@ export async function updateRole(ctx: Ctx, id: string, input: RoleInput, reason?
   assert(before.companyId === ctx.companyId, "Perfil de outra empresa.");
   const roles = await listRoles(ctx.store, ctx.companyId);
   if (roles.some((r) => r.id !== id && searchable(r.name) === searchable(input.name))) throw new BusinessError(`Já existe um perfil chamado "${input.name.trim()}".`, "duplicate");
+  await assertGrantable(ctx, { permissions: normalizeMatrix(input.permissions), actions: normalizeActions(input.actions) }, before);
   if (input.active === false && before.active !== false) {
     const users = (await roleUsers(ctx.store, id)).filter((u) => u.status === "active" || u.status === "invited");
     if (users.length) throw new BusinessError(`O perfil está atribuído a ${users.length} usuário(s) ativo(s) ou convidado(s); altere-os antes de desativar.`, "in_use");

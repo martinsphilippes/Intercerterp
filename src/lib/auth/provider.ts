@@ -69,6 +69,8 @@ class LocalAuth implements AuthProvider {
     const s = await findOne(this.store(), "sessions", [["eq", "tokenHash", sha256(secret)]]);
     if (!s || s.expiresAt < new Date().toISOString()) return null;
     const u = await this.store().get("users", s.userId);
+    // "encerrar todas as sessões": vale só o que foi emitido depois do instante registrado
+    if (u?.sessionsValidAfter && String(s.createdAt ?? "") < u.sessionsValidAfter) return null;
     return u?.authId ?? null;
   }
 

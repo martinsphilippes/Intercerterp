@@ -8,6 +8,7 @@ import { getAuth } from "@/lib/auth/provider";
 import { toCtxUser } from "@/lib/auth/users";
 import type { Ctx } from "@/lib/core/ctx";
 import { getSetting, setSetting } from "@/lib/core/settings";
+import { ensureDemoPlatform } from "./platform";
 import { addDays, today } from "@/lib/dates";
 import { createRole } from "../../roles";
 import {
@@ -36,13 +37,16 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   const owner = await ctxFor(contador);
   const lojaAdmin = await refs.ctxFor("admin", "matriz");
 
-  // equipe de certificação: perfil próprio no escritório (não é administrador da plataforma)
-  let role = (await listAll(store, "roles", { filters: [["eq", "companyId", firm.id]] })).find((r) => r.name === "Equipe de certificação (DEMO)");
-  if (!role) role = await createRole(owner, { name: "Equipe de certificação (DEMO)", description: "Confirma pagamentos, valida titulares e registra emissões de certificados digitais.", permissions: { dashboard: { view: true, create: false, edit: false, delete: false }, accounting: { view: true, create: false, edit: false, delete: false }, admin: { view: true, create: false, edit: false, delete: false }, support: { view: true, create: true, edit: true, delete: false } }, actions: ["certification.operate"], discountLimitBps: 0 });
+  // equipe de certificação Intercert: trabalha na EMPRESA DA PLATAFORMA (multiempresa §4) — a operação
+  // certification.operate alcança pedidos de todos os escritórios e por isso só vale na empresa marcada como plataforma
+  const plat = await ensureDemoPlatform(store);
+  const platCtx: Ctx = { store: scopeStore(store, plat.company.id, { platform: true }), companyId: plat.company.id, branchId: plat.branch.id, user: { id: "system", name: "Sistema", email: "", isAdmin: true, permissions: {}, actions: [], discountLimitBps: 0, branchIds: [], companyIds: [plat.company.id] } };
+  let role = (await listAll(store, "roles", { filters: [["eq", "companyId", plat.company.id]] })).find((r) => r.name === "Equipe de certificação (DEMO)");
+  if (!role) role = await createRole(platCtx, { name: "Equipe de certificação (DEMO)", description: "Confirma pagamentos, valida titulares e registra emissões de certificados digitais (plataforma Intercert).", permissions: { dashboard: { view: true, create: false, edit: false, delete: false }, admin: { view: true, create: false, edit: false, delete: false }, support: { view: true, create: true, edit: true, delete: false } }, actions: ["certification.operate"], discountLimitBps: 0 });
   let teamUser = await store.get("users", sd.id("users", "certificacao"));
-  if (!teamUser) teamUser = await sd.put("users", "certificacao", { name: "Cecília Certificação", email: "certificacao@demo.intercert.local", login: "certificacao", status: "active", roleId: role.id, roleByCompany: { [firm.id]: role.id }, isAdmin: false, companyIds: [firm.id], branchIds: [], isDemo: true, firstAccessAt: new Date().toISOString() });
+  if (!teamUser) teamUser = await sd.put("users", "certificacao", { name: "Cecília Certificação", email: "certificacao@demo.intercert.local", login: "certificacao", status: "active", roleId: role.id, roleByCompany: { [plat.company.id]: role.id }, isAdmin: false, companyIds: [plat.company.id], branchIds: [], isDemo: true, firstAccessAt: new Date().toISOString() });
   if (!teamUser.authId) teamUser = await store.update("users", teamUser.id, { authId: await getAuth().createUser(teamUser.email, DEMO_PASSWORD, teamUser.name) });
-  const team = await ctxFor(teamUser);
+  const team: Ctx = { store: scopeStore(store, plat.company.id, { platform: true }), companyId: plat.company.id, branchId: plat.branch.id, user: await toCtxUser(store, teamUser, plat.company.id) };
 
   await saveCertificationSettings(team, {
     // catálogo padrão da rede de certificação (§43): produtos do InterSuite com custo AC, tipo, titular e AC de 1º nível

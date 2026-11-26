@@ -10,6 +10,8 @@ import type { Ctx } from "../core/ctx";
 import { can, type Crud, type ModuleKey } from "../permissions";
 import { ensureBootstrap } from "./bootstrap";
 import { ScopedStore, scopeStore } from "../db/scoped-store";
+import { readOnly } from "../db/read-only";
+import { companyReadOnly, companySelectable } from "../../domain/tenancy/status";
 
 export const SESSION_COOKIE = "ic_session";
 export const UNIT_COOKIE = "ic_unit";
@@ -42,8 +44,8 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   if (companies.length === 0) return null;
   const unit = jar.get(UNIT_COOKIE)?.value ?? "";
   const [cid, bid] = unit.split(":");
-  // empresa/filial inativa não é contexto de trabalho (volta para a seleção de unidade)
-  const company = companies.find((c) => c.id === cid && c.status !== "inactive") ?? null;
+  // empresa/filial inativa (ou suspensa com bloqueio pelo contrato) não é contexto de trabalho (volta para a seleção de unidade)
+  const company = companies.find((c) => c.id === cid && companySelectable(c)) ?? null;
   const companyBranches = company ? branches.filter((b) => b.companyId === company.id) : [];
   const branch = bid && bid !== "all" ? (companyBranches.find((b) => b.id === bid && b.status !== "inactive") ?? null) : null;
   // Consolidado só para quem acessa todas as filiais (usuário restrito escolhe uma filial)
@@ -69,8 +71,11 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
       canConsolidate,
     };
   }
+  // multiempresa: Store restrito à empresa (a da plataforma atende os chamados da tela de login); empresa suspensa em
+  // "somente leitura" recebe um Store que recusa qualquer gravação
+  const scoped = scopeStore(store, company.id, { platform: Boolean(company.isPlatform) });
   return {
-    ctx: { store: scopeStore(store, company.id), user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined },
+    ctx: { store: companyReadOnly(company) ? readOnly(scoped) : scoped, user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined },
     user,
     company,
     branch,

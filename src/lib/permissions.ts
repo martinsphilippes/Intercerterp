@@ -97,6 +97,13 @@ export const SPECIAL_ACTIONS = [
 
 export type SpecialAction = (typeof SPECIAL_ACTIONS)[number]["key"];
 
+/**
+ * Operações DA PLATAFORMA (Intercert): alcançam dados de outras empresas (toda a rede, fila de certificação de todos os
+ * escritórios). Só valem para usuários da empresa da plataforma (`companies.isPlatform`) — num perfil de qualquer outra
+ * empresa elas não podem ser concedidas e, se já estiverem gravadas, não têm efeito (docs/multiempresa/arquitetura.md §4).
+ */
+export const PLATFORM_ACTIONS: SpecialAction[] = ["network.manage", "certification.operate"];
+
 const all = (): Record<Crud, boolean> => ({ view: true, create: true, edit: true, delete: true });
 const ro = (): Record<Crud, boolean> => ({ view: true, create: false, edit: false, delete: false });
 const rw = (): Record<Crud, boolean> => ({ view: true, create: true, edit: true, delete: false });

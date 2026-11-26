@@ -361,7 +361,10 @@ export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: stri
   requireAction(c, "admin.users");
   const company = await c.store.getOrThrow("companies", companyId);
   const mine = new Set(ctx.user.companyIds ?? []);
-  const users = (await listAll(c.store, "users")).filter((u) => !u.isAdmin && (ctx.user.isAdmin || (u.id !== ctx.user.id && (u.companyIds ?? []).some((x: string) => mine.has(x)))));
+  // vínculo entre empresas (porta explícita): candidatos são os usuários das empresas que o próprio gestor acessa —
+  // a leitura e a gravação saem do escopo da empresa-alvo de propósito, com a autorização conferida acima
+  const cross = unscoped(c.store);
+  const users = (await listAll(cross, "users")).filter((u) => !u.isAdmin && (ctx.user.isAdmin || (u.id !== ctx.user.id && (u.companyIds ?? []).some((x: string) => mine.has(x)))));
   const branchIds = new Set((await listAll(c.store, "branches", { filters: [["eq", "companyId", companyId]] })).map((b) => b.id));
   const wanted = new Set(userIds);
   // fase 1: plano + validação (nenhuma escrita)
@@ -393,7 +396,7 @@ export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: stri
   try {
     for (let i = 0; i < plan.length; i += 100) {
       const chunk = plan.slice(i, i + 100);
-      await c.store.transaction(async (tx) => {
+      await cross.transaction(async (tx) => {
         for (const p of chunk) await tx.update("users", p.user.id, p.patch);
       });
       changes.push(...chunk.map((p) => p.change));

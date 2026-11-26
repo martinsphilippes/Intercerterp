@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
-import { getCollection, COLLECTIONS } from "./schema";
+import { getCollection, COLLECTIONS, COLLECTION_MAP } from "./schema";
 import { fromStored, toStored } from "./serialize";
-import { ConflictError, Doc, Filter, ListOptions, ListResult, NotFoundError, Store } from "./types";
+import { ConflictError, Doc, Filter, ListOptions, ListResult, NotFoundError, Store, type WriteGuard } from "./types";
 import { newId } from "./ids";
 import { normText } from "./norm";
 
@@ -208,11 +208,11 @@ export class MemoryStore implements Store {
     });
   }
 
-  async update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
+  async update<T = any>(collection: string, id: string, patch: Record<string, any>, guard?: WriteGuard): Promise<Doc<T>> {
     return this.write((tx) => {
       const map = this.coll(collection);
       const prev = map.get(id);
-      if (!prev) throw new NotFoundError(collection, id);
+      if (!prev || !owns(collection, prev, guard)) throw new NotFoundError(collection, id);
       const row: Row = { ...prev, ...toStored(collection, patch), updatedAt: new Date().toISOString() };
       this.checkUnique(collection, row, id);
       map.set(id, row);
@@ -222,22 +222,23 @@ export class MemoryStore implements Store {
     });
   }
 
-  async delete(collection: string, id: string): Promise<void> {
-    await this.write((tx) => {
-      const map = this.coll(collection);
-      const prev = map.get(id);
-      if (!prev) return;
-      map.delete(id);
-      tx?.undo.push(() => map.set(id, prev));
-      this.markDirty(collection);
-    });
-  }
-
-  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc> {
+  async delete(collection: string, id: string, guard?: WriteGuard): Promise<boolean> {
     return this.write((tx) => {
       const map = this.coll(collection);
       const prev = map.get(id);
-      if (!prev) throw new NotFoundError(collection, id);
+      if (!prev || !owns(collection, prev, guard)) return false;
+      map.delete(id);
+      tx?.undo.push(() => map.set(id, prev));
+      this.markDirty(collection);
+      return true;
+    });
+  }
+
+  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard): Promise<Doc> {
+    return this.write((tx) => {
+      const map = this.coll(collection);
+      const prev = map.get(id);
+      if (!prev || !owns(collection, prev, guard)) throw new NotFoundError(collection, id);
       const next = (prev[field] ?? 0) + by;
       if (bounds?.min != null && next < bounds.min) throw new ConflictError(`Limite mínimo violado em ${collection}.${field}`, collection, "bounds");
       if (bounds?.max != null && next > bounds.max) throw new ConflictError(`Limite máximo violado em ${collection}.${field}`, collection, "bounds");
@@ -268,9 +269,9 @@ export class MemoryStore implements Store {
           await txStorage.run(state, async () => {
             for (const op of view.ops) {
               if (op.kind === "create") await this.create(op.collection, op.data!, op.id);
-              else if (op.kind === "update") await this.update(op.collection, op.id, op.data!);
-              else if (op.kind === "delete") await this.delete(op.collection, op.id);
-              else await this.increment(op.collection, op.id, op.field!, op.by!, op.bounds);
+              else if (op.kind === "update") await this.update(op.collection, op.id, op.data!, op.guard);
+              else if (op.kind === "delete") await this.delete(op.collection, op.id, op.guard);
+              else await this.increment(op.collection, op.id, op.field!, op.by!, op.bounds, op.guard);
             }
           });
         } catch (e) {
@@ -300,7 +301,13 @@ export class MemoryStore implements Store {
   }
 }
 
-type TxOp = { kind: "create" | "update" | "delete" | "increment"; collection: string; id: string; data?: Record<string, any>; field?: string; by?: number; bounds?: { min?: number; max?: number } };
+type TxOp = { kind: "create" | "update" | "delete" | "increment"; collection: string; id: string; data?: Record<string, any>; field?: string; by?: number; bounds?: { min?: number; max?: number }; guard?: WriteGuard };
+
+/** Multiempresa: com dono informado, só o registro da empresa conta (o de outra é tratado como inexistente). */
+function owns(collection: string, row: Record<string, any>, guard?: WriteGuard): boolean {
+  if (!guard || !COLLECTION_MAP[collection]?.fields.companyId) return true;
+  return row.companyId === guard.companyId;
+}
 
 /** Visão de transação com escritas pendentes até o commit (semântica Appwrite). */
 /** Limite de operações por transação do Appwrite (TablesDB), reproduzido no modo deferred. */
@@ -330,17 +337,17 @@ class DeferredTx implements Store {
     const now = new Date().toISOString();
     return { id: docId, createdAt: now, updatedAt: now, ...fromStored(collection, toStored(collection, data)) } as Doc<T>;
   }
-  async update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
+  async update<T = any>(collection: string, id: string, patch: Record<string, any>, guard?: WriteGuard): Promise<Doc<T>> {
     toStored(collection, patch);
-    this.push({ kind: "update", collection, id, data: patch });
+    this.push({ kind: "update", collection, id, data: patch, guard });
     const cur = (await this.base.get(collection, id)) ?? ({ id } as any);
     return { ...cur, ...patch } as Doc<T>;
   }
-  async delete(collection: string, id: string) {
-    this.push({ kind: "delete", collection, id });
+  async delete(collection: string, id: string, guard?: WriteGuard) {
+    this.push({ kind: "delete", collection, id, guard });
   }
-  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }) {
-    this.push({ kind: "increment", collection, id, field, by, bounds });
+  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard) {
+    this.push({ kind: "increment", collection, id, field, by, bounds, guard });
     const cur = (await this.base.get(collection, id)) ?? ({ id } as any);
     return { ...cur, [field]: (cur[field] ?? 0) + by } as Doc;
   }

@@ -1,5 +1,5 @@
 import { cache } from "react";
-import type { Doc, ListOptions, ListResult, Store } from "./types";
+import type { Doc, ListOptions, ListResult, Store, WriteGuard } from "./types";
 
 /**
  * Camada de leitura rápida sobre o Store, sem mudar o resultado das regras de negócio:
@@ -92,28 +92,28 @@ export class ReadCachedStore implements Store {
     }
   }
 
-  async update<T = any>(collection: string, id: string, patch: Partial<T> & Record<string, any>) {
+  async update<T = any>(collection: string, id: string, patch: Partial<T> & Record<string, any>, guard?: WriteGuard) {
     invalidate(collection);
     try {
-      return await this.inner.update<T>(collection, id, patch);
+      return await this.inner.update<T>(collection, id, patch, guard);
     } finally {
       invalidate(collection);
     }
   }
 
-  async delete(collection: string, id: string) {
+  async delete(collection: string, id: string, guard?: WriteGuard) {
     invalidate(collection);
     try {
-      return await this.inner.delete(collection, id);
+      return await this.inner.delete(collection, id, guard);
     } finally {
       invalidate(collection);
     }
   }
 
-  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }) {
+  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard) {
     invalidate(collection);
     try {
-      return await this.inner.increment(collection, id, field, by, bounds);
+      return await this.inner.increment(collection, id, field, by, bounds, guard);
     } finally {
       invalidate(collection);
     }

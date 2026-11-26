@@ -77,8 +77,13 @@ export const COLLECTIONS: CollectionDef[] = [
       // tipo: "retail" (empresa operacional — padrão quando ausente), "accounting" (escritório contábil com carteira de clientes)
       // ou "certification" (parceiro da rede de certificação — Master, Regional ou Revenda, §43)
       kind: s(20),
+      // multiempresa (docs/multiempresa): empresa da plataforma (Intercert: rede, equipe de certificação e atendimento);
+      // conta do Interos que contratou a empresa (uma conta ↔ uma empresa); módulos contratados; suspensão por contrato
+      // (status "suspended") com histórico; código de vínculo gerado pelo administrador (só o hash, uso único)
+      isPlatform: bool, interosAccountId: s(100), interosLinkedAt: dt, contract: json, suspension: json, suspensionHistory: json,
+      statusBeforeSuspension: s(20), linkCodeHash: s(128), linkCodeExpiresAt: dt, linkCodeCreatedBy: id(), linkCodeUsedAt: dt,
     },
-    indexes: [u("u_cnpj", "cnpj")],
+    indexes: [u("u_cnpj", "cnpj"), u("u_interos_account", "interosAccountId")],
   },
   {
     id: "branches",
@@ -107,6 +112,9 @@ export const COLLECTIONS: CollectionDef[] = [
       // §44 — autenticação em duas etapas (TOTP): segredo cifrado (AES-256-GCM), cadastro pendente (antes da confirmação),
       // códigos de recuperação só como hash (uso único) e último intervalo aceito (impede reaproveitar o mesmo código)
       totpEnabled: bool, totpSecretEnc: s(400), totpPendingEnc: s(400), totpEnabledAt: dt, totpRecoveryHashes: strings, totpLastStep: int,
+      // multiempresa: cargo e filiais por empresa (separados do perfil de acesso); sessões emitidas antes deste instante
+      // deixam de valer ("encerrar todas as sessões")
+      jobTitleByCompany: json, branchIdsByCompany: json, sessionsValidAfter: dt,
     },
     indexes: [u("u_email", "email"), k("i_login", "login"), k("i_auth", "authId")],
   },
@@ -1380,6 +1388,60 @@ export const COLLECTIONS: CollectionDef[] = [
     label: "Arquivos",
     fields: { ...ctx, name: s(250), mime: s(120), sizeBytes: int, sha256: s(80), storageId: s(120), bucket: s(60), entityType: s(40), entityId: id(), kind: s(40) },
     indexes: [k("i_entity", "entityType", "entityId")],
+  },
+  // ─── Multiempresa e interface de serviço do Interos (docs/multiempresa) — tabelas DA PLATAFORMA: nenhum Store
+  // restrito a uma empresa lê ou grava nelas (PLATFORM_ONLY em scoped-store.ts); o acesso é só pelos serviços próprios.
+  {
+    id: "service_requests",
+    label: "Interface de serviço — solicitações (idempotência, trilha e contadores de consulta)",
+    fields: {
+      kind: s(20), clientId: s(64, true), idempotencyKey: s(128), operation: s(80), method: s(10), path: s(300), requestHash: s(64),
+      status: s(20), httpStatus: int, response: json, error: txt, targetCompanyId: id(), attempts: int, lockedUntil: dt,
+      firstRequestId: s(100), lastRequestId: s(100), receivedAt: dt, completedAt: dt, day: date, count: int,
+    },
+    indexes: [k("i_client_date", "clientId", "receivedAt"), k("i_target", "targetCompanyId")],
+  },
+  {
+    id: "tenant_provisionings",
+    label: "Multiempresa — implantações de empresas contratantes pelo Interos (etapas retomáveis)",
+    fields: {
+      accountId: s(100, true), targetCompanyId: id(), operation: s(20), status: s(20), steps: json, lastError: txt, attempts: int, input: json,
+      adminUserId: id(), clientId: s(64), lastRequestId: s(100), startedAt: dt, finishedAt: dt,
+    },
+    indexes: [u("u_account", "accountId"), k("i_target", "targetCompanyId")],
+  },
+  {
+    id: "company_relations",
+    label: "Multiempresa — vínculos explícitos entre empresas (escritório contábil, certificação, rede), com escopos e consentimento",
+    fields: {
+      fromCompanyId: id(true), toCompanyId: id(true), type: s(30, true), scopes: strings, status: s(20), consent: json, validFrom: dt, validUntil: dt,
+      source: s(60), sourceId: id(), notes: s(500), createdBy: s(100), revokedAt: dt, revokedBy: s(100), history: json,
+    },
+    indexes: [u("u_pair_type", "fromCompanyId", "toCompanyId", "type"), k("i_from", "fromCompanyId"), k("i_to", "toCompanyId")],
+  },
+  {
+    id: "tenancy_reviews",
+    label: "Multiempresa — registros com empresa ambígua encaminhados para revisão na migração",
+    fields: {
+      collection: s(60, true), recordId: id(true), reason: s(300), candidates: strings, status: s(20), resolvedCompanyId: id(), resolvedBy: s(100),
+      resolvedAt: dt, runId: id(), detectedAt: dt,
+    },
+    indexes: [u("u_record", "collection", "recordId"), k("i_status", "status")],
+  },
+  {
+    id: "tenancy_violations",
+    label: "Multiempresa — tentativas de acesso entre empresas barradas ou observadas pela camada de dados",
+    fields: {
+      mode: s(20), op: s(20), collection: s(60), scopeCompanyId: id(), targetCompanyId: id(), recordId: id(), caller: s(500), count: int, day: date,
+      firstAt: dt, lastAt: dt,
+    },
+    indexes: [k("i_day", "day")],
+  },
+  {
+    id: "migration_runs",
+    label: "Multiempresa — execuções da migração (simulação e aplicação) com o relatório de conferência",
+    fields: { kind: s(40), mode: s(20), status: s(20), startedAt: dt, finishedAt: dt, report: json, requestedBy: s(100) },
+    indexes: [k("i_kind_date", "kind", "startedAt")],
   },
 ];
 

@@ -8,7 +8,7 @@ import { toCtxUser } from "@/lib/auth/users";
 import type { Ctx } from "@/lib/core/ctx";
 import { getSetting, setSetting } from "@/lib/core/settings";
 import { PARTNER_ROLES } from "@/lib/permissions";
-import { createCompanyWithDefaults } from "../../setup";
+import { ensureDemoPlatform } from "./platform";
 import { addDays, today } from "@/lib/dates";
 import {
   NETWORK_SCOPE, createNode, nodeOfCompany, saveLevelPriceRule, saveCertCustomer, createNetworkSale, createCoupon, createVoucherPackage, purchaseVoucherPackage, registerRenewalContact, type NetworkLevel,
@@ -26,7 +26,6 @@ import { DEFAULT_CERT_CATALOG, PLATFORM_SCOPE, type CertProduct, approveCertific
  * Idempotente (marcador "demo.network.done" e verificação de cada parceiro pelo CNPJ).
  */
 
-const PLATFORM_CNPJ = "20301510000106";
 
 /** custos por camada (centavos): [Master, Regional, Revenda, Contador], mínimo e padrão ao cliente final */
 const PRICES: Record<string, { costs: [number, number, number, number]; min: number; def: number; canEdit: boolean }> = {
@@ -105,8 +104,8 @@ export async function seed(refs: DemoRefs): Promise<unknown> {
   if (baseDone && billingDone && salesDone) return { skipped: true };
 
   // empresa da plataforma e usuário com "Gerir toda a rede"
-  const plat = await createCompanyWithDefaults(store, { name: "Intercert Certificação Digital Ltda (DEMO)", tradeName: "Intercert Certificação (DEMO)", cnpj: PLATFORM_CNPJ, uf: "CE", cityName: "Juazeiro do Norte", cityCode: "2307304", kind: "certification", key: "demo-intercert-platform" });
-  if (!plat.company.isDemo) await store.update("companies", plat.company.id, { isDemo: true });
+  // empresa marcada como plataforma: só nela as operações da rede inteira e da equipe de certificação valem
+  const plat = await ensureDemoPlatform(store);
   const tpl = PARTNER_ROLES.find((r) => r.key === "partner_admin")!;
   const platformRole = await sd.put("roles", "rede-plataforma", {
     companyId: plat.company.id, isDemo: true, key: null, name: "Gestão da rede Intercert (DEMO)", description: "Plataforma: cria, move, suspende e encerra parceiros e define os preços de toda a rede.",

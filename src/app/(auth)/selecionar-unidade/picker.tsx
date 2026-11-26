@@ -61,14 +61,17 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
         <div className="grid gap-2">
           {filteredCompanies.map((c) => {
             const count = branches.filter((b) => b.companyId === c.id && b.status !== "inactive").length;
-            const inactive = c.status === "inactive";
+            const suspended = c.status === "suspended";
+            const readonly = c.status === "readonly";
+            const inactive = c.status === "inactive" || suspended;
+            const why = suspended ? "Acesso suspenso pelo contrato: os dados estão preservados; procure o responsável pelo contrato." : "Empresa inativa: não pode ser selecionada. Um administrador pode reativá-la em Administração → Empresas.";
             return (
-              <button key={c.id} disabled={inactive} title={inactive ? "Empresa inativa: não pode ser selecionada. Um administrador pode reativá-la em Administração → Empresas." : undefined} onClick={() => { setCompanyId(c.id); setQ(""); }} className={CARD}>
+              <button key={c.id} disabled={inactive} title={inactive ? why : readonly ? "Contrato suspenso: acesso em somente leitura (consultas e exportações)." : undefined} onClick={() => { setCompanyId(c.id); setQ(""); }} className={CARD}>
                 <span className="flex items-center gap-3">
                   <Building2 className="size-5 text-brand-700" />
                   <span>
-                    <span className="flex items-center gap-2 text-sm font-medium">{c.name}{c.isDemo && <Badge tone="sim">DEMO</Badge>}{inactive && <Badge tone="neutral">Inativa</Badge>}</span>
-                    <span className="block text-xs text-slate-500">{c.legal !== c.name ? `${c.legal} · ` : ""}CNPJ {fmtCnpj(c.cnpj) || "—"} · {inactive ? "empresa inativa — seleção bloqueada" : `${count} unidade${count === 1 ? "" : "s"} disponíve${count === 1 ? "l" : "is"}`}</span>
+                    <span className="flex items-center gap-2 text-sm font-medium">{c.name}{c.isDemo && <Badge tone="sim">DEMO</Badge>}{suspended ? <Badge tone="neutral">Suspensa</Badge> : inactive && <Badge tone="neutral">Inativa</Badge>}{readonly && <Badge tone="neutral">Somente leitura</Badge>}</span>
+                    <span className="block text-xs text-slate-500">{c.legal !== c.name ? `${c.legal} · ` : ""}CNPJ {fmtCnpj(c.cnpj) || "—"} · {suspended ? "contrato suspenso — seleção bloqueada" : inactive ? "empresa inativa — seleção bloqueada" : `${count} unidade${count === 1 ? "" : "s"} disponíve${count === 1 ? "l" : "is"}`}</span>
                   </span>
                 </span>
                 <ChevronRight className="size-4 text-slate-400" />

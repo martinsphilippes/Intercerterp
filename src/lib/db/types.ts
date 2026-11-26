@@ -57,6 +57,15 @@ export class NotFoundError extends Error {
   }
 }
 
+/**
+ * Condição de dono numa gravação por id (multiempresa): a gravação só acontece se o registro for da empresa informada.
+ * Registro de outra empresa é tratado como inexistente (`NotFoundError` em update/increment; delete não faz nada).
+ * A conferência vai na própria instrução ao banco (sem leitura extra).
+ */
+export interface WriteGuard {
+  companyId: string;
+}
+
 export interface Store {
   readonly backend: "postgres" | "appwrite" | "local" | "memory";
   get<T = any>(collection: string, id: string): Promise<Doc<T> | null>;
@@ -64,10 +73,11 @@ export interface Store {
   list<T = any>(collection: string, opts?: ListOptions): Promise<ListResult<Doc<T>>>;
   /** Cria; lança ConflictError se o id ou índice único já existir. */
   create<T = any>(collection: string, data: Partial<T> & Record<string, any>, id?: string): Promise<Doc<T>>;
-  update<T = any>(collection: string, id: string, patch: Partial<T> & Record<string, any>): Promise<Doc<T>>;
-  delete(collection: string, id: string): Promise<void>;
+  update<T = any>(collection: string, id: string, patch: Partial<T> & Record<string, any>, guard?: WriteGuard): Promise<Doc<T>>;
+  /** Devolve se havia registro a excluir (com `guard`, só conta o da empresa informada). */
+  delete(collection: string, id: string, guard?: WriteGuard): Promise<void | boolean>;
   /** Incremento atômico com limites opcionais; lança ConflictError("bounds") se violar. */
-  increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc>;
+  increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard): Promise<Doc>;
   /**
    * Executa as escritas de `fn` de forma atômica. Dentro da transação, use apenas o `tx` recebido.
    * Leituras dentro da transação não devem depender de escritas da própria transação.
