@@ -1,5 +1,6 @@
 import { detId, isConflict, listAll } from "@/lib/db";
 import type { Store } from "@/lib/db/types";
+import { unscoped } from "@/lib/db/scoped-store";
 import { searchable } from "@/lib/core/text";
 
 /**
@@ -636,9 +637,14 @@ Optantes do Simples Nacional não estão sujeitos às alíquotas de teste de 202
   },
 ];
 
-/** Sincroniza os artigos globais (idempotente; atualiza quando o conteúdo mudou). */
-export async function ensureHelpArticles(store: Store) {
-  const existing = await listAll(store, "help_articles");
+/**
+ * Sincroniza os artigos globais (idempotente; atualiza quando o conteúdo mudou). Conteúdo global é manutenção do
+ * sistema: grava pelo Store base mesmo quando chamada de uma tela — o Store restrito a uma empresa recusa, com razão,
+ * alterar registro sem empresa (multiempresa), e a tela de Ajuda quebrava quando um artigo mudava de texto.
+ */
+export async function ensureHelpArticles(scopedOrBase: Store) {
+  const store = unscoped(scopedOrBase);
+  const existing = (await listAll(store, "help_articles")).filter((a) => a.companyId == null);
   const bySlug = new Map(existing.map((a) => [a.slug, a]));
   let created = 0;
   let updated = 0;
