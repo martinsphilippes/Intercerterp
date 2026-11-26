@@ -304,6 +304,54 @@ const demoTorre = await svc("GET", `/empresas/${demo.empresa ?? "0".repeat(32)}/
 check("Torre: empresa não vinculada (demonstração) → 404", demoTorre.status === 404, { status: demoTorre.status });
 save();
 
+// ── 6b. administração pelo cliente: logins e filiais da própria empresa; empresa nova, não ───────────────────────
+for (const k of ["A", "B"]) {
+  const t = tenants[k];
+  const other = tenants[k === "A" ? "B" : "A"];
+  const { page, ctx } = t;
+  // filial nova pela tela
+  const nomeFilial = `Filial Centro ${k} ${RUN}`;
+  await page.goto(`${BASE}/administracao/empresas/${t.idEmpresa}/filiais/nova`);
+  await page.fill('input[name="name"]', nomeFilial);
+  await page.locator("button[type=submit]").first().click();
+  await page.waitForURL((u) => !u.pathname.endsWith("/filiais/nova"), { timeout: 60000 }).catch(() => undefined);
+  const emp = await svc("GET", `/empresas/${t.idEmpresa}`);
+  const unidades = (emp.json?.empresa?.unidades ?? []).map((u) => u.nome);
+  check(`administrador ${k} abre filial da própria empresa pela tela`, unidades.includes(nomeFilial), { unidades });
+  await shot(page, `05-filial-nova-empresa-${k}`);
+  // filial na outra empresa e empresa nova: recusadas
+  const fo = await fetchAs(ctx, `/administracao/empresas/${other.idEmpresa}/filiais/nova`);
+  check(`administrador ${k} não abre filial na outra empresa`, notFound(fo) || fo.status === 403, { status: fo.status, location: fo.location });
+  // com carregamento progressivo o redirecionamento vai dentro da resposta 200; o formulário de empresa não pode aparecer
+  const ne = await fetchAs(ctx, `/administracao/empresas/nova`);
+  const neRedirect = (ne.status >= 300 && ne.status < 400 && /sem-permissao/.test(ne.location ?? "")) || ne.text.includes("/sem-permissao");
+  const neForm = /name="cnpj"/.test(ne.text) && /name="regime"/.test(ne.text);
+  check(`administrador ${k} não cria empresa ("Nova empresa" leva a sem permissão, sem o formulário)`, neRedirect && !neForm, { status: ne.status, location: ne.location, redireciona: neRedirect, formulario: neForm });
+  const outrasEmp = (await svc("GET", `/empresas?limite=100`)).json?.itens?.length ?? 0;
+  // login e acesso novos da própria empresa pela tela (perfil operacional, senha inicial)
+  const loginEmail = `caixa.${k.toLowerCase()}.${RUN}@homologacao.example`;
+  await page.goto(`${BASE}/administracao/usuarios/novo`);
+  await page.fill('input[name="name"]', `Caixa ${k} (homologação)`);
+  await page.fill('input[name="email"]', loginEmail);
+  await page.check('input[name="mode"][value="password"]');
+  await page.fill('input[name="password"]', PASSWORD);
+  const role = page.locator('select[name="roleId"]');
+  const opts = await role.locator("option").evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent ?? "", d: o.disabled })));
+  const pick = opts.find((o) => o.v && !o.d && /caixa|vendedor|operador/i.test(o.t)) ?? opts.find((o) => o.v && !o.d);
+  if (pick) await role.selectOption(pick.v);
+  await page.locator("button[type=submit]").first().click();
+  await page.waitForURL((u) => /\/administracao\/usuarios\/[A-Za-z0-9]{8,}$/.test(u.pathname), { timeout: 60000 }).catch(() => undefined);
+  const lista = await fetchAs(ctx, `/administracao/usuarios?q=${encodeURIComponent(loginEmail)}`);
+  check(`administrador ${k} cria login e acesso da própria empresa pela tela (perfil ${pick?.t?.trim() ?? "?"})`, lista.status === 200 && lista.text.includes(loginEmail), { url: page.url() });
+  await shot(page, `06-login-novo-empresa-${k}`);
+  // lista completa da outra empresa (sem busca: a caixa de busca repetiria o termo pesquisado)
+  const naOutra = await fetchAs(other.ctx, `/administracao/usuarios`);
+  check(`o login criado por ${k} não aparece na lista de usuários da outra empresa`, naOutra.status === 200 && !naOutra.text.includes(loginEmail) && naOutra.text.includes(other.email), { status: naOutra.status });
+  const depois = (await svc("GET", `/empresas?limite=100`)).json?.itens?.length ?? 0;
+  check(`nenhuma empresa nova surgiu pelas ações do administrador ${k}`, depois === outrasEmp, { antes: outrasEmp, depois });
+}
+save();
+
 // ── 7. suspensão e reativação ───────────────────────────────────────────────────────────────────────────────────
 {
   const B = tenants.B;

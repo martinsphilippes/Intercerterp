@@ -10,17 +10,28 @@
 
 ## 1. Resultado
 
-**68 verificações, nenhuma falha.** Execução de 2026-11-26 02:25 UTC, na publicação final da branch (commit `2685639`).
+**80 verificações, nenhuma falha.** Execução de 2026-11-26 08:44 UTC, na publicação final da branch (commit `2685639`).
 
 As duas empresas fictícias foram criadas pelo Interos nesta execução:
 
 | Empresa | idEmpresa | contaInterosId | Módulos |
 |---|---|---|---|
-| A — Aurora Utilidades | `c87769bf7702aa1419b00da2316f3d9b` | `homolog-a-202611260225` | pdv, vendas, estoque, compras, financeiro, fiscal, relatórios |
-| B — Boreal Papelaria | `f9c6992ff11fd516b26a3d90727640af` | `homolog-b-202611260225` | pdv, vendas, estoque, financeiro |
+| A — Aurora Utilidades | `7733848cc3ca6652e9c017364cd8c31f` | `homolog-a-202611260844` | pdv, vendas, estoque, compras, financeiro, fiscal, relatórios |
+| B — Boreal Papelaria | `06d5dcaaeb1810eb4150cb6a7a500ed9` | `homolog-b-202611260844` | pdv, vendas, estoque, financeiro |
 
 A "outra empresa" das tentativas cruzadas é, além da A e da B, a **demonstração**: uma empresa com vendas, produtos,
 clientes, fornecedores, documentos fiscais e arquivos de verdade no banco.
+
+**Administração pelo cliente.** O administrador de cada empresa, pela tela:
+- abre filial **da própria empresa**;
+- cria login e acesso da própria empresa (perfil operacional, senha inicial).
+
+E não consegue:
+- abrir filial na outra empresa;
+- criar empresa: "Nova empresa" leva a "sem permissão" e o formulário nem aparece. Nenhuma empresa nova surge pelas
+  ações dele.
+
+O login criado não aparece para a outra empresa.
 
 ## 2. O que foi verificado
 
@@ -85,15 +96,27 @@ clientes, fornecedores, documentos fiscais e arquivos de verdade no banco.
 | 57 | provisionamento: lista só empresas vinculadas (A e B presentes; nenhuma da demonstração) | OK |
 | 58 | provisionamento: empresa existente mas não vinculada (demonstração) não existe para o Interos (404) | OK |
 | 59 | Torre: empresa não vinculada (demonstração) → 404 | OK |
-| 60 | B suspensa em somente leitura | OK |
-| 61 | B em somente leitura: consulta continua | OK |
-| 62 | B em somente leitura: gravação recusada | OK |
-| 63 | B suspensa em bloqueio | OK |
-| 64 | B em bloqueio: a sessão aberta perde o acesso | OK |
-| 65 | B em bloqueio: novo login não entra na empresa | OK |
-| 66 | B reativada, com o histórico das suspensões | OK |
-| 67 | B reativada: o administrador entra de novo, na hora | OK |
-| 68 | B reativada: tarefas liberadas e histórico preservado na consulta | OK |
+| 60 | administrador A abre filial da própria empresa pela tela | OK |
+| 61 | administrador A não abre filial na outra empresa | OK |
+| 62 | administrador A não cria empresa ("Nova empresa" leva a sem permissão, sem o formulário) | OK |
+| 63 | administrador A cria login e acesso da própria empresa pela tela (perfil Caixa) | OK |
+| 64 | o login criado por A não aparece na lista de usuários da outra empresa | OK |
+| 65 | nenhuma empresa nova surgiu pelas ações do administrador A | OK |
+| 66 | administrador B abre filial da própria empresa pela tela | OK |
+| 67 | administrador B não abre filial na outra empresa | OK |
+| 68 | administrador B não cria empresa ("Nova empresa" leva a sem permissão, sem o formulário) | OK |
+| 69 | administrador B cria login e acesso da própria empresa pela tela (perfil Caixa) | OK |
+| 70 | o login criado por B não aparece na lista de usuários da outra empresa | OK |
+| 71 | nenhuma empresa nova surgiu pelas ações do administrador B | OK |
+| 72 | B suspensa em somente leitura | OK |
+| 73 | B em somente leitura: consulta continua | OK |
+| 74 | B em somente leitura: gravação recusada | OK |
+| 75 | B suspensa em bloqueio | OK |
+| 76 | B em bloqueio: a sessão aberta perde o acesso | OK |
+| 77 | B em bloqueio: novo login não entra na empresa | OK |
+| 78 | B reativada, com o histórico das suspensões | OK |
+| 79 | B reativada: o administrador entra de novo, na hora | OK |
+| 80 | B reativada: tarefas liberadas e histórico preservado na consulta | OK |
 
 **Regressão das telas.** O rastreador (`scripts/dev/crawl.mjs`) percorreu a prévia como Administração da
 demonstração: **336 páginas, 208 padrões de rota, nenhuma com problema** (status, tela de erro, erro de página ou de

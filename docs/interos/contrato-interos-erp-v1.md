@@ -64,7 +64,7 @@ Erros        { "erro": { "codigo": "...", "mensagem": "...", ... }, "requestId":
 
 | Ambiente | URL base | Credenciais | Situação |
 |---|---|---|---|
-| Homologação | `https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/api/interos/v1` | `interos-prov-homolog` (provisionamento) e `interos-torre-homolog` (Torre) | Ativa. Dados fictícios. Pode ser recriada. |
+| Homologação | `https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/api/interos/v1` | Equipe do Interos: `interos-equipe-prov` (provisionamento) e `interos-equipe-torre` (Torre). Roteiro de homologação do próprio ERP: `interos-prov-homolog` e `interos-torre-homolog`. | Ativa. Dados fictícios. Pode ser recriada. |
 | Produção | `https://intercerterp.vercel.app/api/interos/v1` | nenhuma | Responde `503 servico_nao_configurado` até a liberação (§20) |
 
 - Os segredos da homologação são entregues à equipe do Interos **fora deste documento**, por canal seguro. O ERP

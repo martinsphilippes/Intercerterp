@@ -113,8 +113,9 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
       notificação, cópia de segurança e loja;
     - matriz de 291 tentativas de acesso cruzado por sentido;
     - com o isolamento desligado, ela falha.
-  - **na prévia publicada:** 68 de 68 verificações, com migração, convites pela tela, acesso cruzado por telas, APIs,
-    arquivos, exportações, busca, Torre e provisionamento, e suspensão. A varredura abriu 336 páginas sem problema e
+  - **na prévia publicada:** 80 de 80 verificações, com migração, convites pela tela, administração pelo cliente
+    (filial e login da própria empresa, sem criar empresa), acesso cruzado por telas, APIs, arquivos, exportações,
+    busca, Torre e provisionamento, e suspensão. A varredura abriu 336 páginas sem problema e
     os 21 acessos rápidos continuam na tela de login.
   - **achados corrigidos:**
     - suspensão valendo só depois de até 15 s em outras instâncias;
