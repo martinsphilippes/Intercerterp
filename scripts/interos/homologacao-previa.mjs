@@ -5,9 +5,12 @@
  *   3. duas empresas fictícias provisionadas pelo Interos (A e B), convites aceitos pela tela, primeiro login;
  *   4. dados próprios de cada uma, cadastrados pela tela;
  *   5. tentativas de acesso cruzado (tela, APIs, busca, exportação, arquivos, troca de empresa, Torre, provisionamento);
- *   6. suspensão em somente leitura e em bloqueio, e reativação.
+ *   6. suspensão em somente leitura e em bloqueio, e reativação;
+ *   8. licenças (v2) na mesma versão: retrato assinado, Event-Id, licença como referência do contrato, Torre pelo
+ *      contrato, credencial restrita ao piloto e LGPD (opcional: LIC_TOKEN_FILE, LIC_SIGN_FILE, LIC_PILOTO_TOKEN_FILE).
  * Segredos só por arquivo (nunca na linha de comando nem na saída):
- *   BASE=https://… PROV_TOKEN_FILE=… TORRE_TOKEN_FILE=… SETUP_TOKEN_FILE=… OUT=pasta node scripts/interos/homologacao-previa.mjs
+ *   BASE=https://… PROV_TOKEN_FILE=… TORRE_TOKEN_FILE=… SETUP_TOKEN_FILE=… [LIC_TOKEN_FILE=… LIC_SIGN_FILE=…
+ *   LIC_PILOTO_TOKEN_FILE=…] OUT=pasta node scripts/interos/homologacao-previa.mjs
  * A evidência (OUT/homologacao.json + capturas) não contém tokens, senhas nem links de convite.
  */
 import fs from "node:fs";
@@ -120,7 +123,7 @@ for (const [k, nome, modulos] of [
   const again = await svc("POST", "/empresas", { key, body });
   check(`empresa ${k}: reenvio com a mesma chave devolve a resposta original sem o link`, again.status === 201 && again.headers.get("idempotent-replayed") === "true" && again.json?.convite?.link === null);
   const other = await svc("POST", "/empresas", { key: `${key}-2`, body });
-  check(`empresa ${k}: reenvio com outra chave não duplica (200)`, other.status === 200 && other.json?.empresa?.idEmpresa === r.json?.empresa?.idEmpresa);
+  check(`empresa ${k}: reenvio com outra chave não duplica (200) e volta como está (criacao ja_existia)`, other.status === 200 && other.json?.empresa?.idEmpresa === r.json?.empresa?.idEmpresa && other.json?.criacao === "ja_existia");
   tenants[k] = { nome, email, idEmpresa: r.json?.empresa?.idEmpresa, idUnidade: r.json?.empresa?.unidades?.[0]?.idUnidade, link: r.json?.convite?.link, conta: body.contaInterosId };
   evidence.etapas.push({ etapa: `provisionamento ${k}`, idEmpresa: tenants[k].idEmpresa, contaInterosId: body.contaInterosId, modulos, resposta: redactInvite(r.json) });
 }
@@ -385,6 +388,72 @@ save();
   check("B reativada: o administrador entra de novo, na hora", !refused && !p3.url().includes("/login"), { url: p3.url(), tela: refused });
   const back = await svc("GET", `/empresas/${B.idEmpresa}`);
   check("B reativada: tarefas liberadas e histórico preservado na consulta", back.status === 200 && back.json?.empresa?.situacao === "ativa", { situacao: back.json?.empresa?.situacao });
+}
+
+// ── 8. licenças (v2) na versão unificada ────────────────────────────────────────────────────────────────────────
+if (process.env.LIC_TOKEN_FILE && process.env.LIC_SIGN_FILE) {
+  const LIC = read("LIC_TOKEN_FILE");
+  const SIGN = read("LIC_SIGN_FILE");
+  const v2 = (method, p, o) => api(method, `/api/interos/v2${p}`, { auth: LIC, ...o });
+  const signed = (raw) => {
+    const t = Math.floor(Date.now() / 1000);
+    return `t=${t},v1=${crypto.createHmac("sha256", SIGN).update(`${t}.${raw}`).digest("hex")}`;
+  };
+  async function putLicense(companyId, snapshot, eventId) {
+    const raw = JSON.stringify(snapshot);
+    const r = await fetch(`${BASE}/api/interos/v2/companies/${companyId}/license`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${LIC}`, "content-type": "application/json", "x-interos-signature": signed(raw), "x-interos-event-id": eventId, "x-interos-actor": "homologacao@erp" },
+      body: raw,
+    });
+    const text = await r.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      /* texto */
+    }
+    return { status: r.status, json, headers: r.headers };
+  }
+  const A = tenants.A;
+  const cat = await v2("GET", "/catalog");
+  check("v2: catálogo com a tradução publicada (provisionamento e chaves v1) e dependências 'basta um'", cat.status === 200 && Boolean(cat.json?.data?.translations?.provisioningModules?.pdv) && cat.json?.data?.items?.some((i) => i.code === "06.12" && (i.dependencies?.requiredAnyOf ?? []).length > 0), { status: cat.status, versao: cat.json?.data?.catalogVersion });
+  const snap = (version, extra = {}) => ({ licenseVersion: version, companyId: A.idEmpresa, product: "erp-intercert", commercialStatus: "active", issuedAt: new Date().toISOString(), items: [{ code: "07.01", state: "active" }, { code: "07.02", state: "active" }, { code: "01.02", state: "active" }, { code: "01.03", state: "active" }, { code: "01.04", state: "active" }, { code: "18.02", state: "active" }, { code: "05.04", state: "suspended" }], ...extra });
+  const bad = await putLicense(A.idEmpresa, { ...snap(1), licenseVersion: "um" }, `homolog-lic-${RUN}-1`);
+  check("v2: retrato inválido → 400, sem consumir o Event-Id", bad.status === 400, { status: bad.status, erro: bad.json?.error?.code });
+  const l1 = await putLicense(A.idEmpresa, snap(1), `homolog-lic-${RUN}-1`);
+  check("v2: o mesmo Event-Id com o retrato corrigido é aceito (201 applied)", l1.status === 201 && l1.json?.data?.status === "applied", { status: l1.status, dados: l1.json?.data?.status ?? l1.json?.error });
+  const rep = await putLicense(A.idEmpresa, snap(1), `homolog-lic-${RUN}-1`);
+  check("v2: repetição do evento devolve a resposta original", rep.headers.get("idempotent-replayed") === "true", { status: rep.status });
+  const unsigned = await fetch(`${BASE}/api/interos/v2/companies/${A.idEmpresa}/license`, { method: "PUT", headers: { authorization: `Bearer ${LIC}`, "content-type": "application/json", "x-interos-event-id": `homolog-lic-${RUN}-sem` }, body: JSON.stringify(snap(2)) });
+  check("v2: gravação sem assinatura → 401 signature_required", unsigned.status === 401 && (await unsigned.json())?.error?.code === "signature_required");
+  const st = await v2("GET", `/companies/${A.idEmpresa}/license`);
+  check("v2: licença aplicada e estado efetivo por chave", st.status === 200 && st.json?.data?.appliedVersion === 1 && st.json?.data?.effective?.["vendas.pdv"]?.on === true, { versao: st.json?.data?.appliedVersion });
+  const view = await svc("GET", `/empresas/${A.idEmpresa}`);
+  check("provisionamento: com licença, os módulos seguem a licença (origemModulos licenca)", view.json?.empresa?.contrato?.origemModulos === "licenca" && JSON.stringify(view.json?.empresa?.modulos) === JSON.stringify(["compras", "financeiro", "pdv"]), { modulos: view.json?.empresa?.modulos, origem: view.json?.empresa?.contrato?.origemModulos });
+  const gov = await svc("PUT", `/empresas/${A.idEmpresa}/modulos`, { key: `homolog-mod-lic-${RUN}`, body: { modulos: ["pdv"] } });
+  check("provisionamento: PUT /modulos numa empresa com licença → 409 licenca_governa", gov.status === 409 && gov.json?.erro?.codigo === "licenca_governa", { status: gov.status });
+  const torre = await svc("GET", `/empresas/${A.idEmpresa}/torre/resumo?de=2026-11-01&ate=2026-11-30`, { auth: TORRE });
+  check("Torre: respeita o contrato (comércio digital e fiscal não contratados vêm null)", torre.status === 200 && torre.json?.comercioDigital === null && torre.json?.fiscal === null && JSON.stringify(torre.json?.meta?.modulosContratados) === JSON.stringify(["compras", "financeiro", "pdv"]), { contratados: torre.json?.meta?.modulosContratados });
+  const loja = await svc("GET", `/empresas/${A.idEmpresa}/torre/comercio-digital?de=2026-11-01&ate=2026-11-30`, { auth: TORRE });
+  check("Torre: rota de módulo não contratado → 409 modulo_nao_contratado", loja.status === 409 && loja.json?.erro?.codigo === "modulo_nao_contratado", { status: loja.status });
+  const hist = await v2("GET", `/companies/${A.idEmpresa}/license/history`);
+  check("v2: histórico de licença com o retrato aplicado", hist.status === 200 && (hist.json?.data ?? []).some((h) => h.kind === "snapshot" && h.licenseVersion === 1 && h.status === "applied"));
+  const ups = await v2("GET", "/upsell-requests");
+  check("v2: solicitações de contratação sem nome de pessoa (LGPD)", ups.status === 200 && !JSON.stringify(ups.json?.data ?? []).includes("(homologação)"), { status: ups.status });
+  const errs = await v2("GET", "/errors");
+  check("v2: erros de integração respondem (eventos sem destino ficam listados)", errs.status === 200 && Array.isArray(errs.json?.data));
+  if (process.env.LIC_PILOTO_TOKEN_FILE) {
+    const PILOTO = read("LIC_PILOTO_TOKEN_FILE");
+    const denied = await api("GET", `/api/interos/v2/companies/${A.idEmpresa}/license`, { auth: PILOTO });
+    check("credencial restrita ao piloto: outra empresa → 403 company_not_allowed (v2)", denied.status === 403 && denied.json?.error?.code === "company_not_allowed", { status: denied.status });
+    const deniedV1 = await api("GET", `/api/interos/v1/companies/${A.idEmpresa}/modules`, { auth: PILOTO });
+    check("credencial restrita ao piloto: outra empresa → 403 company_not_allowed (v1 de módulos)", deniedV1.status === 403 && deniedV1.json?.error?.code === "company_not_allowed", { status: deniedV1.status });
+    const list = await api("GET", "/api/interos/v2/companies", { auth: PILOTO });
+    check("credencial restrita ao piloto: a lista não mostra empresas fora do piloto", list.status === 200 && !(list.json?.data ?? []).some((c) => c.companyId === A.idEmpresa), { status: list.status });
+  }
+  evidence.etapas.push({ etapa: "licenças v2", idEmpresa: A.idEmpresa, versaoCatalogo: cat.json?.data?.catalogVersion, contratados: torre.json?.meta?.modulosContratados ?? null });
+  save();
 }
 
 evidence.terminadoEm = new Date().toISOString();
