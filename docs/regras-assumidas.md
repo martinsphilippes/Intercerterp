@@ -1234,7 +1234,8 @@ Resposta às pendências do Interos (`docs/interos/pendencias-integracao.md`).
   traduções, publicadas no catálogo. Empresa criada pelo provisionamento nasce com a habilitação traduzida (só
   vendáveis). Com licença aplicada, o contrato amplo é derivado dela e `PUT /modulos` responde `409 licenca_governa`.
 - **Transições na hora.** Teste, carência, agendamento, vigência e operações agendadas valem na primeira requisição
-  depois do instante. A rotina diária é rede de segurança (o plano da Vercel não garante rotina de hora em hora).
+  depois do instante, inclusive nas listas que o Interos lê a cada 5 minutos. A rotina diária é rede de segurança
+  (rotina de hora em hora depende do plano da Vercel; a aplicação no acesso não depende).
 - **Teto da empresa sobre tudo.** Suspensa, somente leitura ou vigência vencida desligam também as unidades
   preservadas, que voltam na reativação.
 - **Obrigação declarada.** As devoluções no prazo do CDC (90 dias) seguram o desligamento: função opcional em conclusão
