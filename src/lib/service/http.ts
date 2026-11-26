@@ -27,6 +27,8 @@ export interface ServiceCall {
   params: Record<string, string>;
   query: URLSearchParams;
   ip: string | null;
+  /** endereço público do ERP (links de convite): APP_URL ou a origem da chamada */
+  origin: string;
 }
 
 export interface ServiceResult {
@@ -130,13 +132,13 @@ export function serviceRoute(opts: RouteOptions, handler: (call: ServiceCall) =>
         return json(429, errorBody(requestId, "limite_excedido", `Limite de solicitações por minuto atingido. Tente de novo em ${wait} s.`), requestId, { "Retry-After": String(wait) });
       }
       const params = (await ctx?.params) ?? {};
+      // sem carga automática da demonstração aqui: a interface de serviço só lê e grava o que existe no banco
       const store = getStore();
-      const { ensureBootstrap } = await import("../server/bootstrap");
-      await ensureBootstrap();
       const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null;
+      const origin = (process.env.APP_URL || req.nextUrl.origin).replace(/\/$/, "");
 
       if (!opts.mutation) {
-        const result = await handler({ client, requestId, idempotencyKey: null, store, body: null, params, query: req.nextUrl.searchParams, ip });
+        const result = await handler({ client, requestId, idempotencyKey: null, store, body: null, params, query: req.nextUrl.searchParams, ip, origin });
         status = result.status ?? 200;
         companyId = result.companyId ?? null;
         await recordRead(store, { clientId: client.id, operation: opts.operation, companyId, requestId }).catch(() => undefined);
@@ -169,7 +171,7 @@ export function serviceRoute(opts: RouteOptions, handler: (call: ServiceCall) =>
         return json(begin.httpStatus, begin.body, requestId, { "Idempotent-Replayed": "true" });
       }
       try {
-        const result = await handler({ client, requestId, idempotencyKey: key, store, body, params, query: req.nextUrl.searchParams, ip });
+        const result = await handler({ client, requestId, idempotencyKey: key, store, body, params, query: req.nextUrl.searchParams, ip, origin });
         status = result.status ?? 200;
         companyId = result.companyId ?? null;
         await finishIdempotent(store, begin.id, { httpStatus: status, body: result.replayBody !== undefined ? result.replayBody : result.body, companyId, outcome: "concluida" });

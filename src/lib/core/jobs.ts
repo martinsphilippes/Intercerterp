@@ -85,8 +85,18 @@ export async function runDueJobs(store: Store, opts: { limit?: number; types?: s
   if (opts.jobIds) filters.push(["eq", "id", opts.jobIds]);
   const res = await store.list("jobs", { filters, orderBy: [{ field: "runAt", dir: "asc" }], limit: opts.limit ?? 20 });
   const results: Array<{ id: string; type: string; status: string; error?: string }> = [];
+  const suspended = new Map<string, boolean>();
   for (const job of res.items) {
     if (opts.deadlineMs && Date.now() > opts.deadlineMs) break;
+    // empresa suspensa pelo contrato: a tarefa fica retida (volta à fila na reativação)
+    if (job.companyId) {
+      if (!suspended.has(job.companyId)) suspended.set(job.companyId, (await store.get("companies", job.companyId).catch(() => null))?.status === "suspended");
+      if (suspended.get(job.companyId)) {
+        await store.update("jobs", job.id, { status: "held", lastError: "Empresa suspensa pelo contrato: tarefa retida até a reativação.", result: { ...(job.result ?? {}), heldFrom: job.status === "retry" ? "retry" : "pending" } }).catch(() => undefined);
+        results.push({ id: job.id, type: job.type, status: "held" });
+        continue;
+      }
+    }
     const attempt = (job.attempts ?? 0) + 1;
     try {
       await store.create("operations", { type: "job_claim", status: "running", entityType: "job", entityId: job.id }, detId("claim", job.id, attempt));

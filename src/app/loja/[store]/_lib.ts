@@ -28,7 +28,8 @@ export const loadStore = cache(async (ref: string): Promise<StoreRequest | null>
   const r = await resolveStore(store, ref);
   if (!r) return null;
   const company = await store.get("companies", r.st.companyId);
-  if (!company || company.status === "inactive") return null;
+  // empresa inativa ou suspensa pelo contrato: a vitrine sai do ar (pedidos e histórico preservados)
+  if (!company || company.status === "inactive" || company.status === "suspended") return null;
   // comércio digital desligado na empresa: a vitrine sai do ar junto
   if (!(await isFeatureOn(store, r.st.companyId, null, "comercioDigital", featureDefaultFor("comercioDigital", company.kind)))) return null;
   const jar = await cookies();

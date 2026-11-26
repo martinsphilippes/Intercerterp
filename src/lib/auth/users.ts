@@ -68,7 +68,8 @@ export async function toCtxUser(store: Store, u: Doc, companyId?: string | null)
     permissions: maskPermissionsByContract(role?.permissions ?? {}, company),
     actions,
     discountLimitBps: u.discountLimitBps ?? role?.discountLimitBps ?? 0,
-    branchIds: u.branchIds ?? [],
+    // filiais autorizadas na empresa do contexto (vazia = todas)
+    branchIds: cid ? (branchScopeOf(u, cid) ?? []) : (u.branchIds ?? []),
     companyIds: u.companyIds ?? [],
     twoFactorRequired: !u.isAdmin && Boolean(role?.requireTwoFactor),
   };
@@ -84,6 +85,19 @@ export async function findUserByAuthId(store: Store, authId: string): Promise<Do
   return findOne(store, "users", [["eq", "authId", authId]]);
 }
 
+/**
+ * Filiais autorizadas do usuário NA empresa (multiempresa): `null` = todas as filiais da empresa; lista = só essas
+ * (vazia = nenhuma). Ordem: atribuição por empresa (`branchIdsByCompany[empresa]`: [] = todas; lista = só essas) →
+ * lista legada `branchIds` (valia para todas as empresas do usuário: vazia = todas; senão, as da lista).
+ */
+export function branchScopeOf(u: Record<string, any> | null | undefined, companyId: string): string[] | null {
+  if (!u || u.isAdmin) return null;
+  const per = (u.branchIdsByCompany ?? {})[companyId];
+  if (Array.isArray(per)) return per.length ? per : null;
+  const legacy: string[] = u.branchIds ?? [];
+  return legacy.length ? legacy : null;
+}
+
 /** Empresas e filiais acessíveis ao usuário (inclui inativas — use `unitBlockReason` para saber se podem ser selecionadas). */
 export async function accessibleUnits(store: Store, u: Doc) {
   const { listAll } = await import("../db");
@@ -91,9 +105,11 @@ export async function accessibleUnits(store: Store, u: Doc) {
   const [allCompanies, allBranches] = await Promise.all([listAll(base, "companies"), listAll(base, "branches")]);
   // credenciais de demonstração só alcançam empresas de demonstração (nunca uma empresa contratante real)
   const companies = allCompanies.filter((c) => (u.isAdmin || (u.companyIds ?? []).includes(c.id)) && (!u.isDemo || c.isDemo));
-  const branches = allBranches.filter(
-    (b) => companies.some((c) => c.id === b.companyId) && (u.isAdmin || !(u.branchIds?.length) || u.branchIds.includes(b.id)),
-  );
+  const branches = allBranches.filter((b) => {
+    if (!companies.some((c) => c.id === b.companyId)) return false;
+    const scope = branchScopeOf(u, b.companyId);
+    return scope === null || scope.includes(b.id);
+  });
   return { companies, branches };
 }
 

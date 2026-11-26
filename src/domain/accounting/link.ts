@@ -85,6 +85,9 @@ export async function acceptAccountingLink(ctx: Ctx, code: string): Promise<{ cl
   if (integ) await ctx.store.update("integrations", integ.id, { config: { ...(integ.config ?? {}), ...linkCfg }, enabled: true, status: integ.status === "not_configured" ? "operational" : integ.status, lastTestMessage: `Vinculada ao escritório ${firm.tradeName || firm.name}: entregas registradas na caixa de entrada dele.` });
   else
     await ctx.store.create("integrations", { companyId: ctx.companyId, branchId: null, createdBy: ctx.user.id, scopeKey: `${ctx.companyId}|*|accounting`, kind: "accounting", provider: "export_package", environment: "producao", config: linkCfg, secretRefs: {}, status: "operational", enabled: true, lastTestAt: linkedAt, lastTestMessage: `Vinculada ao escritório ${firm.tradeName || firm.name}: entregas registradas na caixa de entrada dele.` }, integrationId(ctx.companyId, null, "accounting"));
+  // multiempresa: vínculo explícito escritório → empresa, consentido pelo administrador da empresa
+  const { upsertRelation } = await import("../tenancy/relations");
+  await upsertRelation(base, { from: firm.id, to: ctx.companyId, type: "contabilidade", status: "ativa", scopes: ["fiscal.leitura", "pacote.entrega"], source: "accounting_clients", sourceId: client.id, actor: { id: ctx.user.id, name: ctx.user.name }, consent: { by: ctx.user.id, byName: ctx.user.name, at: linkedAt, side: "empresa" } });
   await audit(ctx, { module: "admin", action: "accounting.link_accept", entityType: "integration", entityId: "accounting", summary: `Empresa vinculada ao escritório ${firm.tradeName || firm.name} (cliente ${client.code})`, after: linkCfg });
   // auditoria também no escritório (contexto técnico da empresa do escritório)
   await base.create("audit_logs", { companyId: firm.id, branchId: null, userId: ctx.user.id, userName: ctx.user.name, userRole: "Empresa vinculada", module: "accounting", action: "client.link_accept", entityType: "accounting_client", entityId: client.id, summary: `${client.name}: vínculo aceito pela empresa ${company.tradeName || company.name} (${company.cnpj ?? "sem CNPJ"})`, before: null, after: { linkedCompanyId: ctx.companyId }, reason: null, result: "success", ip: ctx.ip ?? null, occurredAt: linkedAt, operationId: null, related: [`company:${ctx.companyId}`] }).catch(() => undefined);
@@ -105,6 +108,8 @@ export async function revokeAccountingLink(ctx: Ctx, by: "firm" | "company", cli
   if (!client || client.linkStatus !== "active") throw new BusinessError("Não há vínculo ativo.", "not_linked");
   const companyId = client.linkedCompanyId as string;
   await base.update("accounting_clients", client.id, { linkStatus: "revoked", linkCodeHash: null, linkCodeExpiresAt: null });
+  const { upsertRelation } = await import("../tenancy/relations");
+  await upsertRelation(base, { from: client.companyId, to: companyId, type: "contabilidade", status: "revogada", source: "accounting_clients", sourceId: client.id, actor: { id: ctx.user.id, name: ctx.user.name }, reason: by === "firm" ? "Desfeito pelo escritório" : "Desfeito pela empresa" });
   const { getIntegration } = await import("../integrations");
   const integ = await getIntegration(base, companyId, null, "accounting");
   if (integ?.config?.linkedClientId === client.id) {
@@ -136,6 +141,12 @@ export async function companyAccountingLink(store: Store, companyId: string): Pr
 export async function linkedCompanyReader(ctx: Ctx, client: Doc): Promise<Store> {
   if (client.companyId !== ctx.companyId) throw new PermissionError();
   if (client.linkStatus !== "active" || !client.linkedCompanyId) throw new BusinessError("Cliente sem vínculo ativo com uma empresa do ERP.", "not_linked");
+  // multiempresa: a leitura confere também o vínculo explícito (revogado ou suspenso no registro → sem leitura);
+  // vínculo anterior ao registro é registrado na primeira leitura (a migração faz o mesmo para todos)
+  const { getRelation, requireRelation, upsertRelation } = await import("../tenancy/relations");
+  if (!(await getRelation(ctx.store, ctx.companyId, client.linkedCompanyId, "contabilidade")))
+    await upsertRelation(ctx.store, { from: ctx.companyId, to: client.linkedCompanyId, type: "contabilidade", status: "ativa", scopes: ["fiscal.leitura", "pacote.entrega"], source: "accounting_clients", sourceId: client.id, actor: { id: "system", name: "Migração multiempresa" }, reason: "Vínculo anterior ao registro de vínculos" });
+  await requireRelation(ctx.store, ctx.companyId, client.linkedCompanyId, "contabilidade", "fiscal.leitura");
   return readOnly(scopeStore(unscoped(ctx.store), client.linkedCompanyId));
 }
 

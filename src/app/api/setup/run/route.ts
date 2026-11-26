@@ -131,6 +131,20 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
   // a partir daqui o banco precisa estar provisionado
   const completed = await store.get("operations", DONE_ID).catch(() => null);
 
+  if (step === "multiempresa") {
+    // migração multiempresa (docs/multiempresa/migracao.md): "simular" (padrão) não altera nada; "aplicar" preenche o que é
+    // inequívoco, encaminha o ambíguo para revisão e registra os vínculos — sempre com o retrato antes/depois
+    const mode = req.nextUrl.searchParams.get("modo") === "aplicar" ? "aplicar" : "simular";
+    const { runTenancyMigration } = await import("@/domain/tenancy/migration");
+    const report = await runTenancyMigration(store, { mode, requestedBy: "rota de instalação" });
+    const summary = { runId: report.runId, modo: report.mode, isolamento: report.isolamento, conferencia: report.conferencia, preenchidos: report.preenchidos.length, revisao: report.revisao.length, plataforma: report.plataforma, equipeDemonstracao: report.equipeDemonstracao, perfisComOperacaoDePlataforma: report.perfisComOperacaoDePlataforma.length, credenciaisCompartilhadas: report.credenciaisCompartilhadas, vinculos: report.vinculos, empresas: Object.keys(report.antes.byCompany).length };
+    return NextResponse.json({ ok: report.conferencia.ok, step, ...summary, detalhe: req.nextUrl.searchParams.get("detalhe") === "1" ? report : undefined, ms: Date.now() - started });
+  }
+
+  // credenciais de demonstração só no ambiente de teste (multiempresa: produção tem empresas contratantes reais)
+  if ((step === "demo" || step === "demo-update") && (await import("@/lib/auth/quick-access")).erpEnvironment() === "producao")
+    return NextResponse.json({ ok: false, error: "Ambiente de produção (ERP_AMBIENTE=producao): a demonstração só pode ser carregada no ambiente de teste." }, { status: 409 });
+
   if (step === "demo-update") {
     // atualização da DEMONSTRAÇÃO após uma nova versão (módulos novos, idempotente): só quando a empresa de demonstração existe
     const { listAll } = await import("@/lib/db");
@@ -201,5 +215,5 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
     return NextResponse.json({ ok: true, step, completed: true });
   }
 
-  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | demo-update | status | check-login | owner | finish | diagnostico)." }, { status: 400 });
+  return NextResponse.json({ ok: false, error: "Etapa inválida (provision | demo | demo-update | multiempresa | status | check-login | owner | finish | diagnostico)." }, { status: 400 });
 }

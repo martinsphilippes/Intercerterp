@@ -5,7 +5,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { getStore } from "@/lib/db";
 import { dbOutageOf, outageMessage } from "@/lib/db/outage";
 import { getAuth } from "@/lib/auth/provider";
-import { accessibleUnits, findUserByLogin, findUserByAuthId, toCtxUser, unitBlockReason } from "@/lib/auth/users";
+import { accessibleUnits, findUserByLogin, toCtxUser, unitBlockReason } from "@/lib/auth/users";
 import { safeNextPath } from "@/lib/auth/redirect";
 import { MFA_COOKIE, SESSION_COOKIE, UNIT_COOKIE, getSession } from "@/lib/server/session";
 import { audit } from "@/lib/core/audit";
@@ -13,7 +13,7 @@ import { nowIso } from "@/lib/dates";
 import type { ActionResult } from "@/lib/server/action";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
 import { CHALLENGE_TTL_MIN, LOCK_WINDOW_MIN, MAX_LOGIN_FAILURES, completeLoginChallenge, createLoginChallenge, dropChallenge, loadLoginChallenge, logLoginAttempt, loginKeyFor, recentLoginFailures } from "@/domain/two-factor";
-import { isQuickAccessUser } from "@/lib/auth/quick-access";
+import { demoCredentialBlocked, isQuickAccessUser } from "@/lib/auth/quick-access";
 
 const secure = process.env.NODE_ENV === "production";
 const MAX_FAILED = MAX_LOGIN_FAILURES;
@@ -70,6 +70,11 @@ async function doLogin(fd: FormData): Promise<ActionResult> {
   const user = userForKey;
   if (!user) {
     await logAttempt("failure", `Tentativa de login inválida (usuário inexistente: ${login.slice(0, 60)})`);
+    return { ok: false, error: "Usuário ou senha inválidos." };
+  }
+  // credencial de demonstração só no ambiente de teste (multiempresa: produção tem empresas contratantes reais)
+  if (demoCredentialBlocked(user)) {
+    await logAttempt("failure", `Login recusado para ${user.name}: credencial de demonstração em ambiente de produção`, user);
     return { ok: false, error: "Usuário ou senha inválidos." };
   }
   if (user.status === "inactive" || user.status === "suspended") {
@@ -284,10 +289,5 @@ export async function acceptInviteAction(fd: FormData): Promise<ActionResult> {
   return { ok: true, message: "Acesso ativado. Entre com seu e-mail e a nova senha.", redirect: "/login" };
 }
 
-export async function currentUserAuthId() {
-  const jar = await cookies();
-  const secret = jar.get(SESSION_COOKIE)?.value;
-  if (!secret) return null;
-  const authId = await getAuth().verify(secret);
-  return authId ? findUserByAuthId(getStore(), authId) : null;
-}
+// (removida) `currentUserAuthId`: exportada num arquivo "use server" e sem uso, devolveria o cadastro completo do
+// usuário — com hash de senha e segredos de duas etapas — a quem a chamasse como ação (inventário multiempresa D13).

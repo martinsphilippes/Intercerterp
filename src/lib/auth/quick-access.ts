@@ -48,14 +48,29 @@ export const DEMO_DIRECTORY: Array<[login: string, sector: string]> = [
 /** Setor e posição de cada login da demonstração. */
 export const DEMO_SECTORS: Record<string, { sector: string; order: number }> = Object.fromEntries(DEMO_DIRECTORY.map(([login, sector], i) => [login, { sector, order: i + 1 }]));
 
-/** O titular ligou o acesso rápido na publicação (`SHOW_DEMO_LOGIN=1`): a lista aparece e os usuários dela ficam protegidos. */
-export function quickAccessPinned(): boolean {
-  return process.env.SHOW_DEMO_LOGIN === "1";
+/**
+ * Ambiente da publicação (multiempresa, docs/multiempresa/arquitetura.md §7): `ERP_AMBIENTE=producao` numa publicação
+ * com empresas contratantes reais; qualquer outro valor (ou ausente) é ambiente de TESTE. Credenciais de demonstração
+ * — acesso rápido, usuários de demonstração e carga da demonstração — só existem no ambiente de teste.
+ * Decisão do titular (13/11/2026): o endereço atual segue como ambiente de teste, com o acesso rápido na tela.
+ */
+export function erpEnvironment(): "producao" | "teste" {
+  return String(process.env.ERP_AMBIENTE ?? "").trim().toLowerCase() === "producao" ? "producao" : "teste";
 }
 
-/** Acesso rápido na tela de login: ligado pelo titular (`SHOW_DEMO_LOGIN=1`) ou na demonstração volátil em memória. */
+/** O titular ligou o acesso rápido na publicação (`SHOW_DEMO_LOGIN=1`): a lista aparece e os usuários dela ficam protegidos. */
+export function quickAccessPinned(): boolean {
+  return process.env.SHOW_DEMO_LOGIN === "1" && erpEnvironment() === "teste";
+}
+
+/** Acesso rápido na tela de login: ligado pelo titular (`SHOW_DEMO_LOGIN=1`) ou na demonstração volátil em memória — nunca em produção. */
 export function demoLoginEnabled(): boolean {
-  return quickAccessPinned() || configuredBackend() === "memory";
+  return erpEnvironment() === "teste" && (quickAccessPinned() || configuredBackend() === "memory");
+}
+
+/** Usuário de demonstração em ambiente de produção: não entra (a credencial é pública na demonstração). */
+export function demoCredentialBlocked(u: Record<string, any> | null | undefined): boolean {
+  return Boolean(u?.isDemo) && erpEnvironment() === "producao";
 }
 
 /**

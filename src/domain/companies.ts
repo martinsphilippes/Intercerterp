@@ -1,6 +1,6 @@
 import { detId, findOne, isConflict, listAll, newId } from "@/lib/db";
 import { NotFoundError, type Doc, type Store } from "@/lib/db/types";
-import { unscoped } from "@/lib/db/scoped-store";
+import { isolationMode, unscoped } from "@/lib/db/scoped-store";
 import { BusinessError, PermissionError, assert } from "@/lib/core/errors";
 import { ctxForCompany, requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit, diff } from "@/lib/core/audit";
@@ -138,14 +138,15 @@ export function companyData(input: CompanyInput) {
 /** Nova empresa com parametrização inicial (matriz, depósitos, perfis, tabela, contas, meios e condições). */
 export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName?: string }) {
   requirePerm(ctx, "admin", "create");
+  // multiempresa: empresa nova é empresa contratante — criada pelo Interos (provisionamento) ou pela administração da
+  // plataforma, nunca a partir de outra empresa cliente (docs/multiempresa/arquitetura.md §4)
+  if (isolationMode() === "estrito" && !ctx.user.isAdmin)
+    throw new BusinessError("Empresas novas são contratadas pelo Interos (ou criadas pela administração da plataforma Intercert). Para uma nova filial desta empresa, use Empresas → Filiais.", "forbidden");
   const data = companyData(input);
-  if (data.cnpj) {
-    const dup = await findOne(ctx.store, "companies", [["eq", "cnpj", data.cnpj]]);
-    if (dup) throw new BusinessError(`Já existe empresa com este CNPJ: ${dup.name}.`, "duplicate");
-  } else {
-    const all = await listAll(ctx.store, "companies");
-    if (all.some((c) => c.name.toLowerCase() === data.name.toLowerCase())) throw new BusinessError("Já existe empresa com esta razão social; informe o CNPJ para diferenciá-las.", "duplicate");
-  }
+  const all = await listAll(unscoped(ctx.store), "companies");
+  // sem revelar a outra empresa (que pode ser de outro cliente)
+  if (data.cnpj && all.some((c) => c.cnpj === data.cnpj)) throw new BusinessError("Já existe empresa com este CNPJ no ERP.", "duplicate");
+  if (!data.cnpj && all.some((c) => c.name.toLowerCase() === data.name.toLowerCase())) throw new BusinessError("Já existe empresa com esta razão social; informe o CNPJ para diferenciá-las.", "duplicate");
   const { company, branch, roles } = await createCompanyWithDefaults(unscoped(ctx.store), {
     key: newId(),
     name: data.name, tradeName: data.tradeName, cnpj: data.cnpj ?? undefined, regime: data.regime, uf: data.address.uf, cityName: data.address.cityName,

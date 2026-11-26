@@ -108,3 +108,16 @@ export async function setDefaultWarehouseAction(id: string, branchId: string) {
     return { ok: true as const, message: `${w.name} é agora o depósito padrão da filial.` };
   });
 }
+
+/** Código de vínculo com o Interos (uso único, 72 h): gerado pelo administrador da empresa-alvo (contrato §4.3). */
+export async function createInterosLinkCodeAction(fd: FormData) {
+  const companyId = fstr(fd, "companyId");
+  return runAction({ module: "admin", op: "edit", revalidate: ["/administracao/empresas"] }, async (s) => {
+    const { companyAdminCtx } = await import("@/domain/companies");
+    const { createInterosLinkCode } = await import("@/domain/tenancy/link-code");
+    const ctx = await companyAdminCtx(s.ctx, companyId, "edit");
+    const r = await createInterosLinkCode(ctx);
+    return { ok: true as const, data: { code: r.code, expiresAt: r.expiresAt }, message: "Código gerado: copie e entregue ao Interos." };
+  });
+}
+

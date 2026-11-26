@@ -1,13 +1,17 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { MemoryStore } from "@/lib/db/memory-store";
 import { scopeStore, unscoped, isolationMode } from "@/lib/db/scoped-store";
+import type { Store } from "@/lib/db/types";
+import { freshPostgresStore } from "./pglite";
 
 /**
  * Isolamento por empresa na camada de dados (docs/multiempresa/arquitetura.md §2). Cada caso tem a contraprova pelo
  * Store sem escopo (o registro existe; só não é alcançável a partir de outra empresa).
  */
+/** Mesmo roteiro no armazenamento em memória e no PostgresStore (Postgres embutido): a condição de dono vai no SQL. */
+let backend: "memoria" | "postgres" = "memoria";
 async function setup() {
-  const base = new MemoryStore();
+  const base: Store = backend === "postgres" ? freshPostgresStore() : new MemoryStore();
   await base.create("customers", { companyId: "A", personType: "PF", name: "Cliente A" }, "ca");
   await base.create("customers", { companyId: "B", personType: "PF", name: "Cliente B" }, "cb");
   await base.create("help_articles", { companyId: null, title: "Global", slug: "g" }, "h1");
@@ -25,7 +29,10 @@ afterEach(() => {
   delete process.env.MULTIEMPRESA_ISOLAMENTO;
 });
 
-describe("isolamento por empresa (Store do contexto) — modo estrito", () => {
+describe.each(["memoria", "postgres"] as const)("isolamento por empresa (Store do contexto) — modo estrito — %s", (kind) => {
+  beforeEach(() => {
+    backend = kind;
+  });
   it("leitura e listagem: só a própria empresa; conteúdo global segue visível", async () => {
     const base = await setup();
     expect(isolationMode()).toBe("estrito");
