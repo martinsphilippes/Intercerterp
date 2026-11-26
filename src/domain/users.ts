@@ -901,6 +901,50 @@ export async function revokeOtherSessions(ctx: Ctx, currentSecret: string): Prom
   return { ended };
 }
 
+/** Tentativas erradas da senha atual na troca de senha que bloqueiam a troca por um tempo (força bruta com sessão aberta). */
+export const PASSWORD_CHANGE_MAX_FAILURES = 5;
+export const PASSWORD_CHANGE_WINDOW_MIN = 15;
+
+/**
+ * Minha conta › Segurança — a própria pessoa troca a senha: confere a senha atual pelo mesmo caminho do login, grava a
+ * nova e encerra as OUTRAS sessões (a atual continua). Cinco senhas atuais erradas em 15 minutos bloqueiam a troca até a
+ * janela passar (quem pega um computador com a sessão aberta não descobre a senha por tentativa). Usuários do acesso
+ * rápido não trocam: a senha deles é a da tela de login. Auditado (sem a senha).
+ */
+export async function changeOwnPassword(ctx: Ctx, currentSecret: string, currentPassword: string, newPassword: string): Promise<{ ended: number }> {
+  const me = await unscoped(ctx.store).get("users", ctx.user.id);
+  if (!me || me.status !== "active") throw new NotFoundError("users", ctx.user.id);
+  if (isQuickAccessUser(me)) throw new BusinessError(quickAccessLockedMessage("Não é possível trocar a senha", me.name), QUICK_ACCESS_LOCKED);
+  assert(currentPassword, "Informe a senha atual.");
+  assert(newPassword.length >= 8, "A nova senha deve ter ao menos 8 caracteres.");
+  assert(newPassword !== currentPassword, "A nova senha precisa ser diferente da atual.");
+  const since = new Date(Date.now() - PASSWORD_CHANGE_WINDOW_MIN * 60000).toISOString();
+  const failures = (await listAll(unscoped(ctx.store), "audit_logs", { filters: [["eq", "entityId", me.id], ["eq", "action", "user.password_change_failed"]] })).filter((a) => String(a.occurredAt ?? a.createdAt ?? "") >= since).length;
+  if (failures >= PASSWORD_CHANGE_MAX_FAILURES)
+    throw new BusinessError(`Muitas tentativas com a senha atual errada. Aguarde ${PASSWORD_CHANGE_WINDOW_MIN} minutos e tente de novo.`, "password_change_blocked");
+  const auth = getAuth();
+  let probe: string | null = null;
+  try {
+    probe = (await auth.login(me.email, currentPassword, false)).secret;
+  } catch {
+    await audit(ctx, { module: "admin", action: "user.password_change_failed", entityType: "user", entityId: me.id, summary: `Troca de senha recusada para ${me.name}: senha atual incorreta`, result: "failure" });
+    throw new BusinessError("Senha atual incorreta.", "invalid_password");
+  } finally {
+    if (probe) await auth.logout(probe).catch(() => undefined);
+  }
+  await auth.createUser(me.email, newPassword, me.name);
+  // as outras sessões deixam de valer; a desta requisição continua
+  const keep = currentSecret ? sha256(currentSecret) : null;
+  let ended = 0;
+  for (const s of await listAll(unscoped(ctx.store), "sessions", { filters: [["eq", "userId", me.id]] })) {
+    if (keep && s.tokenHash === keep) continue;
+    await unscoped(ctx.store).delete("sessions", s.id);
+    ended++;
+  }
+  await audit(ctx, { module: "admin", action: "user.password_change", entityType: "user", entityId: me.id, summary: `${me.name} trocou a própria senha${ended ? ` (${ended} outra(s) sessão(ões) encerrada(s))` : ""}` });
+  return { ended };
+}
+
 export interface RecoveryLinkResult {
   /** link de uso único */
   link: string;

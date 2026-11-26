@@ -124,5 +124,13 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
     - referências de filial, arquivo e destinatário não conferidas;
     - assumir a conta de quem tem mais acesso.
   - **suíte inteira:** 1696 testes em memória e 1690 no Postgres (mais 6 só de memória), build de produção limpo.
+- [x] **Publicado em produção (26/11/2026, autorizado pelo titular):**
+  - **PR #4:** multiempresa. A migração foi aplicada na produção com conferência idêntica antes e depois
+    (`docs/multiempresa/migracao.md` §7).
+  - **PR #5:** retirada do Appwrite.
+  - **PR #6:** correção da tela Ajuda, achada na verificação da própria publicação.
+  - **Conferência final:** 21 acessos rápidos, interface do Interos em `503` (sem credenciais até o aceite),
+    varredura de 336 páginas e 208 padrões de rota sem problema, nenhum erro de execução.
+  - **Credenciais da equipe do Interos** entregues ao titular; valem só na homologação.
 - [ ] **Depende do titular e do Interos:** aceite da homologação, credenciais de produção, decisão sobre
   `ERP_AMBIENTE=producao` e próximas versões do contrato (`docs/pendencias-externas.md`, itens 18–21).
