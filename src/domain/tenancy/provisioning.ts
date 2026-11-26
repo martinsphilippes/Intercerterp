@@ -259,7 +259,16 @@ async function saveProvisioning(store: Store, accountId: string, patch: Record<s
   }
 }
 
-async function runStep<T>(store: Store, accountId: string, etapa: StepKey, fn: () => Promise<T>): Promise<T> {
+/**
+ * Executa uma etapa da implantação registrando o resultado. Com `current`, uma etapa JÁ CONCLUÍDA não é refeita: a
+ * retomada (reenvio do POST /empresas com outra chave, ou /implantacao/retomar) só completa o que falta e nunca volta
+ * módulos, unidade inicial ou situação alterados depois pelas operações próprias.
+ */
+async function runStep<T>(store: Store, accountId: string, etapa: StepKey, fn: () => Promise<T>, current?: () => Promise<T>): Promise<T> {
+  if (current) {
+    const prov = await loadProvisioning(store, accountId);
+    if (((prov?.steps ?? []) as ProvisionStep[]).some((s) => s.etapa === etapa && s.estado === "concluida")) return current();
+  }
   const mark = async (estado: StepState, erro: string | null) => {
     const prov = await loadProvisioning(store, accountId);
     const steps: ProvisionStep[] = [...((prov?.steps ?? []) as ProvisionStep[])];
@@ -391,6 +400,8 @@ export interface ProvisionOutcome {
   status: 200 | 201;
   view: Awaited<ReturnType<typeof tenantView>>;
   invite: (Awaited<ReturnType<typeof deliverInvite>> & { expiraEm: string }) | null;
+  /** a empresa já estava criada: devolvida como está, nada foi alterado */
+  existing?: boolean;
 }
 
 /** Cria (ou retoma a criação de) uma empresa contratante. */
@@ -425,6 +436,10 @@ export async function provisionTenant(store: Store, actor: ServiceActor, body: a
     throw new ServiceError(409, "cnpj_em_uso", "Já existe uma empresa com este CNPJ no ERP. Para trazê-la ao Interos, use a vinculação (POST /empresas/vincular) com o código gerado pelo administrador dela.");
   const prev = await loadProvisioning(store, accountId);
   if (prev && prev.operation === "vincular") throw new ServiceError(409, "conta_ja_vinculada", "Esta conta do Interos foi vinculada a uma empresa existente; use as operações dessa empresa.", { idEmpresa: prev.targetCompanyId });
+  // empresa já criada (implantação concluída, ou criada antes do registro de etapas): devolvida COMO ESTÁ. Um POST
+  // /empresas com outra Idempotency-Key nunca refaz a criação — não volta módulos, unidade inicial nem situação
+  // (inclusive a de uma empresa inativada depois). Para mudar, use as operações próprias.
+  if (byAccount && (!prev || prev.status === "concluida")) return { status: 200, view: await tenantView(store, byAccount.id), invite: null, existing: true };
   await saveProvisioning(store, accountId, {
     operation: "criar", status: "em_andamento", attempts: (prev?.attempts ?? 0) + 1, clientId: actor.clientId, lastRequestId: actor.requestId, startedAt: prev?.startedAt ?? nowIso(), lastError: null,
     input: { empresa: { ...e, cnpj }, unidadeInicial: body.unidadeInicial ?? null, modulos: modules, administrador: { nome: body.administrador.nome, email: String(body.administrador.email).trim().toLowerCase() }, entregaConvite: entrega, contrato: body.contrato ?? null },
@@ -445,16 +460,18 @@ export async function provisionTenant(store: Store, actor: ServiceActor, body: a
     const patch = {
       name: str(e.razaoSocial)!, tradeName: str(e.nomeFantasia) ?? str(e.razaoSocial)!, cnpj, ie: str(e.inscricaoEstadual, 30)?.toUpperCase() ?? null, im: str(e.inscricaoMunicipal, 30),
       regime, crt: REGIMES.find((r) => r.value === regime)!.crt, cnae: onlyDigits(e.cnae) || null, email: str(e.email)?.toLowerCase() ?? null, phone: onlyDigits(e.telefone) || null,
-      address: addr, interosAccountId: accountId, interosLinkedAt: co.interosLinkedAt ?? nowIso(), status: co.status === "suspended" ? "suspended" : "active",
+      address: addr, interosAccountId: accountId, interosLinkedAt: co.interosLinkedAt ?? nowIso(),
+      // empresa recém-criada nasce ativa; uma já existente mantém a situação que tem (suspensa, inativa…)
+      ...(created ? { status: "active" } : {}),
     };
     const after = await base.update("companies", co.id, patch);
     if (created) await audit(serviceCtx(store, actor, co.id), { module: "admin", action: "company.create", entityType: "company", entityId: co.id, summary: `Empresa ${patch.name} criada pelo Interos (conta ${accountId})`, after: patch });
     await saveProvisioning(store, accountId, { targetCompanyId: co.id });
     return after;
-  });
+  }, async () => (await findOne(base, "companies", [["eq", "interosAccountId", accountId]]))!);
 
-  await runStep(store, accountId, "unidade_inicial", () => applyInitialUnit(store, actor, company, body.unidadeInicial ?? {}));
-  const withContract = await runStep(store, accountId, "modulos", () => applyContract(store, actor, company, modules, body.contrato));
+  await runStep(store, accountId, "unidade_inicial", () => applyInitialUnit(store, actor, company, body.unidadeInicial ?? {}), async () => null);
+  const withContract = await runStep(store, accountId, "modulos", () => applyContract(store, actor, company, modules, body.contrato), async () => (await base.get("companies", company.id))!);
   const admin = await runStep(store, accountId, "administrador", () => ensureTenantAdmin(store, actor, withContract, body.administrador, entrega, origin));
   await saveProvisioning(store, accountId, { status: "concluida", finishedAt: nowIso(), lastError: null, adminUserId: admin.user.id });
   return { status: created ? 201 : 200, view: await tenantView(store, company.id), invite: admin.invite };
@@ -567,12 +584,17 @@ export async function linkExistingTenant(store: Store, actor: ServiceActor, body
   // mesma resposta para empresa inexistente, CNPJ diferente ou código errado: o Interos não descobre empresas por tentativa
   const denied = () => new ServiceError(409, "identidade_nao_confere", "Não foi possível confirmar a identidade da empresa: confira idEmpresa, CNPJ e código de vínculo (o código vale 72 horas e só uma vez).");
   if (!company || company.cnpj !== onlyDigits(body.cnpj) || company.isDemo) throw denied();
+  // o CÓDIGO é conferido antes de qualquer outra resposta (correção 15): sem um código válido, toda tentativa recebe a
+  // mesma recusa — nem "já vinculada" nem "conta já vinculada" revelam algo sobre a empresa
+  const given = sha256(normalizeLinkCode(body.codigoVinculo));
+  const codeOk = Boolean(company.linkCodeHash && company.linkCodeHash === given && company.linkCodeExpiresAt && company.linkCodeExpiresAt > nowIso());
+  // reenvio do mesmo vínculo (mesma conta e o mesmo código, já usado nele): devolve a empresa como está
+  const sameLinkAgain = company.interosAccountId === accountId && company.linkCodeUsedHash === given;
+  if (!codeOk && !sameLinkAgain) throw denied();
   if (company.interosAccountId === accountId) return { status: 200 as const, view: await tenantView(store, company.id) };
   if (company.interosAccountId) throw new ServiceError(409, "empresa_ja_vinculada", "Esta empresa já está vinculada a outra conta do Interos. A troca exige desvincular a conta atual.");
   const other = await findOne(base, "companies", [["eq", "interosAccountId", accountId]]);
   if (other) throw new ServiceError(409, "conta_ja_vinculada", "Esta conta do Interos já tem uma empresa no ERP.", { idEmpresa: other.id });
-  const codeOk = company.linkCodeHash && company.linkCodeHash === sha256(normalizeLinkCode(body.codigoVinculo)) && company.linkCodeExpiresAt && company.linkCodeExpiresAt > nowIso();
-  if (!codeOk) throw denied();
   if (modules) {
     const bad = invalidContractModules(modules, company.kind);
     if (bad.length) throw validationError([{ campo: "modulos", mensagem: `Módulo(s) inválido(s) para este tipo de empresa: ${bad.join(", ")}.` }]);
@@ -580,7 +602,7 @@ export async function linkExistingTenant(store: Store, actor: ServiceActor, body
   await saveProvisioning(store, accountId, { operation: "vincular", status: "em_andamento", attempts: 1, clientId: actor.clientId, lastRequestId: actor.requestId, startedAt: nowIso(), targetCompanyId: company.id, input: { idEmpresa: company.id, modulos: modules } });
   await runStep(store, accountId, "vinculo", async () => {
     try {
-      await base.update("companies", company.id, { interosAccountId: accountId, interosLinkedAt: nowIso(), linkCodeHash: null, linkCodeExpiresAt: null, linkCodeUsedAt: nowIso() });
+      await base.update("companies", company.id, { interosAccountId: accountId, interosLinkedAt: nowIso(), linkCodeHash: null, linkCodeExpiresAt: null, linkCodeUsedAt: nowIso(), linkCodeUsedHash: given });
     } catch (err) {
       if (isConflict(err)) throw new ServiceError(409, "conta_ja_vinculada", "Esta conta do Interos já tem uma empresa no ERP.");
       throw err;

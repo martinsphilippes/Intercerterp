@@ -82,6 +82,8 @@ export const COLLECTIONS: CollectionDef[] = [
       // (status "suspended") com histórico; código de vínculo gerado pelo administrador (só o hash, uso único)
       isPlatform: bool, interosAccountId: s(100), interosLinkedAt: dt, contract: json, suspension: json, suspensionHistory: json,
       statusBeforeSuspension: s(20), linkCodeHash: s(128), linkCodeExpiresAt: dt, linkCodeCreatedBy: id(), linkCodeUsedAt: dt,
+      // hash do código já usado no vínculo: o reenvio do MESMO vínculo pela mesma conta responde 200 (idempotente)
+      linkCodeUsedHash: s(128),
     },
     indexes: [u("u_cnpj", "cnpj"), u("u_interos_account", "interosAccountId")],
   },
@@ -1426,6 +1428,10 @@ export const COLLECTIONS: CollectionDef[] = [
       companyId: id(true), licenseVersion: int, snapshot: json, commercialStatus: s(30), display: s(20), limits: json, effective: json,
       rejectedItems: json, warnings: json, appliedAt: dt, appliedRuntimeVersion: int, nextTransitionAt: dt, clientId: s(80),
       lastSyncAt: dt, lastSyncResult: s(300), lastSnapshotAt: dt, staleNotifiedAt: dt, lock: int, lockedAt: dt,
+      // unidades não vendáveis que a empresa já tinha (direito preservado; o teto da empresa desliga e a reativação devolve)
+      preservedAccess: json,
+      // transições locais (fim de teste, agendamentos, vigência): [{ at, licenseVersion, companyState, changes }], últimas 100
+      transitions: json,
     },
     indexes: [u("u_company", "companyId")],
   },
@@ -1444,7 +1450,8 @@ export const COLLECTIONS: CollectionDef[] = [
   {
     id: "upsell_requests",
     label: "Solicitações de contratação feitas no ERP (encaminhadas ao Interos)",
-    fields: { companyId: id(true), branchId: id(), userId: id(), userName: s(200), code: s(20), module: s(80), note: s(500), status: s(20), sentAt: dt },
+    // userName: legado (não é mais gravado — LGPD); ao Interos vão o identificador pseudônimo e o perfil
+    fields: { companyId: id(true), branchId: id(), userId: id(), userName: s(200), requesterRole: s(80), code: s(20), module: s(80), note: s(500), status: s(20), sentAt: dt },
     indexes: [k("i_company", "companyId")],
   },
   {

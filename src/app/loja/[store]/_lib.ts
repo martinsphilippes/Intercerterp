@@ -35,6 +35,8 @@ export const loadStore = cache(async (ref: string): Promise<StoreRequest | null>
   if (!(await isFeatureOn(store, r.st.companyId, null, "comercioDigital", featureDefaultFor("comercioDigital", company.kind)))) return null;
   // habilitação (docs/modulos): sem o módulo a vitrine sai do ar; em desligamento ou consulta histórica ela fica em pausa —
   // nenhum carrinho ou pedido novo, mas o cliente continua acompanhando o pedido já feito
+  const { applyDueTransitions } = await import("@/domain/licensing/due");
+  await applyDueTransitions(store, r.st.companyId);
   const level = decide(await loadCompanyModules(store, r.st.companyId), "ecommerce.loja", company.kind ?? "retail").level;
   if (level === "none") return null;
   const jar = await cookies();

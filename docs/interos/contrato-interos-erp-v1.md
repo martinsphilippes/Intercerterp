@@ -188,7 +188,6 @@ extras dentro de `erro`, como `campos` (validação) e `idEmpresa` (conflito de 
 | 409 | `solicitacao_em_andamento` | A mesma chave ainda está sendo processada | Esperar `Retry-After` e repetir **com a mesma chave** |
 | 409 | `cnpj_em_uso` | O CNPJ já pertence a uma empresa do ERP sem vínculo com esta conta | Usar a vinculação por código (§10) |
 | 409 | `conta_ja_vinculada` | A conta do Interos já tem outra empresa no ERP (traz `idEmpresa`) | Consultar essa empresa; não criar outra |
-| 409 | `empresa_ja_vinculada` | A empresa já está vinculada a outra conta do Interos | Tratar a duplicidade de conta no Interos |
 | 409 | `identidade_nao_confere` | Vinculação com `idEmpresa`, CNPJ ou código que não conferem, ou código vencido ou já usado | Pedir ao administrador da empresa um código novo |
 | 409 | `email_reservado` | E-mail que não pode administrar a empresa (equipe da plataforma, demonstração, acesso desativado) | Informar outro e-mail |
 | 409 | `usuario_bloqueado` | E-mail de um acesso suspenso ou inativo no ERP | Informar outro e-mail ou pedir a reativação à empresa |
@@ -227,8 +226,12 @@ Consequências práticas:
 - **O link de convite é uma credencial de uso único.** Ele aparece **só na primeira resposta** e nunca é gravado. Na
   repetição pela mesma chave, `convite.link` vem `null`, com `linkRedigido: true` e um `aviso`. Para um link novo,
   use `convites/reenviar` (§8.9).
-- **Proteção além da chave:** a conta do Interos identifica a empresa. Reenviar a criação **com outra chave** não
-  duplica empresa, unidade nem convite. O ERP confere cada etapa e devolve `200` com o estado atual (exemplo 04).
+- **Proteção além da chave:** a conta do Interos identifica a empresa. Reenviar a criação **com outra chave** nunca
+  refaz a criação:
+  - empresa já criada (implantação concluída): volta **como está**, com `200`, `criacao: "ja_existia"` e um `aviso`.
+    Nada é alterado: módulos, unidade inicial e situação mudados depois pelas operações próprias continuam como estão
+    (exemplo 04);
+  - implantação incompleta: só as etapas que faltam são feitas; as concluídas não se repetem.
   Suspender no mesmo modo, reativar empresa ativa e vincular de novo à mesma conta também não mudam nada.
 - Nesta versão as chaves não expiram. Não reutilize chave para outra operação.
 
@@ -358,7 +361,10 @@ financeiras, centros de custo e formas e condições de pagamento. Todos esses p
 
 **Regras.**
 - **`201`:** empresa criada nesta chamada.
-- **`200`:** a conta já tinha esta empresa (reenvio com outra chave ou retomada). Só o que faltava é feito.
+- **`200`:** a conta já tinha esta empresa (reenvio com outra chave ou retomada).
+  - Implantação concluída: a empresa volta como está, com `criacao: "ja_existia"`, e nada é alterado.
+  - Implantação incompleta: só as etapas que faltam são feitas.
+  - Para mudar módulos, unidade inicial ou situação, use §8.6, §8.7, §8.10 e §8.11.
 - **CNPJ já existente no ERP**, de empresa sem vínculo com esta conta → `409 cnpj_em_uso`. A saída é a vinculação
   por código (§10). O ERP não informa qual empresa é.
 - **Conta com outra empresa** → `409 conta_ja_vinculada`, com o `idEmpresa` dela.
@@ -474,8 +480,13 @@ sequenceDiagram
   geram código.
 - **Mesma resposta** (`409 identidade_nao_confere`) para empresa inexistente, CNPJ diferente, código errado, vencido
   ou já usado. Assim o Interos, ou quem tiver a credencial, não descobre empresas por tentativa.
-- Empresa vinculada a outra conta → `409 empresa_ja_vinculada`. Conta com outra empresa → `409 conta_ja_vinculada`.
+- O **código é conferido antes de qualquer outra resposta**. Sem um código válido, a recusa é sempre
+  `409 identidade_nao_confere`, inclusive para uma empresa que já está vinculada: a resposta não revela o vínculo.
+  Como uma empresa vinculada não gera código, vincular uma empresa já vinculada a outra conta sempre recebe essa
+  recusa.
+- Com um código válido, uma conta que já tem outra empresa recebe `409 conta_ja_vinculada` (com o `idEmpresa` dela).
   Uma conta corresponde a uma empresa, e vice-versa: o banco garante isso por índice único.
+- Reenviar o mesmo vínculo (mesma conta e o mesmo código, já usado nele) devolve `200` com a empresa como está.
 - Antes do vínculo, a empresa **não existe** para o Interos (`404`).
 
 ## 11. Suspensão e reativação
@@ -721,7 +732,7 @@ corpo) e `resposta` (status, cabeçalhos, corpo).
 | `01-status.json` | 200 | Conferir a credencial e a saúde da interface |
 | `02-empresas-criar.json` | 201 | Criar empresa contratante (empresa, unidade inicial, módulos e administrador) |
 | `03-empresas-criar-reenvio-mesma-chave.json` | 201 | Reenvio com a mesma chave: resposta original, link redigido |
-| `04-empresas-criar-reenvio-outra-chave.json` | 200 | Mesma empresa com outra chave: nada duplicado |
+| `04-empresas-criar-reenvio-outra-chave.json` | 200 | Mesma empresa com outra chave: devolvida como está, nada alterado |
 | `05-empresas-consultar.json` | 200 | Consultar empresa e implantação |
 | `06-unidade-inicial-ajustar.json` | 200 | Ajustar a unidade inicial |
 | `07-modulos-definir.json` | 200 | Definir módulos contratados |
@@ -743,7 +754,6 @@ corpo) e `resposta` (status, cabeçalhos, corpo).
 | `erro-409-cnpj-em-uso.json` | 409 | CNPJ de empresa que já usa o ERP |
 | `erro-409-conta-ja-vinculada.json` | 409 | Conta que já tem outra empresa |
 | `erro-409-convite-ja-aceito.json` | 409 | Reenvio para quem já ativou o acesso |
-| `erro-409-empresa-ja-vinculada.json` | 409 | Empresa já vinculada a outra conta |
 | `erro-409-identidade-nao-confere.json` | 409 | Vinculação sem identidade confirmada |
 | `erro-422-idempotencia-conflito.json` | 422 | Mesma chave com outro conteúdo |
 | `erro-422-validacao.json` | 422 | Campos inválidos, todos de uma vez |

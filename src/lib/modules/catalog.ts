@@ -202,6 +202,9 @@ export const MODULES_CATALOG: ModuleDef[] = [
     surfaces: { routes: ["/vendas/devolucoes", "/vendas/[id]/devolucoes"], exports: ["returns"], permissions: ["sale.return", "sale.return_over_limit"], embedded: ["Venda › Devoluções"] },
     deactivation: {
       mode: "drain", afterOff: "read_history", drainDays: 90,
+      // pendência declarada (correção 5): enquanto houver venda no prazo do CDC, o desligamento — inclusive em cascata
+      // com o PDV — entra em conclusão e só termina quando a última sair do prazo
+      blockers: ["sales.cdc_return_window"],
       drainActions: ["processReturnAction", "confirmCardReversalAction"],
       obligations: ["Devoluções de vendas feitas ANTES do desligamento continuam aceitas por 90 dias (CDC: prazo de reclamação de vício em bens duráveis)."],
     },

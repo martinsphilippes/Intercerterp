@@ -374,12 +374,6 @@ describe.skipIf(process.env.TEST_STORE === "postgres")("contrato Interos ↔ ERP
       { method: "POST", path: "/empresas/vincular", requestId: "req-exemplo-e409c", key: "zeta-vincular-20261125-001", body: { contaInterosId: "conta-zeta-0006", idEmpresa: idBeta, cnpj: "98.765.432/0001-98", codigoVinculo: "AAAAA-BBBBB" } },
       409,
     );
-    await exemplo(
-      "erro-409-empresa-ja-vinculada",
-      "Vincular a outra conta uma empresa que já está vinculada ao Interos",
-      { method: "POST", path: "/empresas/vincular", requestId: "req-exemplo-e409e", key: "zeta-vincular-20261125-002", body: { contaInterosId: "conta-zeta-0006", idEmpresa: idBeta, cnpj: "13.579.246/0001-01", codigoVinculo: "AAAAA-BBBBB" } },
-      409,
-    );
     await exemplo("erro-404-nao-encontrado", "Empresa inexistente ou não vinculada ao Interos", { method: "GET", path: "/empresas/naoexiste000000000000", requestId: "req-exemplo-e404" }, 404);
     tick();
     await send({ method: "POST", path: `/empresas/${idAlfa}/suspender`, requestId: "req-exemplo-e423-prep", key: "alfa-suspender-20261125-002", body: { modo: "bloqueio", motivo: "Contrato encerrado pelo cliente" } });

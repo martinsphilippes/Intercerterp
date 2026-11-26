@@ -180,10 +180,32 @@ describe("regra de acesso e alterações", () => {
     await applyChanges(store, { companyId: A.id, changes: [{ module: "vendas.pdv", action: "disable" }], cascade: true, mode: "enforced" }, who);
     const doc = await loadCompanyModules(store, A.id);
     expect(doc!.modules["vendas.pdv"].state).toBe("draining");
-    // devoluções: política drain de 90 dias mesmo sem pendência própria? sem pendência → desligado em consulta
     const ctxA = systemCtx(store, A.id);
     await expect(assertActionModule(ctxA, A, "vendas.pdv", "finalizeCartAction")).rejects.toBeInstanceOf(ModuleUnavailableError);
     await expect(assertActionModule(ctxA, A, "vendas.pdv", "cancelCartAction")).resolves.toBeUndefined();
+  });
+
+  it("correção 5: desligar o PDV com vendas no prazo do CDC deixa as devoluções em conclusão por 90 dias (pendência declarada)", async () => {
+    const recent = await store.create("sales", { companyId: A.id, branchId: null, status: "completed", total: 9990, completedAt: new Date(Date.now() - 10 * 86400000).toISOString() });
+    await store.create("sales", { companyId: A.id, branchId: null, status: "completed", total: 1500, completedAt: new Date(Date.now() - 120 * 86400000).toISOString() });
+    const r = await applyChanges(store, { companyId: A.id, changes: [{ module: "vendas.pdv", action: "disable" }], cascade: true, mode: "enforced" }, who);
+    const ret = r.simulation.impacts.find((i) => i.module === "vendas.devolucoes")!;
+    // a cascata com o PDV respeita a política das devoluções: pendência e obrigação declaradas na simulação/aplicação
+    expect(ret).toMatchObject({ cascadedFrom: "vendas.pdv", to: "draining", policy: "drain" });
+    expect(ret.blockers).toEqual([expect.objectContaining({ key: "sales.cdc_return_window", count: 1 })]); // só a venda no prazo
+    expect(ret.obligations.join(" ")).toMatch(/90 dias/);
+    const doc = (await loadCompanyModules(store, A.id))!;
+    expect(doc.modules["vendas.devolucoes"].state).toBe("draining");
+    expect(Date.parse(doc.modules["vendas.devolucoes"].drainUntil!)).toBeGreaterThan(Date.now() + 89 * 86400000);
+    // a devolução de uma venda anterior continua aceita; venda nova no PDV, não
+    const ctxA = systemCtx(store, A.id);
+    await expect(assertActionModule(ctxA, A, "vendas.devolucoes", "processReturnAction")).resolves.toBeUndefined();
+    await expect(assertActionModule(ctxA, A, "vendas.pdv", "finalizeCartAction")).rejects.toBeInstanceOf(ModuleUnavailableError);
+    // enquanto houver venda no prazo, não desliga; quando a última sai do prazo, termina sozinho
+    expect((await finalizePendingDeactivations(store, A.id)).finalized).not.toContain("vendas.devolucoes");
+    await store.update("sales", recent.id, { completedAt: new Date(Date.now() - 91 * 86400000).toISOString() });
+    expect((await finalizePendingDeactivations(store, A.id)).finalized).toContain("vendas.devolucoes");
+    expect((await loadCompanyModules(store, A.id))!.modules["vendas.devolucoes"].state).toBe("disabled");
   });
 
   it("lotes: com produto controlado por lote o desligamento fica agendado e o módulo segue operando", async () => {

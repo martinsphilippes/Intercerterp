@@ -1,3 +1,4 @@
+import { applyDueTransitions } from "@/domain/licensing/due";
 import { applyLicense, licenseStatus } from "@/domain/licensing/license";
 import { companyParam, handle, ok, signedWrite } from "../../../_lib";
 
@@ -7,6 +8,8 @@ export const dynamic = "force-dynamic";
 export function GET(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.license.read", async (r) => {
     const companyId = companyParam(r.client, (await params).companyId);
+    // transições vencidas valem na hora: o Interos lê o estado já atualizado
+    await applyDueTransitions(r.store, companyId);
     const st = await licenseStatus(r.store, companyId);
     return ok(st, { requestId: r.requestId, headers: { ETag: `"${st.appliedVersion}"` } });
   });

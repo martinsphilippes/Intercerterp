@@ -6,7 +6,7 @@ import { loadCompanyModules } from "@/lib/modules/access";
 import { MODULE_MAP } from "@/lib/modules/catalog";
 import { applyChanges, companyOrThrow, simulateChanges, VersionConflictError, type ModuleChange, type Simulation } from "../modules/changes";
 import { takeBaseline } from "../modules/baseline";
-import { desiredByUnit, licenseSnapshotSchema, unitByCode, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
+import { desiredByUnit, licenseSnapshotSchema, resolveCode, unitByCode, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
 import { emitInterosEvent } from "./events";
 import { UNITS_V2 } from "@/lib/modules/units-v2.generated";
 
@@ -35,6 +35,12 @@ export interface LicensePlan {
   nextTransitionAt: string | null;
   simulation: Omit<Simulation, "entries"> | null;
   valid: boolean;
+  /**
+   * Unidades ainda não vendáveis que a empresa JÁ TINHA (chaves v1): continuam dela. O teto da empresa (suspensa,
+   * somente leitura, vigência vencida) desliga também essas unidades, e elas voltam quando o teto sai. Só um item
+   * `inactive` explícito encerra o direito.
+   */
+  preservedAccess: string[];
 }
 
 export function parseSnapshot(body: unknown, companyId: string): LicenseSnapshot {
@@ -56,6 +62,12 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
   const changes: ModuleChange[] = [];
   const effective: LicensePlan["effective"] = {};
   const isOn = (k: string) => ["enabled", "scheduled_off"].includes(doc?.modules?.[k]?.state ?? "");
+  // direito preservado (unidade não vendável que a empresa já tinha): o que estava registrado + o que está ligado agora
+  const preserved = new Set<string>((lic?.preservedAccess as string[] | undefined) ?? []);
+  const notSellable = (key: string) => UNITS_V2.find((x) => x.v1Key === key)?.sellable === false;
+  for (const [key, entry] of Object.entries(doc?.modules ?? {})) if (["enabled", "scheduled_off"].includes(entry.state) && notSellable(key)) preserved.add(key);
+  // só um item "inactive" explícito encerra o direito (fim do contrato daquela unidade)
+  for (const it of snapshot.items) if (it.state === "inactive") for (const u of resolveCodeUnits(it.code)) { const k = unitByCode(u)?.v1Key; if (k) preserved.delete(k); }
   // unidades licenciadas
   for (const [code, eff] of desired) {
     const unit = unitByCode(code)!;
@@ -63,12 +75,13 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
     if (!key || !MODULE_MAP.has(key)) continue;
     effective[key] = { unit: code, on: eff.on, state: eff.state, notice: eff.notice };
     if (eff.on && !isOn(key)) {
-      if (!unit.sellable) {
+      if (!unit.sellable && !preserved.has(key)) {
         // decisão do titular: dependente de integração externa só é liberada depois da homologação
         rejectedItems.push({ code, reason: "not_homologated", message: `${unit.name}: ainda depende de homologação da integração externa (${unit.devStatus}); não pode ser ativado para esta empresa.` });
         effective[key] = { ...effective[key], on: false };
         continue;
       }
+      if (!unit.sellable) warnings.push({ code, reason: "preserved_access", message: `${unit.name}: acesso que a empresa já tinha, restabelecido.` });
       changes.push({ module: key, action: "enable", ...(eff.config ? { config: eff.config } : {}) });
     } else if (eff.on && isOn(key) && !unit.sellable) {
       warnings.push({ code, reason: "preserved_access", message: `${unit.name}: acesso existente preservado (unidade ainda não homologada para venda nova).` });
@@ -81,13 +94,42 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
     if (!def || (def.classification !== "commercial" && def.classification !== "optional_function")) continue;
     // unidade ainda não homologada para venda: o Interos não a lista; quem já tem mantém (decisão do titular)
     const u = UNIT_CODE_BY_KEY.get(key);
-    if (u && UNITS_V2.find((x) => x.code === u)?.sellable === false) {
+    if (u && preserved.has(key)) {
+      if (!cap.allowOn) {
+        // o teto da empresa vale para TODAS as unidades, inclusive as preservadas (correção 2): empresa suspensa,
+        // somente leitura ou com a vigência vencida não emite NF-e, NFC-e, NFS-e nem usa o banco ou os canais.
+        // O direito continua registrado e a unidade volta quando o teto sair.
+        effective[key] = { unit: u, on: false, state: cap.state, notice: cap.notice ?? "Empresa sem operação liberada pelo contrato: acesso preservado volta com a reativação." };
+        changes.push({ module: key, action: "disable", history: "read" });
+        continue;
+      }
       effective[key] = { unit: u, on: true, state: "active", notice: "Acesso preservado (unidade aguardando homologação para venda)." };
-      warnings.push({ code: u, reason: "preserved_access", message: `${def.name}: acesso existente preservado; a unidade ainda não é vendável e só desliga por suspensão/inativação explícita.` });
+      warnings.push({ code: u, reason: "preserved_access", message: `${def.name}: acesso existente preservado; a unidade ainda não é vendável e só desliga com o teto da empresa ou inativação explícita.` });
       continue;
     }
     effective[key] = { unit: unitByV1KeyCode(key), on: false, state: "inactive" };
     changes.push({ module: key, action: "disable", history: "read" });
+  }
+  // direito preservado desligado pelo teto: volta quando a empresa sai da suspensão, do somente leitura ou da vigência
+  // vencida — desde que as dependências dele estejam ligadas (ou sendo ligadas) no mesmo lote
+  const willBeOn = (k: string) => effective[k] ? effective[k].on : isOn(k) && !changes.some((c) => c.module === k && c.action === "disable");
+  const depsOk = (k: string) => {
+    const def = MODULE_MAP.get(k) as any;
+    return (def?.requires ?? []).every(willBeOn) && (def?.requiresAny ?? []).every((group: string[]) => group.some(willBeOn));
+  };
+  if (cap.allowOn) {
+    for (const key of preserved) {
+      if (effective[key] || isOn(key) || !MODULE_MAP.has(key)) continue;
+      if (!depsOk(key)) {
+        // a dependência saiu do contrato: o direito preservado acaba junto (como no desligamento em cascata)
+        preserved.delete(key);
+        continue;
+      }
+      const u = unitByV1KeyCode(key);
+      effective[key] = { unit: u, on: true, state: "active", notice: "Acesso preservado restabelecido." };
+      warnings.push({ code: u, reason: "preserved_access", message: `${MODULE_MAP.get(key)!.name}: acesso que a empresa já tinha, restabelecido com a reativação.` });
+      changes.push({ module: key, action: "enable" });
+    }
   }
   let simulation: LicensePlan["simulation"] = null;
   const mode = snapshot.controlMode ?? undefined;
@@ -102,6 +144,8 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
       const explicit = [...desired.entries()].some(([u, eff]) => eff.on && unitByCode(u)?.v1Key === imp.module);
       if (explicit) rejectedItems.push({ code: unitByV1KeyCode(imp.module), reason: "dependency_missing", message: `${imp.name} foi licenciado como ativo, mas depende de ${MODULE_MAP.get(imp.cascadedFrom!)?.name ?? imp.cascadedFrom}, que o retrato desliga.` });
       else {
+        // desligado em cascata porque a dependência saiu do contrato: o direito preservado (se havia) acaba junto
+        if (cap.allowOn) preserved.delete(imp.module);
         effective[imp.module] = { unit: unitByV1KeyCode(imp.module), on: false, state: "inactive", notice: `Desligado junto com ${MODULE_MAP.get(imp.cascadedFrom!)?.name ?? imp.cascadedFrom}.` };
         warnings.push({ code: unitByV1KeyCode(imp.module), reason: "preserved_access", message: `${imp.name} desligado em cascata com ${imp.cascadedFrom}.` });
       }
@@ -111,7 +155,13 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
     companyId, licenseVersion: snapshot.licenseVersion, appliedVersion, stale: snapshot.licenseVersion <= appliedVersion, changes, rejectedItems, warnings, effective,
     companyState: cap.state, companyNotice: cap.notice, nextTransitionAt: nextAt, simulation,
     valid: !rejectedItems.some((r) => r.reason === "dependency_missing" || r.reason === "kind_not_supported"),
+    preservedAccess: [...preserved].sort(),
   };
+}
+
+/** Unidades comerciais de um código do retrato (alias, incluído e módulo resolvidos). */
+function resolveCodeUnits(code: string): string[] {
+  return resolveCode(code).units;
 }
 
 const UNIT_CODE_BY_KEY = new Map(UNITS_V2.filter((u) => u.v1Key).map((u) => [u.v1Key!, u.code]));
@@ -198,7 +248,7 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
     }
     await store.update("company_licenses", licenseId(companyId), {
       licenseVersion: snapshot.licenseVersion, snapshot, commercialStatus: snapshot.commercialStatus, display: snapshot.display ?? lic?.display ?? null,
-      limits: snapshot.limits ?? null, effective: plan!.effective, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings, appliedAt: nowIso(),
+      limits: snapshot.limits ?? null, effective: plan!.effective, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings, appliedAt: nowIso(), preservedAccess: plan!.preservedAccess,
       appliedRuntimeVersion: runtimeVersion, nextTransitionAt: plan!.nextTransitionAt, clientId: meta.clientId, lastSnapshotAt: nowIso(), staleNotifiedAt: null,
     });
     const result: ApplyLicenseResult = { status: "applied", appliedVersion: snapshot.licenseVersion, plan, runtimeVersion };
@@ -233,7 +283,11 @@ export async function maintainLicense(store: Store, companyId: string, now = new
       runtimeVersion = r.version;
       await emitInterosEvent(store, companyId, "license.transition", { licenseVersion: snapshot.licenseVersion, changes: plan.changes, companyState: plan.companyState });
     }
-    await store.update("company_licenses", lic.id, { effective: plan.effective, nextTransitionAt: plan.nextTransitionAt, ...(runtimeVersion ? { appliedRuntimeVersion: runtimeVersion } : {}) });
+    // transição local registrada no histórico da licença (o Interos acompanha pelo GET .../license/history)
+    const transitions = plan.changes.length
+      ? [...(((lic.transitions as unknown[]) ?? []) as unknown[]), { at: now.toISOString(), licenseVersion: snapshot.licenseVersion, companyState: plan.companyState, changes: plan.changes.map((c) => ({ unit: unitByV1KeyCode(c.module), module: c.module, action: c.action })), runtimeVersion }].slice(-100)
+      : undefined;
+    await store.update("company_licenses", lic.id, { effective: plan.effective, nextTransitionAt: plan.nextTransitionAt, preservedAccess: plan.preservedAccess, ...(transitions ? { transitions } : {}), ...(runtimeVersion ? { appliedRuntimeVersion: runtimeVersion } : {}) });
     return { changes: plan.changes.length, companyState: plan.companyState, nextTransitionAt: plan.nextTransitionAt };
   });
 }

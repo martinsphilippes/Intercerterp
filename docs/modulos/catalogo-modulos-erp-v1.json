@@ -1223,6 +1223,9 @@
         "mode": "drain",
         "afterOff": "read_history",
         "drainDays": 90,
+        "blockers": [
+          "sales.cdc_return_window"
+        ],
         "drainActions": [
           "processReturnAction",
           "confirmCardReversalAction"

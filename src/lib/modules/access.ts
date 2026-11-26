@@ -51,8 +51,9 @@ export function enforcedLevelOf(doc: CompanyModulesDoc | null, key: string, kind
     else if (e.state === "draining") level = "drain";
     else level = (e.history ?? (def.deactivation.afterOff === "hidden" ? "none" : "read")) === "read" ? "read" : "none";
   }
-  // função opcional nunca vale mais que o pai
-  if (def.parent && !seen.has(def.parent)) {
+  // função opcional nunca vale mais que o pai — exceto em conclusão: a obrigação própria (ex.: devoluções no prazo do
+  // CDC, reservas de pré-venda a liberar) continua mesmo com o pai desligado, só com as ações de conclusão
+  if (def.parent && !seen.has(def.parent) && e?.state !== "draining") {
     seen.add(key);
     level = minLevel(level, enforcedLevelOf(doc, def.parent, kind, seen));
   }

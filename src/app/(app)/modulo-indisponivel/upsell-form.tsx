@@ -10,7 +10,7 @@ export function UpsellForm({ module }: { module: string }) {
       {({ pending }) => (
         <>
           <input type="hidden" name="module" value={module} />
-          <Field label="Observação (opcional)">
+          <Field label="Observação (opcional)" hint="Vai para a equipe comercial junto com o pedido. Não inclua dados pessoais.">
             <Textarea name="note" maxLength={500} placeholder="Ex.: queremos começar no próximo mês, 2 filiais" />
           </Field>
           <SubmitButton pending={pending}>Solicitar contratação</SubmitButton>

@@ -69,34 +69,34 @@
               "estado": "concluida",
               "concluidaEm": "2026-11-20T12:02:00.000Z",
               "erro": null,
-              "tentativas": 2
+              "tentativas": 1
             },
             {
               "etapa": "unidade_inicial",
               "estado": "concluida",
               "concluidaEm": "2026-11-20T12:02:00.000Z",
               "erro": null,
-              "tentativas": 2
+              "tentativas": 1
             },
             {
               "etapa": "modulos",
               "estado": "concluida",
               "concluidaEm": "2026-11-20T12:02:00.000Z",
               "erro": null,
-              "tentativas": 2
+              "tentativas": 1
             },
             {
               "etapa": "administrador",
               "estado": "concluida",
               "concluidaEm": "2026-11-20T12:02:00.000Z",
               "erro": null,
-              "tentativas": 2
+              "tentativas": 1
             }
           ],
-          "tentativas": 2,
+          "tentativas": 1,
           "ultimoErro": null,
           "iniciadaEm": "2026-11-20T12:02:00.000Z",
-          "concluidaEm": "2026-11-20T12:04:00.000Z"
+          "concluidaEm": "2026-11-20T12:02:00.000Z"
         },
         "unidades": [
           {

@@ -50,21 +50,21 @@
               "estado": "concluida",
               "concluidaEm": "2026-11-20T12:13:00.000Z",
               "erro": null,
-              "tentativas": 2
+              "tentativas": 1
             },
             {
               "etapa": "unidade_inicial",
               "estado": "concluida",
               "concluidaEm": "2026-11-20T12:13:00.000Z",
               "erro": null,
-              "tentativas": 2
+              "tentativas": 1
             },
             {
               "etapa": "modulos",
               "estado": "concluida",
               "concluidaEm": "2026-11-20T12:13:00.000Z",
               "erro": null,
-              "tentativas": 2
+              "tentativas": 1
             },
             {
               "etapa": "administrador",
@@ -112,7 +112,7 @@
         },
         "ultimaAtividadeEm": null,
         "vinculadaEm": "2026-11-20T12:13:00.000Z",
-        "atualizadaEm": "2026-11-20T12:15:00.000Z"
+        "atualizadaEm": "2026-11-20T12:13:00.000Z"
       },
       "convite": {
         "idUsuario": "2651926fe4572c99297d2fa51721848d",

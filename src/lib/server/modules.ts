@@ -20,8 +20,15 @@ export class ModuleUnavailableError extends BusinessError {
   }
 }
 
-/** Estado da empresa — uma leitura por requisição (e 15 s entre requisições pela camada de leitura). */
-export const companyModulesCached = cache((store: Store, companyId: string) => loadCompanyModules(store, companyId));
+/**
+ * Estado da empresa — uma leitura por requisição. Antes de ler, aplica as transições de licença e módulos já vencidas
+ * (teste, agendamentos, vigência, operações agendadas, desligamentos em conclusão): valem na hora, sem esperar a rotina.
+ */
+export const companyModulesCached = cache(async (store: Store, companyId: string) => {
+  const { applyDueTransitions } = await import("@/domain/licensing/due");
+  await applyDueTransitions(store, companyId);
+  return loadCompanyModules(store, companyId);
+});
 
 export async function companyModules(ctx: Pick<Ctx, "store" | "companyId">): Promise<CompanyModulesDoc | null> {
   return companyModulesCached(ctx.store, ctx.companyId);

@@ -12,6 +12,7 @@ import { takeBaseline, provisionModules } from "@/domain/modules/baseline";
 import { decide, loadCompanyModules } from "@/lib/modules/access";
 import { companyCap, itemEffective, resolveCode, type LicenseSnapshot } from "@/domain/licensing/effective";
 import { applyLicense, displayMode, licenseStatus, maintainLicense, planLicense } from "@/domain/licensing/license";
+import { applyDueTransitions } from "@/domain/licensing/due";
 import { assertWithinLimit, noteFiscalDocumentUsage } from "@/domain/licensing/limits";
 import { reconcileLicense } from "@/domain/licensing/sync";
 import { signBody, verifySignature } from "@/domain/licensing/events";
@@ -20,6 +21,7 @@ import { requestUpsell } from "@/domain/licensing/upsell";
 import { runDueJobs } from "@/domain/jobs-registry";
 import { systemCtx } from "@/lib/core/ctx";
 import { roleFromAttributes } from "@/domain/users";
+import { MODULE_MAP } from "@/lib/modules/catalog";
 import { UNITS_V2 } from "@/lib/modules/units-v2.generated";
 
 /**
@@ -111,6 +113,48 @@ describe("aplicação do retrato de licença", () => {
     expect(r.status).toBe("applied");
     expect(r.plan!.rejectedItems.some((i) => i.reason === "not_homologated" && i.code === "04.01")).toBe(true);
     expect(decide(await loadCompanyModules(store, C.id), "fiscal.nfe").level).toBe("none");
+  });
+
+  it("correção 2: o teto da empresa (suspensa, somente leitura, vigência vencida) desliga também as unidades não vendáveis; a reativação devolve", async () => {
+    const t0 = Date.now();
+    const notSellable = UNITS_V2.filter((u) => !u.sellable && u.v1Key && MODULE_MAP.has(u.v1Key)).map((u) => u.v1Key!);
+    const before = await loadCompanyModules(store, A.id);
+    const hadBefore = notSellable.filter((k) => ["enabled", "scheduled_off"].includes(before!.modules[k]?.state ?? ""));
+    expect(hadBefore).toContain("fiscal.nfe"); // a empresa já tinha NF-e (direito preservado)
+    const items = ALL_SELLABLE_RETAIL.map((code) => ({ code, state: "active" as const }));
+    const r1 = await applyLicense(store, A.id, snap(A.id, 1, items, { controlMode: "enforced" }), meta);
+    // preservadas: as que a empresa tinha e cujas dependências continuam no contrato (sem a Loja virtual no retrato,
+    // Banco Intercert e Canais saem em cascata e o direito deles acaba junto)
+    const kept = r1.plan!.preservedAccess;
+    expect(kept).toEqual(expect.arrayContaining(["fiscal.nfe", "fiscal.nfce"]));
+    for (const k of kept) expect(hadBefore).toContain(k);
+    expect(decide(await loadCompanyModules(store, A.id), "fiscal.nfe").level).toBe("full");
+
+    // empresa suspensa: nenhuma unidade fica ligada — nem as preservadas
+    await applyLicense(store, A.id, snap(A.id, 2, items, { commercialStatus: "suspended" }), meta);
+    let doc = await loadCompanyModules(store, A.id);
+    for (const k of kept) expect(decide(doc, k).level, k).not.toBe("full");
+    expect((await licenseStatus(store, A.id)).effective!["fiscal.nfe"]).toMatchObject({ on: false, state: "suspended" });
+
+    // reativada: o direito que a empresa já tinha volta (não é venda nova)
+    const r3 = await applyLicense(store, A.id, snap(A.id, 3, items), meta);
+    expect(r3.plan!.changes.some((c) => c.module === "fiscal.nfe" && c.action === "enable")).toBe(true);
+    doc = await loadCompanyModules(store, A.id);
+    for (const k of kept) expect(decide(doc, k).level, k).toBe("full");
+
+    // somente leitura e vigência vencida (depois da carência) também desligam
+    await applyLicense(store, A.id, snap(A.id, 4, items, { commercialStatus: "read_only" }), meta);
+    expect(decide(await loadCompanyModules(store, A.id), "fiscal.nfe").level).not.toBe("full");
+    await applyLicense(store, A.id, snap(A.id, 5, items, { validUntil: iso(t0 + day) }), meta);
+    expect(decide(await loadCompanyModules(store, A.id), "fiscal.nfe").level).toBe("full");
+    await maintainLicense(store, A.id, new Date(t0 + 10 * day));
+    expect(decide(await loadCompanyModules(store, A.id), "fiscal.nfe").level).not.toBe("full");
+
+    // só a inativação explícita encerra o direito: listada como ativa depois, a NF-e é recusada (não homologada)
+    await applyLicense(store, A.id, snap(A.id, 6, [...items, { code: "04.01", state: "inactive" }]), meta);
+    const r7 = await applyLicense(store, A.id, snap(A.id, 7, [...items, { code: "04.01", state: "active" }]), meta);
+    expect(r7.plan!.preservedAccess).not.toContain("fiscal.nfe");
+    expect(r7.plan!.rejectedItems.some((i) => i.code === "04.01" && i.reason === "not_homologated")).toBe(true);
   });
 
   it("dependência ausente recusa o retrato inteiro (nada muda)", async () => {
@@ -291,6 +335,30 @@ describe("API /api/interos/v2", () => {
     expect(st.headers.get("etag")).toBe('"7"');
   });
 
+  it("correção 3: transição vencida vale na hora — a leitura do Interos aplica (sem a rotina diária) e o histórico mostra", async () => {
+    const t0 = Date.now();
+    const items = [...ALL_SELLABLE_RETAIL.filter((c) => c !== "05.02").map((code) => ({ code, state: "active" as const })), { code: "05.02", state: "trial" as const, until: iso(t0 + 2 * day) }];
+    await applyLicense(store, A.id, snap(A.id, 1, items, { controlMode: "enforced" }), meta);
+    expect(decide(await loadCompanyModules(store, A.id), "compras.cotacoes").level).toBe("full");
+    // antes do instante: nada a aplicar
+    expect((await applyDueTransitions(store, A.id, new Date(t0 + day))).license).toBe(false);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // dia 10: teste e carência vencidos — a primeira leitura do Interos aplica
+      vi.setSystemTime(new Date(t0 + 10 * day));
+      const { GET } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
+      const st = await GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${token}` } }), params());
+      expect((await st.json()).data.effective["compras.cotacoes"]).toMatchObject({ on: false, state: "suspended" });
+      expect(decide(await loadCompanyModules(store, A.id), "compras.cotacoes").level).toBe("read");
+      const hist = await (await import("@/app/api/interos/v2/companies/[companyId]/license/history/route")).GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${token}` } }), params());
+      const rows = (await hist.json()).data;
+      expect(rows[0]).toMatchObject({ kind: "transition", licenseVersion: 1, source: "local", changes: [expect.objectContaining({ module: "compras.cotacoes", action: "disable" })] });
+      expect(rows.some((h: any) => h.kind === "snapshot" && h.licenseVersion === 1)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("escopo e restrição de empresa por credencial", async () => {
     const { PUT, GET } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
     const body = JSON.stringify(snap(A.id, 1, []));
@@ -312,6 +380,25 @@ describe("API /api/interos/v2", () => {
     expect(Array.isArray((await errs.json()).data)).toBe(true);
     const ups = await (await import("@/app/api/interos/v2/upsell-requests/route")).GET(new Request("http://erp.local/x", auth));
     expect(ups.status).toBe(200);
+  });
+
+  it("correção 4 (LGPD): a solicitação de contratação chega ao Interos com identificador pseudônimo e perfil, nunca o nome", async () => {
+    const C = (await createCompanyWithDefaults(store, { name: "Zeta Ficticia", key: "zeta-lic" })).company;
+    await provisionModules(store, C.id, ["cadastros.produtos"], "teste");
+    const sys = systemCtx(store, C.id);
+    const ctxC = { ...sys, user: { ...sys.user, id: "u-zeta-1", name: "Joana da Silva Pereira", roleName: "Gerente de loja" } };
+    await requestUpsell(ctxC, "compras.cotacoes", "Queremos começar no mês que vem");
+    await requestUpsell({ ...ctxC, user: { ...ctxC.user } }, "compras.pedidos", "");
+    const res = await (await import("@/app/api/interos/v2/upsell-requests/route")).GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${token}` } }));
+    const rows = (await res.json()).data.filter((r: any) => r.companyId === C.id);
+    expect(rows.length).toBe(2);
+    expect(JSON.stringify(rows)).not.toMatch(/Joana|Silva|Pereira/);
+    expect(rows[0].requestedBy).toMatch(/^usr_[0-9a-f]{20}$/);
+    expect(rows[0].requestedBy).toBe(rows[1].requestedBy); // a mesma pessoa tem sempre o mesmo identificador
+    expect(rows[0].requesterRole).toBe("Gerente de loja");
+    // nem o banco do ERP guarda mais o nome na solicitação
+    const stored = await listAll(unscoped(store), "upsell_requests", { filters: [["eq", "companyId", C.id]] });
+    expect(stored.every((r) => r.userName == null)).toBe(true);
   });
 
   it("sem segredo de assinatura configurado as escritas respondem 503", async () => {

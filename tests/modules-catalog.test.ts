@@ -158,7 +158,7 @@ describe("rastreabilidade — superfície → módulo", () => {
   });
 
   it("verificações de pendência e evidências de uso apontam para tabelas e campos existentes", () => {
-    for (const [k, b] of Object.entries(BLOCKERS)) for (const f of b.filters) expect(COLLECTION_MAP[b.collection]?.fields[f[1] as string], `${k}.${String(f[1])}`).toBeTruthy();
+    for (const [k, b] of Object.entries(BLOCKERS)) for (const f of typeof b.filters === "function" ? b.filters() : b.filters) expect(COLLECTION_MAP[b.collection]?.fields[f[1] as string], `${k}.${String(f[1])}`).toBeTruthy();
     for (const [k, b] of Object.entries(USAGE_EVIDENCE)) for (const f of b.filters ?? []) expect(COLLECTION_MAP[b.collection]?.fields[f[1] as string], `${k}.${String(f[1])}`).toBeTruthy();
     for (const m of MODULES_CATALOG) for (const b of m.deactivation.blockers ?? []) expect(BLOCKERS[b], `${m.key}: ${b}`).toBeTruthy();
   });
