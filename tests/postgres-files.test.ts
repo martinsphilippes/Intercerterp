@@ -26,7 +26,7 @@ import { freshPostgresStore } from "./pglite";
  * Arquivos do backend Postgres: sem Blob conectado ficam no próprio banco (a instalação funciona só com o banco); com
  * Blob, vão para ele — e para o banco se o Blob recusar. O identificador diz onde cada arquivo está.
  */
-const ENV = ["DATA_BACKEND", "DATABASE_URL", "POSTGRES_URL", "APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID", "APPWRITE_API_KEY", "VERCEL", "BLOB_READ_WRITE_TOKEN", "VERCEL_OIDC_TOKEN", "BLOB_STORE_ID"] as const;
+const ENV = ["DATA_BACKEND", "DATABASE_URL", "POSTGRES_URL", "VERCEL", "BLOB_READ_WRITE_TOKEN", "VERCEL_OIDC_TOKEN", "BLOB_STORE_ID"] as const;
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 const g = globalThis as unknown as { __intercertFiles?: unknown; __intercertStore?: unknown; __intercertAuth?: unknown };
 

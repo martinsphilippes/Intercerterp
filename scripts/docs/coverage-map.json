@@ -2,8 +2,8 @@
  "01": {
   "route": "/login",
   "evid": "01-login",
-  "integ": "Appwrite Auth (sessão por e-mail/senha); auditoria de tentativas",
-  "test": "tests/core.test.ts; login real no Appwrite local (Playwright) e bloqueio após 5 tentativas",
+  "integ": "Login próprio (senha com hash e sessões no banco); auditoria de tentativas",
+  "test": "tests/core.test.ts; tests/login-screen.test.ts; login real pela tela (Playwright) e bloqueio após 5 tentativas",
   "notes": "Usuário ou e-mail; mostrar senha; manter conectado; recuperação; suporte público (/suporte). [Decisão] bloqueio temporário 15 min após 5 tentativas."
  },
  "02": {
@@ -107,7 +107,7 @@
  "16": {
   "route": "/produtos/novo, /produtos/[id]?tab=geral|variacoes|precos|estoque|fiscal|historico",
   "evid": "16-produto",
-  "integ": "Imagem no Appwrite Storage",
+  "integ": "Imagem no armazenamento de arquivos (banco ou Vercel Blob)",
   "test": "tests/products.test.ts (variações, atacado, vigência, histórico)",
   "notes": "Variações por eixos; custos adicionais; margem e markup separados; saldo inicial como movimento."
  },
@@ -247,7 +247,7 @@
  "36": {
   "route": "/administracao/usuarios (+ /novo, /[id], /perfis); /conta/seguranca; /login/duas-etapas",
   "evid": "36-usuarios",
-  "integ": "Appwrite Auth (criação, senha, bloqueio); e-mail de convite; TOTP local (RFC 6238, sem serviço externo)",
+  "integ": "Login próprio (criação, senha, bloqueio); e-mail de convite; TOTP local (RFC 6238, sem serviço externo)",
   "test": "tests/admin.test.ts (convite → primeiro acesso; suspensão; último administrador); tests/ajustes-telas.test.ts (TOTP RFC 6238, login com/sem 2FA, recuperação de uso único, bloqueio, perfil exigindo)",
   "notes": "Convite com token (hash); matriz de permissões; limites de desconto. [Decisão §44] autenticação em duas etapas por usuário (QR otpauth, segredo cifrado, 10 códigos de recuperação só como hash) e exigível por perfil; redefinição pelo administrador auditada."
  },
@@ -282,8 +282,8 @@
  "41": {
   "route": "/administracao/backups (+ /[id])",
   "evid": "41-backups",
-  "integ": "Appwrite Storage (bucket backups)",
-  "test": "tests/backup.test.ts; restauração real em nova base Appwrite (1.264/1.264 registros)",
+  "integ": "Armazenamento de arquivos (banco ou Vercel Blob), pasta backups",
+  "test": "tests/backup.test.ts (geração, verificação em base de teste, adulteração detectada, retenção, agenda)",
   "notes": "Verificação por restauração em base de teste; retenção; agenda."
  },
  "42": {

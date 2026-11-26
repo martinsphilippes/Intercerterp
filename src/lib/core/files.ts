@@ -1,32 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Client, Storage, AppwriteException } from "node-appwrite";
-import { InputFile } from "node-appwrite/file";
-import { configuredBackend, appwriteConfig, newId, sha256, postgresStore } from "../db";
+import { configuredBackend, newId, sha256, postgresStore } from "../db";
 import { FILES_TABLE } from "../db/postgres/ddl";
 import type { Ctx } from "./ctx";
 
 /**
  * Armazenamento de arquivos (XML, DANFE, anexos, backups). No Postgres: Vercel Blob privado quando conectado ao projeto
- * e, sem ele, o próprio banco — a instalação funciona só com o banco. Instalações antigas: Appwrite Storage.
- * Desenvolvimento e testes: disco local ou memória.
+ * e, sem ele, o próprio banco — a instalação funciona só com o banco. Desenvolvimento e testes: disco local ou memória.
  */
 export interface FileStorage {
-  readonly kind: "blob" | "postgres" | "appwrite" | "local" | "memory";
+  readonly kind: "blob" | "postgres" | "local" | "memory";
   put(bucket: string, name: string, data: Buffer, mime: string): Promise<string>;
   get(bucket: string, storageId: string): Promise<Buffer>;
   remove(bucket: string, storageId: string): Promise<void>;
 }
 
+/** Pastas lógicas dos arquivos (o caminho no Blob e a coluna `bucket` do banco). */
 export const BUCKETS = { documents: "documents", attachments: "attachments", backups: "backups", images: "images" } as const;
-
-/**
- * Bucket físico no Appwrite. Planos com limite de buckets (o gratuito permite um) definem APPWRITE_BUCKET_ID e todos os
- * buckets lógicos passam a usar esse único bucket; o metadado do arquivo continua guardando o bucket lógico.
- */
-export function physicalBucket(bucket: string) {
-  return process.env.APPWRITE_BUCKET_ID?.trim() || bucket;
-}
 
 class LocalFileStorage implements FileStorage {
   readonly kind: "local" | "memory";
@@ -55,31 +45,6 @@ class LocalFileStorage implements FileStorage {
   async remove(bucket: string, id: string) {
     if (!this.dir) this.mem.delete(`${bucket}/${id}`);
     else fs.rmSync(path.join(this.dir, bucket, id), { force: true });
-  }
-}
-
-class AppwriteFileStorage implements FileStorage {
-  readonly kind = "appwrite" as const;
-  private storage: Storage;
-  constructor() {
-    const cfg = appwriteConfig();
-    this.storage = new Storage(new Client().setEndpoint(cfg.endpoint).setProject(cfg.projectId).setKey(cfg.apiKey));
-  }
-  async put(bucket: string, name: string, data: Buffer) {
-    const id = newId();
-    await this.storage.createFile({ bucketId: physicalBucket(bucket), fileId: id, file: InputFile.fromBuffer(data, name) });
-    return id;
-  }
-  async get(bucket: string, id: string) {
-    const ab = await this.storage.getFileDownload({ bucketId: physicalBucket(bucket), fileId: id });
-    return Buffer.from(ab as ArrayBuffer);
-  }
-  async remove(bucket: string, id: string) {
-    try {
-      await this.storage.deleteFile({ bucketId: physicalBucket(bucket), fileId: id });
-    } catch (e) {
-      if (!(e instanceof AppwriteException && e.code === 404)) throw e;
-    }
   }
 }
 
@@ -186,8 +151,6 @@ export function fileStorageLabel(): string {
       return "Vercel Blob privado";
     case "postgres":
       return "banco de dados da instalação";
-    case "appwrite":
-      return "Appwrite Storage";
     case "local":
       return "armazenamento local de arquivos";
     default:
@@ -211,7 +174,7 @@ export function getFileStorage(): FileStorage {
   const disk = () => new LocalFileStorage(process.env.LOCAL_FILES_DIR ?? path.join(process.cwd(), ".data", "files"));
   // Postgres: Blob privado quando conectado; sem ele, o próprio banco (também em desenvolvimento com um Postgres local)
   if (backend === "postgres") g.__intercertFiles = new PostgresBackendFileStorage();
-  else g.__intercertFiles = backend === "appwrite" ? new AppwriteFileStorage() : backend === "local" ? disk() : new LocalFileStorage();
+  else g.__intercertFiles = backend === "local" ? disk() : new LocalFileStorage();
   return g.__intercertFiles;
 }
 

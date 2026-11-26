@@ -1,21 +1,17 @@
 import crypto from "node:crypto";
-import { Account, AppwriteException, Client, ID, Query, Users } from "node-appwrite";
-import { appwriteConfig, configuredBackend, detId, findOne, getStore, listAll, sha256 } from "../db";
+import { detId, findOne, getStore, listAll, sha256 } from "../db";
 import type { Store } from "../db/types";
 
 /**
- * Autenticação:
- *  - Própria do ERP (Postgres em produção; local/memória em desenvolvimento e testes): senha com hash scrypt em
- *    `users.passwordHash` e sessões na tabela "sessions" (o navegador guarda o segredo; o banco, só o hash dele).
- *  - Backend Appwrite (instalações antigas): usuários no Appwrite Auth (sessão por e-mail/senha; recuperação por e-mail).
- * O perfil do ERP (empresa, filiais, perfil de acesso) fica sempre na coleção "users".
+ * Autenticação própria do ERP (Postgres em produção; local/memória em desenvolvimento e testes): senha com hash scrypt
+ * em `users.passwordHash` e sessões na tabela "sessions" (o navegador guarda o segredo; o banco, só o hash dele).
+ * O perfil do ERP (empresa, filiais, perfil de acesso) fica na mesma coleção "users"; situação (ativo, suspenso,
+ * inativo) também — o bloqueio do acesso é conferido nela.
  */
 
 export interface AuthProvider {
-  readonly kind: "appwrite" | "local";
   createUser(email: string, password: string, name: string): Promise<string>;
   setPassword(authId: string, password: string): Promise<void>;
-  setBlocked(authId: string, blocked: boolean): Promise<void>;
   login(email: string, password: string, persistent: boolean): Promise<{ secret: string; authId: string; expiresAt: string }>;
   verify(secret: string): Promise<string | null>;
   logout(secret: string): Promise<void>;
@@ -38,7 +34,6 @@ function verifyPassword(password: string, stored: string | null | undefined): bo
 }
 
 class LocalAuth implements AuthProvider {
-  readonly kind = "local" as const;
   constructor(private store: () => Store) {}
 
   async createUser(email: string, password: string) {
@@ -50,10 +45,6 @@ class LocalAuth implements AuthProvider {
   async setPassword(authId: string, password: string) {
     const u = await findOne(this.store(), "users", [["eq", "authId", authId]]);
     if (u) await this.store().update("users", u.id, { passwordHash: hashPassword(password) });
-  }
-
-  async setBlocked() {
-    /* status controlado na coleção users */
   }
 
   async login(email: string, password: string, persistent: boolean) {
@@ -101,102 +92,10 @@ class LocalAuth implements AuthProvider {
   }
 }
 
-class AppwriteAuth implements AuthProvider {
-  readonly kind = "appwrite" as const;
-  private admin() {
-    const c = appwriteConfig();
-    return new Client().setEndpoint(c.endpoint).setProject(c.projectId).setKey(c.apiKey);
-  }
-  private sessionClient(secret: string) {
-    const c = appwriteConfig();
-    return new Client().setEndpoint(c.endpoint).setProject(c.projectId).setSession(secret);
-  }
-
-  async createUser(email: string, password: string, name: string) {
-    const users = new Users(this.admin());
-    try {
-      const u = await users.create({ userId: ID.unique(), email: email.toLowerCase(), password, name });
-      return u.$id;
-    } catch (e) {
-      if (e instanceof AppwriteException && e.code === 409) {
-        const list = await users.list({ queries: [Query.equal("email", email.toLowerCase())] });
-        const found = list.users[0];
-        if (found) {
-          await users.updatePassword({ userId: found.$id, password });
-          return found.$id;
-        }
-      }
-      throw e;
-    }
-  }
-
-  async setPassword(authId: string, password: string) {
-    await new Users(this.admin()).updatePassword({ userId: authId, password });
-  }
-
-  async setBlocked(authId: string, blocked: boolean) {
-    await new Users(this.admin()).updateStatus({ userId: authId, status: !blocked });
-  }
-
-  async login(email: string, password: string) {
-    const account = new Account(this.admin());
-    try {
-      const s = await account.createEmailPasswordSession({ email: email.toLowerCase(), password });
-      return { secret: s.secret, authId: s.userId, expiresAt: s.expire };
-    } catch (e) {
-      if (e instanceof AppwriteException && (e.code === 401 || e.code === 400)) throw new Error("invalid_credentials");
-      throw e;
-    }
-  }
-
-  private cache = new Map<string, { authId: string; until: number }>();
-
-  async verify(secret: string) {
-    const key = sha256(secret);
-    const hit = this.cache.get(key);
-    if (hit && hit.until > Date.now()) return hit.authId;
-    try {
-      const u = await new Account(this.sessionClient(secret)).get();
-      if (!u.status) return null;
-      this.cache.set(key, { authId: u.$id, until: Date.now() + 60000 });
-      return u.$id;
-    } catch {
-      return null;
-    }
-  }
-
-  async logout(secret: string) {
-    this.cache.delete(sha256(secret));
-    try {
-      await new Account(this.sessionClient(secret)).deleteSession({ sessionId: "current" });
-    } catch {
-      /* sessão já expirada */
-    }
-  }
-
-  async requestRecovery(email: string, resetUrl: string) {
-    // O Appwrite envia o e-mail de recuperação pelo SMTP do projeto (Appwrite Cloud possui envio próprio).
-    try {
-      await new Account(this.admin()).createRecovery({ email: email.toLowerCase(), url: resetUrl });
-      return { delivered: true, channel: "appwrite" };
-    } catch (e) {
-      if (e instanceof AppwriteException && e.code === 404) return { delivered: false, channel: "none" };
-      throw e;
-    }
-  }
-
-  async completeRecovery({ userId, secret, password }: { userId: string; secret: string; password: string }) {
-    await new Account(this.admin()).updateRecovery({ userId, secret, password });
-    // senha nova: as sessões abertas antes deixam de valer (a verificação em memória de cada instância expira em 1 min)
-    await new Users(this.admin()).deleteSessions({ userId });
-    for (const [k, v] of this.cache) if (v.authId === userId) this.cache.delete(k);
-  }
-}
-
 const g = globalThis as unknown as { __intercertAuth?: AuthProvider };
 
 export function getAuth(): AuthProvider {
-  g.__intercertAuth ??= configuredBackend() === "appwrite" ? new AppwriteAuth() : new LocalAuth(getStore);
+  g.__intercertAuth ??= new LocalAuth(getStore);
   return g.__intercertAuth;
 }
 

@@ -17,17 +17,17 @@ Monólito modular: um modelo de dados (`src/lib/db/schema.ts`), serviços de dom
 ## Camada de dados (`src/lib/db`)
 
 - `Store` (interface) — `get`, `list`, `create`, `update`, `delete`, `increment(min/max)`, `transaction`.
-- `PostgresStore` (produção, `src/lib/db/postgres`), `MemoryStore` (dev/testes; `.data/local` quando `DATA_BACKEND=local`) e `AppwriteStore` (instalações antigas, até a retirada).
+- `PostgresStore` (produção, `src/lib/db/postgres`), `MemoryStore` (dev/testes; `.data/local` quando `DATA_BACKEND=local`). O `AppwriteStore` foi retirado em 26/11/2026.
 - **Esquema único** em `schema.ts` → no Postgres, uma tabela por coleção, criada e atualizada sozinha na primeira consulta de cada versão (só acrescenta; `npm run db:setup` faz o mesmo sob demanda).
 - Tipos: dinheiro em **centavos** (`money`), quantidade em **milésimos** (`qty`, 1 un = 1000), percentuais em **pontos-base** (`…Bps`, 1% = 100), datas de calendário `AAAA-MM-DD`, instantes ISO UTC, JSON serializado.
-- Filtros: `["eq", campo, valor|valores]`, `["contains", "searchText", termo]`, `["between", …]`, `["or", [...]]` etc. Campos `id/createdAt/updatedAt` são colunas de sistema (no Appwrite, `$id/$createdAt/$updatedAt`); a ordem padrão é a de inserção (`_seq`).
+- Filtros: `["eq", campo, valor|valores]`, `["contains", "searchText", termo]`, `["between", …]`, `["or", [...]]` etc. Campos `id/createdAt/updatedAt` são colunas de sistema; a ordem padrão é a de inserção (`_seq`).
 
 ## Consistência e concorrência
 
 - **Idempotência por chave**: cada efeito recebe id determinístico `detId(...)`. Repetir uma operação (duplo clique, retentativa) encontra o registro existente em vez de duplicar. Formulários enviam `_idem` estável (`ActionForm`).
 - **Sequência por agregado**: movimentos de estoque `(balanceId, seq)`, lançamentos em conta `(accountId, seq)` e baixas `(installmentId, seq)` têm índice único. Duas operações concorrentes sobre o mesmo saldo geram conflito → `retryOnConflict` relê e reaplica. Nenhuma baixa dupla do mesmo saldo nem consumo duplo de estoque.
 - **Limites atômicos**: `increment(..., {min/max})` impede devolução acima do vendido e saldo negativo de vale/título.
-- **Transações**: venda, baixa, estorno, transferência etc. gravam documento + efeitos juntos. No Postgres são transações reais (BEGIN … COMMIT, READ COMMITTED) e toda operação feita durante a transação entra nela; no Appwrite eram escritas preparadas e aplicadas no commit (máx. 100 operações — limite que o código continua respeitando). Efeitos volumosos (estoque da venda) vão por tarefa durável idempotente.
+- **Transações**: venda, baixa, estorno, transferência etc. gravam documento + efeitos juntos. No Postgres são transações reais (BEGIN … COMMIT, READ COMMITTED) e toda operação feita durante a transação entra nela. 100 operações — limite que o código continua respeitando). Efeitos volumosos (estoque da venda) vão por tarefa durável idempotente.
 - **Outbox** (`jobs`): emissão/consulta fiscal, efeitos da venda, notificações e rotinas. Executor em `/api/jobs` (Vercel Cron diário) e em segundo plano após cada ação de usuário (`after()`, a cada 30 s no máximo por instância), com reivindicação única por tentativa, recuo exponencial e limite geral de reagendamentos.
 
 ## Serviços de domínio (`src/domain`)

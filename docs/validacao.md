@@ -1,5 +1,9 @@
 # Validação — cenários executados e resultados
 
+> **Registro histórico** da validação feita na época do Appwrite. O Appwrite foi desligado pelo titular e retirado do
+> código em 26/11/2026. O banco atual é o Postgres (Neon) desde 13/11/2026; as validações atuais estão em
+> `docs/progresso.md` e `docs/multiempresa/homologacao*.md`.
+
 Data da validação: 06/10/2026. Este documento registra **o que foi executado e onde** — sem misturar ambiente local, homologação e produção.
 
 ## 1. Ambientes usados

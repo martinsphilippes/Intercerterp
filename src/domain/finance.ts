@@ -315,7 +315,7 @@ export interface SettleInput {
 /**
  * Baixa uma parcela. Com `tx`, participa da transação externa (sem auditoria nem atualização do status do título —
  * o chamador faz depois); `entryCache` compartilha a sequência das contas entre várias baixas da MESMA transação
- * (no Appwrite as leituras não enxergam as escritas da própria transação — baixa em lote).
+ * (na transação adiada — modo deferred — as leituras não enxergam as escritas da própria transação — baixa em lote).
  */
 export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store, entryCache?: Map<string, Doc>): Promise<Doc> {
   const sid = detId("settle", input.idemKey);
@@ -357,7 +357,7 @@ export async function settleInstallment(ctx: Ctx, input: SettleInput, tx?: Store
     const sign = inst.kind === "receivable" ? 1 : -1;
     const total = input.principal - discount + interest + fine;
     const seq = inst.seq + 1;
-    // cache compartilhado: no Appwrite as leituras não enxergam escritas da própria transação (sequência da conta)
+    // cache compartilhado: na transação adiada as leituras não enxergam escritas da própria transação (sequência da conta)
     const cache = entryCache ?? new Map<string, Doc>();
     const entry = await postEntry(ctx, t, {
       accountId: input.accountId,
@@ -620,7 +620,7 @@ export async function reversalPostCommit(ctx: Ctx, s: Doc, reason: string) {
   if (inst && inst.status !== "paid" && inst.dueDate < today()) await reopenOccurrence(ctx.store, `overdue:${inst.id}`);
 }
 
-/** Limite de escritas por transação do Appwrite. */
+/** Limite de escritas por transação (o modo `MEMORY_TX_MODE=deferred` dos testes recusa acima disso). */
 const TX_LIMIT = 100;
 
 /** Títulos de renegociação vigentes (não cancelados) gerados a partir do título `titleId`. */
@@ -1458,7 +1458,7 @@ export const collectionYourNumber = (titleNumber: number, instNumber: number) =>
 
 /**
  * Parcelas selecionadas + novas parcelas por renegociação. Mantém a renegociação (2·sel + novas + 2 escritas) e o
- * seu desfazimento (2·sel + 2·novas + 2 escritas) dentro do limite de 100 escritas por transação do Appwrite.
+ * seu desfazimento (2·sel + 2·novas + 2 escritas) dentro do limite de 100 escritas por transação.
  */
 export const RENEG_MAX_ITEMS = 49;
 

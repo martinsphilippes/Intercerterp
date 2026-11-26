@@ -214,7 +214,6 @@ export const INTEGRATION_CATALOG: Record<IntegrationKind, { label: string; descr
     label: "E-mail",
     description: "Envio de documentos, convites e recuperação de senha.",
     providers: [
-      { id: "appwrite_messaging", label: "Appwrite Messaging", secrets: [], config: ["providerId"], test: "Envio real de mensagem de teste ao usuário logado." },
       { id: "resend", label: "Resend (API)", secrets: ["apiKey"], config: ["from"], defaultRefs: { apiKey: "RESEND_API_KEY" }, refPrefixes: ["RESEND_"], test: "Envio real de mensagem de teste ao usuário logado." },
     ],
     consumer: "Documentos, convites, suporte",
@@ -237,7 +236,6 @@ export const CONFIG_LABEL: Record<string, string> = {
   serviceCodes: "Serviços de frete (códigos separados por vírgula)",
   projectId: "Projeto na hospedagem (ID)",
   teamId: "Equipe na hospedagem (ID, opcional)",
-  providerId: "ID do provedor de e-mail no Appwrite",
   from: "Remetente (From)",
   dominioCompanyCode: "Código da empresa na Domínio",
   regime: "Regime dos lançamentos (competencia ou caixa)",
@@ -343,6 +341,16 @@ const FORBIDDEN_CONFIG_KEYS = ["baseUrl"];
 
 const catalogProvider = (kind: string, provider: string | null | undefined) => INTEGRATION_CATALOG[kind as IntegrationKind]?.providers.find((p) => p.id === provider);
 
+/**
+ * Provedores desligados: o registro antigo pode continuar gravado, mas a integração vale como NÃO configurada (nada é
+ * enviado a eles; a tela pede outro provedor). E-mail: o Appwrite Messaging saiu com o Appwrite (§48).
+ */
+const RETIRED_PROVIDERS: Partial<Record<IntegrationKind, readonly string[]>> = { email: ["appwrite_messaging"] };
+
+export function retiredProvider(integration: Doc): boolean {
+  return Boolean(RETIRED_PROVIDERS[integration.kind as IntegrationKind]?.includes(String(integration.provider)));
+}
+
 /** Somente os segredos do provedor no catálogo atual (vínculos antigos de outros provedores/versões são ignorados). */
 export function effectiveSecretRefs(integration: Doc): Record<string, string> {
   const prov = catalogProvider(integration.kind, integration.provider);
@@ -384,12 +392,13 @@ export async function findIntegration(store: Store, companyId: string, branchId:
 }
 
 /**
- * Integração efetiva para a filial (específica ou da empresa). Registro com vínculo de credencial não permitido é
- * tratado como não configurado (null); a configuração devolvida nunca traz URL base (endereço fixo do provedor).
+ * Integração efetiva para a filial (específica ou da empresa). Registro com vínculo de credencial não permitido ou de
+ * provedor desligado é tratado como não configurado (null); a configuração devolvida nunca traz URL base (endereço fixo
+ * do provedor).
  */
 export async function getIntegration(store: Store, companyId: string, branchId: string | null | undefined, kind: IntegrationKind): Promise<Doc | null> {
   const raw = await findIntegration(store, companyId, branchId, kind);
-  if (!raw || integrationRefProblem(raw)) return null;
+  if (!raw || retiredProvider(raw) || integrationRefProblem(raw)) return null;
   return safeIntegration(raw);
 }
 
@@ -582,7 +591,8 @@ export async function testIntegration(ctx: Ctx, kind: IntegrationKind, branchId:
     return out;
   }
   const raw = await findIntegration(ctx.store, ctx.companyId, branchId, kind);
-  if (!raw) return { status: "not_configured", ok: false, message: "Integração não configurada." };
+  // provedor desligado: como se não houvesse integração (a tela pede outro provedor)
+  if (!raw || retiredProvider(raw)) return { status: "not_configured", ok: false, message: "Integração não configurada." };
   const refProblem = integrationRefProblem(raw);
   integ = safeIntegration(raw);
   const missing = refProblem ? [] : missingSecrets(integ);

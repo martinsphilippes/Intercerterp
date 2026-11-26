@@ -14,7 +14,6 @@ vi.mock("next/headers", () => ({
 // a carga automática da demonstração (modo memória) não faz parte destes cenários; o resto do módulo é o real
 vi.mock("@/lib/server/bootstrap", async (original) => ({ ...(await original<typeof import("@/lib/server/bootstrap")>()), ensureBootstrap: async () => undefined }));
 
-import { AppwriteException } from "node-appwrite";
 import { freshStore } from "./helpers";
 import { seedDemo } from "@/domain/seed";
 import { DEMO_PASSWORD } from "@/domain/seed/base";
@@ -26,10 +25,13 @@ import { completeRecoveryAction, loginAction, requestRecoveryAction } from "@/ap
 import { getAuth, setAuth, type AuthProvider } from "@/lib/auth/provider";
 import { SESSION_COOKIE } from "@/lib/server/session";
 
-const pausedError = () =>
-  new AppwriteException("Project is paused due to inactivity. Please restore it from the console to resume operations.", 403, "project_paused", '{"code":403,"type":"project_paused"}');
+/** Erros como o cliente `pg` os entrega: código SQLSTATE de 5 caracteres e a mensagem do servidor. */
+const pgError = (code: string, message: string) => Object.assign(new Error(message), { code });
+const downError = () => pgError("08006", "connection failure");
+const deniedError = () => pgError("28P01", 'password authentication failed for user "x"');
+const quotaError = () => pgError("XX000", "Your account or project has exceeded the compute time quota. Upgrade your plan to increase limits.");
 
-/** Banco que recusa toda operação (como o Appwrite com o projeto pausado) ou só as que o teste escolher. */
+/** Banco que recusa toda operação (como o Postgres fora do ar) ou só as que o teste escolher. */
 function failingStore(inner: Store, error: () => unknown, when: (method: string, collection: string) => boolean = () => true): Store {
   return new Proxy(inner, {
     get(target, prop, recv) {
@@ -50,24 +52,15 @@ const form = (fields: Record<string, string>) => {
 };
 
 describe("banco indisponível: classificação do erro", () => {
-  it("reconhece projeto pausado, acesso recusado e serviço fora do ar; ignora o que não é indisponibilidade", () => {
-    expect(dbOutageOf(pausedError())).toMatchObject({ kind: "paused" });
-    // mesma forma vinda de outro grafo de módulos (sem instanceof)
-    expect(dbOutageOf({ name: "AppwriteException", code: 403, type: "project_paused", message: "Project is paused" })).toMatchObject({ kind: "paused" });
-    expect(dbOutageOf(new AppwriteException("missing scope", 401, "general_unauthorized_scope"))).toMatchObject({ kind: "credentials" });
-    expect(dbOutageOf(new AppwriteException("forbidden", 403, "general_access_forbidden"))).toMatchObject({ kind: "credentials" });
-    expect(dbOutageOf(new AppwriteException("Server Error", 500, "general_unknown"))).toMatchObject({ kind: "unreachable" });
-    // cota do plano: o Appwrite limita as operações do banco (429 em chamada do servidor) ou fala de uso/plano na resposta
-    expect(dbOutageOf(new AppwriteException("Rate limit for the current endpoint has been exceeded.", 429, "general_rate_limit_exceeded"))).toMatchObject({ kind: "quota" });
-    expect(dbOutageOf(new AppwriteException("Your organization has reached the usage limit of the Free plan.", 403, "general_access_forbidden"))).toMatchObject({ kind: "quota" });
-    expect(dbOutageOf(new AppwriteException("The requested resource is blocked.", 401, "general_resource_blocked"))).toMatchObject({ kind: "quota" });
-    // estado do próprio usuário não é cota do plano
-    expect(dbOutageOf(new AppwriteException("The current user has been blocked.", 401, "user_blocked"))).toMatchObject({ kind: "credentials" });
+  it("reconhece cota do plano, acesso recusado e serviço fora do ar; ignora o que não é indisponibilidade", () => {
+    expect(dbOutageOf(quotaError())).toMatchObject({ kind: "quota" });
+    expect(dbOutageOf(deniedError())).toMatchObject({ kind: "credentials" });
+    expect(dbOutageOf(downError())).toMatchObject({ kind: "unreachable" });
     expect(dbOutageOf(Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } }))).toMatchObject({ kind: "unreachable" });
     expect(dbOutageOf(Object.assign(new Error("connect timeout"), { code: "UND_ERR_CONNECT_TIMEOUT" }))).toMatchObject({ kind: "unreachable" });
     // não é indisponibilidade: registro/tabela inexistente, consulta inválida, concorrência, erro de programação
-    expect(dbOutageOf(new AppwriteException("not found", 404, "row_not_found"))).toBeNull();
-    expect(dbOutageOf(new AppwriteException("invalid query", 400, "general_query_invalid"))).toBeNull();
+    expect(dbOutageOf(pgError("42P01", 'relation "x" does not exist'))).toBeNull();
+    expect(dbOutageOf(pgError("42601", 'syntax error at or near "x"'))).toBeNull();
     expect(dbOutageOf(new ConflictError("já existe", "users", "unique"))).toBeNull();
     expect(dbOutageOf(Object.assign(new TypeError("x is not a function"), { code: "ERR_INVALID_ARG_TYPE" }))).toBeNull();
     expect(dbOutageOf(new Error("boom"))).toBeNull();
@@ -75,10 +68,10 @@ describe("banco indisponível: classificação do erro", () => {
   });
 
   it("a mensagem diz que não é a senha, em qualquer motivo", () => {
-    for (const kind of ["paused", "quota", "credentials", "unreachable"] as const) {
+    for (const kind of ["quota", "credentials", "unreachable"] as const) {
       expect(outageMessage({ kind, detail: "x" })).toMatch(/Não é problema de usuário nem de senha/);
     }
-    expect(outageMessage({ kind: "paused", detail: "x" })).toMatch(/pausado/);
+    expect(outageMessage({ kind: "quota", detail: "x" })).toMatch(/limite do plano/);
   });
 });
 
@@ -112,20 +105,19 @@ describe("tela de login: acessos da demonstração e banco indisponível", () =>
     expect(st.quick.find((u) => u.login === "gerente")).toMatchObject({ scope: "todas as filiais" });
   });
 
-  it("banco pausado: a tela informa o motivo e mantém os acessos visíveis (lista de reserva)", async () => {
-    setStore(failingStore(seeded, pausedError));
+  it("banco fora do ar: a tela informa o motivo e mantém os acessos visíveis (lista de reserva)", async () => {
+    setStore(failingStore(seeded, downError));
     const st = await loginScreenState();
     expect(st.empty).toBe(false); // falha não é instalação vazia: nunca abre o primeiro acesso
-    expect(st.outage).toMatchObject({ kind: "paused" });
+    expect(st.outage).toMatchObject({ kind: "unreachable" });
     expect(st.quickLive).toBe(false);
     expect(st.quick.map((u) => u.login)).toEqual(defaultDemoAccess().map((u) => u.login));
     expect(st.quick).toHaveLength(Object.keys(DEMO_SECTORS).length);
     expect(st.quick[0]).toEqual({ login: "admin", name: "", sector: "Administração", scope: "" });
   });
 
-  it("cota do plano atingida (depois de reativar o projeto): motivo próprio, acessos visíveis e login com a mensagem certa", async () => {
-    const overQuota = () => new AppwriteException("Rate limit for the current endpoint has been exceeded.", 429, "general_rate_limit_exceeded");
-    setStore(failingStore(seeded, overQuota));
+  it("cota do plano atingida: motivo próprio, acessos visíveis e login com a mensagem certa", async () => {
+    setStore(failingStore(seeded, quotaError));
     const st = await loginScreenState();
     expect(st).toMatchObject({ empty: false, outage: { kind: "quota" }, quickLive: false });
     expect(st.quick).toHaveLength(Object.keys(DEMO_SECTORS).length);
@@ -138,8 +130,8 @@ describe("tela de login: acessos da demonstração e banco indisponível", () =>
     process.env.DATA_BACKEND = "local";
     delete process.env.SHOW_DEMO_LOGIN;
     expect(await loginScreenState()).toMatchObject({ empty: false, outage: null, quick: [] });
-    setStore(failingStore(seeded, pausedError));
-    expect(await loginScreenState()).toMatchObject({ empty: false, outage: { kind: "paused" }, quick: [] });
+    setStore(failingStore(seeded, deniedError));
+    expect(await loginScreenState()).toMatchObject({ empty: false, outage: { kind: "credentials" }, quick: [] });
     // SHOW_DEMO_LOGIN=1 liga o acesso rápido em qualquer armazenamento
     process.env.SHOW_DEMO_LOGIN = "1";
     expect((await loginScreenState()).quick).toHaveLength(Object.keys(DEMO_SECTORS).length);
@@ -162,14 +154,14 @@ describe("tela de login: acessos da demonstração e banco indisponível", () =>
     expect(await loginScreenState()).toEqual({ empty: true, outage: null, quick: [], quickLive: true });
   });
 
-  it("login com o banco pausado: mensagem com o motivo em vez de exceção; com o banco no ar, entra", async () => {
-    setStore(failingStore(seeded, pausedError));
+  it("login com o banco fora do ar: mensagem com o motivo em vez de exceção; com o banco no ar, entra", async () => {
+    setStore(failingStore(seeded, downError));
     const blocked = await loginAction(form({ login: "caixa", password: DEMO_PASSWORD }));
-    expect(blocked).toMatchObject({ ok: false, code: "db_paused" });
-    expect(blocked.ok === false && blocked.error).toMatch(/pausado.*Não é problema de usuário nem de senha/);
+    expect(blocked).toMatchObject({ ok: false, code: "db_unreachable" });
+    expect(blocked.ok === false && blocked.error).toMatch(/não respondeu.*Não é problema de usuário nem de senha/);
     expect(jar.has(SESSION_COOKIE)).toBe(false);
     // recuperação de senha: mesma mensagem, sem exceção
-    expect(await requestRecoveryAction(form({ login: "caixa" }))).toMatchObject({ ok: false, code: "db_paused" });
+    expect(await requestRecoveryAction(form({ login: "caixa" }))).toMatchObject({ ok: false, code: "db_unreachable" });
 
     setStore(seeded);
     const ok = await loginAction(form({ login: "caixa", password: DEMO_PASSWORD }));
@@ -185,10 +177,8 @@ describe("tela de login: acessos da demonstração e banco indisponível", () =>
   it("respostas do provedor de autenticação não são confundidas com banco fora do ar", async () => {
     const real = getAuth();
     const provider = (over: Partial<AuthProvider>): AuthProvider => ({
-      kind: "appwrite",
       createUser: (...a) => real.createUser(...a),
       setPassword: (...a) => real.setPassword(...a),
-      setBlocked: (...a) => real.setBlocked(...a),
       login: (...a) => real.login(...a),
       verify: (...a) => real.verify(...a),
       logout: (...a) => real.logout(...a),
@@ -200,20 +190,22 @@ describe("tela de login: acessos da demonstração e banco indisponível", () =>
       throw e;
     };
     try {
-      // limite de tentativas do provedor: continua "serviço de autenticação indisponível"
-      setAuth(provider({ login: fails(new AppwriteException("Rate limit for the current endpoint has been exceeded.", 429, "general_rate_limit_exceeded")) }));
+      // falha do provedor depois de ler o usuário: continua "serviço de autenticação indisponível"
+      setAuth(provider({ login: fails(new Error("falha interna do provedor")) }));
       const limited = await loginAction(form({ login: "caixa", password: DEMO_PASSWORD }));
       expect(limited.ok === false && limited.error).toMatch(/Serviço de autenticação indisponível/);
-      // pausa no meio do login (depois de ler o usuário): motivo informado
-      setAuth(provider({ login: fails(pausedError()) }));
-      expect(await loginAction(form({ login: "caixa", password: DEMO_PASSWORD }))).toMatchObject({ ok: false, code: "db_paused" });
-      // redefinição de senha: 401 é o link inválido/expirado, não a chave do servidor
+      expect(jar.has(SESSION_COOKIE)).toBe(false);
+      // redefinição de senha: link inválido/expirado e acesso recusado continuam como link inválido
       const reset = { userId: "u1", secret: "s1", password: "NovaSenha@2026", confirm: "NovaSenha@2026" };
-      setAuth(provider({ completeRecovery: fails(new AppwriteException("Invalid token passed in the request.", 401, "user_invalid_token")) }));
+      setAuth(provider({ completeRecovery: fails(new Error("invalid_token")) }));
       const badLink = await completeRecoveryAction(form(reset));
       expect(badLink.ok === false && badLink.error).toMatch(/Link inválido ou expirado/);
-      setAuth(provider({ completeRecovery: fails(pausedError()) }));
-      expect(await completeRecoveryAction(form(reset))).toMatchObject({ ok: false, code: "db_paused" });
+      setAuth(provider({ completeRecovery: fails(deniedError()) }));
+      const denied = await completeRecoveryAction(form(reset));
+      expect(denied.ok === false && denied.error).toMatch(/Link inválido ou expirado/);
+      // banco sem resposta no meio da redefinição: motivo informado
+      setAuth(provider({ completeRecovery: fails(downError()) }));
+      expect(await completeRecoveryAction(form(reset))).toMatchObject({ ok: false, code: "db_unreachable" });
     } finally {
       setAuth(real);
     }

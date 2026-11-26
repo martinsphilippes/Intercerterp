@@ -1,3 +1,7 @@
+/** Armazenamentos aceitos (`DATA_BACKEND`): Postgres em produção; memória e disco local em desenvolvimento e testes. */
+export const BACKENDS = ["postgres", "local", "memory"] as const;
+export type Backend = (typeof BACKENDS)[number];
+
 export type Scalar = string | number | boolean | null;
 
 export type Filter =
@@ -22,7 +26,7 @@ export interface ListOptions {
   limit?: number;
   offset?: number;
   cursorAfter?: string;
-  /** quando false, o total não é calculado (mais rápido no Appwrite) */
+  /** quando false, o total não é calculado (evita a contagem: mais rápido) */
   total?: boolean;
 }
 
@@ -67,7 +71,7 @@ export interface WriteGuard {
 }
 
 export interface Store {
-  readonly backend: "postgres" | "appwrite" | "local" | "memory";
+  readonly backend: Backend;
   get<T = any>(collection: string, id: string): Promise<Doc<T> | null>;
   getOrThrow<T = any>(collection: string, id: string): Promise<Doc<T>>;
   list<T = any>(collection: string, opts?: ListOptions): Promise<ListResult<Doc<T>>>;

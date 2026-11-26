@@ -6,7 +6,7 @@ Princípios: contratos independentes de fornecedor, adaptador real + adaptador d
 
 | Integração | Adaptador real | Consumidor | Teste local (contrato) | Sandbox/homologação | Produção |
 |---|---|---|---|---|---|
-| Appwrite (banco, Auth, Storage) | `AppwriteStore`, `AppwriteAuth`, `AppwriteFileStorage`, `provisionAppwrite` | Todo o sistema | **Comprovado** em Appwrite 1.8.0 self-hosted (Docker): provisionamento de ~75 tabelas, transações, índices únicos, incrementos com limite, Auth, Storage, seed completo, backup e restauração em nova base | — | Appwrite Cloud: **não testado** (rede deste ambiente bloqueia `cloud.appwrite.io`; endpoint e Project ID não fornecidos) |
+| Banco, login e arquivos — Postgres (Neon) | `PostgresStore`, login próprio (`LocalAuth`), arquivos no próprio banco ou no Vercel Blob | Todo o sistema | **Comprovado** com PostgreSQL embutido (suíte inteira) e PostgreSQL 18.7 de verdade (§48) | Prévia da branch com banco próprio (ramificação do Neon) | **Em produção** desde 13/11/2026. O Appwrite foi desligado pelo titular e retirado do código em 26/11/2026 |
 | NF-e / NFC-e / NFS-e — Focus NFe | `FocusNfeProvider` (API v2; NFS-e municipal `/v2/nfse` e nacional `/v2/nfsen`) | Fiscal, PDV, devoluções, compras | Contrato testado contra **servidor HTTP falso** que imita a Focus (envio 202/processando, consulta autorizado, 401 → erro) — `tests/fiscal.test.ts` | **Não executado** (sem token; rede bloqueia a Focus) | Não |
 | Fiscal — simulação | `SimulatedFiscalProvider` (rotulado, valida NCM/CFOP, simula rejeição) | Demonstração | Comprovado | — | — |
 | Pix — Mercado Pago | `MercadoPagoProvider` (`X-Idempotency-Key` = referência; consulta por `external_reference`; estorno) | PDV → pagamento | Contrato coberto por testes de intenção (pendente/confirmado/falha com consulta da referência anterior) usando o provedor de simulação | **Não executado** (sem `MERCADOPAGO_ACCESS_TOKEN`) | Não |
@@ -14,8 +14,8 @@ Princípios: contratos independentes de fornecedor, adaptador real + adaptador d
 | TEF | Conector local (contrato HTTP abaixo) | Terminais / PDV | Teste feito **pelo navegador do caixa** (o servidor nunca acessa o conector); a Central de integrações mostra o resultado medido dos terminais — `tests/integrations.test.ts`, `tests/admin-access.test.ts` | Depende do software do conector | Não |
 | Banco — arquivos | Parsers OFX, CSV (mapeável), CNAB 240 (FEBRABAN T/U), CNAB 400 (Itaú, Bradesco) | Conciliação | Comprovado com arquivos de exemplo (`tests/fixtures`) | Layouts devem ser homologados com arquivos reais dos bancos | — |
 | Banco — API/Open Finance | Não implementado (estado “indisponível” na central) | — | — | — | — |
-| E-mail | Resend (API) e Appwrite Messaging | Convites, recuperação local, cobrança, documentos, chamados, contabilidade | Sem canal configurado: todas as telas registram “não enviado / canal não configurado” (comprovado) | Não executado (sem chave) | Não |
-| Recuperação de senha | Appwrite Auth `createRecovery`/`updateRecovery` | Login | Fluxo local comprovado; Appwrite local sem SMTP | — | Appwrite Cloud envia pelo próprio SMTP |
+| E-mail | Resend (API) | Convites, recuperação local, cobrança, documentos, chamados, contabilidade | Sem canal configurado: todas as telas registram “não enviado / canal não configurado” (comprovado) | Não executado (sem chave) | Não |
+| Recuperação de senha | Login próprio: link de uso único (`resetTokenHash`) por e-mail; sem canal de e-mail, o link iniciado pelo administrador aparece uma vez para ele | Login, Administração › Usuários | Comprovado (`tests/admin-multiempresa.test.ts`) | — | Depende do canal de e-mail (item 5 das pendências) |
 | Consulta CNPJ | BrasilAPI (pública) | Clientes, fornecedores | Rede deste ambiente bloqueia; erro tratado e exibido | — | — |
 | Contabilidade | Pacote ZIP (XMLs armazenados + CSVs + manifesto SHA-256) e envio por e-mail | Fiscal → relatórios | Pacote comprovado (ZIP inspecionado em teste) | — | — |
 
@@ -23,8 +23,8 @@ Princípios: contratos independentes de fornecedor, adaptador real + adaptador d
 
 | Variável | Uso |
 |---|---|
-| `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_API_KEY`, `APPWRITE_DATABASE_ID`, `APPWRITE_BUCKET_ID` (opcional) | Banco, Auth e Storage |
-| `AUTH_ENCRYPTION_KEY` (recomendada; texto longo aleatório, sensível) | Cifra do segredo da autenticação em duas etapas e da sessão pendente do login (§44). Sem ela, derivada de `APPWRITE_API_KEY`; trocar a chave obriga os usuários a recadastrar o autenticador |
+| `DATABASE_URL` / `POSTGRES_URL` (integração do Neon) | Banco de dados; sem eles, o sistema roda em memória (desenvolvimento) |
+| `AUTH_ENCRYPTION_KEY` (recomendada; texto longo aleatório, sensível) | Cifra do segredo da autenticação em duas etapas e da sessão pendente do login (§44). Obrigatória em produção (sem ela, a autenticação em duas etapas recusa o cadastro com mensagem clara); trocar a chave obriga os usuários a recadastrar o autenticador. As variáveis `APPWRITE_*` que restarem no projeto não têm efeito |
 | `FOCUSNFE_TOKEN` (nome configurável em Fiscal → Configurações) | NF-e/NFC-e/NFS-e |
 | `NFCE_CSC` (nome configurável) | CSC da NFC-e |
 | `MERCADOPAGO_ACCESS_TOKEN` (nome configurável) | Pix |
@@ -45,7 +45,7 @@ O PDV roda no navegador. Impressoras térmicas, leitores HID e pinpads TEF, por�
 ### Topologia
 
 ```
-[Navegador do caixa] ──HTTPS──> [ERP (Vercel) + Appwrite]
+[Navegador do caixa] ──HTTPS──> [ERP (Vercel) + Postgres (Neon)]
         │
         └──HTTP local──> [Conector] ──USB/serial/rede──> impressora · leitor HID · pinpad TEF
              http://127.0.0.1:9100

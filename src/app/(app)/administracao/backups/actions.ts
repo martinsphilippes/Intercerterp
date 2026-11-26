@@ -1,9 +1,6 @@
 "use server";
 
-import { after } from "next/server";
-import { runAction, fstr, fopt, fbool } from "@/lib/server/action";
-import { getStore } from "@/lib/db";
-import { enqueue } from "@/lib/core/jobs";
+import { runAction, fstr, fbool } from "@/lib/server/action";
 import { requireAction } from "@/lib/core/ctx";
 import { createBackup, verifyBackup, createRestoreJob, runRestoreJob, applyRetention } from "@/domain/backup";
 
@@ -32,24 +29,15 @@ export async function restoreAction(id: string, fd: FormData) {
   return runAction({ module: "admin", revalidate: [`/administracao/backups/${id}`] }, async (s) => {
     requireAction(s.ctx, "admin.backup");
     if (!fbool(fd, "confirm")) return { ok: false as const, error: "Confirme que revisou o escopo e o destino da restauração." };
-    const target = fstr(fd, "target") === "appwrite_new" ? "appwrite_new" : "test";
     const b = await s.ctx.store.get("backups", id);
     // a cópia precisa ser da empresa em uso (nunca restaurar/verificar cópia de outra empresa)
     if (!b || b.companyId !== s.ctx.companyId) return { ok: false as const, error: "Registro não encontrado.", code: "not_found" };
-    const job = await createRestoreJob(s.ctx, b, target, target === "appwrite_new" ? fopt(fd, "databaseId") : null, fstr(fd, "_idem") || undefined);
-    if (target === "test") {
-      const done = await runRestoreJob(s.ctx, job.id);
-      return done.status === "completed"
-        ? { ok: true as const, message: "Restauração em base de teste concluída: contagens e checksums iguais.", redirect: `/administracao/backups/${id}?tab=restauracao` }
-        : { ok: false as const, error: `Restauração em base de teste com falha: ${done.error ?? "divergência"}` };
-    }
-    // nova base Appwrite: provisionamento e cópia são longos → tarefa durável, iniciada logo após a resposta
-    const j = await enqueue(s.ctx.store, { type: "admin.restore.run", payload: { restoreJobId: job.id }, dedupeKey: `restore:${job.id}`, companyId: s.ctx.companyId, maxAttempts: 2, createdBy: s.user.id });
-    after(async () => {
-      const { runDueJobs } = await import("@/domain/jobs-registry");
-      await runDueJobs(getStore(), { jobIds: [j.id] }).catch((e) => console.error("[restore]", e));
-    });
-    return { ok: true as const, message: "Restauração iniciada em segundo plano. Acompanhe a situação nesta página.", redirect: `/administracao/backups/${id}?tab=restauracao` };
+    // destino único: base de teste isolada
+    const job = await createRestoreJob(s.ctx, b, "test", fstr(fd, "_idem") || undefined);
+    const done = await runRestoreJob(s.ctx, job.id);
+    return done.status === "completed"
+      ? { ok: true as const, message: "Restauração em base de teste concluída: contagens e checksums iguais.", redirect: `/administracao/backups/${id}?tab=restauracao` }
+      : { ok: false as const, error: `Restauração em base de teste com falha: ${done.error ?? "divergência"}` };
   });
 }
 

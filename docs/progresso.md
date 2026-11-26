@@ -59,13 +59,14 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] **Acesso rápido fixo na tela de login (13/11):** decisão do titular — os logins de acesso ficam na tela inicial até ele mandar tirar. Registrada no código, nas regras (§47), no README e na variável `SHOW_DEMO_LOGIN` da Vercel. Como a senha está na tela e qualquer visitante entra como Administração, os usuários da lista ficam protegidos enquanto o acesso rápido estiver ligado: não são inativados nem suspensos, não trocam senha, e-mail ou login, não viram administrador geral, não usam autenticação em duas etapas, não recebem link de “Esqueci minha senha” e não são bloqueados por tentativas erradas — nem pelo administrador geral (`tests/quick-access-pin.test.ts`, com contraprova de cada trava).
 - [x] **Publicado em produção (13/11, PR #1, autorizado pelo titular):** endereço oficial no banco novo, em São Paulo. A produção tem banco próprio (a integração do Neon separa a publicação de teste em outra ramificação): começou vazio e a demonstração foi carregada nele em 65 s. Conferido no endereço oficial: 21 acessos rápidos na tela inicial (computador e celular), entrada pelos botões, XML baixado do banco, sete senhas erradas sem travar o botão, varredura — 287 páginas, todas 200, sem erro.
 - [ ] **Depende do titular:** (a) informar o e-mail do administrador geral; (b) ~~autorizar a publicação em produção~~ feito; (c) remover as variáveis `APPWRITE_*` na Vercel e apagar o projeto no console do Appwrite (`docs/pendencias-externas.md`, item 1). Depois: publicar, conferir a produção, renovar o `SETUP_TOKEN`; por fim, retirar o código do Appwrite. Opcional nos planos pagos: conectar o Blob privado.
+- [x] **Appwrite retirado do código (26/11/2026; o titular desligou o serviço):** saíram banco, login, arquivos, e-mail pelo Appwrite Messaging, provisionamento, restauração em “nova base Appwrite”, `npm run appwrite:setup` e a dependência `node-appwrite`; Postgres, memória, login próprio, arquivos (banco/Blob) e e-mail (Resend) sem mudança. As variáveis `APPWRITE_*` que restam na Vercel são ignoradas — falta o titular apagá-las (`docs/pendencias-externas.md`, item 1; §48). Suíte: 1698 de 1698 em memória e 1692 no Postgres (mais 6 só de memória); tsc, lint e build limpos.
 
 ## Pendente (depende de terceiros)
 - Credenciais dos provedores (Focus NFe, Mercado Pago, e-mail, TEF, banco).
 
 ## Como retomar
 1. `npm install` · `npm test` · `MEMORY_TX_MODE=deferred npm test` · `npx tsc --noEmit` · `npx next lint`.
-2. Appwrite local (opcional): variáveis em `.env.local`, `npm run appwrite:setup`, `npm run seed`.
+2. Postgres local (opcional): `DATABASE_URL` em `.env.local`, `npm run db:setup`, `npm run seed`.
 3. `npm run build && npm start` · `node scripts/dev/crawl.mjs` · `node scripts/dev/evidence.mjs` · `node scripts/docs/build-matrix.mjs`.
 
 ## Comércio digital — Telas 49–64 (guia v2.0) · 18/11/2026

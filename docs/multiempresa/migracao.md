@@ -109,3 +109,21 @@ completos estão em `migracao-simular.json` e `migracao-aplicar.json`.
   `perfisComOperacaoDePlataforma` e não tem efeito fora da plataforma.
 - **Credenciais compartilhadas:** nenhuma.
 
+
+## 7. Resultado na produção (26/11/2026)
+
+Publicação autorizada pelo titular: PR #4, merge `1143592`. A estrutura nova foi criada sozinha na primeira consulta
+da versão. A migração rodou logo depois, em modo `estrito`, com a demonstração carregada. Os relatórios completos estão
+em `docs/multiempresa/evidencias/producao/`.
+
+| Modo | Tempo | Preenchidos | Revisão | Plataforma | Vínculos | Registros (antes → depois) | Valores de conferência |
+|---|---|---|---|---|---|---|---|
+| simular | 1,7 s | 0 | 0 | 1 candidata (a mesma da homologação) | 1 contábil e 6 de rede ativos; 1 sem origem | 4.665 → 4.665 | 48 vendas · R$ 5.994,22 · estoque 943 un. · 59 documentos fiscais |
+| aplicar | 1,3 s | 0 | 0 | marcada; equipe de certificação da demonstração movida para ela | **8 criados** (1 contábil e 7 de rede) | 4.665 → 4.675 (+8 vínculos, +1 perfil da equipe, +1 auditoria) | idênticos: `conferencia.ok = true`, sem diferenças |
+
+Depois da migração:
+- os 21 acessos rápidos continuam na tela de login;
+- a interface do Interos responde `503 servico_nao_configurado`, porque a produção não tem credenciais até o aceite;
+- a varredura das telas como Administração da demonstração abriu 336 páginas e 208 padrões de rota, sem nenhum
+  problema;
+- a Vercel não registrou nenhum erro de execução na primeira hora.

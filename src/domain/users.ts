@@ -23,7 +23,7 @@ import { QUICK_ACCESS_LOCKED, isQuickAccessUser, quickAccessLockedMessage } from
  * Regras:
  *  - convite: token aleatório (somente o hash é gravado) com validade; link /convite/<token>;
  *    envio pelo canal de e-mail configurado com resultado real; sem canal, o link é exibido ao administrador;
- *  - suspensão/inativação bloqueia o login (no Appwrite Auth também via setBlocked) e encerra sessões locais;
+ *  - suspensão/inativação bloqueia o login e encerra as sessões abertas;
  *  - nunca deixar a instalação sem administrador ativo (último administrador protegido, também sob concorrência:
  *    a gravação é conferida depois de feita e desfeita se deixar o sistema sem administrador);
  *  - alcance do gestor: só gerencia usuários vinculados à empresa em uso; quem não é administrador não gerencia
@@ -714,20 +714,6 @@ export async function updateUser(ctx: Ctx, id: string, input: UserInput) {
       throw lastAdminError(before, "Remover o acesso de administrador");
     }
   }
-  const auth = getAuth();
-  if (auth.kind === "appwrite" && before.authId && (data.email !== before.email || data.name !== before.name)) {
-    const { Client, Users } = await import("node-appwrite");
-    const { appwriteConfig } = await import("@/lib/db");
-    const c = appwriteConfig();
-    const users = new Users(new Client().setEndpoint(c.endpoint).setProject(c.projectId).setKey(c.apiKey));
-    try {
-      if (data.email !== before.email) await users.updateEmail({ userId: before.authId, email: data.email });
-      if (data.name !== before.name) await users.updateName({ userId: before.authId, name: data.name });
-    } catch (e: any) {
-      if (before.isAdmin && !data.isAdmin) await ctx.store.update("users", id, { isAdmin: true, roleId: before.roleId ?? null, roleByCompany: before.roleByCompany ?? null });
-      throw new BusinessError(`O serviço de autenticação recusou a alteração: ${e?.message ?? e}`, "auth_failed");
-    }
-  }
   const after = await ctx.store.update("users", id, patch);
   // conferência depois de gravar (duas trocas simultâneas deixariam a empresa sem administrador): desfaz e recusa
   const orphan = await firstCompanyWithoutAdmin(ctx.store, lost);
@@ -762,11 +748,10 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
   if (status !== "active") await assertNotLastAdmin(ctx.store, u, what);
   // último administrador POR EMPRESA (a situação vale em todas as empresas do usuário)
   const lost = status !== "active" ? await companyAdminLoss(ctx, u, { ...u, status }, () => what) : [];
-  const auth = getAuth();
+  // a situação é conferida no login e em cada sessão (login próprio): gravá-la já bloqueia ou libera o acesso
   let after: Doc;
   if (status === "active") {
     if (!u.authId) throw new BusinessError("Este usuário ainda não definiu senha. Reenvie o convite para que ele ative o acesso.", "no_credentials");
-    await auth.setBlocked(u.authId, false);
     after = await ctx.store.update("users", id, { status: "active", suspendedReason: null, suspendedAt: null });
   } else {
     // suspensão/inativação também invalida um link de recuperação de senha pendente
@@ -786,7 +771,6 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
       await undo();
       throw lastCompanyAdminError(u.name, (await companyNames(ctx, [orphan]))[0], what);
     }
-    if (u.authId) await auth.setBlocked(u.authId, true);
   }
   const ended = status !== "active" ? await endLocalSessions(ctx.store, id) : 0;
   const label = { active: "reativado", inactive: "inativado", suspended: "suspenso" }[status];
@@ -835,14 +819,9 @@ export async function adminSetPassword(ctx: Ctx, id: string, password: string) {
   // acesso rápido: a senha é a da demonstração, exibida na tela — só aceita voltar a ela (conserta um acesso alterado)
   if (isQuickAccessUser(u) && password !== (process.env.DEMO_PASSWORD || "Intercert@2026"))
     throw new BusinessError(quickAccessLockedMessage("Não é possível trocar a senha", u.name), QUICK_ACCESS_LOCKED);
-  const auth = getAuth();
-  if (u.authId) {
-    if (auth.kind === "local") await auth.createUser(u.email, password, u.name);
-    else await auth.setPassword(u.authId, password);
-  } else {
-    const authId = await auth.createUser(u.email, password, u.name);
-    await ctx.store.update("users", id, { authId });
-  }
+  // login próprio: grava a senha nova (hash) no cadastro, localizado pelo e-mail; sem credencial ainda, passa a ter uma
+  const authId = await getAuth().createUser(u.email, password, u.name);
+  if (!u.authId) await ctx.store.update("users", id, { authId });
   await endLocalSessions(ctx.store, id);
   await audit(ctx, { module: "admin", action: "user.password_reset", entityType: "user", entityId: id, summary: `Senha de ${u.name} redefinida pelo administrador (sessões encerradas)` });
 }
@@ -869,15 +848,6 @@ export async function adminResetTwoFactor(ctx: Ctx, id: string, reason: string) 
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 
-/** Cliente do serviço de autenticação legado (Appwrite): com a chave do servidor ou com a sessão do próprio usuário. */
-async function appwriteClient(sessionSecret?: string) {
-  const { Client } = await import("node-appwrite");
-  const { appwriteConfig } = await import("@/lib/db");
-  const c = appwriteConfig();
-  const client = new Client().setEndpoint(c.endpoint).setProject(c.projectId);
-  return sessionSecret ? client.setSession(sessionSecret) : client.setKey(c.apiKey);
-}
-
 /** Sessões abertas (válidas) do usuário no login próprio do ERP: quantas e quando começou a mais recente. */
 export async function openSessions(store: Store, u: Record<string, any>): Promise<{ count: number; lastStartedAt: string | null }> {
   const now = nowIso();
@@ -901,14 +871,6 @@ export async function revokeUserSessions(ctx: Ctx, id: string, reason?: string |
   const at = nowIso();
   await ctx.store.update("users", id, { sessionsValidAfter: at });
   const ended = await endLocalSessions(ctx.store, id);
-  if (getAuth().kind === "appwrite" && u.authId) {
-    const { Users } = await import("node-appwrite");
-    try {
-      await new Users(await appwriteClient()).deleteSessions({ userId: u.authId });
-    } catch (e: any) {
-      throw new BusinessError(`O serviço de autenticação recusou o encerramento das sessões: ${e?.message ?? e}`, "auth_failed");
-    }
-  }
   await audit(ctx, {
     module: "admin", action: "user.sessions_revoke", entityType: "user", entityId: id,
     summary: `Sessões de ${u.name} encerradas pelo administrador (${ended} aberta(s)); novo login exigido em todos os dispositivos`, after: { sessionsValidAfter: at }, reason: reason?.trim() || null,
@@ -927,34 +889,20 @@ export async function revokeOtherSessions(ctx: Ctx, currentSecret: string): Prom
   const unknown = "Não foi possível identificar a sessão atual. Entre de novo e tente outra vez.";
   assert(currentSecret, unknown);
   let ended = 0;
-  if (getAuth().kind === "appwrite") {
-    const { Account } = await import("node-appwrite");
-    try {
-      const account = new Account(await appwriteClient(currentSecret));
-      for (const s of (await account.listSessions()).sessions) {
-        if (s.current) continue;
-        await account.deleteSession({ sessionId: s.$id });
-        ended++;
-      }
-    } catch (e: any) {
-      throw new BusinessError(`O serviço de autenticação recusou o encerramento das sessões: ${e?.message ?? e}`, "auth_failed");
-    }
-  } else {
-    const keep = sha256(currentSecret);
-    const sessions = await listAll(ctx.store, "sessions", { filters: [["eq", "userId", me.id]] });
-    assert(sessions.some((s) => s.tokenHash === keep), unknown);
-    for (const s of sessions) {
-      if (s.tokenHash === keep) continue;
-      await ctx.store.delete("sessions", s.id);
-      ended++;
-    }
+  const keep = sha256(currentSecret);
+  const sessions = await listAll(ctx.store, "sessions", { filters: [["eq", "userId", me.id]] });
+  assert(sessions.some((s) => s.tokenHash === keep), unknown);
+  for (const s of sessions) {
+    if (s.tokenHash === keep) continue;
+    await ctx.store.delete("sessions", s.id);
+    ended++;
   }
   await audit(ctx, { module: "admin", action: "user.sessions_revoke_others", entityType: "user", entityId: me.id, summary: `${me.name} encerrou as outras sessões (${ended}); a sessão atual continua aberta` });
   return { ended };
 }
 
 export interface RecoveryLinkResult {
-  /** link de uso único (vazio no serviço de autenticação legado, que gera e envia o e-mail por conta própria) */
+  /** link de uso único */
   link: string;
   delivered: boolean;
   channel: string;
@@ -980,32 +928,23 @@ export async function adminStartRecovery(ctx: Ctx, id: string, origin: string): 
   // acesso rápido (decisão do titular): a senha é a da tela — nenhum link de troca
   if (isQuickAccessUser(u)) throw new BusinessError(quickAccessLockedMessage("Não é possível enviar link de recuperação de senha", u.name), QUICK_ACCESS_LOCKED);
   const site = origin.replace(/\/$/, "");
-  const auth = getAuth();
-  let r: RecoveryLinkResult;
-  if (auth.kind === "appwrite") {
-    // serviço legado: o Appwrite gera o link e envia o e-mail (validade dele: 1 hora)
-    const sent = await auth.requestRecovery(u.email, `${site}/redefinir-senha`);
-    if (!sent.delivered) throw new BusinessError("O serviço de autenticação não encontrou a conta deste usuário para enviar a recuperação.", "auth_failed");
-    r = { link: "", delivered: true, channel: sent.channel, message: null, expiresAt: new Date(Date.now() + 3600000).toISOString() };
-  } else {
-    const secret = newToken();
-    const expiresAt = new Date(Date.now() + ADMIN_RECOVERY_HOURS * 3600000).toISOString();
-    // credencial local identificada pelo e-mail (como `LocalAuth.createUser`): sem ela, a senha nova não abriria sessão
-    await ctx.store.update("users", id, { resetTokenHash: sha256(secret), resetExpiresAt: expiresAt, ...(u.authId ? {} : { authId: `local:${String(u.email).toLowerCase()}` }) });
-    const link = `${site}/redefinir-senha?userId=${encodeURIComponent(u.id)}&secret=${secret}`;
-    const company = await ctx.store.get("companies", ctx.companyId);
-    const companyName = company?.tradeName || company?.name || "Intercert ERP";
-    const sent = await sendEmail(ctx.companyId, {
-      to: u.email,
-      subject: `Redefinição de senha — ${companyName}`,
-      html:
-        `<p>Olá, ${escapeHtml(u.name)}.</p><p>${escapeHtml(ctx.user.name)} iniciou a redefinição da sua senha de acesso ao ERP de <b>${escapeHtml(companyName)}</b>.</p>` +
-        `<p>Para definir uma nova senha, abra: <a href="${link}">${link}</a></p>` +
-        `<p>O link vale uma única vez e expira em ${new Date(expiresAt).toLocaleString("pt-BR", { timeZone: DEFAULT_TZ })}. Ao definir a nova senha, as sessões abertas com a senha anterior são encerradas.</p>` +
-        `<p>Se você não esperava esta mensagem, procure o administrador.</p>`,
-    });
-    r = { link, delivered: sent.delivered, channel: sent.channel, message: sent.message ?? null, expiresAt };
-  }
+  const secret = newToken();
+  const expiresAt = new Date(Date.now() + ADMIN_RECOVERY_HOURS * 3600000).toISOString();
+  // credencial local identificada pelo e-mail (como `LocalAuth.createUser`): sem ela, a senha nova não abriria sessão
+  await ctx.store.update("users", id, { resetTokenHash: sha256(secret), resetExpiresAt: expiresAt, ...(u.authId ? {} : { authId: `local:${String(u.email).toLowerCase()}` }) });
+  const link = `${site}/redefinir-senha?userId=${encodeURIComponent(u.id)}&secret=${secret}`;
+  const company = await ctx.store.get("companies", ctx.companyId);
+  const companyName = company?.tradeName || company?.name || "Intercert ERP";
+  const sent = await sendEmail(ctx.companyId, {
+    to: u.email,
+    subject: `Redefinição de senha — ${companyName}`,
+    html:
+      `<p>Olá, ${escapeHtml(u.name)}.</p><p>${escapeHtml(ctx.user.name)} iniciou a redefinição da sua senha de acesso ao ERP de <b>${escapeHtml(companyName)}</b>.</p>` +
+      `<p>Para definir uma nova senha, abra: <a href="${link}">${link}</a></p>` +
+      `<p>O link vale uma única vez e expira em ${new Date(expiresAt).toLocaleString("pt-BR", { timeZone: DEFAULT_TZ })}. Ao definir a nova senha, as sessões abertas com a senha anterior são encerradas.</p>` +
+      `<p>Se você não esperava esta mensagem, procure o administrador.</p>`,
+  });
+  const r: RecoveryLinkResult = { link, delivered: sent.delivered, channel: sent.channel, message: sent.message ?? null, expiresAt };
   await audit(ctx, {
     module: "admin", action: "user.recovery_start", entityType: "user", entityId: id,
     summary: `Recuperação de senha de ${u.name} iniciada pelo administrador (${r.delivered ? `e-mail entregue ao provedor ${r.channel}` : "e-mail não enviado — link exibido ao administrador"}); link de uso único, válido até ${new Date(r.expiresAt).toLocaleString("pt-BR", { timeZone: DEFAULT_TZ })}; link anterior invalidado`,
@@ -1022,7 +961,8 @@ export async function acceptInvite(store: Store, token: string, password: string
   const auth = getAuth();
   const authId = u.authId ?? (await auth.createUser(u.email, password, u.name));
   if (u.authId) await auth.setPassword(u.authId, password);
-  if (auth.kind === "local") await auth.createUser(u.email, password, u.name);
+  // login próprio: a senha (hash) fica no cadastro localizado pelo e-mail
+  await auth.createUser(u.email, password, u.name);
   const after = await store.update("users", u.id, { authId, status: "active", inviteTokenHash: null, inviteExpiresAt: null, firstAccessAt: nowIso() });
   await audit({ store, user: await toCtxUser(store, after, u.companyIds?.[0] ?? null), companyId: u.companyIds?.[0] ?? "", branchId: null }, { module: "admin", action: "user.invite_accept", entityType: "user", entityId: u.id, summary: `${u.name} aceitou o convite e definiu a senha (primeiro acesso)` });
   await resolveOccurrence(store, `user:${u.id}:invite`).catch(() => 0);

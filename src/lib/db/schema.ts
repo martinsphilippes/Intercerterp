@@ -2,7 +2,7 @@
  * Esquema único do ERP Intercert.
  *
  * Fonte de verdade para:
- *  - provisionamento das tabelas no Appwrite (scripts/appwrite-setup.ts);
+ *  - criação das tabelas no Postgres (src/lib/db/postgres/ddl.ts; automática, ou `npm run db:setup`);
  *  - validação/coerção e índices únicos no armazenamento local (dev/testes);
  *  - backup/restauração (lista de coleções).
  *

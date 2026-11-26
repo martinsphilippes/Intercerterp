@@ -74,7 +74,7 @@ describe("documentos", () => {
   });
 });
 
-describe("armazenamento local (mesma semântica do Appwrite)", () => {
+describe("armazenamento local (mesma semântica do Postgres)", () => {
   it("índice único, transação atômica e incremento com limite", async () => {
     const s = new MemoryStore();
     await s.create("counters", { key: "a", value: 1 }, "c1");

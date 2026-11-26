@@ -20,7 +20,7 @@ O app abre em tela cheia, com atalhos para PDV, Painel, Produtos e Contas a rece
 
 **Acesso rápido (ambiente de teste):** com `SHOW_DEMO_LOGIN=1`, a tela de login lista os usuários da empresa de demonstração por setor, com a senha e um botão “Entrar” de um clique. Só aparecem usuários marcados como demonstração (nunca contas reais nem o administrador geral). **Fica ligado por decisão do titular (13/11/2026) até ele mandar tirar** — não desligar por iniciativa própria. Enquanto ligado, os usuários da lista ficam protegidos: não podem ser inativados ou suspensos, ter senha, e-mail ou login trocados, virar administrador geral nem cadastrar autenticador, “Esqueci minha senha” não gera link de troca para eles, e tentativas erradas não trancam o botão (`src/lib/auth/quick-access.ts`; regras §47).
 
-**Não consigo entrar / a lista de acessos sumiu:** quase sempre é o banco. A tela de login mostra o aviso “Acesso bloqueado…” com o motivo (banco sem resposta, acesso recusado ou limite do plano), o caminho para liberar e o botão “Tentar novamente”, e mantém os acessos da demonstração listados (`docs/regras-assumidas.md` §47). No Postgres o banco adormece quando ocioso e acorda sozinho — não há reativação manual. Em instalação antiga no Appwrite Cloud gratuito, o projeto é pausado após 7 dias sem atividade no console dele e a cota mensal conta cada linha lida: foi o que motivou a saída do Appwrite (§48).
+**Não consigo entrar / a lista de acessos sumiu:** quase sempre é o banco. A tela de login mostra o aviso “Acesso bloqueado…” com o motivo (banco sem resposta, acesso recusado ou limite do plano), o caminho para liberar e o botão “Tentar novamente”, e mantém os acessos da demonstração listados (`docs/regras-assumidas.md` §47). No Postgres o banco adormece quando ocioso e acorda sozinho — não há reativação manual. (A pausa por inatividade e a cota por linha lida do Appwrite Cloud gratuito motivaram a troca pelo Postgres; o Appwrite foi desligado e saiu do código — §48.)
 
 ## Gestão contábil (escritórios de contabilidade)
 
@@ -36,7 +36,7 @@ Na demonstração: escritório "Contábil Horizonte (DEMO)" com os usuários `co
 
 ## Instalação automatizada (sem a tela de primeiro acesso)
 
-`GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, índices e bucket), `demo` (repita até `done: true`), `demo-update` (reaplica cenários de demonstração novos numa instalação já concluída, idempotente), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação), `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema) e `diagnostico` (só leitura, a qualquer momento: regiões das funções e do banco, tempo por consulta, codificação e tamanho do banco, arquivos, chave de cifra e avisos — sem expor credenciais).
+`GET /api/setup/run?step=<etapa>` com o `SETUP_TOKEN` (cabeçalho `x-setup-token` ou `?token=`), em etapas retomáveis: `provision` (tabelas, colunas e índices que faltam — a primeira consulta já os cria), `demo` (repita até `done: true`), `demo-update` (reaplica cenários de demonstração novos numa instalação já concluída, idempotente), `status` (contagens), `owner&email=…&name=…` (cria o administrador geral; a senha aparece uma única vez), `check-login&login=…&password=…` (testa a autenticação), `finish` (encerra; depois disso a rota só aceita `provision` para migrações de esquema) e `diagnostico` (só leitura, a qualquer momento: regiões das funções e do banco, tempo por consulta, codificação e tamanho do banco, arquivos, chave de cifra e avisos — sem expor credenciais).
 
 ## Início rápido (desenvolvimento local, sem banco)
 
@@ -79,7 +79,7 @@ O `vercel.json` agenda `/api/jobs` **uma vez por dia** (compatível com o plano 
 
 Sem banco conectado, a aplicação mostra a página **“configuração pendente”** com o que falta (nenhum dado é gravado). Somente para apresentação, `DATA_BACKEND=memory` sobe uma demonstração volátil (recriada a cada reinício e sem consistência entre instâncias).
 
-**Instalação antiga no Appwrite:** continua funcionando enquanto as variáveis `APPWRITE_*` existirem e não houver `DATABASE_URL` (o Postgres tem prioridade). `npm run appwrite:setup` provisiona o esquema lá. O caminho de saída está em `docs/regras-assumidas.md` §48.
+Variáveis `APPWRITE_*` que tenham sobrado no projeto não têm efeito (o Appwrite saiu do código em 26/11/2026) e podem ser apagadas em *Settings → Environment Variables*.
 
 ## Scripts
 
@@ -91,11 +91,10 @@ Sem banco conectado, a aplicação mostra a página **“configuração pendente
 | `npm test` | Testes de regras de negócio (vitest, banco em memória) |
 | `TEST_STORE=postgres npm test` | A mesma suíte sobre o Postgres (embutido; com `TEST_PG_URL=postgres://…`, num servidor de verdade pelo cliente de produção) |
 | `npm run db:setup` | Cria no Postgres o que falta do esquema (o sistema também faz sozinho) |
-| `npm run appwrite:setup` | Provisiona o esquema no Appwrite (instalações antigas) |
 | `npm run seed` | Carrega a demonstração (repetível, sem duplicar) |
 | `npm run jobs` | Executa tarefas pendentes e rotinas (equivalente ao cron) |
 | `npm run e2e` | Testes de navegador (Playwright) |
-| `MEMORY_TX_MODE=deferred npm test` | Mesmos testes com a semântica de transação do Appwrite (escritas visíveis só no commit, máx. 100 operações) |
+| `MEMORY_TX_MODE=deferred npm test` | Mesmos testes com transação adiada, a semântica mais restrita (escritas visíveis só no commit, máx. 100 operações) |
 | `node scripts/dev/crawl.mjs` | Varredura de navegação: login real, todos os links internos, erros de página/console e telas de erro |
 | `node scripts/dev/evidence.mjs` | Captura as evidências de interface (48 telas + 14 visões) em `docs/evidencias/` |
 | `node scripts/docs/build-matrix.mjs` | Regenera `docs/matriz-cobertura.md` a partir de `scripts/docs/coverage-map.json` |

@@ -15,7 +15,7 @@ import { MAX_TX_OPS, runIdempotentBatches } from "./price-adjust";
  *  - Prévia sem gravação: saldo, multa e juros sugeridos (mesma fórmula de `suggestLateCharges`, §13) e total por parcela;
  *    parcelas que não podem ser baixadas aparecem com o motivo e ficam fora da aplicação.
  *  - Aplicação reutiliza `finance.settleInstallment` (mesma baixa da tela do título: lançamento em conta, sequência da
- *    parcela, saldo do título) dentro de transações de até `SETTLE_ITEMS_PER_TX` parcelas (≤ 100 escritas no Appwrite),
+ *    parcela, saldo do título) dentro de transações de até `SETTLE_ITEMS_PER_TX` parcelas (≤ 100 escritas por transação),
  *    pelo motor `runIdempotentBatches` (marcador do lote na mesma transação; lote com parcela recusada é refeito parcela a
  *    parcela). Cada baixa é atômica — nunca fica lançamento sem baixa ou baixa sem saldo atualizado.
  *  - Idempotente pela chave do envio + parcela (`lot:<chave>:<parcela>`): reenviar não baixa duas vezes.

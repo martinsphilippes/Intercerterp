@@ -8,24 +8,21 @@ import { configuredBackend } from "../db";
  *
  * De onde vem a chave (`secretKeySource`):
  *  - "own": `AUTH_ENCRYPTION_KEY` (qualquer texto longo) — o certo em toda publicação;
- *  - "appwrite": derivada da chave de API do Appwrite, nas instalações antigas — vale só enquanto a variável existir;
  *  - "dev": chave fixa, só em desenvolvimento, testes e na demonstração em memória;
- *  - "missing": publicação com banco de verdade sem nenhuma das duas. Nada é cifrado com uma chave que está no
+ *  - "missing": publicação com banco de verdade sem `AUTH_ENCRYPTION_KEY`. Nada é cifrado com uma chave que está no
  *    código-fonte: gravar um segredo falha dizendo o que falta, e o que estava cifrado não abre.
  */
-export type SecretKeySource = "own" | "appwrite" | "dev" | "missing";
+export type SecretKeySource = "own" | "dev" | "missing";
 
 export function secretKeySource(): SecretKeySource {
   if (process.env.AUTH_ENCRYPTION_KEY) return "own";
-  if (process.env.APPWRITE_API_KEY) return "appwrite";
-  const backend = configuredBackend();
-  return process.env.NODE_ENV === "production" && (backend === "postgres" || backend === "appwrite") ? "missing" : "dev";
+  return process.env.NODE_ENV === "production" && configuredBackend() === "postgres" ? "missing" : "dev";
 }
 
 function key(): Buffer | null {
   const source = secretKeySource();
   if (source === "missing") return null;
-  const material = source === "own" ? process.env.AUTH_ENCRYPTION_KEY : source === "appwrite" ? `appwrite:${process.env.APPWRITE_API_KEY}` : "intercert-dev-only-key";
+  const material = source === "own" ? process.env.AUTH_ENCRYPTION_KEY : "intercert-dev-only-key";
   return crypto.createHash("sha256").update(`intercert-secret-box:${material}`).digest();
 }
 

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-/** Identificador aleatório compatível com Appwrite (≤ 36 chars, [a-zA-Z0-9]). */
+/** Identificador aleatório: 20 caracteres hexadecimais (curto e só com [a-f0-9]). */
 export function newId(): string {
   return crypto.randomBytes(10).toString("hex");
 }

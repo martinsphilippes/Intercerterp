@@ -376,8 +376,9 @@ describe("demonstração do financeiro", () => {
 });
 
 /**
- * Armazenamento com a semântica do Appwrite: dentro da transação as leituras NÃO enxergam as escritas
- * pendentes (aplicadas só no commit, atômicas). Pega erros de sequência/cache que o banco em memória mascara.
+ * Armazenamento com transação adiada (a semântica mais restrita, a do modo deferred): dentro da transação as leituras
+ * NÃO enxergam as escritas pendentes (aplicadas só no commit, atômicas). Pega erros de sequência/cache que o banco em
+ * memória mascara.
  */
 class IsolatedStore {
   readonly backend = "memory" as const;
@@ -422,7 +423,7 @@ class IsolatedStore {
   }
 }
 
-describe("semântica de transação do Appwrite (leituras isoladas)", () => {
+describe("transação adiada (leituras isoladas)", () => {
   it("baixa com tarifa, estorno, conciliação com diferença, renegociação e saldo inicial funcionam", async () => {
     const iso = new IsolatedStore(ctx.store);
     const c: Ctx = { ...ctx, store: iso as any };

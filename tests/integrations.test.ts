@@ -95,6 +95,23 @@ describe("Central de integrações — estados medidos", () => {
     expect(r.message).toMatch(/não configurado/i);
   });
 
+  it("e-mail gravado com o antigo Appwrite Messaging (provedor desligado) vale como canal não configurado", async () => {
+    const c = await ctx();
+    const scopeKey = `${refs.company.id}|*|email`;
+    const id = detId("integration", scopeKey);
+    // registro como os da época do Appwrite (o catálogo não oferece mais o provedor): gravado direto no banco
+    await store.create("integrations", { companyId: refs.company.id, branchId: null, scopeKey, kind: "email", provider: "appwrite_messaging", environment: "producao", config: { providerId: "p1" }, secretRefs: {}, enabled: true, status: "operational", lastTestMessage: "ok" }, id);
+    try {
+      expect(await getIntegration(store, refs.company.id, null, "email")).toBeNull();
+      const { sendEmail } = await import("@/lib/core/email");
+      expect(await sendEmail(refs.company.id, { to: "pessoa@example.com", subject: "Teste", html: "<p>x</p>" })).toEqual({ delivered: false, channel: "not_configured", message: "Canal de e-mail não configurado." });
+      expect(await testIntegration(c, "email", null)).toMatchObject({ status: "not_configured", ok: false });
+      await expect(saveIntegration(c, { kind: "email", branchId: null, provider: "appwrite_messaging" })).rejects.toThrow(/Provedor não suportado/);
+    } finally {
+      await store.delete("integrations", id);
+    }
+  });
+
   it("integração fiscal (visão 10) grava em fiscal_configs; Focus sem token → não operacional", async () => {
     const c = await ctx();
     delete process.env.FOCUS_TOKEN_INEXISTENTE;

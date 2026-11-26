@@ -58,7 +58,7 @@ beforeAll(async () => {
 }, 120000);
 
 describe("baixa em lote (FIN-02)", () => {
-  it("lote cabe no limite de 100 escritas por transação do Appwrite", () => {
+  it("lote cabe no limite de 100 escritas por transação", () => {
     expect(SETTLE_ITEMS_PER_TX * SETTLE_OPS_PER_ITEM + 1).toBeLessThanOrEqual(MAX_TX_OPS);
     expect(SETTLE_ITEMS_PER_TX).toBeGreaterThan(1);
   });

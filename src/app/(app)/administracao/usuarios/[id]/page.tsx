@@ -16,7 +16,6 @@ import { formatPhone } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
 import { inviteState, manageableCompanyIds, openSessions, seesPlatformAdmins } from "@/domain/users";
 import { branchScopeOf, userRoleIn } from "@/lib/auth/users";
-import { getAuth } from "@/lib/auth/provider";
 import { unscoped } from "@/lib/db/scoped-store";
 import { MatrixView } from "../perfis/matrix-view";
 import { setUserStatusAction, cancelInviteAction, resetTwoFactorAction, revokeSessionsAction } from "../actions";
@@ -60,7 +59,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const scopeHere = scope === null ? null : scope.filter((b) => branches.some((x) => x.id === b));
   const branchNames = u.isAdmin || scopeHere === null ? "Todas as filiais desta empresa" : scopeHere.length ? scopeHere.map((b: string) => branches.find((x) => x.id === b)?.name ?? b).join(", ") : "Nenhuma filial desta empresa";
   const jobTitle = ((u.jobTitleByCompany ?? {})[s.ctx.companyId] as string | undefined) ?? null;
-  const sessions = getAuth().kind === "local" ? await openSessions(s.ctx.store, u) : null;
+  const sessions = await openSessions(s.ctx.store, u);
   const recoveryPending = Boolean(u.resetTokenHash && u.resetExpiresAt && u.resetExpiresAt > new Date().toISOString());
   const discount = u.discountLimitBps ?? (u.isAdmin ? 10000 : (role?.discountLimitBps ?? 0));
   return (
@@ -158,7 +157,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
                 items={[
                   {
                     label: "Sessões abertas",
-                    value: sessions ? `${sessions.count}${sessions.lastStartedAt ? ` · a mais recente iniciada em ${formatDateTime(sessions.lastStartedAt)}` : ""}` : "Gerenciadas pelo serviço de autenticação",
+                    value: `${sessions.count}${sessions.lastStartedAt ? ` · a mais recente iniciada em ${formatDateTime(sessions.lastStartedAt)}` : ""}`,
                   },
                   { label: "Sessões encerradas pela última vez", value: u.sessionsValidAfter ? formatDateTime(u.sessionsValidAfter) : "—" },
                   { label: "Recuperação de senha", value: recoveryPending ? `Link pendente, válido até ${formatDateTime(u.resetExpiresAt)} (uso único)` : "Nenhum link pendente" },

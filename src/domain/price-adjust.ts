@@ -23,7 +23,7 @@ import { priceMetrics, priceScopeKey, savePrice, validatePrice } from "./pricing
  * Margem e markup são os de `priceMetrics` (src/lib/money.ts) — o motor só faz o caminho inverso (preço a partir da margem).
  */
 
-/** Limite de escritas por transação do Appwrite (TablesDB). */
+/** Limite de escritas por transação (o modo `MEMORY_TX_MODE=deferred` dos testes recusa acima disso). */
 export const MAX_TX_OPS = 100;
 /** Escritas por SKU na aplicação de preço: preço + até 2 linhas de histórico (preço/atacado) + auditoria. */
 export const PRICE_OPS_PER_ITEM = 4;
