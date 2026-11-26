@@ -99,6 +99,8 @@ export const COLLECTIONS: CollectionDef[] = [
       inviteExpiresAt: dt, resetTokenHash: s(128), resetExpiresAt: dt, lastAccessAt: dt, firstAccessAt: dt,
       suspendedReason: s(300), phone: s(40), isDemo: bool, createdBy: id(),
       inviteSentAt: dt, inviteDelivery: s(300), invitedBy: id(), suspendedAt: dt,
+      // atributos organizacionais (decisão do titular, 26/11/2026): aplicam modelos de perfil; o perfil segue sendo o único contêiner de permissões
+      jobTitle: s(120), department: s(120), jobFunction: s(120),
       // perfil por empresa: { [companyId]: roleId } (roleId = perfil legado/da empresa de origem)
       roleByCompany: json,
       // vendedores (CAD-05/VEN-05): sem acesso ao sistema (cadastro só para atribuir vendas; login sempre recusado),
@@ -1406,6 +1408,35 @@ export const COLLECTIONS: CollectionDef[] = [
     label: "Linha de base da migração por empresa (o que estava disponível e em uso) e divergências para revisão",
     fields: { companyId: id(true), takenAt: dt, kind: s(20), modules: json, usage: json, divergences: json, status: s(20), reviewedBy: s(200), reviewedAt: dt, notes: txt },
     indexes: [u("u_company", "companyId")],
+  },
+  // ───────────────────────────── Licenciamento comercial (Interos, contrato v2) — retrato versionado por empresa
+  {
+    id: "company_licenses",
+    label: "Licença vigente da empresa (retrato do Interos, versão aplicada, limites, exibição e sincronização)",
+    fields: {
+      companyId: id(true), licenseVersion: int, snapshot: json, commercialStatus: s(30), display: s(20), limits: json, effective: json,
+      rejectedItems: json, warnings: json, appliedAt: dt, appliedRuntimeVersion: int, nextTransitionAt: dt, clientId: s(80),
+      lastSyncAt: dt, lastSyncResult: s(300), lastSnapshotAt: dt, staleNotifiedAt: dt, lock: int, lockedAt: dt,
+    },
+    indexes: [u("u_company", "companyId")],
+  },
+  {
+    id: "license_history",
+    label: "Histórico de retratos de licença recebidos (um por versão; índice único impede aplicação dupla)",
+    fields: { companyId: id(true), licenseVersion: int, status: s(20), source: s(20), clientId: s(80), eventId: s(200), snapshot: json, result: json, at: dt },
+    indexes: [u("u_company_version", "companyId", "licenseVersion"), k("i_company", "companyId")],
+  },
+  {
+    id: "interos_events",
+    label: "Eventos recebidos do Interos (proteção contra repetição: Event-Id único por cliente, guardado 7 dias)",
+    fields: { clientId: s(80, true), eventId: s(200, true), requestHash: s(80), status: int, response: json, at: dt, companyId: id() },
+    indexes: [u("u_client_event", "clientId", "eventId")],
+  },
+  {
+    id: "upsell_requests",
+    label: "Solicitações de contratação feitas no ERP (encaminhadas ao Interos)",
+    fields: { companyId: id(true), branchId: id(), userId: id(), userName: s(200), code: s(20), module: s(80), note: s(500), status: s(20), sentAt: dt },
+    indexes: [k("i_company", "companyId")],
   },
   {
     id: "files",

@@ -4,7 +4,7 @@
 >
 > O runtime de habilitação v1 (`docs/modulos/`) já existe. Todo cliente atual está em `legacy`, ou seja, com o comportamento anterior.
 >
-> **As Fases 6 a 10 aguardam a validação das decisões do §7.**
+> **Fases 6 a 10 implementadas** (§8), com as decisões do titular do §7. Nenhum cliente teve acesso alterado: o retrato de licença só passa a bloquear quando o Interos envia `controlMode: "enforced"` para a empresa.
 
 ## Onde está cada entrega
 
@@ -22,7 +22,7 @@
 | Matriz de dependências (runtime) | [../modulos/matriz-dependencias.md](../modulos/matriz-dependencias.md) |
 | Matriz de permissões | `catalogo-modulos-erp-v2.json` › `permissions` (60 permissões → unidades) |
 | Contrato Interos v1 (implementado) | [../modulos/contrato-interos-erp-v1.md](../modulos/contrato-interos-erp-v1.md) |
-| Contrato Interos v2 (proposta) | [../INTEGRATIONS/INTEROS/contrato-interos-erp-v2-proposta.md](../INTEGRATIONS/INTEROS/contrato-interos-erp-v2-proposta.md) |
+| Contrato Interos v2 (implementado) | [../INTEGRATIONS/INTEROS/contrato-interos-erp-v2.md](../INTEGRATIONS/INTEROS/contrato-interos-erp-v2.md) |
 | Política de segurança | [../SECURITY/politica-modularizacao.md](../SECURITY/politica-modularizacao.md) |
 | Plano de migração, testes e rollback | [../MIGRATION/plano-migracao-v2.md](../MIGRATION/plano-migracao-v2.md) |
 
@@ -229,42 +229,56 @@ Combinações conferidas com teste:
 
 Matriz completa: `docs/modulos/matriz-dependencias.md` (runtime) e `dependencies` de cada item no JSON v2.
 
-## 7. Decisões que dependem de você (antes das Fases 6 a 10)
+## 7. Decisões do titular (26/11/2026)
 
-1. **Integração externa conta como "operacional"?** NF-e, NFC-e, NFS-e e Pix estão completos no ERP, mas dependem do token da Focus e da homologação na SEFAZ, e da credencial do Mercado Pago.
-   - Proposta: **não liberar para venda nova** até a homologação.
-   - Os clientes atuais mantêm o acesso que já têm.
-2. **Carência e contingência.**
-   - Proposta: **7 dias** de carência depois do vencimento sem renovação, então modo somente leitura.
-   - Proposta: **7 dias** de teste vencido antes de suspender.
-   - Obrigações fiscais nunca são interrompidas.
-3. **Limite de documentos fiscais.** Proposta: **nunca bloquear** a emissão legal; só avisar e gerar cobrança de excedente.
-4. **Granularidade comercial.** O runtime v1 já vende 67 unidades. Quer dividir mais nas Fases 6 e 7?
-   - Exemplo: separar no caixa a conferência cega (07.15) e o controle de divergências (07.26) como recursos 07.03.01 e 07.03.02.
-   - Proposta: manter as 67 unidades na primeira onda e dividir só o que tiver demanda comercial.
-5. **Exibição de módulo não contratado.** Proposta:
-   - `oculto` para os clientes atuais;
-   - `oportunidade` (com "Solicitar contratação") para os planos novos.
-6. **Autenticação servidor a servidor da v2.** Manter token com hash e HMAC por evento, ou exigir mTLS / OAuth2 client credentials? Depende do que o Interos suporta.
-7. **Reconciliação ativa.** O ERP deve consultar o Interos uma vez por dia (exige o endereço do Interos), ou basta o Interos reenviar quando a versão divergir?
-8. **Cargos, departamentos e funções.**
-   - Proposta: atributos do usuário que aplicam modelos de perfil;
-   - o perfil continua sendo o único contêiner de permissões.
+| # | Pergunta | Decisão |
+|---|---|---|
+| 1 | Integração externa conta como operacional? | Só vende depois da homologação; quem já tem mantém |
+| 2 | Carência e contingência | 7 dias após a vigência e 7 dias após o fim do teste |
+| 3 | Limite de documentos fiscais | Nunca bloqueia a emissão |
+| 4 | Granularidade | Mantidas as 67 unidades |
+| 5 | Exibição do não contratado | Oculto para os clientes atuais; oportunidade nos planos novos |
+| 6 | Autenticação v2 | Token com hash e HMAC por evento |
+| 7 | Reconciliação | O ERP consulta o Interos todo dia e o Interos reenvia quando a versão diverge |
+| 8 | Cargo, departamento e função | Atributos do usuário que aplicam o perfil |
 
-## 8. Próximas fases (incrementais e reversíveis)
+O detalhe de onde cada decisão está no código está no §0 do contrato v2.
 
-O detalhe está em `docs/MIGRATION/plano-migracao-v2.md`:
+## 8. Fases 6 a 10 — o que foi implementado
 
-1. Publicar o catálogo v2 como dado.
-2. Retrato de licença (`company_licenses`).
-3. API v2 com eventos assinados.
-4. Estados de teste, vigência e suspensão programada.
-5. Limites só com aviso; depois, com bloqueio de novos cadastros.
-6. Telemetria.
-7. Interface bloqueada / oportunidade.
-8. Divisão fina das unidades.
+| Fase | Entrega | Código |
+|---|---|---|
+| 6 — Infraestrutura de licenciamento | Retrato versionado por empresa (`company_licenses` e `license_history`). Estados: ativo, inativo, teste, ativação e suspensão programadas, suspenso, expirado, somente leitura. Carências calculadas localmente. Trava por empresa. Tradução para o runtime de habilitação, com dependências e política de desligamento. | `src/domain/licensing/effective.ts` e `license.ts` |
+| 6 — Limites | Usuários, dispositivos e filiais bloqueiam só novos cadastros e reativações. Documentos fiscais só avisam. | `limits.ts`; ganchos em `users.ts`, `terminals.ts`, `companies.ts` e `fiscal/service.ts` |
+| 7 — Proteções | Reaproveitam o runtime v1, já aplicado em telas, ações, APIs, exportações, rotinas, vitrine e webhook. A licença só muda os estados. | `docs/modulos/README.md` §4 |
+| 7 — Interface | Menu oculto, bloqueado ou oportunidade. `/modulo-indisponivel` com "Solicitar contratação", que gera `upsell_requests` e o evento `upsell.requested`. | `(app)/layout.tsx`, `modulo-indisponivel/*` e `upsell.ts` |
+| 8 — Integração | API v2: catálogo, item do catálogo, empresas, licença (GET/PUT), simulação, histórico, sincronização, telemetria, erros e solicitações. HMAC, `Event-Id` contra repetição, restrição de empresas por credencial. | `src/app/api/interos/v2/*` |
+| 8 — Sincronização | Eventos de saída assinados com retentativa (`interos.event`). Rotina diária de consulta ao Interos (`interos.reconcile`) com `sync.stale`. Rotina `licenses.maintenance` para as transições locais. | `events.ts`, `sync.ts` e `routines/licensing.ts` |
+| 8 — Telemetria | `GET .../usage` só com contagens e datas | `usage.ts` |
+| 9 — Migração | Sem retrato, a empresa segue no runtime atual (linha de base em `legacy`). O primeiro retrato só passa a bloquear se trouxer `controlMode: "enforced"`. Unidades não homologadas que a empresa já tinha ficam preservadas. | `license.ts` |
+| 9 — Perfil por atributos | Cargo, departamento e função no usuário (formulário e domínio), com a regra `access.attributeRoles` por empresa | `users.ts` e `user-form.tsx` |
+| 10 — Testes | Ver a tabela abaixo | `tests/licensing.test.ts` |
 
-Cada etapa é aplicada por empresa e tem reversão documentada.
+Cobertura dos cenários exigidos:
+
+| Cenário exigido | Coberto por |
+|---|---|
+| Empresas com módulos diferentes e isolamento | `modules-enablement` (empresas A e B) e `licensing` (retrato em A não muda B) |
+| Expiração de teste e suspensão programada | `licensing` › manutenção local, dias 6 e 10 |
+| Vigência vencida com carência e depois somente leitura | `licensing` |
+| Eventos duplicados e fora de ordem | Versão repetida devolve `duplicate`; versão menor devolve `stale`; `Event-Id` repetido devolve a mesma resposta; corpo diferente com o mesmo `Event-Id` devolve 409 |
+| Sincronização concorrente | Índice único de versão do runtime, trava por empresa na licença e índice único (empresa, versão) no histórico |
+| Falha de comunicação com o Interos | Reconciliação com erro mantém a licença; `sync.stale` depois de 3 dias |
+| Revogação | Runtime com prazo de 15 s (v1) |
+| Dependências e homologação | Retrato inconsistente recusado; unidade não homologada recusada para empresa nova e preservada para quem já tinha |
+| Assinatura e escopos | Assinatura inválida devolve 401; sem segredo, 503; sem escopo ou empresa não permitida, 403 |
+| Ausência de duplicidade financeira e de estoque | Idempotência existente (vendas, loja, baixas), coberta pelas suítes anteriores; a licença não toca nesses dados |
+
+**Pendências desta etapa:**
+1. **Tela de regras "perfil por cargo".** A regra hoje é um parâmetro gravado; falta a tela de edição em Parâmetros.
+2. **Ambiente:** configurar `INTEROS_*` em produção e homologar com o Interos real (endpoints do Interos para pull e eventos).
+3. **Homologação das integrações externas** (Focus NFe/SEFAZ e Banco Intercert) para liberar NF-e, NFC-e, NFS-e e, por consequência, a Loja virtual para vendas novas.
+4. **Unificações técnicas** recomendadas no §4 (Pix, pedidos, promoções), antes de omnichannel e marketplaces.
 
 ## 9. Riscos remanescentes
 

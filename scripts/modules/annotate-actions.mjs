@@ -72,6 +72,7 @@ const MAP = {
   "(app)/fiscal/entradas/actions.ts": { "*": "fiscal.livro_entradas" },
   "(app)/fornecedores/actions.ts": { "*": "cadastros.fornecedores" },
   "(app)/notificacoes/actions.ts": { "*": "plataforma.painel" },
+  "(app)/modulo-indisponivel/actions.ts": { "*": "plataforma.painel" },
   "(app)/produtos/alteracao-em-massa/actions.ts": { "*": "produtos.alteracao_massa" },
   "(app)/produtos/balanca/actions.ts": { "*": "produtos.balanca" },
   "(app)/produtos/cadastros/actions.ts": { "*": "cadastros.produtos" },

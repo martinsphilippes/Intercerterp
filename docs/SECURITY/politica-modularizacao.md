@@ -30,10 +30,11 @@ O controle não se resume a esconder menu.
 | Páginas públicas | Loja fora do ar ou em pausa conforme o módulo | ✅ v1 |
 | Banco de dados | Isolamento por `companyId`. Sem Row Level Security: o acesso ao banco é só do servidor. | ✅ (sem RLS; o banco nunca é exposto ao navegador) |
 | Aplicativos externos | Não existem hoje. Quando existirem, usarão as mesmas APIs com conferência de módulo. | ⏳ |
-| Limites contratados (usuários, dispositivos, filiais) | Proposta v2 | ⏳ |
+| Limites contratados (usuários, dispositivos, filiais) | `src/domain/licensing/limits.ts`, chamado nos cadastros e reativações | ✅ v2 (fiscal só avisa) |
 
 ## Credenciais
 
+- Escritas da v2 exigem HMAC (`X-Interos-Signature`), com segredo por cliente indicado em `signingSecretEnv`, e `X-Interos-Event-Id` único (anti-repetição por 7 dias). A credencial pode ser restrita a uma lista de empresas (`companyIds`).
 - Tokens do Interos ficam só no servidor (`INTEROS_CLIENTS` guarda apenas o hash SHA-256). Nunca vão para o navegador.
 - O segredo da assinatura de eventos é separado do token; cada cliente tem o seu.
 - Rotação sem janela de indisponibilidade: cadastrar a nova credencial, trocar no Interos e remover a antiga.
@@ -43,8 +44,8 @@ O controle não se resume a esconder menu.
 
 - O Interos decide o que a empresa contratou. O perfil decide o que cada usuário pode fazer dentro do que foi contratado.
 - O administrador da empresa não consegue habilitar módulos para si: a alteração só vem pela API do Interos ou por um administrador da plataforma, com ator e motivo registrados.
-- **Proposta v2:**
-  - cargo, departamento e função passam a ser atributos do usuário que aplicam modelos de perfil;
+- **Implementado (decisão 8):**
+  - cargo, departamento e função são atributos do usuário que aplicam o perfil pela regra `access.attributeRoles`;
   - o perfil continua sendo o único contêiner de permissões, para evitar duas fontes de verdade;
   - permissões granulares (visualizar, cadastrar, editar, excluir, executar, aprovar, cancelar, importar, exportar, imprimir, administrar) entram como operações do perfil por submódulo.
 

@@ -7,13 +7,25 @@ import crypto from "node:crypto";
  *   [{"id":"interos-prod","tokenSha256":"<hex>","scopes":["erp.modules.read","erp.modules.write"]}]
  * Gere com `npx tsx scripts/modules/new-interos-token.ts <id> [escopos]`. Requisição: `Authorization: Bearer <token>`.
  */
-export type InterosScope = "erp.modules.read" | "erp.modules.write";
-export const INTEROS_SCOPES: InterosScope[] = ["erp.modules.read", "erp.modules.write"];
+export type InterosScope = "erp.modules.read" | "erp.modules.write" | "erp.license.read" | "erp.license.write" | "erp.usage.read";
+export const INTEROS_SCOPES: InterosScope[] = ["erp.modules.read", "erp.modules.write", "erp.license.read", "erp.license.write", "erp.usage.read"];
 
 export interface InterosClient {
   id: string;
   tokenSha256: string;
   scopes: InterosScope[];
+  /** v2: NOME da variável de ambiente com o segredo HMAC das escritas (o valor nunca fica no JSON) */
+  signingSecretEnv?: string | null;
+  /** v2: empresas que este cliente pode alterar (ausente = todas) */
+  companyIds?: string[] | null;
+}
+
+/** Segredo de assinatura do cliente (v2). */
+export function signingSecretOf(c: InterosClient): string | null {
+  const name = c.signingSecretEnv;
+  if (!name || !/^[A-Z][A-Z0-9_]{2,80}$/.test(name)) return null;
+  const v = process.env[name];
+  return v && v.length >= 32 ? v : null;
 }
 
 export function interosClients(): InterosClient[] {
@@ -24,7 +36,11 @@ export function interosClients(): InterosClient[] {
     if (!Array.isArray(list)) return [];
     return list
       .filter((c) => c && typeof c.id === "string" && /^[0-9a-f]{64}$/.test(String(c.tokenSha256 ?? "")))
-      .map((c) => ({ id: c.id, tokenSha256: String(c.tokenSha256), scopes: (Array.isArray(c.scopes) ? c.scopes : []).filter((s: string) => (INTEROS_SCOPES as string[]).includes(s)) }));
+      .map((c) => ({
+        id: c.id, tokenSha256: String(c.tokenSha256), scopes: (Array.isArray(c.scopes) ? c.scopes : []).filter((s: string) => (INTEROS_SCOPES as string[]).includes(s)),
+        signingSecretEnv: typeof c.signingSecretEnv === "string" ? c.signingSecretEnv : null,
+        companyIds: Array.isArray(c.companyIds) ? c.companyIds.map(String) : null,
+      }));
   } catch {
     return [];
   }

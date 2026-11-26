@@ -2,3 +2,4 @@
 import "./finance";
 import "./purchases";
 import "./admin";
+import "../licensing/events";

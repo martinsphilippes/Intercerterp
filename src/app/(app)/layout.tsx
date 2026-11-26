@@ -8,6 +8,8 @@ import { featureDefaultFor, isFeatureOn } from "@/lib/core/settings";
 import { headers } from "next/headers";
 import { combined, companyModules, pathDecision } from "@/lib/server/modules";
 import { modulesForPath } from "@/lib/modules/surfaces";
+import { moduleDef } from "@/lib/modules/catalog";
+import { displayMode } from "@/domain/licensing/license";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireSession();
@@ -17,12 +19,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const modDoc = await companyModules(s.ctx);
   const kind = s.company.kind ?? "retail";
   const levelOf = (href: string) => combined(modDoc, modulesForPath(href)?.modules ?? [], kind).level;
+  const display = await displayMode(s.ctx.store, s.ctx.companyId);
+  // bloqueado/oportunidade só para módulos contratáveis e existentes (nunca para lacunas nem para o que não se aplica ao tipo)
+  const lockable = (href: string) => display !== "hidden" && (modulesForPath(href)?.modules ?? []).some((k) => { const d = moduleDef(k); return d && d.availability !== "planned" && d.kinds.includes(kind) && (d.classification === "commercial" || d.classification === "optional_function"); });
   const groups = navFor(s.company.kind)
     .map((g) => ({
       ...g,
       items: g.items
-        .filter((i) => can(s.user, i.module) && (!i.action || canDo(s.user, i.action)) && (!i.anyAction || i.anyAction.some((x) => canDo(s.user, x))) && (!i.feature || features.get(i.feature)) && levelOf(i.href) !== "none")
-        .map((i) => (levelOf(i.href) === "full" ? i : { ...i, label: `${i.label} (consulta)` })),
+        // não contratado: oculto (padrão dos clientes atuais) ou, conforme a licença, bloqueado / oportunidade de contratação —
+        // o item só leva à página de módulo indisponível; nenhum dado nem operação fica acessível (o servidor continua bloqueando)
+        .filter((i) => can(s.user, i.module) && (!i.action || canDo(s.user, i.action)) && (!i.anyAction || i.anyAction.some((x) => canDo(s.user, x))) && (!i.feature || features.get(i.feature) || (levelOf(i.href) === "none" && lockable(i.href))) && (levelOf(i.href) !== "none" || lockable(i.href)))
+        .map((i) => {
+          const level = levelOf(i.href);
+          if (level === "full") return i;
+          if (level === "none") return { ...i, label: `${i.label} ${display === "upsell" ? "(contratar)" : "(bloqueado)"}`, icon: "Lock", href: `/modulo-indisponivel?m=${encodeURIComponent(combined(modDoc, modulesForPath(i.href)?.modules ?? [], kind).module)}` };
+          return { ...i, label: `${i.label} (consulta)` };
+        }),
     }))
     .filter((g) => g.items.length);
   const h = await headers();

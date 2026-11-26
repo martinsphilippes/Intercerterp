@@ -95,3 +95,23 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
   - 1033/1033 também na suíte inteira sobre o Postgres;
   - typecheck, lint e build limpos.
 - [ ] Pendente: tabela de catálogo inicial do titular (não recebida), homologação com Postgres no ambiente de homologação (a local, em memória, foi feita) e credencial `INTEROS_CLIENTS` em produção.
+
+## Modularização integral — Fases 6 a 10 (26/11)
+
+- [x] Decisões do titular registradas: homologação antes da venda, carências de 7 dias, emissão fiscal nunca bloqueada, 67 unidades, oculto/oportunidade, token+HMAC, pull diário + reenvio, perfil por atributos.
+- [x] Licença versionada (`src/domain/licensing`).
+  - Estados, carências e agendamentos locais.
+  - Trava por empresa.
+  - Homologação e preservação de acesso.
+  - Limites.
+  - Eventos assinados.
+  - Reconciliação.
+  - Telemetria.
+  - Solicitação de contratação.
+- [x] API `/api/interos/v2`: catálogo, empresas, licença, simulação, histórico, sync, usage, errors, upsell-requests.
+- [x] Menu bloqueado/oportunidade. Cargo, departamento e função no usuário.
+- [x] Verificação: suíte completa verde em memória; testes de licença, habilitação e catálogo v2 também no Postgres; typecheck e lint limpos.
+- [ ] Pendente:
+  - tela da regra "perfil por cargo";
+  - configurar `INTEROS_*` e homologar com o Interos real;
+  - homologar Focus/SEFAZ e Banco Intercert.

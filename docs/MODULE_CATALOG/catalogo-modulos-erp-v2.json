@@ -35,15 +35,15 @@
   },
   "totals": {
     "modules": 53,
-    "submodules": 1016,
+    "submodules": 1019,
     "resources": 0,
-    "operational": 319,
+    "operational": 322,
     "partial": 220,
     "external": 31,
     "future": 446,
     "commercialUnits": 67,
     "aliases": 37,
-    "audited": 1016
+    "audited": 1019
   },
   "v1Compatibility": {
     "unitsByV1Key": {
@@ -40527,6 +40527,127 @@
       "permissions": [],
       "evidence": [
         "src/app/(app)/administracao/modulos/page.tsx"
+      ],
+      "notes": "",
+      "version": "2.0.0",
+      "createdAt": "2026-11-26",
+      "updatedAt": "2026-11-26"
+    },
+    {
+      "id": "d8d423a6-7385-5cf3-a98b-87ff7046fd02",
+      "code": "53.05",
+      "level": "submodule",
+      "name": "Licença comercial versionada (retrato do Interos, estados, carências e agendamentos locais)",
+      "technicalName": "licenciamento__licenca_comercial_versionada_retrato_interos_estados_carenci",
+      "slug": "licenciamento.licenca_comercial_versionada_retrato_interos_estados_carenci",
+      "description": "Licença comercial versionada (retrato do Interos, estados, carências e agendamentos locais)",
+      "parent": "53",
+      "origin": "auditoria",
+      "devStatus": "OP",
+      "devStatusLabel": "Implementado e operacional",
+      "availability": "disponivel",
+      "commercialClass": "CORE",
+      "technicalClass": "core",
+      "aliasOf": null,
+      "aliases": [],
+      "reuses": null,
+      "v1Keys": [
+        "plataforma.administracao"
+      ],
+      "commercialUnit": null,
+      "includedIn": null,
+      "dependencies": {
+        "required": [],
+        "optional": []
+      },
+      "routes": [],
+      "apis": [],
+      "permissions": [],
+      "evidence": [
+        "src/domain/licensing/license.ts",
+        "src/domain/licensing/effective.ts",
+        "tests/licensing.test.ts"
+      ],
+      "notes": "Contrato v2",
+      "version": "2.0.0",
+      "createdAt": "2026-11-26",
+      "updatedAt": "2026-11-26"
+    },
+    {
+      "id": "47510992-a06e-52eb-a478-63272d29f98b",
+      "code": "53.06",
+      "level": "submodule",
+      "name": "API v2 assinada (HMAC, anti-repetição), eventos de saída, reconciliação e telemetria",
+      "technicalName": "licenciamento__api_v2_assinada_hmac_anti_repeticao_eventos_saida_reconcilia",
+      "slug": "licenciamento.api_v2_assinada_hmac_anti_repeticao_eventos_saida_reconcilia",
+      "description": "API v2 assinada (HMAC, anti-repetição), eventos de saída, reconciliação e telemetria",
+      "parent": "53",
+      "origin": "auditoria",
+      "devStatus": "OP",
+      "devStatusLabel": "Implementado e operacional",
+      "availability": "disponivel",
+      "commercialClass": "CORE",
+      "technicalClass": "core",
+      "aliasOf": null,
+      "aliases": [],
+      "reuses": null,
+      "v1Keys": [
+        "plataforma.administracao"
+      ],
+      "commercialUnit": null,
+      "includedIn": null,
+      "dependencies": {
+        "required": [],
+        "optional": []
+      },
+      "routes": [],
+      "apis": [],
+      "permissions": [],
+      "evidence": [
+        "src/app/api/interos/v2/_lib.ts",
+        "src/domain/licensing/events.ts",
+        "src/domain/licensing/sync.ts",
+        "src/domain/licensing/usage.ts"
+      ],
+      "notes": "",
+      "version": "2.0.0",
+      "createdAt": "2026-11-26",
+      "updatedAt": "2026-11-26"
+    },
+    {
+      "id": "4a703096-9b4c-501d-a08e-bc78601fd7ff",
+      "code": "53.07",
+      "level": "submodule",
+      "name": "Limites contratados e solicitação de contratação (oportunidade)",
+      "technicalName": "licenciamento__limites_contratados_solicitacao_contratacao_oportunidade",
+      "slug": "licenciamento.limites_contratados_solicitacao_contratacao_oportunidade",
+      "description": "Limites contratados e solicitação de contratação (oportunidade)",
+      "parent": "53",
+      "origin": "auditoria",
+      "devStatus": "OP",
+      "devStatusLabel": "Implementado e operacional",
+      "availability": "disponivel",
+      "commercialClass": "CORE",
+      "technicalClass": "core",
+      "aliasOf": null,
+      "aliases": [],
+      "reuses": null,
+      "v1Keys": [
+        "plataforma.administracao"
+      ],
+      "commercialUnit": null,
+      "includedIn": null,
+      "dependencies": {
+        "required": [],
+        "optional": []
+      },
+      "routes": [],
+      "apis": [],
+      "permissions": [],
+      "evidence": [
+        "src/domain/licensing/limits.ts",
+        "src/domain/licensing/upsell.ts",
+        "src/app/(app)/modulo-indisponivel/upsell-form.tsx"
       ],
       "notes": "",
       "version": "2.0.0",

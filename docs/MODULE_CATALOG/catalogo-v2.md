@@ -4,7 +4,7 @@
 
 | Módulos | Submódulos | Recursos | Operacionais | Parciais | Dependentes de integração | Futuros | Unidades comerciais | Aliases |
 |---|---|---|---|---|---|---|---|---|
-| 53 | 1016 | 0 | 319 | 220 | 31 | 446 | 67 | 37 |
+| 53 | 1019 | 0 | 322 | 220 | 31 | 446 | 67 | 37 |
 
 Legenda — Classe: CORE · MOD (módulo comercial) · ADD (add-on) · INT (integração) · COMP (compartilhado) · PERM (permissão) · FUT (futuro). Unidade: **U** = vendida por si; → código = incluída em; ≡ código = alias de.
 
@@ -1288,3 +1288,6 @@ Legenda — Classe: CORE · MOD (módulo comercial) · ADD (add-on) · INT (inte
 | 53.02 | API de gestão para o Interos (v1) *(achado na auditoria)* | `licenciamento.api_gestao_interos_v1` | OP | CORE |  |  | `plataforma.administracao` | `src/app/api/interos/v1/_lib.ts` — Token, escopos, idempotência, versão |
 | 53.03 | Linha de base e migração de direitos *(achado na auditoria)* | `licenciamento.linha_base_migracao_direitos` | OP | CORE |  |  | `plataforma.administracao` | `src/domain/modules/baseline.ts` |
 | 53.04 | Consulta de módulos contratados (tela) *(achado na auditoria)* | `licenciamento.consulta_modulos_contratados_tela` | OP | CORE |  |  | `plataforma.administracao` | `src/app/(app)/administracao/modulos/page.tsx` |
+| 53.05 | Licença comercial versionada (retrato do Interos, estados, carências e agendamentos locais) *(achado na auditoria)* | `licenciamento.licenca_comercial_versionada_retrato_interos_estados_carenci` | OP | CORE |  |  | `plataforma.administracao` | `src/domain/licensing/license.ts` `src/domain/licensing/effective.ts` — Contrato v2 |
+| 53.06 | API v2 assinada (HMAC, anti-repetição), eventos de saída, reconciliação e telemetria *(achado na auditoria)* | `licenciamento.api_v2_assinada_hmac_anti_repeticao_eventos_saida_reconcilia` | OP | CORE |  |  | `plataforma.administracao` | `src/app/api/interos/v2/_lib.ts` `src/domain/licensing/events.ts` |
+| 53.07 | Limites contratados e solicitação de contratação (oportunidade) *(achado na auditoria)* | `licenciamento.limites_contratados_solicitacao_contratacao_oportunidade` | OP | CORE |  |  | `plataforma.administracao` | `src/domain/licensing/limits.ts` `src/domain/licensing/upsell.ts` |

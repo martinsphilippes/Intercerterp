@@ -135,3 +135,7 @@ files	24.20	plataforma.arquivos	arquivos (XML, anexos, cópias)
 categories	01.06	cadastros.produtos	categorias e subcategorias
 brands	01.07	cadastros.produtos	marcas
 cost_centers	18.16	tec.financeiro	centros de custo
+company_licenses	53.05	plataforma.administracao	licença vigente (retrato do Interos)
+license_history	53.05	plataforma.administracao	histórico de licenças
+interos_events	53.06	plataforma.administracao	eventos recebidos (anti-repetição)
+upsell_requests	53.07	plataforma.administracao	solicitações de contratação

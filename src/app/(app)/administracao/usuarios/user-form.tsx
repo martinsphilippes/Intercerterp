@@ -87,6 +87,15 @@ export function UserForm({
               <Field label="Telefone">
                 <Input name="phone" defaultValue={u.phone ?? ""} inputMode="tel" />
               </Field>
+              <Field label="Cargo" hint="Com regra em Parâmetros › Perfil por cargo, aplica o perfil quando nenhum é escolhido">
+                <Input name="jobTitle" defaultValue={u.jobTitle ?? ""} maxLength={120} />
+              </Field>
+              <Field label="Departamento">
+                <Input name="department" defaultValue={u.department ?? ""} maxLength={120} />
+              </Field>
+              <Field label="Função">
+                <Input name="jobFunction" defaultValue={u.jobFunction ?? ""} maxLength={120} />
+              </Field>
             </FormGrid>
           </FormSection>
 

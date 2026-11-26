@@ -48,7 +48,9 @@
     "fiscal.obligations",
     "admin.backup",
     "admin.roles",
-    "modules.maintenance"
+    "modules.maintenance",
+    "licenses.maintenance",
+    "interos.reconcile"
   ],
   "modules": [
     {
@@ -151,9 +153,14 @@
           "admin.branches",
           "integration-logs"
         ],
+        "jobs": [
+          "interos.event"
+        ],
         "routines": [
           "admin.roles",
-          "modules.maintenance"
+          "modules.maintenance",
+          "licenses.maintenance",
+          "interos.reconcile"
         ],
         "permissions": [
           "admin.users",

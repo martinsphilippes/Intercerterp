@@ -1,9 +1,38 @@
-# Contrato Interos ↔ ERP Intercert — v2 (PROPOSTA para validação)
+# Contrato Interos ↔ ERP Intercert — v2
 
-> **Situação:** desenho da Fase 5, ainda não implementado.
-> - A v1 (`docs/modulos/contrato-interos-erp-v1.md`) está em produção no código e continua válida.
-> - A v2 é acrescentada ao lado da v1 (`/api/interos/v2`). A v1 só será desativada depois da migração do Interos.
-> - Os pontos marcados com **[DECIDIR]** dependem de você.
+> **Situação:** IMPLEMENTADO (26/11/2026), com as decisões do titular incorporadas (§0).
+> - Código: `src/app/api/interos/v2/*` e `src/domain/licensing/*`.
+> - Testes: `tests/licensing.test.ts`, rodando também sobre o Postgres.
+> - A v1 (`docs/modulos/contrato-interos-erp-v1.md`) continua disponível em paralelo.
+
+## 0. Decisões do titular (26/11/2026)
+
+| # | Decisão | Onde está no código |
+|---|---|---|
+| 1 | Unidade dependente de integração externa (NF-e, NFC-e, NFS-e, Banco Intercert) e unidade em desenvolvimento (Canais) **só são vendáveis depois da homologação**. Quem já tem mantém o acesso. | `units-v2.generated.ts` (`sellable`) e `planLicense` (`not_homologated`, `preserved_access`) |
+| 2 | Carência de **7 dias** depois do vencimento da vigência sem renovação; depois, somente leitura. Teste vencido: **7 dias** de carência antes de suspender. | `LICENSE_POLICY`, `companyCap` e `itemEffective` |
+| 3 | Limite de documentos fiscais **nunca bloqueia** a emissão: só avisa e gera o evento `limit.reached` com `blocking: false`. | `noteFiscalDocumentUsage` |
+| 4 | Granularidade: mantidas as **67 unidades comerciais**. | `unidades.tsv` |
+| 5 | Não contratado: **oculto** para os clientes atuais e **oportunidade** ("Solicitar contratação") nos planos novos. O Interos pode fixar `display` no retrato. | `displayMode`, menu e `/modulo-indisponivel` |
+| 6 | Autenticação: **token servidor a servidor** (o ERP guarda só o hash), mais **HMAC por evento** nas escritas, com segredo próprio por cliente. Sem mTLS ou OAuth2 nesta versão. | `interos-auth.ts` e `v2/_lib.ts` (`signedWrite`) |
+| 7 | O ERP **consulta** o Interos diariamente, e o Interos **reenvia** quando a versão diverge (`GET .../sync`). | Rotina `interos.reconcile` (`sync.ts`) |
+| 8 | Cargo, departamento e função são atributos do usuário. Uma regra da empresa aplica o perfil; o perfil continua sendo o único contêiner de permissões. | `roleFromAttributes` e `access.attributeRoles` |
+
+**Consequência da decisão 1, a registrar comercialmente:**
+- A **Loja virtual** (12.01) depende de NF-e: a expedição exige a nota autorizada.
+- Por isso a loja também **não pode ser ativada para empresas novas** até a homologação da NF-e.
+- O retrato que a liste é recusado com `dependency_missing`, citando a NF-e.
+
+## Configuração (servidor)
+
+| Variável | Uso |
+|---|---|
+| `INTEROS_CLIENTS` | JSON das credenciais: `[{"id":"interos-prod","tokenSha256":"<hex>","scopes":["erp.license.read","erp.license.write","erp.usage.read"],"signingSecretEnv":"INTEROS_SIGNING_SECRET_PROD","companyIds":null}]` |
+| `INTEROS_SIGNING_SECRET_PROD` (o nome é livre e é indicado em `signingSecretEnv`) | Segredo HMAC das escritas, com 32 caracteres ou mais. Sem ele, as escritas v2 respondem 503. |
+| `INTEROS_EVENTS_URL` e `INTEROS_OUTBOUND_SECRET` | Destino e segredo dos eventos do ERP para o Interos. Sem eles, os eventos ficam na fila como não enviados, sem bloquear nada. |
+| `INTEROS_LICENSE_URL` (com `{companyId}`) e `INTEROS_OUTBOUND_TOKEN` | Consulta diária do retrato no Interos (pull) |
+
+Gere o token com `npx tsx scripts/modules/new-interos-token.ts interos-prod erp.license.read,erp.license.write,erp.usage.read`.
 
 ## 1. Papéis
 
@@ -56,11 +85,11 @@ O retrato é versionado por `licenseVersion`, um inteiro que só cresce e é emi
 |---|---|
 | `active` | `enabled`: operação completa |
 | `inactive` | `disabled`, histórico em consulta conforme a política do módulo (contrato encerrado) |
-| `trial` | `enabled` até `until`. Depois vira `expired` **localmente**, sem depender do Interos. |
+| `trial` | `enabled` até `until`; mais **7 dias** de carência (com aviso); depois `suspended`, **localmente**, sem depender do Interos. |
 | `activation_scheduled` | Nada até `effectiveAt`; então `enabled` (executado pela rotina local) |
 | `suspension_scheduled` | `enabled` até `effectiveAt`; então `suspended` |
 | `suspended` | Bloqueia novas operações. Obrigações em curso continuam (política `drain`). Consulta histórica mantida. Reversível sem perda. |
-| `expired` | Igual a `suspended` depois de uma carência de **[DECIDIR] 7 dias** em consulta |
+| `expired` | Somente consulta histórica (igual a `read_only`). A carência de 7 dias vale para `validUntil` e para o teste, não para um item já enviado como `expired`. |
 | `read_only` | Só consulta histórica e ações de correção de histórico (`historyActions`) |
 | `unavailable` (técnico) | Definido **pelo ERP**, nunca pelo Interos: o item não está operacional. O ERP recusa ativar e informa em `rejectedItems`. |
 
@@ -91,7 +120,8 @@ Ativar, desativar, suspender, reativar, programar e atualizar limites são todos
 ### Segurança das chamadas
 
 - **Autenticação.** Token servidor a servidor com escopos, como na v1: `erp.license.read`, `erp.license.write`, `erp.usage.read`.
-  - **[DECIDIR]** Evoluir para **mTLS** ou **OAuth2 client credentials**, conforme o suporte do Interos.
+  - Decisão 6: mantido o token com hash; mTLS ou OAuth2 ficam para uma versão futura, se o Interos exigir.
+- **Escritas** (`PUT .../license`) exigem os cabeçalhos `X-Interos-Signature` e `X-Interos-Event-Id`. `X-Interos-Actor` é opcional. A resposta de repetição traz `Idempotent-Replayed: true`.
 - **Assinatura.** Cabeçalho `X-Interos-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + body)>`, com segredo por cliente e diferente do token.
 - **Proteção contra repetição.** O ERP recusa a requisição quando:
   - `t` está fora de uma janela de ±5 minutos;
@@ -105,7 +135,10 @@ Ativar, desativar, suspender, reativar, programar e atualizar limites são todos
 
 ### Eventos do ERP para o Interos (saída)
 
-Usa o mecanismo de tarefas duráveis já existente (`jobs`), com retentativa exponencial e assinatura HMAC no mesmo formato.
+Usa o mecanismo de tarefas duráveis já existente (`jobs`, tipo `interos.event`), com retentativa exponencial e assinatura HMAC no mesmo formato.
+- Cabeçalhos: `X-ERP-Signature: t=<unix>,v1=<hex>` (segredo `INTEROS_OUTBOUND_SECRET`) e `X-ERP-Event-Type`.
+- O corpo traz `eventId`, `type`, `companyId`, `at` e `data`.
+- Respostas 4xx (exceto 408 e 429) não são repetidas.
 
 | Evento | Quando |
 |---|---|
@@ -120,7 +153,7 @@ Usa o mecanismo de tarefas duráveis já existente (`jobs`), com retentativa exp
 - O ERP **nunca** consulta o Interos durante uma ação do usuário. A decisão usa a cópia local já aplicada (`company_modules`, com cache por empresa de 15 segundos).
 - **Reconciliação** em duas vias:
   - o Interos chama `GET .../sync` periodicamente e reenvia o retrato quando a versão diverge;
-  - **[DECIDIR]** opcionalmente, o ERP chama `GET {INTEROS_BASE_URL}/licenses/{companyId}` uma vez por dia.
+  - opcionalmente, o ERP chama `GET {INTEROS_BASE_URL}/licenses/{companyId}` uma vez por dia.
 - **Com o Interos indisponível:**
   - mantém a última licença válida;
   - aplica localmente o que tem data: fim de teste, agendamentos, vigência;
@@ -128,7 +161,7 @@ Usa o mecanismo de tarefas duráveis já existente (`jobs`), com retentativa exp
   - registra `sync.stale`.
 - **Revogação com o Interos indisponível:** suspensões já recebidas (inclusive programadas) são executadas na data, sem precisar do Interos.
 - **Vigência vencida sem renovação recebida:**
-  - carência de **[DECIDIR] 7 dias** com operação normal e aviso ao administrador;
+  - carência de **7 dias** com operação normal e aviso ao administrador;
   - depois disso, `read_only`;
   - obrigações fiscais em curso continuam sempre (motor fiscal, `drain`).
 
@@ -139,7 +172,7 @@ Usa o mecanismo de tarefas duráveis já existente (`jobs`), com retentativa exp
 | Usuários ativos | Criação ou reativação de usuário | Recusa a criação com mensagem; não inativa ninguém |
 | Dispositivos (terminais de PDV e equipamentos) | Cadastro ou ativação de terminal | Recusa o novo; os existentes continuam |
 | Filiais | Criação de filial e filtro de filiais autorizadas | Filial não autorizada: só consulta |
-| Documentos fiscais por mês | Emissão | **Nunca** bloqueia a emissão legal. Avisa e gera o evento `limit.reached` para cobrança de excedente. **[DECIDIR]** |
+| Documentos fiscais por mês | Emissão | **Nunca** bloqueia a emissão legal. Avisa e gera o evento `limit.reached` para cobrança de excedente. |
 
 ## 6. Telemetria (`GET .../usage`)
 
@@ -161,7 +194,7 @@ Fonte dos dados: `audit_logs`, contadores e tabelas de documentos, agregados por
 
 ## 7. Interface do ERP
 
-O comportamento é configurado por empresa, por padrão do Interos: `hidden` | `locked` | `upsell`. **[DECIDIR]** O padrão sugerido é `hidden` para clientes atuais e `upsell` para novos planos.
+O comportamento é configurado por empresa, por padrão do Interos: `hidden` | `locked` | `upsell`. O padrão sugerido é `hidden` para clientes atuais e `upsell` para novos planos.
 
 - **`locked` e `upsell`:**
   - o item aparece no menu com cadeado;

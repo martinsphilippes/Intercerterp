@@ -48,3 +48,6 @@
 48.11	Validação do titular e autorização de download do certificado	OP	src/domain/accounting/certificates.ts:519; src/domain/accounting/certificates.ts:145	[contabil.certificados]	
 48.12	Fila da equipe de certificação Intercert	OP	src/domain/accounting/certificates.ts:838; src/app/(app)/administracao/certificacao/page.tsx	Exclusivo da plataforma [rede.plataforma]	
 49.13	Ajuda contextual por rota e catálogo de rejeições SEFAZ	OP	src/domain/help-content.ts:687; src/domain/help-content.ts:46	[plataforma.painel]	
+53.05	Licença comercial versionada (retrato do Interos, estados, carências e agendamentos locais)	OP	src/domain/licensing/license.ts; src/domain/licensing/effective.ts; tests/licensing.test.ts	Contrato v2 [plataforma.administracao]	
+53.06	API v2 assinada (HMAC, anti-repetição), eventos de saída, reconciliação e telemetria	OP	src/app/api/interos/v2/_lib.ts; src/domain/licensing/events.ts; src/domain/licensing/sync.ts; src/domain/licensing/usage.ts	[plataforma.administracao]	
+53.07	Limites contratados e solicitação de contratação (oportunidade)	OP	src/domain/licensing/limits.ts; src/domain/licensing/upsell.ts; src/app/(app)/modulo-indisponivel/upsell-form.tsx	[plataforma.administracao]	

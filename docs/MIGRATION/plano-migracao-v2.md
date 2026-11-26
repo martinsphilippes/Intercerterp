@@ -10,18 +10,18 @@ Nenhum cliente teve acesso alterado (`docs/modulos/lancamento-gradual.md`).
 
 ## Etapas propostas (incrementais, sem migração destrutiva)
 
-| # | Etapa | Muda comportamento? | Reversão |
-|---|---|---|---|
-| 1 | Validar com o titular o catálogo v2 e as decisões em aberto (`docs/MODULARIZATION/README.md` §Decisões) | Não | — |
-| 2 | Publicar o catálogo v2 como **dado**. Códigos v2 ↔ chaves v1 por alias (`v1Compatibility.unitsByV1Key`); o runtime segue v1. | Não | Remover o arquivo |
-| 3 | Tabela aditiva `company_licenses` (retrato do Interos) e tradução retrato → estados do runtime v1 | Não, enquanto o Interos não enviar retratos | Ignorar a tabela |
-| 4 | API v2: catálogo, licença, simulação, sincronização, eventos assinados | Só para empresas cujo retrato for aplicado | Desligar a rota v2; a v1 continua |
-| 5 | Estados de teste, vigência e suspensão programada, com execução local por rotina | Só para empresas com essas datas no retrato | `PUT` de novo retrato, ou modo `legacy` |
-| 6 | Limites (usuários, dispositivos, filiais) só com aviso (`limit.reached`) | Não bloqueia | — |
-| 7 | Limites com bloqueio de **novos** cadastros | Sim, por empresa | Retrato sem limite |
-| 8 | Telemetria agregada `GET usage` | Não | — |
-| 9 | Interface `locked` e `upsell` e "Solicitar contratação" | Visual, por empresa | Modo `hidden` |
-| 10 | Divisão fina das unidades v1 conforme decisão comercial. Exemplo: `caixa.operacao` dividido em abertura/fechamento e conferência. | Por empresa e versão do retrato | Retrato anterior |
+| # | Etapa | Muda comportamento? | Reversão | Situação (26/11) |
+|---|---|---|---|---|
+| 1 | Validar com o titular o catálogo v2 e as decisões em aberto (`docs/MODULARIZATION/README.md` §Decisões) | Não | — | ✅ decisões recebidas |
+| 2 | Publicar o catálogo v2 como **dado**. Códigos v2 ↔ chaves v1 por alias (`v1Compatibility.unitsByV1Key`); o runtime segue v1. | Não | Remover o arquivo | ✅ |
+| 3 | Tabela aditiva `company_licenses` (retrato do Interos) e tradução retrato → estados do runtime v1 | Não, enquanto o Interos não enviar retratos | Ignorar a tabela | ✅ `company_licenses`, `license_history` |
+| 4 | API v2: catálogo, licença, simulação, sincronização, eventos assinados | Só para empresas cujo retrato for aplicado | Desligar a rota v2; a v1 continua | ✅ API v2 |
+| 5 | Estados de teste, vigência e suspensão programada, com execução local por rotina | Só para empresas com essas datas no retrato | `PUT` de novo retrato, ou modo `legacy` | ✅ |
+| 6 | Limites (usuários, dispositivos, filiais) só com aviso (`limit.reached`) | Não bloqueia | — | ✅ (só fiscal: aviso) |
+| 7 | Limites com bloqueio de **novos** cadastros | Sim, por empresa | Retrato sem limite | ✅ usuários, dispositivos e filiais |
+| 8 | Telemetria agregada `GET usage` | Não | — | ✅ `GET usage` |
+| 9 | Interface `locked` e `upsell` e "Solicitar contratação" | Visual, por empresa | Modo `hidden` | ✅ |
+| 10 | Divisão fina das unidades v1 conforme decisão comercial. Exemplo: `caixa.operacao` dividido em abertura/fechamento e conferência. | Por empresa e versão do retrato | Retrato anterior | ⏸ mantidas as 67 unidades (decisão 4) |
 
 ## Simulação de impacto antes de cada etapa
 

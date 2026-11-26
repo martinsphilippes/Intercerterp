@@ -34,7 +34,8 @@ export const MODULES_CATALOG: ModuleDef[] = [
       // /api/export: cada exportação é conferida pelo módulo da sua chave; /api/interos: integração de gestão (escopos próprios)
       apis: ["/api/export", "/api/interos"],
       exports: ["admin.users", "admin.roles", "admin.audit", "admin.companies", "admin.branches", "integration-logs"],
-      routines: ["admin.roles", "modules.maintenance"], permissions: ["admin.users", "admin.integrations", "data.export"],
+      jobs: ["interos.event"],
+      routines: ["admin.roles", "modules.maintenance", "licenses.maintenance", "interos.reconcile"], permissions: ["admin.users", "admin.integrations", "data.export"],
     },
     deactivation: never, existing: "exists",
   },
@@ -643,7 +644,7 @@ export const MODULES_CATALOG: ModuleDef[] = [
  * Rotinas que rodam mesmo com o módulo desligado: liberam reservas de estoque e encerram pendências (obrigações).
  * Sem nada pendente elas não fazem nada. As demais rotinas só rodam com o módulo habilitado ou em desligamento.
  */
-export const ALWAYS_RUN_ROUTINES = new Set(["ecommerce.expire", "sales.documents_expire", "sales.presale_reservations", "fiscal.stuck", "fiscal.obligations", "admin.backup", "admin.roles", "modules.maintenance"]);
+export const ALWAYS_RUN_ROUTINES = new Set(["ecommerce.expire", "sales.documents_expire", "sales.presale_reservations", "fiscal.stuck", "fiscal.obligations", "admin.backup", "admin.roles", "modules.maintenance", "licenses.maintenance", "interos.reconcile"]);
 
 export const MODULE_MAP: Map<string, ModuleDef> = new Map(MODULES_CATALOG.map((m) => [m.key, m]));
 

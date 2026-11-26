@@ -338,14 +338,39 @@ function markdown(doc: ReturnType<typeof catalogV2Document>): string {
   return md;
 }
 
+/**
+ * Módulo de runtime compacto (src/lib/modules/units-v2.generated.ts): unidades comerciais v2 ↔ chaves v1, aliases,
+ * inclusões e o que é vendável. Decisão do titular (26/11/2026): unidade dependente de integração externa (EXT) ou em
+ * desenvolvimento só é vendável depois da homologação; parcial é vendável pelo que existe.
+ */
+export function runtimeUnitsModule(doc: ReturnType<typeof catalogV2Document>): string {
+  const units = doc.items.filter((n) => n.commercialUnit).map((n) => ({
+    code: n.code, name: n.name, slug: n.slug, v1Key: Object.entries(doc.v1Compatibility.unitsByV1Key).find(([, c]) => c === n.code)?.[0] ?? null,
+    devStatus: n.devStatus, sellable: ["OP", "PARC", "FALHA"].includes(n.devStatus), requires: n.dependencies.required,
+  }));
+  const aliasOf = Object.fromEntries(doc.items.filter((n) => n.aliasOf).map((n) => [n.code, n.aliasOf]));
+  const includedIn = Object.fromEntries(doc.items.filter((n) => n.includedIn && !n.aliasOf).map((n) => [n.code, n.includedIn]));
+  const known = doc.items.map((n) => n.code);
+  return `// GERADO por scripts/modules/build-catalog-v2.ts — não edite. Catálogo ${doc.catalogVersion}.
+export const CATALOG_V2_VERSION = ${JSON.stringify(doc.catalogVersion)};
+export interface UnitV2 { code: string; name: string; slug: string; v1Key: string | null; devStatus: string; sellable: boolean; requires: string[] }
+export const UNITS_V2: UnitV2[] = ${JSON.stringify(units, null, 1)};
+export const ALIAS_OF: Record<string, string> = ${JSON.stringify(aliasOf)};
+export const INCLUDED_IN: Record<string, string> = ${JSON.stringify(includedIn)};
+export const KNOWN_CODES: string[] = ${JSON.stringify(known)};
+`;
+}
+
 if (require.main === module) {
   const doc = catalogV2Document();
+  const unitsFile = path.join(ROOT, "src/lib/modules/units-v2.generated.ts");
+  const unitsSrc = runtimeUnitsModule(doc);
   const json = JSON.stringify(doc, null, 2) + "\n";
   const md = markdown(doc);
   const jf = path.join(DIR, "catalogo-modulos-erp-v2.json");
   const mf = path.join(DIR, "catalogo-v2.md");
   if (process.argv.includes("--check")) {
-    if (fs.readFileSync(jf, "utf8") !== json || fs.readFileSync(mf, "utf8") !== md) {
+    if (fs.readFileSync(jf, "utf8") !== json || fs.readFileSync(mf, "utf8") !== md || fs.readFileSync(unitsFile, "utf8") !== unitsSrc) {
       console.error("catálogo v2 desatualizado: rode npx tsx scripts/modules/build-catalog-v2.ts");
       process.exit(1);
     }
@@ -353,6 +378,7 @@ if (require.main === module) {
   } else {
     fs.writeFileSync(jf, json);
     fs.writeFileSync(mf, md);
+    fs.writeFileSync(unitsFile, unitsSrc);
     console.log(JSON.stringify(doc.totals), "v1 sem unidade v2:", doc.v1Compatibility.v1KeysWithoutV2Unit);
   }
 }

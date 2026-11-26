@@ -116,8 +116,19 @@ Usuários e perfis, empresas e filiais, parâmetros, central de integrações (m
   - `/api/interos/v1/companies` — src/app/api/interos/v1/companies/route.ts
   - `/api/interos/v1/operations/[operationId]/cancel` — src/app/api/interos/v1/operations/[operationId]/cancel/route.ts
   - `/api/interos/v1/operations/[operationId]` — src/app/api/interos/v1/operations/[operationId]/route.ts
+  - `/api/interos/v2/catalog/[code]` — src/app/api/interos/v2/catalog/[code]/route.ts
+  - `/api/interos/v2/catalog` — src/app/api/interos/v2/catalog/route.ts
+  - `/api/interos/v2/companies/[companyId]/license/history` — src/app/api/interos/v2/companies/[companyId]/license/history/route.ts
+  - `/api/interos/v2/companies/[companyId]/license/simulate` — src/app/api/interos/v2/companies/[companyId]/license/simulate/route.ts
+  - `/api/interos/v2/companies/[companyId]/license` — src/app/api/interos/v2/companies/[companyId]/license/route.ts
+  - `/api/interos/v2/companies/[companyId]/sync` — src/app/api/interos/v2/companies/[companyId]/sync/route.ts
+  - `/api/interos/v2/companies/[companyId]/usage` — src/app/api/interos/v2/companies/[companyId]/usage/route.ts
+  - `/api/interos/v2/companies` — src/app/api/interos/v2/companies/route.ts
+  - `/api/interos/v2/errors` — src/app/api/interos/v2/errors/route.ts
+  - `/api/interos/v2/upsell-requests` — src/app/api/interos/v2/upsell-requests/route.ts
 - **Exportações:** `admin.users`, `admin.roles`, `admin.audit`, `admin.companies`, `admin.branches`, `integration-logs`
-- **Rotinas diárias:** `admin.roles`, `modules.maintenance`
+- **Tarefas duráveis (fila):** `interos.event`
+- **Rotinas diárias:** `admin.roles`, `modules.maintenance`, `licenses.maintenance`, `interos.reconcile`
 - **Permissões de perfil:** `admin.users`, `admin.integrations`, `data.export`
 - **Ao desligar:** immediate; depois: consulta histórica. Recurso da plataforma: não pode ser desligado.
 
@@ -171,6 +182,7 @@ Painel do gestor (cartões condicionados aos módulos habilitados), central de n
   - `createTicketAction` — src/app/(app)/ajuda/chamados/actions.ts
   - `markAction` — src/app/(app)/notificacoes/actions.ts
   - `replyTicketAction` — src/app/(app)/ajuda/chamados/actions.ts
+  - `requestUpsellAction` — src/app/(app)/modulo-indisponivel/actions.ts
   - `savePrefsAction` — src/app/(app)/notificacoes/actions.ts
   - `setTicketStatusAction` — src/app/(app)/ajuda/chamados/actions.ts
   - `unarchiveAction` — src/app/(app)/notificacoes/actions.ts

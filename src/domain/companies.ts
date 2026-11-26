@@ -274,6 +274,8 @@ export async function createBranch(ctx: Ctx, companyId: string, input: BranchInp
   const c = await companyAdminCtx(ctx, companyId, "create");
   const company = await c.store.getOrThrow("companies", companyId);
   assert(company.status !== "inactive", "Empresa inativa: reative-a antes de criar filiais.");
+  const { assertWithinLimit } = await import("./licensing/limits");
+  await assertWithinLimit(c.store, companyId, "branches");
   const data = branchData(input);
   const branches = await listAll(c.store, "branches", { filters: [["eq", "companyId", companyId]] });
   if (branches.some((b) => b.code === data.code)) throw new BusinessError(`Já existe filial com o código ${data.code} nesta empresa.`, "duplicate");
@@ -351,6 +353,10 @@ export async function setBranchStatus(ctx: Ctx, id: string, status: "active" | "
     assert(open.items.length === 0, "Há caixas abertos nesta filial; feche-os antes de inativar.");
     const active = await listAll(c.store, "branches", { filters: [["eq", "companyId", b.companyId], ["eq", "status", "active"]] });
     assert(active.filter((x) => x.id !== id).length > 0, "A empresa precisa ter ao menos uma filial ativa.");
+  }
+  if (status === "active" && b.status === "inactive") {
+    const { assertWithinLimit } = await import("./licensing/limits");
+    await assertWithinLimit(c.store, b.companyId, "branches");
   }
   const after = await c.store.update("branches", id, { status });
   await audit({ ...c, branchId: id }, { module: "admin", action: `branch.${status}`, entityType: "branch", entityId: id, summary: `Filial ${b.name} ${status === "inactive" ? "inativada (não pode mais ser selecionada nem operar)" : "reativada"}`, reason: reason ?? null, related: [`company:${b.companyId}`] });

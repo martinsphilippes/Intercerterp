@@ -1153,3 +1153,18 @@ Contexto (reunião com o dono): a Intercert é uma AC2 da ICP-Brasil sob as AC1 
 - **Revogação.** Na hora, na instância que aplicou; em até 15 segundos nas demais (memória curta por empresa).
 - **Restauração de backup** não altera a habilitação.
 - Detalhes em `docs/modulos/README.md`. O contrato da integração está em `docs/modulos/contrato-interos-erp-v1.md`.
+
+## 51. Licenciamento comercial pelo Interos (contrato v2) [Decisão do titular, 26/11/2026]
+
+- O Interos envia o **retrato completo e versionado** da licença: `PUT /api/interos/v2/companies/{id}/license`, assinado com HMAC e protegido por `X-Interos-Event-Id`.
+- **Versão menor ou igual à aplicada:** é ignorada (`stale`). **Mesma versão repetida:** devolve `duplicate`.
+- **Datas resolvidas localmente pela rotina `licenses.maintenance`:** fim de teste, ativação e suspensão programadas, vigência.
+- **Carências:** 7 dias depois do vencimento da vigência (depois, somente leitura) e 7 dias depois do fim do teste (depois, suspenso).
+- **Homologação:** unidade dependente de integração externa ou em desenvolvimento não é ativada para empresa nova (`not_homologated`). Quem já tinha mantém o acesso (`preserved_access`).
+  - Consequência: a Loja virtual depende de NF-e e também aguarda a homologação para vendas novas.
+- **Limites contratados:** usuários, dispositivos e filiais barram só novos cadastros. Documentos fiscais nunca bloqueiam: só geram o evento `limit.reached`.
+- **Exibição do não contratado:** oculto para os clientes atuais e "oportunidade" (Solicitar contratação) para empresas novas. O Interos pode fixar `display`.
+- **Reconciliação:** o ERP consulta o Interos todo dia (`INTEROS_LICENSE_URL`) e o Interos reenvia quando diverge.
+- **Retrato envelhecido:** sem retrato novo há mais de 3 dias, gera o evento `sync.stale`, e a última licença válida continua valendo.
+- **Migração sem bloqueio:** sem retrato, a empresa segue o runtime atual. O controle só passa a bloquear quando o retrato traz `controlMode: "enforced"`.
+- **Cargo, departamento e função** são atributos do usuário. A regra `access.attributeRoles` aplica o perfil quando nenhum é escolhido; o perfil continua sendo o único contêiner de permissões.

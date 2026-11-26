@@ -50,6 +50,28 @@ export interface UserInput {
   branchIds: string[];
   /** null = herda o limite do perfil */
   discountLimitBps?: number | null;
+  /** atributos organizacionais (aplicam o perfil pela regra da empresa quando nenhum perfil é escolhido) */
+  jobTitle?: string | null;
+  department?: string | null;
+  jobFunction?: string | null;
+}
+
+export type UserAttribute = "jobTitle" | "department" | "jobFunction";
+export interface AttributeRoleRule {
+  attribute: UserAttribute;
+  value: string;
+  roleId: string;
+}
+export const ATTRIBUTE_ROLES_KEY = "access.attributeRoles";
+
+/**
+ * Perfil pelo cargo, departamento ou função (decisão do titular, 26/11/2026): a regra da empresa aponta um perfil;
+ * o perfil continua sendo o ÚNICO contêiner de permissões. Primeira regra que casar (comparação sem caixa/acento).
+ */
+export function roleFromAttributes(rules: AttributeRoleRule[], attrs: Partial<Record<UserAttribute, string | null | undefined>>): string | null {
+  const norm = (v: string | null | undefined) => (v ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+  for (const r of rules) if (norm(attrs[r.attribute]) && norm(attrs[r.attribute]) === norm(r.value)) return r.roleId;
+  return null;
 }
 
 export const DEFAULT_INVITE_DAYS = 7;
@@ -205,13 +227,18 @@ async function validateInput(ctx: Ctx, input: UserInput, selfId?: string) {
     assert(br, "Filial inválida.");
     assert(input.isAdmin || companyIds.includes(br.companyId), `A filial ${br.name} não pertence às empresas vinculadas.`);
   }
+  const attrs = { jobTitle: input.jobTitle?.trim() || null, department: input.department?.trim() || null, jobFunction: input.jobFunction?.trim() || null };
+  if (!input.roleId && !input.isAdmin) {
+    const rules = await getSetting<AttributeRoleRule[]>(ctx.store, ctx.companyId, null, ATTRIBUTE_ROLES_KEY, []);
+    input = { ...input, roleId: roleFromAttributes(Array.isArray(rules) ? rules : [], attrs) };
+  }
   if (input.roleId) {
     const role = await base.get("roles", input.roleId);
     assert(role, "Perfil inválido.");
     assert(role.companyId === ctx.companyId, "Perfil de outra empresa: escolha um perfil da empresa em uso.");
     assert(role.active !== false, "Perfil inativo.");
   } else {
-    assert(input.isAdmin, "Selecione o perfil de acesso.");
+    assert(input.isAdmin, "Selecione o perfil de acesso (ou informe cargo, departamento ou função com regra de perfil em Parâmetros).");
   }
   if (input.discountLimitBps != null) assert(Number.isInteger(input.discountLimitBps) && input.discountLimitBps >= 0 && input.discountLimitBps <= 10000, "Limite de desconto deve estar entre 0% e 100%.");
   return {
@@ -224,6 +251,7 @@ async function validateInput(ctx: Ctx, input: UserInput, selfId?: string) {
     companyIds,
     branchIds,
     discountLimitBps: input.discountLimitBps ?? null,
+    ...attrs,
   };
 }
 
@@ -265,6 +293,11 @@ export async function createUser(
   }
   const data = await validateInput(ctx, input);
   await assertCanManageCompanies(ctx, data.companyIds);
+  // limite contratado de usuários (licença do Interos): só barra o NOVO usuário; administradores da plataforma não contam
+  if (!data.isAdmin) {
+    const { assertWithinLimit } = await import("./licensing/limits");
+    for (const cid of data.companyIds ?? []) await assertWithinLimit(unscoped(ctx.store), cid, "users");
+  }
   // perfil por empresa: o escolhido vale na empresa em uso; nas demais vinculadas, o perfil de sistema equivalente
   const roleByCompany = data.isAdmin || !data.roleId ? {} : { ...(await materializeRoles(ctx.store, { roleId: data.roleId }, data.companyIds)), [ctx.companyId]: data.roleId };
   if (input.mode === "password") {
@@ -447,6 +480,10 @@ export async function setUserStatus(ctx: Ctx, id: string, status: "active" | "in
   await guard(ctx, "edit", `alterar situação de usuário para ${status}`, id);
   const u = await loadManagedUser(ctx, id);
   assert(u.id !== ctx.user.id, "Você não pode alterar a situação do seu próprio acesso.");
+  if (status === "active" && u.status !== "active" && u.status !== "invited" && !u.isAdmin) {
+    const { assertWithinLimit } = await import("./licensing/limits");
+    for (const cid of u.companyIds ?? []) await assertWithinLimit(unscoped(ctx.store), cid, "users");
+  }
   await assertManagesWholeUser(ctx, u, "Alterar a situação do acesso");
   // acesso rápido da tela de login (decisão do titular): o usuário não sai da lista
   if (status !== "active" && isQuickAccessUser(u)) throw new BusinessError(quickAccessLockedMessage(status === "suspended" ? "Não é possível suspender" : "Não é possível inativar", u.name), QUICK_ACCESS_LOCKED);
