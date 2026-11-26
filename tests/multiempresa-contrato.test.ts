@@ -40,3 +40,22 @@ describe("recursos de contrato (isFeatureOn)", () => {
     expect(await isFeatureOn(scopeStore(store, semLoja), semLoja, null, "lotes")).toBe(true);
   });
 });
+
+describe("empresa suspensa em somente leitura (o Store do contexto de trabalho)", () => {
+  it("toda gravação é recusada com o motivo da suspensão; a auditoria de consultas e exportações continua registrando", async () => {
+    const { readOnly } = await import("@/lib/db/read-only");
+    const { companyBlockMessage } = await import("@/domain/tenancy/status");
+    const { audit } = await import("@/lib/core/audit");
+    const { listAll } = await import("@/lib/db");
+    await store.update("companies", comLoja, { status: "suspended", suspension: { mode: "somente_leitura", reason: "teste" } });
+    const company = (await store.get("companies", comLoja))!;
+    const ro = readOnly(scopeStore(store, comLoja), { message: companyBlockMessage(company) ?? undefined, appendOnly: ["audit_logs"] });
+    await expect(ro.create("customers", { personType: "PF", name: "Não grava" })).rejects.toThrow(/somente leitura \(contrato suspenso\)/);
+    await expect(ro.update("companies", comLoja, { name: "X" })).rejects.toThrow(/somente leitura/);
+    const ctx = { store: ro, companyId: comLoja, branchId: null, user: { id: "u1", name: "Pessoa", email: "", isAdmin: false, permissions: {}, actions: [], discountLimitBps: 0, branchIds: [], companyIds: [comLoja] } } as any;
+    await audit(ctx, { module: "sales", action: "data.export", entityType: "export", entityId: "customers", summary: "Exportação em somente leitura" });
+    const logs = await listAll(store, "audit_logs", { filters: [["eq", "companyId", comLoja], ["eq", "action", "data.export"]] });
+    expect(logs.length).toBe(1);
+    await store.update("companies", comLoja, { status: "active", suspension: null });
+  });
+});

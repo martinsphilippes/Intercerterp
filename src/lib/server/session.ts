@@ -12,7 +12,7 @@ import { ensureBootstrap } from "./bootstrap";
 import { ScopedStore, scopeStore } from "../db/scoped-store";
 import { readOnly } from "../db/read-only";
 import { demoCredentialBlocked } from "../auth/quick-access";
-import { companyReadOnly, companySelectable } from "../../domain/tenancy/status";
+import { companyBlockMessage, companyReadOnly, companySelectable } from "../../domain/tenancy/status";
 
 export const SESSION_COOKIE = "ic_session";
 export const UNIT_COOKIE = "ic_unit";
@@ -78,7 +78,11 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   // "somente leitura" recebe um Store que recusa qualquer gravação
   const scoped = scopeStore(store, company.id, { platform: Boolean(company.isPlatform) });
   return {
-    ctx: { store: companyReadOnly(company) ? readOnly(scoped) : scoped, user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined },
+    // suspensa em somente leitura: toda gravação é recusada com o motivo; a trilha de auditoria continua registrando
+    ctx: {
+      store: companyReadOnly(company) ? readOnly(scoped, { message: companyBlockMessage(company) ?? undefined, appendOnly: ["audit_logs"] }) : scoped,
+      user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+    },
     user,
     company,
     branch,

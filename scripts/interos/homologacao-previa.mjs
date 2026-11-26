@@ -134,18 +134,21 @@ async function newSession() {
   return { ctx, page: await ctx.newPage() };
 }
 async function shot(page, name) {
-  await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: false }).catch(() => undefined);
+  await page.screenshot({ path: path.join(OUT, `${name}.jpg`), type: "jpeg", quality: 70, fullPage: false }).catch(() => undefined);
 }
+/** Entra com e-mail e senha; devolve null (entrou) ou o texto da tela de login (recusado). */
 async function login(page, loginValue, password) {
   await page.goto(`${BASE}/login`);
   await page.fill("#login", loginValue);
   await page.fill("#password", password);
   await page.click("button[type=submit]");
-  await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 90000 });
+  const entered = await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 45000 }).then(() => true, () => false);
+  if (!entered) return (await page.locator("form").first().innerText().catch(() => "")).slice(0, 300) || "não saiu da tela de login";
   if (page.url().includes("selecionar-unidade")) {
     await page.locator("button, a").filter({ hasText: /Matriz/ }).first().click();
-    await page.waitForURL((u) => !u.pathname.includes("selecionar-unidade"), { timeout: 90000 });
+    await page.waitForURL((u) => !u.pathname.includes("selecionar-unidade"), { timeout: 60000 }).catch(() => undefined);
   }
+  return null;
 }
 /** status HTTP e conteúdo de uma URL com a sessão do navegador */
 async function fetchAs(ctx, p) {
@@ -170,9 +173,10 @@ for (const k of ["A", "B"]) {
   await reuse.fill('input[name="confirm"]', PASSWORD).catch(() => undefined);
   await reuse.click("button[type=submit]").catch(() => undefined);
   await reuse.waitForTimeout(3000);
-  check(`convite ${k} é de uso único (o mesmo link não ativa de novo)`, !reuse.url().includes("/login") || /inv[aá]lido|expirad|utilizado|usado/i.test(await reuse.locator("body").innerText()), { trecho: reused.slice(0, 120) });
-  await login(page, t.email, PASSWORD);
-  check(`administrador ${k} entra no ERP`, !page.url().includes("/login"), { url: page.url() });
+  // o mesmo link de novo: a ativação é recusada (fica na página do convite, sem voltar ao login)
+  check(`convite ${k} é de uso único (o mesmo link não ativa de novo)`, !reuse.url().includes("/login"), { trecho: reused.slice(0, 160), depois: (await reuse.locator("body").innerText()).slice(0, 160) });
+  const refused = await login(page, t.email, PASSWORD);
+  check(`administrador ${k} entra no ERP`, !refused && !page.url().includes("/login"), { url: page.url(), tela: refused });
   await shot(page, `01-painel-empresa-${k}`);
   t.ctx = ctx;
   t.page = page;
@@ -215,6 +219,7 @@ const demo = {};
   demo.produto = await firstId("/produtos", /^\/produtos\/([A-Za-z0-9]{12,})$/);
   demo.venda = await firstId("/vendas", /^\/vendas\/([A-Za-z0-9]{12,})$/);
   demo.fornecedor = await firstId("/fornecedores", /^\/fornecedores\/([A-Za-z0-9]{12,})$/);
+  demo.empresa = await firstId("/administracao/empresas", /^\/administracao\/empresas\/([A-Za-z0-9]{12,})$/);
   await page.goto(`${BASE}/fiscal`);
   const fileHrefs = await page.locator("a[href*='/api/files/']").evaluateAll((as) => as.map((a) => a.getAttribute("href"))).catch(() => []);
   demo.arquivo = fileHrefs.map((h) => /\/api\/files\/([A-Za-z0-9]+)/.exec(h)?.[1]).find(Boolean) ?? null;
@@ -223,9 +228,14 @@ const demo = {};
     const h2 = await page.locator("a[href*='/api/files/']").evaluateAll((as) => as.map((a) => a.getAttribute("href"))).catch(() => []);
     demo.arquivo = h2.map((h) => /\/api\/files\/([A-Za-z0-9]+)/.exec(h)?.[1]).find(Boolean) ?? null;
   }
-  demo.nomeProduto = demo.produto ? (await (await fetchAs(ctx, `/produtos/${demo.produto}`)).text.match(/<h1[^>]*>([^<]{3,80})<\/h1>/)?.[1]?.trim() ?? null) : null;
-  const unit = await page.evaluate(() => document.cookie);
-  void unit;
+  const h1 = async (p) => {
+    await page.goto(`${BASE}${p}`);
+    return ((await page.locator("h1").first().innerText().catch(() => "")) || "").trim() || null;
+  };
+  demo.nomeCliente = demo.cliente ? await h1(`/clientes/${demo.cliente}`) : null;
+  demo.nomeProduto = demo.produto ? await h1(`/produtos/${demo.produto}`) : null;
+  demo.nomeFornecedor = demo.fornecedor ? await h1(`/fornecedores/${demo.fornecedor}`) : null;
+  demo.tituloVenda = demo.venda ? await h1(`/vendas/${demo.venda}`) : null;
   demo.ctx = ctx;
   evidence.etapas.push({ etapa: "ids da empresa de demonstração (outra empresa)", ids: { ...demo, ctx: undefined } });
   check("ids da demonstração coletados para as tentativas cruzadas", Boolean(demo.cliente && demo.produto && demo.venda), { ...demo, ctx: undefined });
@@ -233,21 +243,26 @@ const demo = {};
 save();
 
 // ── 6. tentativas de acesso cruzado ─────────────────────────────────────────────────────────────────────────────
-const notFound = (r) => r.status === 404 || (r.status >= 300 && r.status < 400 && /sem-permissao|nao-encontrad|login/.test(r.location ?? "")) || /não encontrad|nao encontrad|sem permissão/i.test(r.text.slice(0, 20000));
+// bloqueado = página de "não encontrado" (com carregamento progressivo, o Next responde 200 e envia a página de erro),
+// 404, ou redirecionamento para sem-permissão — e NENHUM dado identificador do registro da outra empresa na resposta
+const NOT_FOUND_MARK = "Página ou registro não encontrado";
+const notFound = (r) => r.status === 404 || (r.status >= 300 && r.status < 400 && /sem-permissao|login/.test(r.location ?? "")) || r.text.includes(NOT_FOUND_MARK) || /Sem permissão|sem-permissao/.test(r.text);
 for (const [k, other] of [["A", "B"], ["B", "A"]]) {
   const t = tenants[k];
   const o = tenants[other];
   const tries = [
     [`tela: cliente da empresa ${other}`, `/clientes/${o.idCliente}`, o.cliente],
-    ["tela: cliente da demonstração", `/clientes/${demo.cliente}`, null],
+    ["tela: cliente da demonstração", `/clientes/${demo.cliente}`, demo.nomeCliente],
     ["tela: produto da demonstração", `/produtos/${demo.produto}`, demo.nomeProduto],
-    ["tela: venda da demonstração", `/vendas/${demo.venda}`, null],
-    ["tela: fornecedor da demonstração", `/fornecedores/${demo.fornecedor}`, null],
+    ["tela: venda da demonstração", `/vendas/${demo.venda}`, demo.tituloVenda],
+    ["tela: fornecedor da demonstração", `/fornecedores/${demo.fornecedor}`, demo.nomeFornecedor],
+    ["tela: editar cliente da demonstração", `/clientes/${demo.cliente}/editar`, demo.nomeCliente],
   ];
   for (const [nome, p, leak] of tries) {
     if (p.includes("/null")) continue;
     const r = await fetchAs(t.ctx, p);
-    check(`${k} → ${nome}: bloqueado`, notFound(r) && !(leak && r.text.includes(leak)), { status: r.status, location: r.location });
+    const leaked = Boolean(leak && r.text.includes(leak));
+    check(`${k} → ${nome}: bloqueado, sem vazar dados`, notFound(r) && !leaked, { status: r.status, location: r.location, paginaNaoEncontrado: r.text.includes(NOT_FOUND_MARK), vazou: leaked });
   }
   if (demo.arquivo) {
     const f = await fetchAs(t.ctx, `/api/files/${demo.arquivo}`);
@@ -256,7 +271,7 @@ for (const [k, other] of [["A", "B"], ["B", "A"]]) {
   // lista e exportação só com os próprios dados
   const lista = await fetchAs(t.ctx, `/clientes?q=${encodeURIComponent("Cliente Exclusivo")}`);
   check(`${k} → lista de clientes: só o próprio`, lista.text.includes(t.cliente) && !lista.text.includes(o.cliente), { status: lista.status });
-  const exp = await fetchAs(t.ctx, `/api/export/clientes`);
+  const exp = await fetchAs(t.ctx, `/api/export/customers`);
   check(`${k} → exportação de clientes: só o próprio`, exp.status === 200 && exp.text.includes(t.cliente) && !exp.text.includes(o.cliente), { status: exp.status, linhas: exp.text.split("\n").length - 1 });
   const busca = await fetchAs(t.ctx, `/api/search?q=${encodeURIComponent(demo.nomeProduto ?? "Camiseta")}`);
   check(`${k} → busca global: nada de outra empresa`, busca.status === 200 && !(demo.nomeProduto && busca.text.includes(demo.nomeProduto)), { status: busca.status, trecho: busca.text.slice(0, 160) });
@@ -284,7 +299,9 @@ const lst = await svc("GET", `/empresas?limite=100`);
 const ids = (lst.json?.itens ?? []).map((e) => e.idEmpresa);
 check("provisionamento: lista só empresas vinculadas (A e B presentes; nenhuma da demonstração)", ids.includes(tenants.A.idEmpresa) && ids.includes(tenants.B.idEmpresa) && (lst.json?.itens ?? []).every((e) => e.contaInterosId), { total: ids.length });
 const demoCompany = await svc("GET", `/empresas/${demo.empresa ?? "0".repeat(32)}`);
-check("provisionamento: empresa não vinculada não existe para o Interos (404)", demoCompany.status === 404);
+check("provisionamento: empresa existente mas não vinculada (demonstração) não existe para o Interos (404)", Boolean(demo.empresa) && demoCompany.status === 404, { idEmpresa: demo.empresa, status: demoCompany.status });
+const demoTorre = await svc("GET", `/empresas/${demo.empresa ?? "0".repeat(32)}/torre/resumo?de=2026-11-01&ate=2026-11-30`, { auth: TORRE });
+check("Torre: empresa não vinculada (demonstração) → 404", demoTorre.status === 404, { status: demoTorre.status });
 save();
 
 // ── 7. suspensão e reativação ───────────────────────────────────────────────────────────────────────────────────
@@ -316,8 +333,10 @@ save();
   const ra = await svc("POST", `/empresas/${B.idEmpresa}/reativar`, { key: `homolog-reat-${RUN}`, body: { motivo: "Homologação concluída" } });
   check("B reativada, com o histórico das suspensões", ra.status === 200 && ra.json?.empresa?.situacao === "ativa" && (ra.json?.empresa?.historicoSituacao ?? []).length >= 3, ra.json?.empresa?.historicoSituacao);
   const { page: p3 } = await newSession();
-  await login(p3, B.email, PASSWORD);
-  check("B reativada: o administrador entra de novo", !p3.url().includes("/login"), { url: p3.url() });
+  const refused = await login(p3, B.email, PASSWORD);
+  check("B reativada: o administrador entra de novo, na hora", !refused && !p3.url().includes("/login"), { url: p3.url(), tela: refused });
+  const back = await svc("GET", `/empresas/${B.idEmpresa}`);
+  check("B reativada: tarefas liberadas e histórico preservado na consulta", back.status === 200 && back.json?.empresa?.situacao === "ativa", { situacao: back.json?.empresa?.situacao });
 }
 
 evidence.terminadoEm = new Date().toISOString();

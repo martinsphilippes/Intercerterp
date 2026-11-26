@@ -77,3 +77,35 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] Verificação: suíte completa 979/979 (memória) e testes do comércio digital no PostgreSQL; build de produção limpo; compra de ponta a ponta no navegador (produto → carrinho com cupom → checkout → Pix → pagamento simulado), simulador de retorno (evento repetido sem nova baixa), NF-e, expedição, conciliação, monitor e prévia; varredura do ERP com o build de produção: 333 páginas, 208 padrões de rota, 0 problemas. Achados corrigidos na verificação: demonstração com 30 dias de histórico sem saldo (reposição rastreável e cenários isolados), parâmetros de URL vazios (banco, simulador, expedição), uma linha do monitor por produto, código IBGE completado pelo CEP no servidor.
 - [x] **Publicado em produção (18/11, PR #2, autorizado pelo titular):** publicação pronta em 3 min, em São Paulo; as 11 tabelas novas foram criadas sozinhas no primeiro acesso (diagnóstico: esquema aplicado, consultas de 4 ms, banco com 29 MB). Demonstração atualizada pela rota de instalação (`step=demo-update`, uma chamada, 11,8 s): Loja Modelo publicada, 11 produtos no catálogo (10 na vitrine — o Cinto fica de fora por falta de peso, de propósito), 7 pedidos IC-1041 a IC-1047 nos estados previstos, 3 carrinhos abandonados. Conferência no endereço oficial **só de leitura** (sem compra nem aprovação de teste, para não sujar a demonstração; o fluxo de escrita foi conferido na publicação de teste com banco real): 21 acessos rápidos na tela inicial (computador e celular); vitrine, produto, carrinho, 5 páginas institucionais, `robots.txt` e `sitemap.xml` com resposta 200, loja inexistente 404, celular em 2 colunas sem rolagem lateral, sem service worker do ERP na vitrine; 14 telas de gestão com resposta 200 (mediana ~1 s medida daqui), 7 pedidos na lista, monitor com 1 falha (Cinto), banco com 4 transações, “Ver loja” levando à vitrine. Varredura completa do ERP em produção como Administração: 337 páginas, 209 padrões de rota (42 do comércio digital e da vitrine), todas com resposta 200, sem tela de erro, erro de página ou de console (mediana 1,0 s e 95% abaixo de 1,4 s, medidos daqui). Erros de execução na Vercel: só o aviso já conhecido do modo SSL do cliente `pg`.
 - [x] **Duas melhorias pedidas pelo titular, publicadas em produção (18/11, PR #3):** (1) a miniatura da loja na Central, no editor e nos modelos mostra os produtos, preços, categorias e a ordem da vitrine (antes: produtos ilustrativos que não existiam no catálogo), com o produto da oferta no modelo Campanha, exemplos rotulados só para loja sem produto à venda e foto que não abre voltando para a ilustração da categoria; (2) a conexão do banco escreve `sslmode=verify-full` — mesma conexão de hoje, sem o aviso que aparecia como erro no painel da Vercel e sem afrouxar na próxima versão do cliente `pg` (§48, §49). Verificação: suíte 983/983, testes do comércio digital e do SSL também no PostgreSQL, build limpo, varredura local de 333 páginas sem problema; foto real e foto com erro simulado conferidas no navegador; na publicação de teste e na produção (só leitura): miniatura com os produtos reais nas três telas (computador e celular), vitrine, 21 acessos rápidos e telas de gestão sem erro. Nos registros da Vercel, a última ocorrência do aviso de SSL é de antes da publicação; depois dela, nenhum aviso nem erro.
+
+## Multiempresa e Interos · 26/11/2026
+- [x] **Mapeamento antes de alterar** (`docs/multiempresa/mapeamento/01..06`):
+  - 132 coleções;
+  - 297 portas sem escopo classificadas;
+  - identidade e permissões, rotinas, arquivos e APIs;
+  - hierarquias entre empresas (escritório contábil, rede, certificação);
+  - indicadores para a Torre;
+  - inventário de telas e APIs, com os achados corrigidos.
+- [x] **Isolamento no servidor** (`docs/multiempresa/arquitetura.md`):
+  - Store restrito à empresa em todo contexto, com condição de dono dentro do SQL;
+  - tabelas da plataforma fora do alcance das empresas;
+  - modos estrito, observar e legado;
+  - plataforma explícita (`isPlatform`) e vínculos explícitos entre empresas (`company_relations`);
+  - módulos por contrato e suspensão em dois modos;
+  - credenciais de demonstração só no ambiente de teste (`ERP_AMBIENTE`).
+- [x] **Administração pelo cliente** (`docs/multiempresa/administracao.md`):
+  - convites, perfis por módulo, tela, ação e escopo;
+  - cargo e filiais por empresa;
+  - encerrar sessões e recuperação iniciada pelo administrador;
+  - último administrador por empresa;
+  - impacto antes de salvar perfil compartilhado;
+  - ninguém concede nem assume acesso maior que o próprio.
+- [x] **Interface de serviço do Interos v1** (`docs/interos/contrato-interos-erp-v1.md`):
+  - provisionamento retomável e idempotente: criar, vincular por código, unidade, módulos, administradores, convites,
+    suspender, reativar, retomar;
+  - Torre de Controle só de leitura, com 13 rotas e os números das telas;
+  - 46 exemplos reais conferidos a cada execução da suíte.
+- [x] **Migração verificável** (`docs/multiempresa/migracao.md`): simular e aplicar, retrato antes e depois, fila de
+  revisão para o ambíguo, rollback em três níveis.
+- [ ] **Depende do titular e do Interos:** aceite da homologação, credenciais de produção, decisão sobre
+  `ERP_AMBIENTE=producao` e próximas versões do contrato (`docs/pendencias-externas.md`, itens 18–21).
