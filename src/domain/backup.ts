@@ -30,7 +30,9 @@ const MAX_FILES_BYTES = 300 * 1024 * 1024;
 const STALE_MINUTES = 30;
 
 /** Metadados do próprio backup não entram na cópia (o artefato não pode conter a si mesmo). */
-const SELF_EXCLUDED = new Set(["backups", "restore_jobs"]);
+// habilitação de módulos: contrato vigente (fonte oficial no ERP, alterado pelo Interos) — restaurar uma cópia antiga
+// nunca devolve nem remove módulos; o histórico de alterações e as operações também não voltam no tempo
+const SELF_EXCLUDED = new Set(["backups", "restore_jobs", "company_modules", "module_changes", "module_operations", "module_baselines"]);
 
 export interface BackupScope {
   includeFiles: boolean;

@@ -8,7 +8,7 @@ import { closeCommission, reopenCommission, type CommissionBase } from "@/domain
 const REVALIDATE = ["/vendas/comissoes", "/financeiro/pagar"];
 
 export async function closeCommissionAction(fd: FormData) {
-  return runAction({ module: "sales", revalidate: REVALIDATE }, async (s) => {
+  return runAction({ entitlement: "vendas.comissoes", action: "closeCommissionAction", module: "sales", revalidate: REVALIDATE }, async (s) => {
     await requireFeature(s, "comissoes");
     const base = fstr(fd, "base");
     const title = await closeCommission(s.ctx, {
@@ -20,7 +20,7 @@ export async function closeCommissionAction(fd: FormData) {
 }
 
 export async function reopenCommissionAction(titleId: string, fd: FormData) {
-  return runAction({ module: "sales", revalidate: REVALIDATE }, async (s) => {
+  return runAction({ entitlement: "vendas.comissoes", action: "reopenCommissionAction", module: "sales", revalidate: REVALIDATE }, async (s) => {
     await requireFeature(s, "comissoes");
     const t = await reopenCommission(s.ctx, titleId, fstr(fd, "reason"));
     return { ok: true as const, message: `Fechamento reaberto: título nº ${t.number} cancelado.` };

@@ -10,7 +10,7 @@ const R = ["/administracao/integracoes"];
 const scopeOf = (s: { ctx: { branchId: string | null } }, scope: string) => (scope === "company" ? null : s.ctx.branchId);
 
 export async function saveIntegrationAction(fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "saveIntegrationAction", module: "admin", op: "edit", revalidate: R }, async (s) => {
     requireAction(s.ctx, "admin.integrations");
     const kind = fstr(fd, "kind") as IntegrationKind;
     const cat = INTEGRATION_CATALOG[kind];
@@ -32,7 +32,7 @@ export async function saveIntegrationAction(fd: FormData) {
 }
 
 export async function saveFiscalIntegrationAction(fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: [...R, "/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "saveFiscalIntegrationAction", module: "admin", op: "edit", revalidate: [...R, "/fiscal/configuracoes"] }, async (s) => {
     const kind = fstr(fd, "kind") as "fiscal_nfe" | "fiscal_nfse";
     const branchId = scopeOf(s, fstr(fd, "scope"));
     const cfg = await getFiscalConfig(s.ctx.store, s.ctx.companyId, branchId);
@@ -52,7 +52,7 @@ export async function saveFiscalIntegrationAction(fd: FormData) {
 }
 
 export async function unlinkCredentialAction(kind: IntegrationKind, scope: "branch" | "company") {
-  return runAction({ module: "admin", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "unlinkCredentialAction", module: "admin", op: "edit", revalidate: R }, async (s) => {
     requireAction(s.ctx, "admin.integrations");
     const branchId = scopeOf(s, scope);
     if (kind === "fiscal_nfe" || kind === "fiscal_nfse") {
@@ -73,7 +73,7 @@ export async function unlinkCredentialAction(kind: IntegrationKind, scope: "bran
 }
 
 export async function testIntegrationAction(kind: IntegrationKind, scope: "branch" | "company") {
-  return runAction({ module: "admin", op: "view", revalidate: R }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "testIntegrationAction", module: "admin", op: "view", revalidate: R }, async (s) => {
     const r = await testIntegration(s.ctx, kind, scopeOf(s, scope));
     if (!r.ok && r.status !== "configured_untested") return { ok: false as const, error: `${STATUS_LABEL[r.status] ?? r.status}: ${r.message}` };
     return { ok: true as const, message: `${STATUS_LABEL[r.status] ?? r.status}: ${r.message}` };
@@ -81,7 +81,7 @@ export async function testIntegrationAction(kind: IntegrationKind, scope: "branc
 }
 
 export async function requeueJobAction(jobId: string) {
-  return runAction({ module: "admin", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "requeueJobAction", module: "admin", op: "edit", revalidate: R }, async (s) => {
     const r = await requeueJob(s.ctx, jobId);
     const x = r[0];
     return { ok: true as const, message: x ? `Tarefa reprocessada: ${x.status === "done" ? "concluída" : x.status === "retry" ? `nova falha — ${x.error ?? ""}` : x.status}` : "Tarefa reenfileirada (será executada pelo agendador)." };
@@ -89,7 +89,7 @@ export async function requeueJobAction(jobId: string) {
 }
 
 export async function runJobsAction(fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: R }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "runJobsAction", module: "admin", op: "edit", revalidate: R }, async (s) => {
     const r = await runCompanyJobs(s.ctx, { includeRetry: fbool(fd, "includeRetry") || true });
     const ok = r.results.filter((x) => x.status === "done").length;
     return { ok: true as const, message: r.ran ? `${r.ran} tarefa(s) executada(s): ${ok} concluída(s), ${r.ran - ok} com falha/retentativa.` : "Nenhuma tarefa pendente para executar." };

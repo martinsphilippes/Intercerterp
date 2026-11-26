@@ -2,6 +2,9 @@ import { listAll } from "@/lib/db";
 import type { Store } from "@/lib/db/types";
 import { getSetting, setSetting } from "@/lib/core/settings";
 import { today } from "@/lib/dates";
+import { decide, loadCompanyModules } from "@/lib/modules/access";
+import { ALWAYS_RUN_ROUTINES } from "@/lib/modules/catalog";
+import { bestLevel, modulesForRoutine } from "@/lib/modules/surfaces";
 
 /**
  * Rotinas periódicas idempotentes (executadas pelo cron em /api/jobs):
@@ -22,7 +25,17 @@ export async function runScheduled(store: Store) {
   const out: Record<string, unknown> = {};
   const day = today();
   for (const c of companies) {
+    // habilitação (docs/modulos): rotina de módulo não habilitado não roda — exceto as que encerram obrigações
+    const modules = await loadCompanyModules(store, c.id);
     for (const [key, fn] of routines) {
+      const owners = modulesForRoutine(key);
+      if (owners.length && !ALWAYS_RUN_ROUTINES.has(key)) {
+        const level = bestLevel(owners.map((m) => decide(modules, m, c.kind ?? "retail").level));
+        if (level !== "full" && level !== "drain") {
+          out[`${c.id}:${key}`] = { skipped: "module_disabled" };
+          continue;
+        }
+      }
       const marker = `routine.${key}.lastRun`;
       const last = await getSetting<string | null>(store, c.id, null, marker, null);
       if (last === day) continue;

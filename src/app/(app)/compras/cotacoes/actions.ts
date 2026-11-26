@@ -7,7 +7,7 @@ const rv = (id?: string) => ["/compras/cotacoes", ...(id ? [`/compras/cotacoes/$
 
 export async function saveQuotationAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "purchases", op: id ? "edit" : "create", requireBranch: true, revalidate: rv(id ?? undefined) }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "saveQuotationAction", module: "purchases", op: id ? "edit" : "create", requireBranch: true, revalidate: rv(id ?? undefined) }, async (s) => {
     const input = { title: fstr(fd, "title"), items: fjson(fd, "items", []), supplierIds: fjson(fd, "supplierIds", []), responseDue: fopt(fd, "responseDue"), notes: fopt(fd, "notes"), origin: (fopt(fd, "origin") as any) ?? "manual" };
     const q = id ? await updateQuotation(s.ctx, id, input) : await createQuotation(s.ctx, { ...input, idemKey: `ui:${fstr(fd, "_idem")}` });
     return { ok: true as const, message: id ? "Cotação atualizada." : `Cotação nº ${q.number} criada. Registre as propostas dos fornecedores.`, redirect: `/compras/cotacoes/${q.id}?tab=propostas` };
@@ -16,7 +16,7 @@ export async function saveQuotationAction(fd: FormData) {
 
 export async function saveProposalAction(fd: FormData) {
   const id = fstr(fd, "quotationId");
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "saveProposalAction", module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
     const input: ProposalInput = {
       supplierId: fstr(fd, "supplierId"),
       items: fjson(fd, "items", []),
@@ -34,7 +34,7 @@ export async function saveProposalAction(fd: FormData) {
 }
 
 export async function removeProposalAction(quotationId: string, supplierId: string) {
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: rv(quotationId) }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "removeProposalAction", module: "purchases", op: "edit", requireBranch: true, revalidate: rv(quotationId) }, async (s) => {
     await removeProposal(s.ctx, quotationId, supplierId);
     return { ok: true as const, message: "Proposta removida." };
   });
@@ -42,7 +42,7 @@ export async function removeProposalAction(quotationId: string, supplierId: stri
 
 export async function importCsvAction(fd: FormData) {
   const id = fstr(fd, "quotationId");
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "importCsvAction", module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
     const file = fd.get("csv");
     if (!(file instanceof File) || file.size === 0) return { ok: false as const, error: "Selecione o arquivo CSV." };
     const r = await importProposalsCsv(s.ctx, id, await file.text());
@@ -51,28 +51,28 @@ export async function importCsvAction(fd: FormData) {
 }
 
 export async function selectionAction(id: string, assign: Record<string, string | null>) {
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "selectionAction", module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
     const ev = await saveSelection(s.ctx, id, assign, "manual");
     return { grandTotal: ev.grandTotal, groups: ev.groups.length };
   });
 }
 
 export async function suggestAction(id: string, onTimeOnly: boolean) {
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "suggestAction", module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
     const r = await applySuggestion(s.ctx, id, { onTimeOnly });
     return { ok: true as const, message: `Menor total com frete (heurística): ${r.evaluation.groups.length} fornecedor(es)${r.feasible ? "" : " — atenção: há mínimo não atingido ou item sem proposta viável"}.` };
   });
 }
 
 export async function generateOrdersAction(id: string, submit: boolean) {
-  return runAction({ module: "purchases", op: "create", requireBranch: true, revalidate: [...rv(id), "/compras/pedidos", "/compras/aprovacoes"] }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "generateOrdersAction", module: "purchases", op: "create", requireBranch: true, revalidate: [...rv(id), "/compras/pedidos", "/compras/aprovacoes"] }, async (s) => {
     const r = await generateOrders(s.ctx, id, { submit });
     return { ok: true as const, message: r.created ? `${r.orders.length} pedido(s) em rascunho gerado(s)${submit ? " e enviado(s) para análise como uma solicitação" : ""}.` : "Os pedidos desta cotação já tinham sido gerados (nada foi duplicado)." };
   });
 }
 
 export async function cancelQuotationAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "cancelQuotationAction", module: "purchases", op: "edit", requireBranch: true, revalidate: rv(id) }, async (s) => {
     await cancelQuotation(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Cotação cancelada." };
   });

@@ -12,7 +12,7 @@ import { previewCookieName } from "@/domain/ecommerce/storefront";
  * comércio digital) e abre a vitrine com a faixa "Prévia".
  */
 export async function GET(req: Request) {
-  const s = await requireApiSession("text");
+  const s = await requireApiSession("text", { modules: ["ecommerce.loja"], surface: "ver loja" });
   if (s instanceof NextResponse) return s;
   const allowed = ["ecommerce.manage", "ecommerce.catalog", "ecommerce.orders", "ecommerce.marketing"].some((a) => canDo(s.user, a as any));
   if (!allowed || !(await isFeatureOn(s.ctx.store, s.ctx.companyId, s.ctx.branchId, "comercioDigital", featureDefaultFor("comercioDigital", s.company.kind)))) return new NextResponse("Sem acesso ao comércio digital.", { status: 403 });

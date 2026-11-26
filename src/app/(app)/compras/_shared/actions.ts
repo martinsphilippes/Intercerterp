@@ -32,7 +32,7 @@ export interface SkuHit {
 
 /** Pesquisa de SKUs de produto (nome, SKU, código de barras ou código do fornecedor) com dados do vínculo do fornecedor. */
 export async function searchSkusAction(q: string, supplierId?: string | null) {
-  return runAction({ module: "purchases" }, async (s) => {
+  return runAction({ entitlement: ["compras.pedidos", "compras.cotacoes", "compras.recebimento"], action: "searchSkusAction", module: "purchases" }, async (s) => {
     const term = (q ?? "").trim();
     if (term.length < 2) return [] as SkuHit[];
     const store = s.ctx.store;
@@ -62,7 +62,7 @@ export async function searchSkusAction(q: string, supplierId?: string | null) {
 
 /** Último custo/código do fornecedor para uma lista de SKUs (sugestão de custo no pedido). */
 export async function supplierCostsAction(supplierId: string, skuIds: string[]) {
-  return runAction({ module: "purchases" }, async (s) => {
+  return runAction({ entitlement: ["compras.pedidos", "compras.cotacoes", "compras.recebimento"], action: "supplierCostsAction", module: "purchases" }, async (s) => {
     const sid = await ownSupplierId(s.ctx.store, s.ctx.companyId, supplierId);
     if (!sid || !skuIds.length) return {} as Record<string, { lastCost: number | null; supplierCode: string | null; leadTimeDays: number | null }>;
     const sps = await listAll(s.ctx.store, "supplier_products", { filters: [["eq", "companyId", s.ctx.companyId], ["eq", "supplierId", sid], ["eq", "skuId", skuIds]] });

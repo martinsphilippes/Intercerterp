@@ -11,7 +11,7 @@ const PATHS = ["/compras/aprovacoes", "/compras/pedidos"];
 
 export async function decideAction(fd: FormData) {
   const id = fstr(fd, "requestId");
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/aprovacoes/${id}`, ...PATHS] }, async (s) => {
+  return runAction({ entitlement: "compras.aprovacoes", action: "decideAction", module: "purchases", requireBranch: true, revalidate: [`/compras/aprovacoes/${id}`, ...PATHS] }, async (s) => {
     const decision = fstr(fd, "decision") as Decision;
     if (!["approve", "adjust", "reject"].includes(decision)) return { ok: false as const, error: "Escolha uma decisão." };
     const note = fstr(fd, "note").slice(0, 500);
@@ -24,14 +24,14 @@ export async function decideAction(fd: FormData) {
 }
 
 export async function revokeAction(decisionId: string, requestId: string, fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/aprovacoes/${requestId}`, ...PATHS] }, async (s) => {
+  return runAction({ entitlement: "compras.aprovacoes", action: "revokeAction", module: "purchases", requireBranch: true, revalidate: [`/compras/aprovacoes/${requestId}`, ...PATHS] }, async (s) => {
     await revokeDecision(s.ctx, decisionId, fstr(fd, "reason"));
     return { ok: true as const, message: "Decisão revista — a solicitação voltou para análise na mesma etapa." };
   });
 }
 
 export async function savePolicyAction(fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: ["/compras/aprovacoes/politica", "/compras/aprovacoes"] }, async (s) => {
+  return runAction({ entitlement: "compras.aprovacoes", action: "savePolicyAction", module: "admin", op: "edit", revalidate: ["/compras/aprovacoes/politica", "/compras/aprovacoes"] }, async (s) => {
     const input: PolicyInput = {
       name: fstr(fd, "name"),
       rules: { tiers: fjson(fd, "tiers", []), distinctApprovers: fbool(fd, "distinctApprovers") },

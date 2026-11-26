@@ -13,7 +13,8 @@ import type { Doc, ListOptions, ListResult, Store } from "./types";
  * alterada; os resultados são entregues como cópias, para que um chamador não altere o objeto de outro.
  */
 const SHARED_TTL_MS = 15_000;
-const SHARED = new Set(["companies", "branches", "roles", "settings", "payment_methods"]);
+// company_modules: a revogação de um módulo vale em até 15 s em todas as instâncias (na instância que aplicou, na hora)
+const SHARED = new Set(["companies", "branches", "roles", "settings", "payment_methods", "company_modules"]);
 
 const requestMemo = cache(() => new Map<string, Promise<unknown>>());
 const shared = new Map<string, { until: number; value: Promise<unknown> }>();

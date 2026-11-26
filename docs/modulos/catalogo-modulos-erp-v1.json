@@ -1,0 +1,4675 @@
+{
+  "$schema": "https://intercert.example/schemas/catalogo-modulos-erp-v1.schema.json",
+  "catalog": "catalogo-modulos-erp-v1",
+  "catalogVersion": "1.0.0",
+  "families": {
+    "plataforma": "Plataforma",
+    "tecnico": "Componentes técnicos",
+    "cadastros": "Cadastros",
+    "vendas": "Vendas e caixa",
+    "comercio_digital": "Comércio digital",
+    "estoque": "Estoque",
+    "compras": "Compras",
+    "financeiro": "Financeiro",
+    "fiscal": "Fiscal",
+    "analise": "Análise",
+    "implantacao": "Implantação e integrações",
+    "contabil": "Escritório contábil",
+    "rede": "Rede de certificação"
+  },
+  "classifications": {
+    "commercial": "Módulo comercial: contratável sozinho, com utilidade própria.",
+    "optional_function": "Função opcional de um módulo: exige o módulo-pai.",
+    "technical": "Componente técnico compartilhado: não contratável; ativo enquanto algum módulo ativo precisar dele.",
+    "platform": "Recurso obrigatório da plataforma: sempre ativo.",
+    "permission": "Permissão de usuário (perfil): não é módulo; listada em permissions com o módulo que a governa."
+  },
+  "availability": {
+    "available": "Implementado e contratável.",
+    "needs_confirmation": "Implementado; o recorte comercial ainda precisa de confirmação.",
+    "planned": "Lacuna documentada: não existe no ERP e não pode ser ativado."
+  },
+  "companyModuleStates": {
+    "enabled": "Habilitado: operação completa.",
+    "scheduled_off": "Desligamento agendado: segue operando até as pendências impeditivas acabarem.",
+    "draining": "Em desligamento: novas operações bloqueadas; operações em andamento podem concluir.",
+    "disabled": "Desligado: consulta histórica (history=read) ou oculto (history=none). Dados preservados."
+  },
+  "controlModes": {
+    "legacy": "Sem controle de módulos: comportamento anterior.",
+    "shadow": "Avalia e registra o que seria negado, sem bloquear.",
+    "enforced": "Aplica a habilitação."
+  },
+  "alwaysRunRoutines": [
+    "ecommerce.expire",
+    "sales.documents_expire",
+    "sales.presale_reservations",
+    "fiscal.stuck",
+    "fiscal.obligations",
+    "admin.backup",
+    "admin.roles",
+    "modules.maintenance"
+  ],
+  "modules": [
+    {
+      "key": "plataforma.acesso",
+      "name": "Autenticação e sessão",
+      "description": "Login próprio, autenticação em duas etapas, convite, recuperação de senha, seleção de empresa/filial e segurança da conta.",
+      "family": "plataforma",
+      "version": "1.0.0",
+      "classification": "platform",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/conta",
+          "/sem-permissao",
+          "/modulo-indisponivel"
+        ],
+        "publicRoutes": [
+          "/login",
+          "/convite",
+          "/recuperar-senha",
+          "/redefinir-senha",
+          "/selecionar-unidade",
+          "/primeiro-acesso",
+          "/suporte"
+        ],
+        "apis": [
+          "/api/unit",
+          "/api/setup/run",
+          "/api/keepalive"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "plataforma.administracao",
+      "name": "Administração essencial",
+      "description": "Usuários e perfis, empresas e filiais, parâmetros, central de integrações (moldura), histórico e auditoria.",
+      "family": "plataforma",
+      "version": "1.0.0",
+      "classification": "platform",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/administracao/usuarios",
+          "/administracao/empresas",
+          "/administracao/parametros",
+          "/administracao/historico",
+          "/administracao/integracoes",
+          "/administracao/integracoes/email",
+          "/administracao/modulos"
+        ],
+        "apis": [
+          "/api/export",
+          "/api/interos"
+        ],
+        "exports": [
+          "admin.users",
+          "admin.roles",
+          "admin.audit",
+          "admin.companies",
+          "admin.branches",
+          "integration-logs"
+        ],
+        "routines": [
+          "admin.roles",
+          "modules.maintenance"
+        ],
+        "permissions": [
+          "admin.users",
+          "admin.integrations",
+          "data.export"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "plataforma.backup",
+      "name": "Backup e restauração",
+      "description": "Cópias agendadas, restauração e retenção. Obrigatório: proteção dos dados da empresa.",
+      "family": "plataforma",
+      "version": "1.0.0",
+      "classification": "platform",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/administracao/backups"
+        ],
+        "exports": [
+          "admin.backups"
+        ],
+        "jobs": [
+          "admin.backup.scheduled",
+          "admin.restore.run"
+        ],
+        "routines": [
+          "admin.backup"
+        ],
+        "permissions": [
+          "admin.backup"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "plataforma.painel",
+      "name": "Painel, notificações e suporte",
+      "description": "Painel do gestor (cartões condicionados aos módulos habilitados), central de notificações, ajuda e chamados.",
+      "family": "plataforma",
+      "version": "1.0.0",
+      "classification": "platform",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/dashboard",
+          "/notificacoes",
+          "/ajuda"
+        ],
+        "apis": [
+          "/api/search",
+          "/api/jobs"
+        ],
+        "exports": [
+          "notifications",
+          "support.tickets"
+        ],
+        "permissions": [
+          "support.manage"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "plataforma.arquivos",
+      "name": "Arquivos e documentos",
+      "description": "Download de XML, anexos e cópias com conferência de empresa e permissão. Continua disponível para documentos históricos de módulos desligados.",
+      "family": "plataforma",
+      "version": "1.0.0",
+      "classification": "platform",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "apis": [
+          "/api/files"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "tec.estoque",
+      "name": "Motor de estoque",
+      "description": "Saldos, movimentos, reservas, custo médio e depósitos (src/domain/stock.ts, warehouses.ts). Usado por PDV, loja, compras e estoque.",
+      "family": "tecnico",
+      "version": "1.0.0",
+      "classification": "technical",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "jobs": [
+          "sale.effects",
+          "sale.cancel.effects",
+          "return.effects"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "tec.financeiro",
+      "name": "Motor financeiro",
+      "description": "Contas (caixa/banco), lançamentos, títulos e baixas, meios e condições de pagamento (src/domain/finance.ts). Recebe as vendas, compras e repasses mesmo sem as telas financeiras contratadas.",
+      "family": "tecnico",
+      "version": "1.0.0",
+      "classification": "technical",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro",
+          "/financeiro/cadastros",
+          "/financeiro/contas"
+        ],
+        "jobs": [
+          "finance.account.rebuild"
+        ],
+        "exports": [
+          "fin-account-entries"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "tec.fiscal",
+      "name": "Motor fiscal",
+      "description": "Configuração fiscal, emitente, certificado, numeração, grupos tributários, provedor (Focus NFe/simulação), transmissão, consulta, cancelamento, obrigações e relatórios fiscais.",
+      "family": "tecnico",
+      "version": "1.0.0",
+      "classification": "technical",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/fiscal",
+          "/fiscal/configuracoes",
+          "/fiscal/relatorios",
+          "/administracao/integracoes/fiscal_nfe"
+        ],
+        "exports": [
+          "fiscal-documentos",
+          "fiscal-livro-saidas",
+          "fiscal-ncm",
+          "fiscal-cfop",
+          "fiscal-servicos",
+          "fiscal-cancelamentos",
+          "fiscal-rejeicoes",
+          "fiscal-obrigacoes"
+        ],
+        "jobs": [
+          "fiscal.transmit",
+          "fiscal.query",
+          "fiscal.cancel",
+          "fiscal.email"
+        ],
+        "routines": [
+          "fiscal.obligations",
+          "fiscal.certificate",
+          "fiscal.stuck"
+        ],
+        "permissions": [
+          "fiscal.configure",
+          "fiscal.cancel"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Documentos em processamento continuam sendo transmitidos/consultados até a resposta da SEFAZ.",
+          "Cancelamento e CC-e de documentos autorizados continuam dentro do prazo legal.",
+          "Prazos de obrigações e validade do certificado continuam avisados."
+        ],
+        "historyActions": [
+          "transmitAction",
+          "retransmitAction",
+          "queryAction",
+          "refreshAction",
+          "cancelAction",
+          "cceAction",
+          "emailAction",
+          "batchRetransmitAction",
+          "toggleContingencyAction",
+          "refreshFiscalAction",
+          "completeObligationAction",
+          "obligationStatusAction"
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "tec.precos",
+      "name": "Motor de preços",
+      "description": "Tabelas de preço por filial e vigência, atacado e cálculo de totais e rateio (pricing.ts, pricing-calc.ts).",
+      "family": "tecnico",
+      "version": "1.0.0",
+      "classification": "technical",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {},
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "tec.pagamentos",
+      "name": "Intenções de pagamento (Pix)",
+      "description": "Contrato de Pix (Mercado Pago e simulação) e intenções de pagamento usadas pelo PDV (src/domain/payments).",
+      "family": "tecnico",
+      "version": "1.0.0",
+      "classification": "technical",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/administracao/integracoes/pix"
+        ],
+        "apis": [
+          "/api/pdv/intents"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "cadastros.produtos",
+      "name": "Produtos e serviços",
+      "description": "Cadastro de produtos, variações, preços, custos, parâmetros de estoque, conversões, cadastros auxiliares e importação de produtos por planilha.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": [
+          "produtos.alteracao_massa",
+          "produtos.etiquetas",
+          "produtos.balanca",
+          "produtos.promocoes",
+          "produtos.kits",
+          "vendas.pdv",
+          "vendas.documentos",
+          "ecommerce.loja",
+          "estoque.gestao",
+          "compras.reposicao",
+          "compras.pedidos",
+          "compras.recebimento",
+          "clientes.fidelidade",
+          "vendas.devolucoes",
+          "pdv.recebimento_crediario",
+          "pdv.reserva_prevenda",
+          "ecommerce.promocoes",
+          "ecommerce.banco",
+          "ecommerce.canais",
+          "estoque.transferencias",
+          "estoque.inventario",
+          "estoque.lotes",
+          "estoque.inventario_fiscal",
+          "compras.cotacoes",
+          "compras.aprovacoes",
+          "compras.nota_a_confirmar",
+          "compras.cte",
+          "compras.precificacao",
+          "vendas.pdv_offline",
+          "ecommerce.marketplaces"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/produtos",
+          "/produtos/cadastros",
+          "/produtos/importar",
+          "/produtos/novo"
+        ],
+        "exports": [
+          "products"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Produtos continuam sendo lidos por PDV, loja, compras e notas já emitidas."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "produtos.alteracao_massa",
+      "name": "Alteração de produtos em massa",
+      "description": "Reajuste de preços e alteração de categoria, marca, NCM, grupo tributário e situação de vários produtos com prévia.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "cadastros.produtos",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/produtos/alteracao-em-massa"
+        ],
+        "features": [
+          "alteracaoMassa"
+        ],
+        "permissions": [
+          "products.bulk_edit"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": "Isolado: só a tela /produtos/alteracao-em-massa e product-bulk.ts; a precificação após a entrada usa price-adjust.ts/receipt-pricing.ts, não a alteração em massa."
+    },
+    {
+      "key": "produtos.etiquetas",
+      "name": "Etiquetas de produtos",
+      "description": "Etiquetas de gôndola e adesivas com preço e código de barras, inclusive a partir de um recebimento.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "cadastros.produtos",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [
+        {
+          "module": "compras.recebimento",
+          "effect": "Atalho de etiquetas a partir do recebimento concluído"
+        }
+      ],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/produtos/etiquetas"
+        ],
+        "features": [
+          "etiquetas"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": null
+    },
+    {
+      "key": "produtos.balanca",
+      "name": "Balança etiquetadora",
+      "description": "Código de peso/valor no PDV, aba Balança no produto e carga de PLU.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "cadastros.produtos",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [
+        {
+          "module": "vendas.pdv",
+          "effect": "Leitura da etiqueta de balança no PDV"
+        }
+      ],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/produtos/balanca"
+        ],
+        "features": [
+          "balanca"
+        ],
+        "embedded": [
+          "Produto › aba Balança",
+          "PDV › leitura EAN-13 iniciado por 2"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": null
+    },
+    {
+      "key": "produtos.promocoes",
+      "name": "Promoções",
+      "description": "Promoções por período, leve-pague e preço promocional aplicadas no PDV.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "cadastros.produtos",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/produtos/promocoes"
+        ],
+        "features": [
+          "promocoes"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Vendas já concluídas mantêm o desconto registrado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "produtos.kits",
+      "name": "Kits e composição",
+      "description": "Componentes do produto, venda de kit com baixa dos componentes e montagem/desmembramento.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "cadastros.produtos",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/estoque/montagem"
+        ],
+        "features": [
+          "kits"
+        ],
+        "embedded": [
+          "Produto › aba Componentes"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Cancelamento e devolução de vendas de kit anteriores continuam estornando os componentes."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "cadastros.clientes",
+      "name": "Gestão de clientes",
+      "description": "Cadastro de clientes (identidade única por CPF/CNPJ), ficha, limite de crédito e histórico.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": [
+          "clientes.fidelidade"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/clientes"
+        ],
+        "exports": [
+          "customers"
+        ],
+        "permissions": [
+          "customer.credit_limit"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Clientes continuam identificáveis no PDV, na loja e nas notas (identidade compartilhada)."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "clientes.fidelidade",
+      "name": "Programa de fidelidade",
+      "description": "Pontos por compra e resgate no PDV.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "cadastros.clientes",
+      "dependencies": {
+        "required": [
+          "vendas.pdv"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.clientes",
+          "vendas.pdv",
+          "caixa.operacao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.financeiro",
+          "tec.pagamentos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/clientes/fidelidade"
+        ],
+        "features": [
+          "fidelidade"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Saldo de pontos preservado; resgate bloqueado enquanto desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "cadastros.fornecedores",
+      "name": "Fornecedores",
+      "description": "Cadastro de fornecedores, contatos e condições.",
+      "family": "cadastros",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": [
+          "compras.pedidos",
+          "compras.recebimento",
+          "compras.cotacoes",
+          "compras.aprovacoes",
+          "compras.nota_a_confirmar",
+          "compras.cte",
+          "compras.precificacao"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/fornecedores"
+        ],
+        "exports": [
+          "suppliers"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "caixa.operacao",
+      "name": "Caixa",
+      "description": "Abertura, suprimento, sangria, fechamento (cego ou não), reabertura e relatório do caixa.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": [
+          "vendas.pdv",
+          "clientes.fidelidade",
+          "vendas.devolucoes",
+          "pdv.recebimento_crediario",
+          "pdv.reserva_prevenda",
+          "vendas.pdv_offline"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/caixa"
+        ],
+        "exports": [
+          "cash_sessions",
+          "cash_movements"
+        ],
+        "permissions": [
+          "cash.reopen",
+          "cash.withdrawal"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 3,
+        "blockers": [
+          "cash.open_sessions"
+        ],
+        "drainActions": [
+          "closeSessionAction",
+          "addMovementAction",
+          "previewCloseAction",
+          "retryCloseTransferAction"
+        ],
+        "obligations": [
+          "Caixas abertos podem ser fechados (com sangria/suprimento) até a conclusão; nenhum caixa novo abre."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "vendas.pdv",
+      "name": "Frente de caixa (PDV)",
+      "description": "Atendimento no PDV, pré-venda, troca, pagamento (dinheiro, cartão, Pix, vale), terminais e histórico de vendas.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "caixa.operacao",
+          "cadastros.produtos"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "caixa.operacao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.financeiro",
+          "tec.pagamentos"
+        ],
+        "dependents": [
+          "clientes.fidelidade",
+          "vendas.devolucoes",
+          "pdv.recebimento_crediario",
+          "pdv.reserva_prevenda",
+          "vendas.pdv_offline"
+        ]
+      },
+      "optionalIntegrations": [
+        {
+          "module": "fiscal.nfce",
+          "effect": "Emissão da NFC-e na conclusão da venda; sem ele a venda sai com recibo não fiscal"
+        },
+        {
+          "module": "cadastros.clientes",
+          "effect": "Identificação e cadastro rápido do cliente no PDV"
+        },
+        {
+          "module": "financeiro.contas_receber",
+          "effect": "Venda a prazo (crediário) gera títulos a receber"
+        },
+        {
+          "module": "vendas.documentos",
+          "effect": "Importar orçamento/pedido no PDV"
+        }
+      ],
+      "configurationPrerequisites": [
+        {
+          "key": "terminal",
+          "description": "Ao menos um terminal ativo na filial (Administração › Terminais)"
+        }
+      ],
+      "surfaces": {
+        "routes": [
+          "/pdv",
+          "/vendas",
+          "/administracao/terminais",
+          "/administracao/integracoes/card_tef"
+        ],
+        "apis": [
+          "/api/pdv/products",
+          "/api/pdv/customers",
+          "/api/pdv/vouchers"
+        ],
+        "exports": [
+          "sales",
+          "admin.terminals"
+        ],
+        "permissions": [
+          "sale.cancel",
+          "sale.discount_over_limit",
+          "sale.overdue_override",
+          "pdv.remove_item",
+          "pdv.cancel_cart"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 1,
+        "blockers": [
+          "pdv.parked_carts",
+          "pdv.pending_pix"
+        ],
+        "drainActions": [
+          "cancelCartAction",
+          "cancelPixAction",
+          "simulatePixAction",
+          "cancelSaleAction"
+        ],
+        "historyActions": [
+          "sendReceiptAction"
+        ],
+        "obligations": [
+          "Histórico de vendas, recibos e segunda via continuam em consulta.",
+          "Pix pendentes podem ser confirmados ou cancelados."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "vendas.devolucoes",
+      "name": "Trocas e devoluções",
+      "description": "Devolução/troca de vendas com vale-crédito ou estorno, limite de valor e autorização.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "vendas.pdv",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "vendas.pdv",
+          "caixa.operacao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.financeiro",
+          "tec.pagamentos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/vendas/devolucoes",
+          "/vendas/[id]/devolucoes"
+        ],
+        "exports": [
+          "returns"
+        ],
+        "permissions": [
+          "sale.return",
+          "sale.return_over_limit"
+        ],
+        "embedded": [
+          "Venda › Devoluções"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 90,
+        "drainActions": [
+          "processReturnAction",
+          "confirmCardReversalAction"
+        ],
+        "obligations": [
+          "Devoluções de vendas feitas ANTES do desligamento continuam aceitas por 90 dias (CDC: prazo de reclamação de vício em bens duráveis)."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "pdv.recebimento_crediario",
+      "name": "Recebimento de parcelas no PDV",
+      "description": "Receber parcelas do crediário no caixa aberto (F9), com estorno.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "vendas.pdv",
+      "dependencies": {
+        "required": [
+          "financeiro.contas_receber"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "vendas.pdv",
+          "caixa.operacao",
+          "cadastros.produtos",
+          "financeiro.contas_receber"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.financeiro",
+          "tec.pagamentos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/caixa/recebimentos"
+        ],
+        "features": [
+          "recebimentoPdv"
+        ],
+        "permissions": [
+          "pdv.receive_installments",
+          "pdv.reverse_receipt"
+        ],
+        "embedded": [
+          "PDV › Receber parcelas (F9)"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recebimentos já registrados continuam no caixa e no fechamento."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "pdv.reserva_prevenda",
+      "name": "Reserva de estoque na pré-venda",
+      "description": "Reserva os itens físicos ao salvar a pré-venda (F6); consumida na conclusão e liberada no cancelamento ou expiração.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "vendas.pdv",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "vendas.pdv",
+          "caixa.operacao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.financeiro",
+          "tec.pagamentos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "features": [
+          "reservaPreVenda"
+        ],
+        "routines": [
+          "sales.presale_reservations"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "hidden",
+        "drainDays": 3,
+        "blockers": [
+          "pdv.presale_reservations"
+        ],
+        "obligations": [
+          "Reservas existentes são consumidas ou liberadas pela rotina de expiração."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "vendas.documentos",
+      "name": "Orçamentos e pedidos de venda",
+      "description": "Orçamento com validade e envio, pedido com reserva de estoque, faturamento parcial no PDV ou em NF-e e link público do documento.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "cadastros.produtos"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [
+        {
+          "module": "vendas.pdv",
+          "effect": "Faturar no PDV (importar documento)"
+        },
+        {
+          "module": "fiscal.nfe",
+          "effect": "Faturar pedido em NF-e"
+        }
+      ],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/vendas/orcamentos",
+          "/vendas/pedidos"
+        ],
+        "publicRoutes": [
+          "/documento"
+        ],
+        "features": [
+          "documentoComercial"
+        ],
+        "routines": [
+          "sales.documents_expire"
+        ],
+        "permissions": [
+          "sales_doc.quote",
+          "sales_doc.order",
+          "sales_doc.cancel"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 30,
+        "blockers": [
+          "sales_doc.open_orders"
+        ],
+        "drainActions": [
+          "cancelOrderAction",
+          "renewReservationAction"
+        ],
+        "obligations": [
+          "Pedidos com reserva podem ser faturados ou cancelados; a rotina de expiração libera as reservas."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "vendas.comissoes",
+      "name": "Vendedores e comissões",
+      "description": "Cadastro de vendedores, percentuais, apuração, fechamento e reabertura de comissões.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [
+          [
+            "vendas.pdv",
+            "vendas.documentos",
+            "ecommerce.loja"
+          ]
+        ],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/vendas/vendedores",
+          "/vendas/comissoes"
+        ],
+        "features": [
+          "comissoes"
+        ],
+        "exports": [
+          "sales-commissions"
+        ],
+        "permissions": [
+          "sales.commissions"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Fechamentos de comissão já feitos ficam em consulta."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "ecommerce.loja",
+      "name": "Loja virtual",
+      "description": "Loja própria: modelos, identidade, domínio, catálogo digital, vitrine pública, carrinho, checkout com gateway, pedidos on-line, frete, expedição, retirada e monitor de integrações.",
+      "family": "comercio_digital",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "cadastros.produtos",
+          "fiscal.nfe"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos",
+          "fiscal.nfe"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.fiscal",
+          "tec.financeiro"
+        ],
+        "dependents": [
+          "ecommerce.promocoes",
+          "ecommerce.banco",
+          "ecommerce.canais",
+          "ecommerce.marketplaces"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [
+        {
+          "key": "store.published",
+          "description": "Loja criada, com dados legais, pagamentos e frete configurados e publicada"
+        }
+      ],
+      "surfaces": {
+        "routes": [
+          "/comercio-digital",
+          "/comercio-digital/modelos",
+          "/comercio-digital/editor",
+          "/comercio-digital/catalogo",
+          "/comercio-digital/pedidos",
+          "/comercio-digital/pagamentos",
+          "/comercio-digital/frete",
+          "/comercio-digital/expedicao",
+          "/comercio-digital/monitor",
+          "/comercio-digital/ver-loja",
+          "/administracao/integracoes/store_gateway",
+          "/administracao/integracoes/store_logistics",
+          "/administracao/integracoes/store_domains"
+        ],
+        "publicRoutes": [
+          "/loja"
+        ],
+        "webhooks": [
+          "/api/loja/gateway"
+        ],
+        "features": [
+          "comercioDigital"
+        ],
+        "routines": [
+          "ecommerce.expire"
+        ],
+        "permissions": [
+          "ecommerce.manage",
+          "ecommerce.catalog",
+          "ecommerce.orders",
+          "ecommerce.cancel"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 30,
+        "blockers": [
+          "ecommerce.open_orders"
+        ],
+        "drainActions": [
+          "invoiceOrderAction",
+          "cancelOrderAction",
+          "confirmPickingAction",
+          "generateLabelAction",
+          "dispatchOrderAction",
+          "confirmPickupAction",
+          "confirmDeliveryAction",
+          "completeReturnAction",
+          "retryChargeAction",
+          "reprocessEventAction",
+          "dismissEventAction",
+          "pauseStoreAction"
+        ],
+        "obligations": [
+          "A vitrine deixa de aceitar pedidos novos na hora (página de loja indisponível); o acompanhamento do pedido pelo cliente continua.",
+          "Pedidos pagos seguem para nota, separação, expedição e entrega; avisos do gateway continuam processados.",
+          "Arrependimento (7 dias, CDC art. 49) e devoluções de pedidos anteriores continuam aceitos durante a conclusão.",
+          "Pedidos pendentes expiram pela rotina e liberam as reservas."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "ecommerce.promocoes",
+      "name": "Cupons e recuperação de carrinhos",
+      "description": "Cupons da loja e rascunhos de recuperação de carrinho abandonado.",
+      "family": "comercio_digital",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "ecommerce.loja",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "ecommerce.loja",
+          "cadastros.produtos",
+          "fiscal.nfe"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.fiscal",
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/comercio-digital/promocoes"
+        ],
+        "permissions": [
+          "ecommerce.marketing"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Cupons já aplicados em pedidos são preservados."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "ecommerce.banco",
+      "name": "Banco Intercert e repasses",
+      "description": "Conciliação dos recebimentos do gateway (bruto, taxa, líquido), conta de liquidação e repasses.",
+      "family": "comercio_digital",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "ecommerce.loja",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "ecommerce.loja",
+          "cadastros.produtos",
+          "fiscal.nfe"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.fiscal",
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/comercio-digital/banco",
+          "/administracao/integracoes/store_bank"
+        ],
+        "permissions": [
+          "ecommerce.finance"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 60,
+        "blockers": [
+          "ecommerce.pending_payouts"
+        ],
+        "drainActions": [
+          "reconcileAction",
+          "preparePayoutAction"
+        ],
+        "obligations": [
+          "Repasses solicitados e créditos a conciliar continuam até a liquidação."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "ecommerce.canais",
+      "name": "Canais de venda (marketplaces e redes)",
+      "description": "Contas preparadas em marketplaces, redes sociais e descoberta. Hoje só PREPARA a conta (sem integração ativa de pedidos).",
+      "family": "comercio_digital",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "needs_confirmation",
+      "existing": "needs_confirmation",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "ecommerce.loja",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "ecommerce.loja",
+          "cadastros.produtos",
+          "fiscal.nfe"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.fiscal",
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/comercio-digital/canais"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": "src/domain/ecommerce/channels.ts registra contas 'preparadas'; não há sincronização de pedidos com marketplace — contratar como módulo só depois da integração real (lacuna)."
+    },
+    {
+      "key": "estoque.gestao",
+      "name": "Saldos e movimentação de estoque",
+      "description": "Consulta de saldos por depósito, movimentos, ajustes e cadastro de depósitos.",
+      "family": "estoque",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "cadastros.produtos"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos"
+        ],
+        "dependents": [
+          "estoque.transferencias",
+          "estoque.inventario",
+          "estoque.lotes",
+          "estoque.inventario_fiscal"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/estoque",
+          "/estoque/movimentos",
+          "/estoque/transferencias/depositos"
+        ],
+        "exports": [
+          "stock-balances",
+          "stock-movements"
+        ],
+        "permissions": [
+          "stock.adjust",
+          "stock.warehouses"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "O motor de estoque continua baixando vendas e recebimentos (saldos preservados)."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "estoque.transferencias",
+      "name": "Transferências entre depósitos e filiais",
+      "description": "Transferência com separação, expedição, recebimento, divergência e documento fiscal.",
+      "family": "estoque",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "estoque.gestao",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "estoque.gestao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/estoque/transferencias"
+        ],
+        "exports": [
+          "transfers"
+        ],
+        "routines": [
+          "stock.transfers_overdue"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 30,
+        "blockers": [
+          "stock.transfers_in_transit"
+        ],
+        "drainActions": [
+          "receiveTransferAction",
+          "resolveTransferAction",
+          "cancelTransferAction",
+          "setTransferDocumentAction"
+        ],
+        "obligations": [
+          "Mercadoria em trânsito precisa ser recebida ou cancelada (saldo em trânsito)."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "estoque.inventario",
+      "name": "Inventário e contagem",
+      "description": "Inventário com folha de contagem (inclusive bipagem), conclusão com ajuste e retomada.",
+      "family": "estoque",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "estoque.gestao",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "estoque.gestao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/estoque/inventarios"
+        ],
+        "exports": [
+          "inventories",
+          "inventory-items"
+        ],
+        "routines": [
+          "stock.inventories_stale"
+        ],
+        "features": [
+          "bipagemContagem"
+        ],
+        "permissions": [
+          "stock.inventory_close"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 15,
+        "blockers": [
+          "stock.open_inventories"
+        ],
+        "drainActions": [
+          "saveCountsAction",
+          "addInventoryItemAction",
+          "concludeInventoryAction",
+          "cancelInventoryAction",
+          "resumeInventoryAction"
+        ],
+        "obligations": [
+          "Inventários abertos congelam o saldo contado: precisam ser concluídos ou cancelados."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "estoque.lotes",
+      "name": "Lotes e validades",
+      "description": "Saldo por lote, FEFO na venda, lote no recebimento, relatório de validades e alerta diário.",
+      "family": "estoque",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "estoque.gestao",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "estoque.gestao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/estoque/validades"
+        ],
+        "apis": [
+          "/api/pdv/lots"
+        ],
+        "features": [
+          "lotes"
+        ],
+        "routines": [
+          "stock.lot_expiry"
+        ],
+        "embedded": [
+          "Produto › Controla lote e validade",
+          "Recebimento › lote na conferência",
+          "PDV › escolha do lote"
+        ]
+      },
+      "deactivation": {
+        "mode": "scheduled",
+        "afterOff": "read_history",
+        "blockers": [
+          "stock.lot_controlled_products"
+        ],
+        "obligations": [
+          "Enquanto houver produto com controle de lote ligado, o desligamento fica agendado: o saldo por lote é integridade do estoque (PDV, recebimento e transferência dependem dele). Desligue o controle nos produtos (ou o recurso em Parâmetros) e o módulo desliga sozinho."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "estoque.inventario_fiscal",
+      "name": "Inventário em data-base",
+      "description": "Saldo de cada produto por depósito numa data passada, valorizado pelo custo médio, com totais por NCM.",
+      "family": "estoque",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "estoque.gestao",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "estoque.gestao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/estoque/inventario-fiscal"
+        ],
+        "features": [
+          "inventarioFiscal"
+        ],
+        "exports": [
+          "stock-fiscal-inventory"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": null
+    },
+    {
+      "key": "compras.reposicao",
+      "name": "Planejamento de reposição",
+      "description": "Sugestão de compra pela cobertura em dias e histórico de vendas.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "cadastros.produtos"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [
+        {
+          "module": "compras.pedidos",
+          "effect": "Gerar pedido de compra a partir da sugestão"
+        },
+        {
+          "module": "compras.cotacoes",
+          "effect": "Gerar cotação a partir da sugestão"
+        }
+      ],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/reposicao"
+        ],
+        "exports": [
+          "replenishment"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "compras.pedidos",
+      "name": "Pedidos de compra",
+      "description": "Pedido de compra com revisão, envio ao fornecedor e acompanhamento de entrega.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "cadastros.fornecedores",
+          "cadastros.produtos"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.fornecedores",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": [
+          "compras.cotacoes",
+          "compras.aprovacoes"
+        ]
+      },
+      "optionalIntegrations": [
+        {
+          "module": "compras.aprovacoes",
+          "effect": "Pedido passa pela política de aprovação"
+        },
+        {
+          "module": "compras.recebimento",
+          "effect": "Receber mercadorias contra o pedido"
+        }
+      ],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/pedidos"
+        ],
+        "exports": [
+          "purchase_orders"
+        ],
+        "routines": [
+          "purchases.followup"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 60,
+        "blockers": [
+          "purchase.open_orders"
+        ],
+        "obligations": [
+          "Pedidos já enviados ao fornecedor podem ser recebidos ou cancelados."
+        ],
+        "drainActions": [
+          "cancelOrderAction",
+          "closeBalanceAction",
+          "registerTransitAction",
+          "registerSentAction"
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "compras.cotacoes",
+      "name": "Cotações de compra",
+      "description": "Cotação com vários fornecedores, mapa comparativo, seleção por item e geração do pedido.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "compras.pedidos"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "compras.pedidos",
+          "cadastros.fornecedores",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/cotacoes"
+        ],
+        "exports": [
+          "quotations"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Cotações concluídas e pedidos gerados ficam em consulta."
+        ]
+      },
+      "notes": "A cotação termina gerando pedido(s) de compra: dependência real de compras.pedidos. Compras sem cotação é suportado (pedido direto)."
+    },
+    {
+      "key": "compras.aprovacoes",
+      "name": "Aprovação de compras",
+      "description": "Política de alçadas, solicitação de compra com etapas, aprovação, reprovação e orçamento mensal.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "compras.pedidos"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "compras.pedidos",
+          "cadastros.fornecedores",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.precos",
+          "tec.estoque"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/aprovacoes"
+        ],
+        "exports": [
+          "purchase_requests"
+        ],
+        "permissions": [
+          "purchase.approve"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 15,
+        "blockers": [
+          "purchase.pending_approvals"
+        ],
+        "drainActions": [
+          "decideAction"
+        ],
+        "obligations": [
+          "Solicitações em análise precisam ser decididas.",
+          "Sem o módulo (desligado ou em desligamento), o envio do pedido é aprovado automaticamente e registrado na solicitação ('Sem etapa de aprovação') — sem isso o pedido ficaria parado sem tela para aprovar."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "compras.recebimento",
+      "name": "Recebimento de mercadorias",
+      "description": "Entrada por XML/chave ou manual, conferência, entrada no estoque, contas a pagar, conversão de CFOP e devolução a fornecedor.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [
+          "cadastros.produtos",
+          "cadastros.fornecedores"
+        ],
+        "requiredAnyOf": [],
+        "transitive": [
+          "cadastros.produtos",
+          "cadastros.fornecedores"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.financeiro",
+          "tec.fiscal",
+          "tec.precos"
+        ],
+        "dependents": [
+          "compras.nota_a_confirmar",
+          "compras.cte",
+          "compras.precificacao"
+        ]
+      },
+      "optionalIntegrations": [
+        {
+          "module": "compras.pedidos",
+          "effect": "Conferência contra o pedido; sem ele a entrada é sem pedido"
+        }
+      ],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/recebimentos"
+        ],
+        "exports": [
+          "receipts"
+        ],
+        "features": [
+          "entradaSemPedido",
+          "conversorCfop",
+          "devolucaoFornecedor"
+        ],
+        "permissions": [
+          "purchase.receive"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 15,
+        "blockers": [
+          "purchase.receipts_in_progress"
+        ],
+        "drainActions": [
+          "saveReceiptAction",
+          "resumeConfirmAction",
+          "cancelReceiptAction"
+        ],
+        "obligations": [
+          "Recebimentos em conferência podem ser concluídos ou cancelados."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "compras.nota_a_confirmar",
+      "name": "Entrada com nota a confirmar",
+      "description": "Mercadoria que chega antes da nota: entrada provisória, conta a pagar provisória e confirmação com a nota.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "compras.recebimento",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "compras.recebimento",
+          "cadastros.produtos",
+          "cadastros.fornecedores"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.financeiro",
+          "tec.fiscal",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/aguardando-nota"
+        ],
+        "features": [
+          "notaAConfirmar"
+        ],
+        "exports": [
+          "purchase-pending-invoices"
+        ],
+        "routines": [
+          "purchases.pending_invoice"
+        ],
+        "permissions": [
+          "purchase.receive_pending_invoice",
+          "purchase.confirm_invoice"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 60,
+        "blockers": [
+          "purchase.pending_invoices"
+        ],
+        "drainActions": [
+          "invoiceConfirmAction",
+          "cancelScheduledAction"
+        ],
+        "obligations": [
+          "Entradas aguardando nota precisam ser confirmadas com a nota do fornecedor."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "compras.cte",
+      "name": "CT-e de frete (entrada)",
+      "description": "Importa o CT-e da transportadora e rateia o frete no custo dos recebimentos.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "compras.recebimento",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "compras.recebimento",
+          "cadastros.produtos",
+          "cadastros.fornecedores"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.financeiro",
+          "tec.fiscal",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/cte"
+        ],
+        "features": [
+          "cteEntrada"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "compras.precificacao",
+      "name": "Precificação após a entrada",
+      "description": "Sugere o novo preço de venda a partir do custo do recebimento, com prévia.",
+      "family": "compras",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "compras.recebimento",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "compras.recebimento",
+          "cadastros.produtos",
+          "cadastros.fornecedores"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.financeiro",
+          "tec.fiscal",
+          "tec.precos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/compras/precificacao",
+          "/compras/recebimentos/[id]/precificacao"
+        ],
+        "features": [
+          "precificacaoEntrada"
+        ],
+        "permissions": [
+          "purchase.pricing"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.contas_receber",
+      "name": "Contas a receber",
+      "description": "Títulos a receber, parcelas, baixa, estorno, renegociação, recibo e aviso de vencimento.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": [
+          "pdv.recebimento_crediario",
+          "financeiro.inadimplencia",
+          "financeiro.cobranca_whatsapp",
+          "financeiro.carne",
+          "financeiro.baixa_lote"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/receber"
+        ],
+        "exports": [
+          "fin-receivables"
+        ],
+        "routines": [
+          "finance.due"
+        ],
+        "permissions": [
+          "finance.settle",
+          "finance.reverse"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 365,
+        "blockers": [
+          "finance.open_receivables"
+        ],
+        "drainActions": [
+          "settleAction",
+          "reverseSettlementAction",
+          "settleBatchAction",
+          "previewBatchSettleAction",
+          "cancelTitleAction",
+          "sendNoticeAction",
+          "uploadAttachmentAction"
+        ],
+        "obligations": [
+          "Títulos em aberto continuam podendo ser baixados (recebimento é direito da empresa e obrigação do cliente); nenhum título novo é lançado manualmente."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.inadimplencia",
+      "name": "Alerta e bloqueio de inadimplentes",
+      "description": "Política de aviso/bloqueio de venda para cliente em atraso e aviso diário.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "financeiro.contas_receber",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "financeiro.contas_receber"
+        ],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "features": [
+          "inadimplencia"
+        ],
+        "routines": [
+          "finance.delinquency"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.cobranca_whatsapp",
+      "name": "Cobrança pelo WhatsApp",
+      "description": "Modelos de mensagem e botão 'Cobrar no WhatsApp' nas parcelas.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": "financeiro.contas_receber",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "financeiro.contas_receber"
+        ],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/cobranca"
+        ],
+        "features": [
+          "cobrancaWhatsapp"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.carne",
+      "name": "Impressão de carnê",
+      "description": "Carnê com uma lâmina por parcela.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": "financeiro.contas_receber",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "financeiro.contas_receber"
+        ],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/receber/[id]/carne"
+        ],
+        "features": [
+          "carne"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.contas_pagar",
+      "name": "Contas a pagar",
+      "description": "Títulos a pagar, autorização, baixa, estorno e recibo.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/pagar"
+        ],
+        "exports": [
+          "fin-payables"
+        ],
+        "permissions": [
+          "finance.approve_payable"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 365,
+        "blockers": [
+          "finance.open_payables"
+        ],
+        "drainActions": [
+          "settleAction",
+          "reverseSettlementAction",
+          "settleBatchAction",
+          "previewBatchSettleAction",
+          "approvePayableAction",
+          "revokeApprovalAction",
+          "cancelTitleAction",
+          "uploadAttachmentAction"
+        ],
+        "obligations": [
+          "Contas em aberto (inclusive as geradas por compras) continuam podendo ser pagas."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.baixa_lote",
+      "name": "Baixa de títulos em lote",
+      "description": "Seleção múltipla de parcelas com prévia e baixa conjunta.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": "financeiro.contas_receber",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "financeiro.contas_receber"
+        ],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "features": [
+          "baixaLote"
+        ],
+        "embedded": [
+          "Contas a receber/pagar › Baixar selecionadas"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "hidden"
+      },
+      "notes": "Serve a receber e a pagar; o pai é contas a receber por ser a lista em que a função nasceu. Confirmar se deve ser contratável com apenas contas a pagar."
+    },
+    {
+      "key": "financeiro.fluxo_caixa",
+      "name": "Fluxo de caixa",
+      "description": "Fluxo realizado e previsto, lançamentos avulsos e transferências entre contas.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": [
+          "financeiro.fechamento_periodo"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/fluxo-caixa"
+        ],
+        "exports": [
+          "fin-cashflow"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.conciliacao",
+      "name": "Conciliação bancária",
+      "description": "Importação de extrato (OFX, CNAB, CSV), conciliação, baixa a partir do extrato e integração bancária.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/conciliacao",
+          "/administracao/integracoes/bank"
+        ],
+        "exports": [
+          "fin-bank-transactions"
+        ],
+        "permissions": [
+          "finance.reconcile"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "historyActions": [
+          "undoReconciliationAction"
+        ],
+        "obligations": [
+          "Conciliações feitas ficam em consulta. Desfazer uma conciliação continua permitido: o estorno de baixa conciliada exige desfazê-la antes (finance.ts), e sem isso a baixa ficaria sem correção."
+        ]
+      },
+      "notes": "Baixa de boleto pelo arquivo de retorno CNAB só existe aqui (reconciliation.ts settleFromBankTx): sem a conciliação, boletos são baixados manualmente em contas a receber."
+    },
+    {
+      "key": "financeiro.cartoes",
+      "name": "Recebíveis de cartão",
+      "description": "Acompanhamento e baixa dos recebíveis de cartão das vendas.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": [
+          "financeiro.taxas_adquirente"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/cartoes"
+        ],
+        "exports": [
+          "fin-cards"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 400,
+        "blockers": [
+          "finance.open_card_receivables"
+        ],
+        "drainActions": [
+          "settleCardAction",
+          "settleCardsBatchAction"
+        ],
+        "obligations": [
+          "Recebíveis de vendas anteriores continuam podendo ser baixados até a liquidação pela adquirente."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.taxas_adquirente",
+      "name": "Taxas por bandeira e arquivo da adquirente",
+      "description": "Taxa por bandeira × parcelas e conciliação com o arquivo da adquirente.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "financeiro.cartoes",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "financeiro.cartoes"
+        ],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/cartoes/adquirente"
+        ],
+        "features": [
+          "taxasCartao"
+        ],
+        "exports": [
+          "fin-acquirer-lines"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.relatorios",
+      "name": "DRE gerencial e aging",
+      "description": "DRE por competência, aging de receber e pagar e plano de contas.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/relatorios/financeiros"
+        ],
+        "features": [
+          "dre"
+        ],
+        "exports": [
+          "fin-dre",
+          "fin-aging",
+          "fin-chart-of-accounts"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.fechamento_periodo",
+      "name": "Fechamento de período",
+      "description": "Fecha o período financeiro recusando lançamentos retroativos; reabertura auditada.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": "financeiro.fluxo_caixa",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "financeiro.fluxo_caixa"
+        ],
+        "technicalComponents": [
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/fechamento"
+        ],
+        "features": [
+          "fechamentoPeriodo"
+        ],
+        "permissions": [
+          "finance.close_period"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Períodos já fechados continuam fechados (a trava não é removida pelo desligamento); reabrir exige o módulo."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "financeiro.exportacao_dominio",
+      "name": "Exportação para a Domínio",
+      "description": "Arquivo de lançamentos contábeis no layout de importação da Domínio.",
+      "family": "financeiro",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [
+          [
+            "financeiro.contas_receber",
+            "financeiro.contas_pagar"
+          ]
+        ],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/financeiro/exportacao-dominio",
+          "/administracao/integracoes/accounting_dominio"
+        ],
+        "features": [
+          "exportacaoDominio"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.nfce",
+      "name": "NFC-e",
+      "description": "Emissão, contingência, consulta, cancelamento e reimpressão de NFC-e.",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.fiscal"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [
+        {
+          "key": "fiscal.config",
+          "description": "Configuração fiscal da filial, certificado e CSC"
+        }
+      ],
+      "surfaces": {
+        "routes": [
+          "/fiscal/nfce"
+        ],
+        "permissions": [
+          "fiscal.issue"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 30,
+        "blockers": [
+          "fiscal.processing_nfce"
+        ],
+        "obligations": [
+          "NFC-e em processamento ou em contingência é transmitida/consultada até a resposta; cancelamento dentro do prazo legal continua permitido."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.nfe",
+      "name": "NF-e",
+      "description": "Assistente de NF-e (venda, devolução, transferência, entrada), carta de correção, cancelamento e inutilização.",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.fiscal"
+        ],
+        "dependents": [
+          "ecommerce.loja",
+          "ecommerce.promocoes",
+          "ecommerce.banco",
+          "ecommerce.canais",
+          "ecommerce.marketplaces"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [
+        {
+          "key": "fiscal.config",
+          "description": "Configuração fiscal da filial e certificado"
+        }
+      ],
+      "surfaces": {
+        "routes": [
+          "/fiscal/nfe"
+        ],
+        "permissions": [
+          "fiscal.issue"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 30,
+        "blockers": [
+          "fiscal.processing_nfe"
+        ],
+        "obligations": [
+          "NF-e em processamento é concluída; cancelamento e CC-e dentro do prazo legal continuam permitidos."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.nfse",
+      "name": "NFS-e",
+      "description": "Emissão e cancelamento de NFS-e (serviços, LC 116).",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.fiscal"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [
+        {
+          "key": "fiscal.nfse",
+          "description": "Integração de NFS-e do município"
+        }
+      ],
+      "surfaces": {
+        "routes": [
+          "/fiscal/nfse",
+          "/administracao/integracoes/fiscal_nfse"
+        ],
+        "exports": [],
+        "permissions": [
+          "fiscal.issue"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 30,
+        "blockers": [
+          "fiscal.processing_nfse"
+        ],
+        "obligations": [
+          "NFS-e em processamento é concluída."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.livro_entradas",
+      "name": "Livro de entradas",
+      "description": "Livro de entradas por período e nota de entrada sem estoque.",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.fiscal"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/fiscal/entradas"
+        ],
+        "features": [
+          "livroEntradas"
+        ],
+        "exports": [
+          "fiscal-livro-entradas",
+          "fiscal-entradas-cfop"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.sped",
+      "name": "SPED Fiscal e EFD Contribuições",
+      "description": "EFD ICMS/IPI por estabelecimento e EFD Contribuições, com prévia de pendências, geração e histórico.",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "shared_screen",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.fiscal"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/fiscal/arquivos"
+        ],
+        "features": [
+          "arquivosFiscais"
+        ],
+        "permissions": [
+          "fiscal.files"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Arquivos gerados continuam para download; o pacote contábil segue sem o SPED do período."
+        ]
+      },
+      "notes": "Hoje o recurso arquivosFiscais liga SPED e Sintegra juntos; a habilitação separa /fiscal/arquivos (SPED) de /fiscal/arquivos/sintegra."
+    },
+    {
+      "key": "fiscal.sintegra",
+      "name": "Sintegra",
+      "description": "Arquivo Sintegra (registros 50, 54, 61, 61R, 74, 75).",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "shared_screen",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.fiscal"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/fiscal/arquivos/sintegra"
+        ],
+        "features": [
+          "arquivosFiscais"
+        ],
+        "permissions": [
+          "fiscal.files"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.tributacao_avancada",
+      "name": "Tributação avançada",
+      "description": "Tributação completa (ICMS-ST, MVA, FCP, DIFAL), naturezas de operação e crédito do Simples Nacional.",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [
+          [
+            "fiscal.nfe",
+            "fiscal.nfce"
+          ]
+        ],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "features": [
+          "tributacaoCompleta",
+          "naturezasOperacao",
+          "creditoSimples"
+        ],
+        "embedded": [
+          "Fiscal › Configurações › Tributação completa / Naturezas / Crédito do Simples"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Documentos emitidos mantêm os valores calculados; a configuração é preservada para a reativação."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.reforma_tributaria",
+      "name": "Reforma tributária (IBS/CBS/IS)",
+      "description": "Grupos IBS/CBS/IS nos documentos, conforme a adesão na configuração fiscal.",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [
+          [
+            "fiscal.nfe",
+            "fiscal.nfce"
+          ]
+        ],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "features": [
+          "reformaTributaria"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "relatorios.gerenciais",
+      "name": "Central de relatórios e relatórios gerenciais",
+      "description": "Central de relatórios, relatórios gerenciais por filial e por período.",
+      "family": "analise",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/relatorios",
+          "/relatorios/gerenciais"
+        ],
+        "exports": [
+          "reports-units",
+          "reports-breakdown",
+          "reports-branch-ops"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "relatorios.curva_abc",
+      "name": "Curva ABC de produtos",
+      "description": "Classificação ABC por faturamento/margem e ficha analítica do produto.",
+      "family": "analise",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/relatorios/curva-abc"
+        ],
+        "exports": [
+          "reports-abc",
+          "reports-abc-product"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "gestao.metas",
+      "name": "Metas de vendas",
+      "description": "Metas por filial e vendedor com acompanhamento no painel.",
+      "family": "analise",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/dashboard/metas"
+        ],
+        "exports": [
+          "reports-goals"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "implantacao.importacao",
+      "name": "Importação de cadastros e saldos",
+      "description": "Assistente de importação por CSV de clientes, fornecedores, saldos iniciais e títulos.",
+      "family": "implantacao",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/administracao/importacao"
+        ],
+        "features": [
+          "importacaoCadastros"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "integracao.contabilidade",
+      "name": "Área da contabilidade (vínculo com escritório)",
+      "description": "Vínculo com o escritório contábil, envio automático do pacote mensal de XMLs e autorização de certificados.",
+      "family": "implantacao",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [
+          "tec.fiscal"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/administracao/integracoes/accounting"
+        ],
+        "routines": [
+          "fiscal.accountingExport"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Pacotes já entregues continuam na caixa do escritório."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "contabil.carteira",
+      "name": "Carteira de clientes contábeis",
+      "description": "Painel da carteira, clientes PF/PJ, regime, grupos, departamentos, equipe e responsáveis.",
+      "family": "contabil",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "accounting"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": [
+          "contabil.entregas",
+          "contabil.certificados"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/contabil",
+          "/contabil/clientes",
+          "/contabil/grupos",
+          "/contabil/equipe"
+        ],
+        "exports": [
+          "accounting_clients"
+        ],
+        "permissions": [
+          "accounting.all_clients",
+          "accounting.link",
+          "accounting.manage_team"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "contabil.entregas",
+      "name": "Caixa de entrada de entregas",
+      "description": "Recebimento dos pacotes de XML das empresas vinculadas, conferência e download auditado.",
+      "family": "contabil",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "accounting"
+      ],
+      "parent": "contabil.carteira",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "contabil.carteira"
+        ],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/contabil/entregas"
+        ],
+        "exports": [
+          "accounting_deliveries"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "contabil.certificados",
+      "name": "Certificados digitais dos clientes",
+      "description": "Solicitação, cobrança, validação, emissão e download de certificados A1 dos clientes.",
+      "family": "contabil",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "accounting"
+      ],
+      "parent": "contabil.carteira",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "contabil.carteira"
+        ],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/contabil/certificados"
+        ],
+        "apis": [
+          "/api/certificados"
+        ],
+        "routines": [
+          "accounting.certificates"
+        ],
+        "permissions": [
+          "accounting.certificates"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 60,
+        "blockers": [
+          "accounting.open_certificate_requests"
+        ],
+        "obligations": [
+          "Solicitações pagas seguem até a emissão e o download."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "rede.parceiro",
+      "name": "Rede de certificação — nó do parceiro",
+      "description": "Minha rede: parceiros abaixo, preços dos filhos e posição na hierarquia.",
+      "family": "rede",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "certification",
+        "accounting",
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": [
+          "rede.vendas",
+          "rede.renovacoes",
+          "rede.financeiro",
+          "rede.vouchers_cupons"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/rede/minha",
+          "/rede/novo",
+          "/rede/[id]"
+        ],
+        "features": [
+          "redeCertificacao"
+        ],
+        "permissions": [
+          "network.children",
+          "network.prices"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "rede.vendas",
+      "name": "Vendas de certificados pela rede",
+      "description": "Nova venda com o preço da rede, clientes de certificado, cobrança e entrega.",
+      "family": "rede",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "certification",
+        "accounting",
+        "retail"
+      ],
+      "parent": "rede.parceiro",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "rede.parceiro"
+        ],
+        "technicalComponents": [],
+        "dependents": [
+          "rede.vouchers_cupons"
+        ]
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/rede/vendas",
+          "/rede/clientes"
+        ],
+        "permissions": [
+          "network.sell",
+          "network.sales_all"
+        ]
+      },
+      "deactivation": {
+        "mode": "drain",
+        "afterOff": "read_history",
+        "drainDays": 60,
+        "blockers": [
+          "network.open_sales"
+        ],
+        "obligations": [
+          "Vendas pagas seguem até a emissão do certificado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "rede.vouchers_cupons",
+      "name": "Vouchers e cupons da rede",
+      "description": "Pacotes de vouchers e cupons de desconto.",
+      "family": "rede",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "certification",
+        "accounting",
+        "retail"
+      ],
+      "parent": "rede.vendas",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "rede.vendas",
+          "rede.parceiro"
+        ],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/rede/vouchers",
+          "/rede/cupons"
+        ],
+        "permissions": [
+          "network.vouchers",
+          "network.coupons"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Vouchers vendidos continuam resgatáveis (saldo do cliente)."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "rede.renovacoes",
+      "name": "Renovações",
+      "description": "Acompanhamento de vencimentos e contatos de renovação.",
+      "family": "rede",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "certification",
+        "accounting",
+        "retail"
+      ],
+      "parent": "rede.parceiro",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "rede.parceiro"
+        ],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/rede/renovacoes"
+        ],
+        "routines": [
+          "network.renewals"
+        ],
+        "permissions": [
+          "network.renewals"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "rede.financeiro",
+      "name": "Financeiro em camadas da rede",
+      "description": "Modalidade pré/pós-pago, carteira de créditos, fechamentos e resultado por camada.",
+      "family": "rede",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "certification",
+        "accounting",
+        "retail"
+      ],
+      "parent": "rede.parceiro",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "rede.parceiro"
+        ],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/rede/financeiro",
+          "/rede/minha/financeiro",
+          "/rede/fechamentos"
+        ],
+        "routines": [
+          "network.billing"
+        ],
+        "exports": [
+          "network-closing"
+        ],
+        "permissions": [
+          "network.billing",
+          "network.finance_view"
+        ]
+      },
+      "deactivation": {
+        "mode": "scheduled",
+        "afterOff": "read_history",
+        "blockers": [
+          "network.open_closings"
+        ],
+        "obligations": [
+          "Fechamentos de período em aberto precisam ser concluídos antes do desligamento."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "rede.plataforma",
+      "name": "Gestão da rede (plataforma Intercert)",
+      "description": "Árvore completa, preços padrão, catálogo e parâmetros da rede, e a equipe de certificação. Exclusivo da plataforma Intercert, governado pelas operações network.manage e certification.operate.",
+      "family": "rede",
+      "version": "1.0.0",
+      "classification": "platform",
+      "availability": "available",
+      "existing": "exists",
+      "companyKinds": [
+        "retail",
+        "accounting",
+        "certification"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {
+        "routes": [
+          "/rede",
+          "/rede/precos",
+          "/rede/parametros",
+          "/administracao/certificacao"
+        ],
+        "permissions": [
+          "network.manage",
+          "certification.operate"
+        ]
+      },
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history",
+        "obligations": [
+          "Recurso da plataforma: não pode ser desligado."
+        ]
+      },
+      "notes": null
+    },
+    {
+      "key": "fiscal.mdfe",
+      "name": "MDF-e",
+      "description": "Manifesto de documentos fiscais para transporte próprio. Não existe no ERP.",
+      "family": "fiscal",
+      "version": "1.0.0",
+      "classification": "commercial",
+      "availability": "planned",
+      "existing": "gap",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": null,
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [],
+        "technicalComponents": [],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {},
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "vendas.pdv_offline",
+      "name": "PDV em contingência offline",
+      "description": "Operação do PDV sem internet. O PWA hoje só mostra a página de sem conexão.",
+      "family": "vendas",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "planned",
+      "existing": "gap",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "vendas.pdv",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "vendas.pdv",
+          "caixa.operacao",
+          "cadastros.produtos"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.financeiro",
+          "tec.pagamentos"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {},
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    },
+    {
+      "key": "ecommerce.marketplaces",
+      "name": "Integração de pedidos com marketplaces",
+      "description": "Importação de pedidos e sincronização de estoque com marketplaces. Hoje só há contas preparadas.",
+      "family": "comercio_digital",
+      "version": "1.0.0",
+      "classification": "optional_function",
+      "availability": "planned",
+      "existing": "gap",
+      "companyKinds": [
+        "retail"
+      ],
+      "parent": "ecommerce.loja",
+      "dependencies": {
+        "required": [],
+        "requiredAnyOf": [],
+        "transitive": [
+          "ecommerce.loja",
+          "cadastros.produtos",
+          "fiscal.nfe"
+        ],
+        "technicalComponents": [
+          "tec.estoque",
+          "tec.precos",
+          "tec.fiscal",
+          "tec.financeiro"
+        ],
+        "dependents": []
+      },
+      "optionalIntegrations": [],
+      "configurationPrerequisites": [],
+      "surfaces": {},
+      "deactivation": {
+        "mode": "immediate",
+        "afterOff": "read_history"
+      },
+      "notes": null
+    }
+  ],
+  "permissions": [
+    {
+      "key": "sale.cancel",
+      "label": "Cancelar venda",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.pdv"
+      ]
+    },
+    {
+      "key": "sale.return",
+      "label": "Registrar devolução/troca",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.devolucoes"
+      ]
+    },
+    {
+      "key": "sale.discount_over_limit",
+      "label": "Aprovar desconto acima do limite",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.pdv"
+      ]
+    },
+    {
+      "key": "sale.overdue_override",
+      "label": "Liberar venda para cliente inadimplente",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.pdv"
+      ]
+    },
+    {
+      "key": "sales.commissions",
+      "label": "Vendedores e comissões (percentuais, apuração, fechamento e reabertura)",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.comissoes"
+      ]
+    },
+    {
+      "key": "sales_doc.quote",
+      "label": "Criar e editar orçamentos de venda",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.documentos"
+      ]
+    },
+    {
+      "key": "sales_doc.order",
+      "label": "Criar pedidos de venda e converter orçamentos em pedido",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.documentos"
+      ]
+    },
+    {
+      "key": "sales_doc.cancel",
+      "label": "Cancelar pedidos de venda (libera a reserva de estoque)",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.documentos"
+      ]
+    },
+    {
+      "key": "cash.reopen",
+      "label": "Reabrir caixa",
+      "classification": "permission",
+      "governedBy": [
+        "caixa.operacao"
+      ]
+    },
+    {
+      "key": "cash.withdrawal",
+      "label": "Registrar sangria/suprimento",
+      "classification": "permission",
+      "governedBy": [
+        "caixa.operacao"
+      ]
+    },
+    {
+      "key": "pdv.receive_installments",
+      "label": "Receber parcelas do crediário no PDV",
+      "classification": "permission",
+      "governedBy": [
+        "pdv.recebimento_crediario"
+      ]
+    },
+    {
+      "key": "pdv.reverse_receipt",
+      "label": "Estornar recebimento de parcelas no PDV",
+      "classification": "permission",
+      "governedBy": [
+        "pdv.recebimento_crediario"
+      ]
+    },
+    {
+      "key": "stock.adjust",
+      "label": "Ajustar estoque",
+      "classification": "permission",
+      "governedBy": [
+        "estoque.gestao"
+      ]
+    },
+    {
+      "key": "stock.inventory_close",
+      "label": "Concluir inventário",
+      "classification": "permission",
+      "governedBy": [
+        "estoque.inventario"
+      ]
+    },
+    {
+      "key": "stock.warehouses",
+      "label": "Cadastrar, editar e desativar depósitos",
+      "classification": "permission",
+      "governedBy": [
+        "estoque.gestao"
+      ]
+    },
+    {
+      "key": "finance.settle",
+      "label": "Baixar títulos",
+      "classification": "permission",
+      "governedBy": [
+        "financeiro.contas_receber"
+      ]
+    },
+    {
+      "key": "finance.reverse",
+      "label": "Estornar baixas",
+      "classification": "permission",
+      "governedBy": [
+        "financeiro.contas_receber"
+      ]
+    },
+    {
+      "key": "finance.reconcile",
+      "label": "Conciliar extratos",
+      "classification": "permission",
+      "governedBy": [
+        "financeiro.conciliacao"
+      ]
+    },
+    {
+      "key": "finance.approve_payable",
+      "label": "Autorizar contas a pagar",
+      "classification": "permission",
+      "governedBy": [
+        "financeiro.contas_pagar"
+      ]
+    },
+    {
+      "key": "finance.close_period",
+      "label": "Fechar e reabrir período financeiro",
+      "classification": "permission",
+      "governedBy": [
+        "financeiro.fechamento_periodo"
+      ]
+    },
+    {
+      "key": "purchase.approve",
+      "label": "Aprovar compras",
+      "classification": "permission",
+      "governedBy": [
+        "compras.aprovacoes"
+      ]
+    },
+    {
+      "key": "purchase.receive",
+      "label": "Receber mercadorias",
+      "classification": "permission",
+      "governedBy": [
+        "compras.recebimento"
+      ]
+    },
+    {
+      "key": "purchase.receive_pending_invoice",
+      "label": "Lançar entrada com nota a confirmar",
+      "classification": "permission",
+      "governedBy": [
+        "compras.nota_a_confirmar"
+      ]
+    },
+    {
+      "key": "purchase.confirm_invoice",
+      "label": "Confirmar com a nota e aprovar divergências",
+      "classification": "permission",
+      "governedBy": [
+        "compras.nota_a_confirmar"
+      ]
+    },
+    {
+      "key": "purchase.pricing",
+      "label": "Precificar após a entrada de mercadorias",
+      "classification": "permission",
+      "governedBy": [
+        "compras.precificacao"
+      ]
+    },
+    {
+      "key": "products.bulk_edit",
+      "label": "Alterar produtos e preços em massa",
+      "classification": "permission",
+      "governedBy": [
+        "produtos.alteracao_massa"
+      ]
+    },
+    {
+      "key": "fiscal.issue",
+      "label": "Emitir documentos fiscais",
+      "classification": "permission",
+      "governedBy": [
+        "fiscal.nfce",
+        "fiscal.nfe",
+        "fiscal.nfse"
+      ]
+    },
+    {
+      "key": "fiscal.cancel",
+      "label": "Cancelar documento fiscal",
+      "classification": "permission",
+      "governedBy": [
+        "tec.fiscal"
+      ]
+    },
+    {
+      "key": "fiscal.configure",
+      "label": "Configurar fiscal e certificados",
+      "classification": "permission",
+      "governedBy": [
+        "tec.fiscal"
+      ]
+    },
+    {
+      "key": "fiscal.files",
+      "label": "Gerar arquivos fiscais (SPED, EFD e Sintegra)",
+      "classification": "permission",
+      "governedBy": [
+        "fiscal.sped",
+        "fiscal.sintegra"
+      ]
+    },
+    {
+      "key": "data.export",
+      "label": "Exportar dados",
+      "classification": "permission",
+      "governedBy": [
+        "plataforma.administracao"
+      ]
+    },
+    {
+      "key": "admin.users",
+      "label": "Gerenciar usuários e perfis",
+      "classification": "permission",
+      "governedBy": [
+        "plataforma.administracao"
+      ]
+    },
+    {
+      "key": "admin.integrations",
+      "label": "Configurar integrações",
+      "classification": "permission",
+      "governedBy": [
+        "plataforma.administracao"
+      ]
+    },
+    {
+      "key": "admin.backup",
+      "label": "Backup e restauração",
+      "classification": "permission",
+      "governedBy": [
+        "plataforma.backup"
+      ]
+    },
+    {
+      "key": "support.manage",
+      "label": "Atender chamados",
+      "classification": "permission",
+      "governedBy": [
+        "plataforma.painel"
+      ]
+    },
+    {
+      "key": "customer.credit_limit",
+      "label": "Conceder/alterar limite de crédito (crediário)",
+      "classification": "permission",
+      "governedBy": [
+        "cadastros.clientes"
+      ]
+    },
+    {
+      "key": "accounting.all_clients",
+      "label": "Ver toda a carteira de clientes (não só os seus)",
+      "classification": "permission",
+      "governedBy": [
+        "contabil.carteira"
+      ]
+    },
+    {
+      "key": "accounting.link",
+      "label": "Vincular/desvincular empresas do ERP a clientes",
+      "classification": "permission",
+      "governedBy": [
+        "contabil.carteira"
+      ]
+    },
+    {
+      "key": "accounting.manage_team",
+      "label": "Gerir departamentos e responsáveis da carteira",
+      "classification": "permission",
+      "governedBy": [
+        "contabil.carteira"
+      ]
+    },
+    {
+      "key": "accounting.certificates",
+      "label": "Solicitar, cobrar e baixar certificados digitais dos clientes",
+      "classification": "permission",
+      "governedBy": [
+        "contabil.certificados"
+      ]
+    },
+    {
+      "key": "certification.operate",
+      "label": "Operar a certificação digital (equipe de certificação Intercert)",
+      "classification": "permission",
+      "governedBy": [
+        "rede.plataforma"
+      ]
+    },
+    {
+      "key": "network.manage",
+      "label": "Gerir toda a rede de certificação (plataforma Intercert: criar, mover, suspender e encerrar parceiros)",
+      "classification": "permission",
+      "governedBy": [
+        "rede.plataforma"
+      ]
+    },
+    {
+      "key": "network.children",
+      "label": "Cadastrar parceiros abaixo do próprio nó da rede de certificação",
+      "classification": "permission",
+      "governedBy": [
+        "rede.parceiro"
+      ]
+    },
+    {
+      "key": "network.prices",
+      "label": "Definir os preços (custo, mínimo e padrão) dos parceiros abaixo na rede",
+      "classification": "permission",
+      "governedBy": [
+        "rede.parceiro"
+      ]
+    },
+    {
+      "key": "network.sell",
+      "label": "Vender certificados pela rede (nova venda, clientes de certificado, cobrança e entrega)",
+      "classification": "permission",
+      "governedBy": [
+        "rede.vendas"
+      ]
+    },
+    {
+      "key": "network.sales_all",
+      "label": "Ver todas as vendas, clientes e renovações do próprio nó (não só as próprias)",
+      "classification": "permission",
+      "governedBy": [
+        "rede.vendas"
+      ]
+    },
+    {
+      "key": "network.vouchers",
+      "label": "Criar, vender e atribuir pacotes de vouchers da rede",
+      "classification": "permission",
+      "governedBy": [
+        "rede.vouchers_cupons"
+      ]
+    },
+    {
+      "key": "network.coupons",
+      "label": "Criar e gerir cupons de desconto do próprio nó e dos parceiros abaixo",
+      "classification": "permission",
+      "governedBy": [
+        "rede.vouchers_cupons"
+      ]
+    },
+    {
+      "key": "network.renewals",
+      "label": "Acompanhar renovações e registrar contatos com os clientes",
+      "classification": "permission",
+      "governedBy": [
+        "rede.renovacoes"
+      ]
+    },
+    {
+      "key": "network.billing",
+      "label": "Financeiro com os parceiros abaixo: definir a modalidade (pré/pós-pago, comissão), recarregar créditos, ajustar a carteira e fechar períodos",
+      "classification": "permission",
+      "governedBy": [
+        "rede.financeiro"
+      ]
+    },
+    {
+      "key": "network.finance_view",
+      "label": "Ver o financeiro da rede: modalidade, carteira, fechamentos e resultado por camada do nó e dos parceiros abaixo",
+      "classification": "permission",
+      "governedBy": [
+        "rede.financeiro"
+      ]
+    },
+    {
+      "key": "pdv.remove_item",
+      "label": "Remover item já registrado no atendimento do PDV (sem autorização do supervisor)",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.pdv"
+      ]
+    },
+    {
+      "key": "pdv.cancel_cart",
+      "label": "Cancelar atendimento do PDV com itens (sem autorização do supervisor)",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.pdv"
+      ]
+    },
+    {
+      "key": "sale.return_over_limit",
+      "label": "Registrar devolução acima do valor máximo sem autorização do gerente",
+      "classification": "permission",
+      "governedBy": [
+        "vendas.devolucoes"
+      ]
+    },
+    {
+      "key": "ecommerce.manage",
+      "label": "Configurar a loja virtual (modelo, identidade, domínio, publicação, canais, pagamentos e frete)",
+      "classification": "permission",
+      "governedBy": [
+        "ecommerce.loja"
+      ]
+    },
+    {
+      "key": "ecommerce.catalog",
+      "label": "Editar o catálogo digital (produtos na vitrine, fotos, descrições e preço on-line)",
+      "classification": "permission",
+      "governedBy": [
+        "ecommerce.loja"
+      ]
+    },
+    {
+      "key": "ecommerce.orders",
+      "label": "Atender pedidos on-line (nota fiscal, separação, expedição, retirada e entrega)",
+      "classification": "permission",
+      "governedBy": [
+        "ecommerce.loja"
+      ]
+    },
+    {
+      "key": "ecommerce.cancel",
+      "label": "Cancelar pedidos on-line e registrar devoluções e arrependimentos",
+      "classification": "permission",
+      "governedBy": [
+        "ecommerce.loja"
+      ]
+    },
+    {
+      "key": "ecommerce.marketing",
+      "label": "Cupons da loja e recuperação de carrinhos",
+      "classification": "permission",
+      "governedBy": [
+        "ecommerce.promocoes"
+      ]
+    },
+    {
+      "key": "ecommerce.finance",
+      "label": "Banco Intercert: conciliar recebimentos da loja e preparar repasses",
+      "classification": "permission",
+      "governedBy": [
+        "ecommerce.banco"
+      ]
+    }
+  ],
+  "validation": {
+    "valid": true,
+    "issues": []
+  }
+}

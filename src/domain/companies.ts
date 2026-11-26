@@ -136,9 +136,11 @@ export function companyData(input: CompanyInput) {
 }
 
 /** Nova empresa com parametrização inicial (matriz, depósitos, perfis, tabela, contas, meios e condições). */
-export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName?: string }) {
+export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName?: string; modules?: string[] | null }) {
   requirePerm(ctx, "admin", "create");
   const data = companyData(input);
+  const { validateSelection } = await import("./modules/baseline");
+  validateSelection((data.kind as "retail") ?? "retail", input.modules ?? null);
   if (data.cnpj) {
     const dup = await findOne(ctx.store, "companies", [["eq", "cnpj", data.cnpj]]);
     if (dup) throw new BusinessError(`Já existe empresa com este CNPJ: ${dup.name}.`, "duplicate");
@@ -152,6 +154,10 @@ export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName
     cityCode: data.address.cityCode, branchName: input.branchName?.trim() || "Matriz", createdBy: ctx.user.id, kind: data.kind as "retail" | "accounting" | "certification",
   });
   const store = unscoped(ctx.store);
+  // habilitação de módulos (docs/modulos): a empresa nova recebe os módulos selecionados (sem seleção: o conjunto padrão
+  // do tipo) e já nasce com o controle aplicado; dependências inconsistentes recusam a criação antes de gravar o resto
+  const { provisionModules } = await import("./modules/baseline");
+  await provisionModules(store, company.id, input.modules ?? null, ctx.user.name || ctx.user.id);
   const updated = await store.update("companies", company.id, { ...data, status: "active" });
   await store.update("branches", branch.id, { ie: data.ie, im: data.im, address: data.address, phone: data.phone, email: data.email });
   // quem cria passa a ter acesso, com o perfil Administrador da nova empresa (administradores já enxergam todas)

@@ -36,14 +36,14 @@ const docPath = (model: string, id: string) => `/fiscal/${model}/${id}`;
 // ───────────────────────────── Ações sobre documentos
 
 export async function transmitAction(id: string) {
-  return runAction({ module: "fiscal", op: "create", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "transmitAction", module: "fiscal", op: "create", requireBranch: true, revalidate: R }, async (s) => {
     const d = await submitDraft(s.ctx, id);
     return { ok: true as const, message: `Resultado: ${DOC_STATUS_LABEL[d.status]}${d.statusMessage ? ` — ${d.statusMessage}` : ""}`.slice(0, 300) };
   });
 }
 
 export async function retransmitAction(id: string) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "retransmitAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await retransmit(s.ctx, id);
     return { ok: true as const, message: `Retransmitido (mesma referência). Resultado: ${DOC_STATUS_LABEL[d.status]}${d.statusMessage ? ` — ${d.statusMessage}` : ""}`.slice(0, 300) };
   });
@@ -51,35 +51,35 @@ export async function retransmitAction(id: string) {
 
 /** A consulta altera a situação e aplica efeitos (estoque/financeiro): exige emissão e o documento da filial ativa. */
 export async function queryAction(id: string) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "queryAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await queryDocument(s.ctx, id);
     return { ok: true as const, message: `Consulta ao provedor: ${DOC_STATUS_LABEL[d.status]}${d.statusMessage ? ` — ${d.statusMessage}` : ""}`.slice(0, 300) };
   });
 }
 
 export async function refreshAction(id: string) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "refreshAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const r = await refreshFromCatalog(s.ctx, id);
     return { ok: true as const, message: r.changes.length ? `Atualizado do cadastro: ${r.changes.join("; ")}`.slice(0, 300) : "Nenhuma diferença em relação ao cadastro." };
   });
 }
 
 export async function cancelAction(id: string, fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "cancelAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await cancelDocument(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: d.status === "cancelled" ? "Cancelamento homologado pelo provedor." : `Documento ${DOC_STATUS_LABEL[d.status].toLowerCase()}.` };
   });
 }
 
 export async function cceAction(id: string, fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "cceAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const d = await correctionLetter(s.ctx, id, fstr(fd, "text"));
     return { ok: true as const, message: `CC-e nº ${d.correctionCount} registrada.` };
   });
 }
 
 export async function emailAction(id: string, fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "emailAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const r = await shareByEmail(s.ctx, id, fstr(fd, "to"));
     if (!r.delivered) return { ok: false as const, error: `E-mail não enviado (${r.channel}): ${r.message ?? "falha"}` };
     return { ok: true as const, message: `E-mail entregue ao canal ${r.channel}.` };
@@ -87,7 +87,7 @@ export async function emailAction(id: string, fd: FormData) {
 }
 
 export async function batchRetransmitAction(model: "nfe" | "nfce" | "nfse", fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "batchRetransmitAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const ids = fd.getAll("ids").map(String).filter(Boolean);
     const out = await retransmitBatch(s.ctx, { model, branchId: requireBranch(s.ctx), ids: ids.length ? ids : undefined });
     const ok = out.filter((o) => o.after === "authorized").length;
@@ -96,7 +96,7 @@ export async function batchRetransmitAction(model: "nfe" | "nfce" | "nfse", fd: 
 }
 
 export async function disableAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "disableAction", module: "fiscal", op: "edit", requireBranch: true, revalidate: R }, async (s) => {
     const branchId = requireBranch(s.ctx);
     const doc = await disableNumbers(s.ctx, { branchId, model: (fstr(fd, "model") as "nfe" | "nfce") || "nfe", series: fstr(fd, "series") || "1", from: fint(fd, "from"), to: fint(fd, "to"), justification: fstr(fd, "justification") });
     return { ok: true as const, message: `Inutilização homologada (protocolo ${doc.protocol ?? "—"}).`, redirect: docPath(doc.model, doc.id) };
@@ -112,7 +112,7 @@ function parseNfe(fd: FormData): NfeInput {
 }
 
 export async function previewNfeAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "create" }, async (s) => {
+  return runAction({ entitlement: "fiscal.nfe", action: "previewNfeAction", module: "fiscal", op: "create" }, async (s) => {
     const raw = parseNfe(fd);
     raw.branchId = requireBranch(s.ctx);
     // origem recebimento: valores e limites da devolução vêm do recebimento (o rascunho em edição não conta como já devolvido)
@@ -123,7 +123,7 @@ export async function previewNfeAction(fd: FormData) {
 }
 
 export async function saveNfeAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "create", revalidate: R }, async (s) => {
+  return runAction({ entitlement: "fiscal.nfe", action: "saveNfeAction", module: "fiscal", op: "create", revalidate: R }, async (s) => {
     const input = parseNfe(fd);
     // emitente sempre a filial ativa (inclusive transferência: emitida pela filial de origem, validada em loadOrigin)
     input.branchId = requireBranch(s.ctx);
@@ -179,7 +179,7 @@ function parseNfse(fd: FormData, branchId: string): NfseInput {
 }
 
 export async function saveNfseAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "create", revalidate: R }, async (s) => {
+  return runAction({ entitlement: "fiscal.nfse", action: "saveNfseAction", module: "fiscal", op: "create", revalidate: R }, async (s) => {
     const branchId = requireBranch(s.ctx);
     const input = parseNfse(fd, branchId);
     const id = fopt(fd, "id");
@@ -198,7 +198,7 @@ export async function saveNfseAction(fd: FormData) {
 
 /** Adesão à reforma tributária (FIS-19) — exige o recurso ligado em Parâmetros › Recursos. */
 export async function saveReformAdherenceAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "fiscal.reforma_tributaria", action: "saveReformAdherenceAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     await requireFeature(s, "reformaTributaria");
     const scope = fstr(fd, "scope") === "company" ? null : requireBranch(s.ctx);
     await saveReformAdherence(s.ctx, scope, { adherence: fbool(fd, "reformAdherence"), from: fopt(fd, "reformAdherenceFrom") });
@@ -211,7 +211,7 @@ export async function saveReformAdherenceAction(fd: FormData) {
 const OPS = "/fiscal/configuracoes";
 
 export async function saveNatureAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
+  return runAction({ entitlement: "fiscal.tributacao_avancada", action: "saveNatureAction", module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
     await requireFeature(s, "naturezasOperacao");
     const n = await saveNature(
       s.ctx,
@@ -223,7 +223,7 @@ export async function saveNatureAction(fd: FormData) {
 }
 
 export async function saveCompleteSettingsAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
+  return runAction({ entitlement: "fiscal.tributacao_avancada", action: "saveCompleteSettingsAction", module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
     await requireFeature(s, "tributacaoCompleta");
     await saveCompleteSettings(s.ctx, { pisCofinsExcludeIcms: fbool(fd, "pisCofinsExcludeIcms"), difalDefaultMode: fstr(fd, "difalDefaultMode"), difalModes: fstr(fd, "difalModes"), ufRates: fstr(fd, "ufRates") });
     return { ok: true as const, message: "Opções de tributação salvas." };
@@ -231,7 +231,7 @@ export async function saveCompleteSettingsAction(fd: FormData) {
 }
 
 export async function saveSimplesCreditAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
+  return runAction({ entitlement: "fiscal.tributacao_avancada", action: "saveSimplesCreditAction", module: "fiscal", op: "edit", revalidate: [OPS] }, async (s) => {
     await requireFeature(s, "creditoSimples");
     const v = fstr(fd, "simplesCredit");
     await saveSimplesCredit(s.ctx, v ? parseBps(v) : null);
@@ -240,7 +240,7 @@ export async function saveSimplesCreditAction(fd: FormData) {
 }
 
 export async function saveConfigAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "saveConfigAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     const scope = fstr(fd, "scope") === "company" ? null : requireBranch(s.ctx);
     const section = fstr(fd, "section");
     const data: Record<string, any> = {};
@@ -283,7 +283,7 @@ export async function saveConfigAction(fd: FormData) {
 }
 
 export async function testConnectionAction(scope: "branch" | "company") {
-  return runAction({ module: "fiscal", op: "view", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "testConnectionAction", module: "fiscal", op: "view", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     const r = await testFiscalConnection(s.ctx, scope === "company" ? null : requireBranch(s.ctx));
     if (!r.ok) return { ok: false as const, error: `Teste falhou: ${r.message}` };
     return { ok: true as const, message: r.message };
@@ -291,7 +291,7 @@ export async function testConnectionAction(scope: "branch" | "company") {
 }
 
 export async function saveIssuerAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "saveIssuerAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     await saveIssuer(s.ctx, s.ctx.branchId, {
       company: { name: fstr(fd, "name"), tradeName: fopt(fd, "tradeName"), cnpj: fstr(fd, "cnpj"), ie: fopt(fd, "ie"), im: fopt(fd, "im"), regime: fstr(fd, "regime"), crt: fstr(fd, "crt"), cnae: fopt(fd, "cnae") },
       branch: s.ctx.branchId
@@ -303,7 +303,7 @@ export async function saveIssuerAction(fd: FormData) {
 }
 
 export async function uploadCertificateAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "uploadCertificateAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     const file = fd.get("file");
     assert(file && typeof file === "object" && "arrayBuffer" in file, "Selecione o arquivo .pfx.");
     const f = file as File;
@@ -314,7 +314,7 @@ export async function uploadCertificateAction(fd: FormData) {
 }
 
 export async function setNumberAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "setNumberAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     await setNextNumber(s.ctx, requireBranch(s.ctx), fstr(fd, "model") as "nfe" | "nfce" | "nfse", fstr(fd, "series"), fint(fd, "next"));
     return { ok: true as const, message: "Numeração ajustada." };
   });
@@ -350,14 +350,14 @@ function parseTaxGroup(fd: FormData): TaxGroupInput {
 }
 
 export async function saveTaxGroupAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "saveTaxGroupAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     const g = await saveTaxGroup(s.ctx, fopt(fd, "id"), parseTaxGroup(fd));
     return { ok: true as const, message: `Grupo "${g.name}" salvo.`, redirect: "/fiscal/configuracoes?tab=tributacao" };
   });
 }
 
 export async function deleteTaxGroupAction(id: string) {
-  return runAction({ module: "fiscal", op: "delete", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "deleteTaxGroupAction", module: "fiscal", op: "delete", revalidate: ["/fiscal/configuracoes"] }, async (s) => {
     await deleteTaxGroup(s.ctx, id);
     return { ok: true as const, message: "Grupo excluído." };
   });
@@ -367,7 +367,7 @@ export async function deleteTaxGroupAction(id: string) {
 
 /** Pacote com todos os XML/CSV do período: gerar exige "Exportar dados"; enviar por e-mail exige "Configurar fiscal". */
 export async function generatePackageAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "view", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "generatePackageAction", module: "fiscal", op: "view", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     requireAction(s.ctx, "data.export");
     const f = normalizeFilter({ from: fstr(fd, "from"), to: fstr(fd, "to"), branch: fstr(fd, "branch") || undefined });
     const send = fstr(fd, "intent") === "send";
@@ -383,21 +383,21 @@ export async function generatePackageAction(fd: FormData) {
 }
 
 export async function saveScheduleAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "saveScheduleAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     const r = await saveAccountingSchedule(s.ctx, { enabled: fbool(fd, "enabled"), day: fint(fd, "day", 5) });
     return { ok: true as const, message: r.enabled ? `Envio mensal agendado para o dia ${r.day}.` : "Envio mensal desativado." };
   });
 }
 
 export async function saveObligationAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "saveObligationAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     const o = await saveObligation(s.ctx, fopt(fd, "id"), { kind: fstr(fd, "kind"), name: fstr(fd, "name"), period: fstr(fd, "period"), dueDate: fstr(fd, "dueDate"), responsibleId: fopt(fd, "responsibleId"), notes: fopt(fd, "notes") });
     return { ok: true as const, message: `Obrigação "${o.name}" salva.` };
   });
 }
 
 export async function completeObligationAction(id: string, fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "completeObligationAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     const file = fd.get("proof");
     let proof: { name: string; mime: string; data: Buffer } | null = null;
     if (file && typeof file === "object" && "arrayBuffer" in file && (file as File).size > 0) {
@@ -411,28 +411,28 @@ export async function completeObligationAction(id: string, fd: FormData) {
 }
 
 export async function obligationStatusAction(id: string, status: "pending" | "in_progress" | "waived", fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "obligationStatusAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     await setObligationStatus(s.ctx, id, status, fopt(fd, "reason"));
     return { ok: true as const, message: "Situação atualizada." };
   });
 }
 
 export async function deleteObligationAction(id: string) {
-  return runAction({ module: "fiscal", op: "delete", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "deleteObligationAction", module: "fiscal", op: "delete", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     await deleteObligation(s.ctx, id);
     return { ok: true as const, message: "Obrigação excluída." };
   });
 }
 
 export async function generateObligationsAction() {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "generateObligationsAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     const r = await generateObligations(s.ctx);
     return { ok: true as const, message: r.created ? `${r.created} obrigação(ões) gerada(s) a partir do calendário.` : "Obrigações da competência já estavam geradas." };
   });
 }
 
 export async function saveTemplatesAction(fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "saveTemplatesAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
     const list = fjson<ObligationTemplate[]>(fd, "templates", []);
     await saveTemplates(s.ctx, list);
     return { ok: true as const, message: "Calendário de obrigações salvo." };
@@ -440,7 +440,7 @@ export async function saveTemplatesAction(fd: FormData) {
 }
 
 export async function toggleContingencyAction(on: boolean, fd: FormData) {
-  return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/nfce", "/fiscal/configuracoes"] }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "toggleContingencyAction", module: "fiscal", op: "edit", revalidate: ["/fiscal/nfce", "/fiscal/configuracoes"] }, async (s) => {
     const branchId = requireBranch(s.ctx);
     const reason = fopt(fd, "reason");
     if (on) assert(reason && reason.length >= 5, "Informe o motivo da contingência.");
@@ -451,7 +451,7 @@ export async function toggleContingencyAction(on: boolean, fd: FormData) {
 
 /** Pesquisa de produtos (SKU) para a NF-e: preço da tabela padrão da filial, unidade, NCM e saldo disponível. */
 export async function searchSkusAction(q: string) {
-  return runAction({ module: "fiscal", op: "create" }, async (s) => {
+  return runAction({ entitlement: "tec.fiscal", action: "searchSkusAction", module: "fiscal", op: "create" }, async (s) => {
     const { listAll } = await import("@/lib/db");
     const { normalizeSearch } = await import("@/lib/list");
     const term = normalizeSearch(q ?? "");

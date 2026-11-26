@@ -19,7 +19,7 @@ async function guard(s: SessionInfo) {
 // ------------------------------------------------------------------------------------------------------------ clientes
 
 export async function saveCustomerAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vendas", action: "saveCustomerAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const id = fopt(fd, "id");
     const c = await saveCertCustomer(s.ctx, id, {
@@ -86,7 +86,7 @@ export async function quoteSaleAction(fd: FormData) {
 }
 
 export async function createSaleAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vendas", action: "createSaleAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await createNetworkSale(s.ctx, saleInput(fd));
     const next = r.status === "awaiting_payment" ? "Próxima etapa: enviar a cobrança ao cliente." : "Sem cobrança: a equipe de certificação agenda a validação do titular.";
@@ -95,7 +95,7 @@ export async function createSaleAction(fd: FormData) {
 }
 
 export async function sendSaleChargeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vendas", action: "sendSaleChargeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const res = await sendCertificateCharge(s.ctx, fstr(fd, "id"), { channel: fstr(fd, "channel") as any, to: fopt(fd, "to"), dueDate: fopt(fd, "dueDate"), message: fopt(fd, "message") });
     return { ok: true as const, data: res, message: res.channel === "email" ? `Cobrança enviada por e-mail para ${res.to}.` : `Envio por ${CHARGE_CHANNEL_LABEL[res.channel] ?? res.channel} registrado para ${res.to}.` };
@@ -103,7 +103,7 @@ export async function sendSaleChargeAction(fd: FormData) {
 }
 
 export async function cancelSaleAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vendas", action: "cancelSaleAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await cancelCertificateRequest(s.ctx, fstr(fd, "id"), { reason: fstr(fd, "reason") });
     return { ok: true as const, message: `Venda ${r.protocol} cancelada (voucher e cupom devolvidos, se houver).` };
@@ -111,7 +111,7 @@ export async function cancelSaleAction(fd: FormData) {
 }
 
 export async function requestSaleEmissionAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vendas", action: "requestSaleEmissionAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await requestCertificateEmission(s.ctx, fstr(fd, "id"));
     return { ok: true as const, message: `Emissão de ${r.protocol} pedida à equipe de certificação.` };
@@ -119,7 +119,7 @@ export async function requestSaleEmissionAction(fd: FormData) {
 }
 
 export async function recordSaleAuthorizationAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vendas", action: "recordSaleAuthorizationAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const f = fd.get("evidence");
     const evidence = f && typeof f !== "string" && (f as File).size ? { name: (f as File).name || "evidencia", mime: (f as File).type || "application/octet-stream", data: Buffer.from(await (f as File).arrayBuffer()) } : null;
@@ -131,7 +131,7 @@ export async function recordSaleAuthorizationAction(fd: FormData) {
 // -------------------------------------------------------------------------------------------------------------- cupons
 
 export async function createCouponAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vouchers_cupons", action: "createCouponAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const kind = fstr(fd, "kind") === "fixed" ? "fixed" : "percent";
     const pct = fstr(fd, "percent").replace(",", ".");
@@ -145,7 +145,7 @@ export async function createCouponAction(fd: FormData) {
 }
 
 export async function setCouponActiveAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vouchers_cupons", action: "setCouponActiveAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const active = fstr(fd, "active") === "1";
     const c = await setCouponActive(s.ctx, fstr(fd, "id"), active, fopt(fd, "reason"));
@@ -156,7 +156,7 @@ export async function setCouponActiveAction(fd: FormData) {
 // ------------------------------------------------------------------------------------------------------------- vouchers
 
 export async function createPackageAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vouchers_cupons", action: "createPackageAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const items: Array<{ productKey: string; qty: number; unitPrice: number }> = [];
     for (let i = 0; i < 10; i++) {
@@ -170,7 +170,7 @@ export async function createPackageAction(fd: FormData) {
 }
 
 export async function purchasePackageAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vouchers_cupons", action: "purchasePackageAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await purchaseVoucherPackage(s.ctx, fstr(fd, "packageId"), { buyerNodeId: fopt(fd, "buyerNodeId"), generateCodes: fbool(fd, "generateCodes"), idemKey: fstr(fd, "_idem") });
     return { ok: true as const, message: `Pacote ${r.purchase.packageName} ${fopt(fd, "buyerNodeId") ? "atribuído" : "comprado"}: ${r.lots.reduce((a, l) => a + Number(l.qty), 0)} unidade(s) no saldo.${r.purchase.financeNote ? ` ${r.purchase.financeNote}` : " Lançado no financeiro (a receber e a pagar)."}` };
@@ -178,7 +178,7 @@ export async function purchasePackageAction(fd: FormData) {
 }
 
 export async function setPackageActiveAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vouchers_cupons", action: "setPackageActiveAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const active = fstr(fd, "active") === "1";
     await setVoucherPackageActive(s.ctx, fstr(fd, "id"), active);
@@ -187,7 +187,7 @@ export async function setPackageActiveAction(fd: FormData) {
 }
 
 export async function issueCodeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vouchers_cupons", action: "issueCodeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const c = await issueVoucherCode(s.ctx, fstr(fd, "lotId"), { gift: fbool(fd, "gift"), notes: fopt(fd, "notes") });
     return { ok: true as const, data: { code: c.code }, message: `Código ${c.code} emitido${c.gift ? " (presente: o cliente final paga R$ 0)" : ""}.` };
@@ -195,7 +195,7 @@ export async function issueCodeAction(fd: FormData) {
 }
 
 export async function cancelCodeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.vouchers_cupons", action: "cancelCodeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const c = await cancelVoucherCode(s.ctx, fstr(fd, "id"), fstr(fd, "reason"));
     return { ok: true as const, message: `Código ${c.code} cancelado; a unidade voltou ao saldo.` };
@@ -205,7 +205,7 @@ export async function cancelCodeAction(fd: FormData) {
 // ----------------------------------------------------------------------------------------------------------- renovações
 
 export async function registerContactAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.renovacoes", action: "registerContactAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     await registerRenewalContact(s.ctx, fstr(fd, "certificateId"), { contactDate: fopt(fd, "contactDate"), channel: fstr(fd, "channel"), result: fstr(fd, "result"), notes: fopt(fd, "notes"), nextAction: fopt(fd, "nextAction"), nextActionDate: fopt(fd, "nextActionDate") });
     return { ok: true as const, message: "Contato registrado." };
@@ -213,7 +213,7 @@ export async function registerContactAction(fd: FormData) {
 }
 
 export async function saveIdleDaysAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: ["/rede/parametros", "/rede/renovacoes"] }, async (s) => {
+  return runAction({ entitlement: "rede.renovacoes", action: "saveIdleDaysAction", module: "dashboard", revalidate: ["/rede/parametros", "/rede/renovacoes"] }, async (s) => {
     await guard(s);
     const v = await saveIdleAlertDays(s.ctx, fint(fd, "idleAlertDays"));
     return { ok: true as const, message: `Alerta de renovação sem ação: ${v.idleAlertDays} dia(s) antes do vencimento.` };

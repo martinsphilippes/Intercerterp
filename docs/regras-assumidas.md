@@ -1142,3 +1142,14 @@ Contexto (reunião com o dono): a Intercert é uma AC2 da ICP-Brasil sob as AC1 
 **Demonstração.** “Loja Modelo” publicada (modelo Essencial, Azul Intercert), 11 produtos (o Cinto com “Peso pendente”, como no guia), cupom BEMVINDO10, conta preparada no Mercado Livre, carrinhos parados e 7 pedidos pelo checkout real (IC-1041 a IC-1047) em todas as etapas, inclusive um crédito do gateway conciliado.
 
 **Prévia fiel (18/11/2026).** A miniatura da loja na Central, no editor e na galeria de modelos mostra os produtos, preços, categorias e a ordem da vitrine — a mesma consulta da loja pública (`storePreviewData`) —, e no modelo Campanha o produto da oferta escolhido. Só a loja sem produto vendável vê exemplos, rotulados “Produtos de exemplo” (antes, a miniatura mostrava sempre produtos ilustrativos, que não existiam no catálogo). As fotos vêm pela rota de imagens da vitrine, que só entrega a identidade da loja e fotos de produtos do catálogo dela; foto que não abre volta para a ilustração da categoria, sem o ícone de imagem quebrada do navegador. A ilustração por categoria é a mesma na vitrine e no ERP (`src/components/storefront/product-icon.ts`).
+
+## 50. Habilitação de módulos por empresa contratante e integração com o Interos [Decisão]
+
+- **Três camadas independentes.** A habilitação (contrato, `company_modules`; o ERP é a fonte oficial e o Interos altera), a configuração (`feature.<chave>` e pré-requisitos) e a permissão de perfil. O isolamento continua o mesmo. A interface só mostra um recurso quando habilitação e configuração valem; as regras de domínio seguem só a configuração.
+- **Catálogo único** em `src/lib/modules/catalog.ts` (versão 1.0.0, chaves estáveis). O JSON `docs/modulos/catalogo-modulos-erp-v1.json` é gerado dele, e o teste confere que está em dia.
+- **Toda server action declara o módulo** (`runAction({ entitlement, action })`). Toda tela, rota, exportação, rotina, tarefa, recurso e permissão tem dono no catálogo. Os testes recusam o que não tiver.
+- **Migração aditiva.** Toda empresa existente recebe uma linha de base em modo `legacy` (comportamento anterior). O controle só passa a valer por decisão explícita, em dois passos: `shadow` e depois `enforced`. Passar a `enforced` exige revisar as divergências da linha de base. Empresa nova nasce `enforced` com os módulos selecionados.
+- **Desligamento.** Pode ser `immediate`, `drain` (conclui pendências e desliga sozinho, sem interromper obrigações mesmo depois do prazo) ou `scheduled` (lotes). Nada é apagado, e reativar reaproveita a configuração. Tarefas da fila, avisos do gateway e rotinas que encerram obrigações nunca são bloqueados.
+- **Revogação.** Na hora, na instância que aplicou; em até 15 segundos nas demais (memória curta por empresa).
+- **Restauração de backup** não altera a habilitação.
+- Detalhes em `docs/modulos/README.md`. O contrato da integração está em `docs/modulos/contrato-interos-erp-v1.md`.

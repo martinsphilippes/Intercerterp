@@ -76,3 +76,22 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] Documentação: especificação e lacunas (`docs/referencia/telas/comercio-digital.md`), matriz (Telas 49–64), regras §49, pendências 13–17.
 - [x] Verificação: suíte completa 979/979 (memória) e testes do comércio digital no PostgreSQL; build de produção limpo; compra de ponta a ponta no navegador (produto → carrinho com cupom → checkout → Pix → pagamento simulado), simulador de retorno (evento repetido sem nova baixa), NF-e, expedição, conciliação, monitor e prévia; varredura do ERP com o build de produção: 333 páginas, 208 padrões de rota, 0 problemas. Achados corrigidos na verificação: demonstração com 30 dias de histórico sem saldo (reposição rastreável e cenários isolados), parâmetros de URL vazios (banco, simulador, expedição), uma linha do monitor por produto, código IBGE completado pelo CEP no servidor.
 - [x] **Publicado em produção (18/11, PR #2, autorizado pelo titular):** publicação pronta em 3 min, em São Paulo; as 11 tabelas novas foram criadas sozinhas no primeiro acesso (diagnóstico: esquema aplicado, consultas de 4 ms, banco com 29 MB). Demonstração atualizada pela rota de instalação (`step=demo-update`, uma chamada, 11,8 s): Loja Modelo publicada, 11 produtos no catálogo (10 na vitrine — o Cinto fica de fora por falta de peso, de propósito), 7 pedidos IC-1041 a IC-1047 nos estados previstos, 3 carrinhos abandonados. Conferência no endereço oficial **só de leitura** (sem compra nem aprovação de teste, para não sujar a demonstração; o fluxo de escrita foi conferido na publicação de teste com banco real): 21 acessos rápidos na tela inicial (computador e celular); vitrine, produto, carrinho, 5 páginas institucionais, `robots.txt` e `sitemap.xml` com resposta 200, loja inexistente 404, celular em 2 colunas sem rolagem lateral, sem service worker do ERP na vitrine; 14 telas de gestão com resposta 200 (mediana ~1 s medida daqui), 7 pedidos na lista, monitor com 1 falha (Cinto), banco com 4 transações, “Ver loja” levando à vitrine. Varredura completa do ERP em produção como Administração: 337 páginas, 209 padrões de rota (42 do comércio digital e da vitrine), todas com resposta 200, sem tela de erro, erro de página ou de console (mediana 1,0 s e 95% abaixo de 1,4 s, medidos daqui). Erros de execução na Vercel: só o aviso já conhecido do modo SSL do cliente `pg`.
+
+## Modularização por empresa contratante e integração Interos (26/11)
+
+- [x] Catálogo `catalogo-modulos-erp-v1` (1.0.0): 81 entradas.
+  - 36 módulos comerciais, 31 funções opcionais, 5 componentes técnicos e 6 recursos da plataforma.
+  - 3 lacunas e 60 permissões mapeadas.
+  - Grafo validado, sem ciclos.
+  - Inventário e matriz gerados do código (`npm run modules:inventory`).
+- [x] Regra de acesso aplicada em: telas (pelo caminho real), menu, recursos, 392 server actions, APIs, exportações, rotinas e vitrine pública. Avisos do gateway e fila de tarefas são preservados como obrigações.
+- [x] Desligamento com simulação de impacto, cascata, pendências em andamento, conclusão automática e reativação com configuração preservada.
+- [x] API `/api/interos/v1`:
+  - catálogo, empresas, módulos, simulação, aplicação, histórico, linha de base e operações;
+  - token servidor a servidor com escopos, Idempotency-Key, If-Match e operação agendada.
+- [x] Migração: linha de base em `legacy` (rotina diária, `?step=modules-baseline` ou `npm run modules:baseline`); provisionamento seletivo de empresa nova; Administração › Módulos contratados.
+- [x] Verificação:
+  - 1033/1033 testes (memória), dos quais 50 são novos;
+  - 1033/1033 também na suíte inteira sobre o Postgres;
+  - typecheck, lint e build limpos.
+- [ ] Pendente: tabela de catálogo inicial do titular (não recebida), homologação com Postgres no ambiente de homologação (a local, em memória, foi feita) e credencial `INTEROS_CLIENTS` em produção.

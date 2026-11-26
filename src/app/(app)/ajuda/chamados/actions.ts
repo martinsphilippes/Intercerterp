@@ -4,7 +4,7 @@ import { runAction, fstr, fopt } from "@/lib/server/action";
 import { createTicket, replyTicket, updateTicket, attachmentsFromForm } from "@/domain/support";
 
 export async function createTicketAction(fd: FormData) {
-  return runAction({ module: "support", op: "create", revalidate: ["/ajuda", "/ajuda/chamados"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "createTicketAction", module: "support", op: "create", revalidate: ["/ajuda", "/ajuda/chamados"] }, async (s) => {
     const t = await createTicket(s.ctx, {
       category: fstr(fd, "category"),
       priority: fstr(fd, "priority"),
@@ -19,7 +19,7 @@ export async function createTicketAction(fd: FormData) {
 }
 
 export async function replyTicketAction(id: string, fd: FormData) {
-  return runAction({ module: "support", revalidate: [`/ajuda/chamados/${id}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "replyTicketAction", module: "support", revalidate: [`/ajuda/chamados/${id}`] }, async (s) => {
     const r = await replyTicket(s.ctx, id, { body: fstr(fd, "body"), internal: fstr(fd, "internal") === "on", status: fopt(fd, "status"), attachments: await attachmentsFromForm(fd), idemKey: fstr(fd, "_idem") || undefined });
     const d = r.delivery;
     return { ok: true as const, message: d ? (d.delivered ? `Resposta registrada e enviada por e-mail (${d.channel}).` : `Resposta registrada. E-mail não enviado: ${String(d.message ?? d.channel).replace(/\.$/, "")}.`) : "Mensagem registrada." };
@@ -27,7 +27,7 @@ export async function replyTicketAction(id: string, fd: FormData) {
 }
 
 export async function updateTicketAction(id: string, fd: FormData) {
-  return runAction({ module: "support", revalidate: [`/ajuda/chamados/${id}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "updateTicketAction", module: "support", revalidate: [`/ajuda/chamados/${id}`] }, async (s) => {
     const patch: { status?: string; assigneeId?: string | null; priority?: string; reason?: string | null } = {};
     if (fd.has("status")) patch.status = fstr(fd, "status");
     if (fd.has("assigneeId")) patch.assigneeId = fopt(fd, "assigneeId");
@@ -39,7 +39,7 @@ export async function updateTicketAction(id: string, fd: FormData) {
 }
 
 export async function setTicketStatusAction(id: string, status: string, fd: FormData) {
-  return runAction({ module: "support", revalidate: [`/ajuda/chamados/${id}`] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "setTicketStatusAction", module: "support", revalidate: [`/ajuda/chamados/${id}`] }, async (s) => {
     await updateTicket(s.ctx, id, { status, reason: fopt(fd, "reason") });
     return { ok: true as const, message: status === "resolved" ? "Chamado marcado como resolvido." : status === "closed" ? "Chamado encerrado." : "Chamado reaberto." };
   });

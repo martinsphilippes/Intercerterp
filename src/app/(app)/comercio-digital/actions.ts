@@ -48,7 +48,7 @@ const percentBps = (v: string | null) => (v ? Math.round(Number(v.replace(",", "
 // ───────────────────────────── Loja (Telas 49–51)
 
 export async function createStoreAction(fd: FormData) {
-  return runAction(opts(), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "createStoreAction", ...opts() }, async (s) => {
     await guard(s);
     await createStore(s.ctx, { name: fopt(fd, "name"), fulfillmentBranchId: fopt(fd, "branchId") });
     return { ok: true as const, message: "Loja virtual criada em rascunho. Escolha o modelo e personalize.", redirect: `${BASE}/modelos` };
@@ -56,7 +56,7 @@ export async function createStoreAction(fd: FormData) {
 }
 
 export async function applyTemplateAction(key: TemplateKey, _fd: FormData) {
-  return runAction(opts("/modelos", "/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "applyTemplateAction", ...opts("/modelos", "/editor") }, async (s) => {
     await guard(s);
     await applyTemplate(s.ctx, key);
     return { ok: true as const, message: "Modelo aplicado ao rascunho. Siga para o editor para personalizar.", redirect: `${BASE}/editor` };
@@ -64,7 +64,7 @@ export async function applyTemplateAction(key: TemplateKey, _fd: FormData) {
 }
 
 export async function saveIdentityAction(fd: FormData) {
-  return runAction(opts("/editor", "/modelos"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "saveIdentityAction", ...opts("/editor", "/modelos") }, async (s) => {
     await guard(s);
     const accent = fstr(fd, "accentCustom") || fstr(fd, "accentColor");
     await saveIdentity(s.ctx, {
@@ -84,7 +84,7 @@ export async function saveIdentityAction(fd: FormData) {
 }
 
 export async function uploadThemeImageAction(which: "logo" | "hero", fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "uploadThemeImageAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     const file = fd.get("file");
     if (!(file instanceof File) || !file.size) throw new BusinessError("Escolha a imagem.");
@@ -95,7 +95,7 @@ export async function uploadThemeImageAction(which: "logo" | "hero", fd: FormDat
 }
 
 export async function removeThemeImageAction(which: "logo" | "hero", _fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "removeThemeImageAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     await setThemeImage(s.ctx, which, null);
     return { ok: true as const, message: "Imagem removida da loja." };
@@ -103,7 +103,7 @@ export async function removeThemeImageAction(which: "logo" | "hero", _fd: FormDa
 }
 
 export async function saveLegalContactAction(fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "saveLegalContactAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     await saveLegalContact(
       s.ctx,
@@ -115,7 +115,7 @@ export async function saveLegalContactAction(fd: FormData) {
 }
 
 export async function savePagesAction(fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "savePagesAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     await savePages(s.ctx, { about: fstr(fd, "about"), exchanges: fstr(fd, "exchanges"), shipping: fstr(fd, "shipping"), privacy: fstr(fd, "privacy"), terms: fstr(fd, "terms") });
     return { ok: true as const, message: "Páginas da loja salvas." };
@@ -123,7 +123,7 @@ export async function savePagesAction(fd: FormData) {
 }
 
 export async function restoreDefaultPagesAction(_fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "restoreDefaultPagesAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     const st = await requireStore(s.ctx);
     await savePages(s.ctx, defaultPages(st.name, legalOf(st)));
@@ -132,7 +132,7 @@ export async function restoreDefaultPagesAction(_fd: FormData) {
 }
 
 export async function saveCheckoutAction(fd: FormData) {
-  return runAction(opts("/pagamentos"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "saveCheckoutAction", ...opts("/pagamentos") }, async (s) => {
     await guard(s);
     await saveCheckout(s.ctx, { requireDoc: fbool(fd, "requireDoc"), minOrder: fint(fd, "minOrder"), orderPrefix: fstr(fd, "orderPrefix"), safetyStockQty: fint(fd, "safetyUnits") * QTY });
     return { ok: true as const, message: "Regras do checkout salvas." };
@@ -140,7 +140,7 @@ export async function saveCheckoutAction(fd: FormData) {
 }
 
 export async function addDomainAction(fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "addDomainAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     const d = await addDomain(s.ctx, fstr(fd, "domain"));
     return { ok: true as const, message: d.status === "active" ? `Domínio ${d.domain} verificado e ativo.` : `Domínio ${d.domain} cadastrado: configure o DNS conforme as instruções e verifique.` };
@@ -148,7 +148,7 @@ export async function addDomainAction(fd: FormData) {
 }
 
 export async function verifyDomainAction(id: string, _fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "verifyDomainAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     const d = await verifyDomain(s.ctx, id);
     return { ok: true as const, message: d.status === "active" ? "Domínio verificado e ativo." : `Verificação: ${d.diagnostic}` };
@@ -156,7 +156,7 @@ export async function verifyDomainAction(id: string, _fd: FormData) {
 }
 
 export async function setPrimaryDomainAction(id: string, _fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "setPrimaryDomainAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     await setPrimaryDomain(s.ctx, id);
     return { ok: true as const, message: "Domínio principal atualizado." };
@@ -164,7 +164,7 @@ export async function setPrimaryDomainAction(id: string, _fd: FormData) {
 }
 
 export async function removeDomainAction(id: string, fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "removeDomainAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     await removeDomain(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Domínio removido da loja." };
@@ -172,7 +172,7 @@ export async function removeDomainAction(id: string, fd: FormData) {
 }
 
 export async function publishStoreAction(_fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "publishStoreAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     await publishStore(s.ctx);
     return { ok: true as const, message: "Loja publicada: a vitrine já recebe pedidos." };
@@ -180,7 +180,7 @@ export async function publishStoreAction(_fd: FormData) {
 }
 
 export async function pauseStoreAction(fd: FormData) {
-  return runAction(opts("/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "pauseStoreAction", ...opts("/editor") }, async (s) => {
     await guard(s);
     await pauseStore(s.ctx, fstr(fd, "reason"));
     return { ok: true as const, message: "Loja pausada: a vitrine mostra o aviso de pausa; pedidos em andamento continuam." };
@@ -190,7 +190,7 @@ export async function pauseStoreAction(fd: FormData) {
 // ───────────────────────────── Catálogo (Tela 52)
 
 export async function addToCatalogAction(fd: FormData) {
-  return runAction(opts("/catalogo"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "addToCatalogAction", ...opts("/catalogo") }, async (s) => {
     await guard(s);
     const n = await addToCatalog(s.ctx, ids(fd));
     return { ok: true as const, message: n ? `${n} produto(s) incluído(s) no catálogo digital (fora da vitrine até publicar).` : "Os produtos selecionados já estavam no catálogo." };
@@ -198,7 +198,7 @@ export async function addToCatalogAction(fd: FormData) {
 }
 
 export async function setPresenceAction(published: boolean, fd: FormData) {
-  return runAction(opts("/catalogo"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "setPresenceAction", ...opts("/catalogo") }, async (s) => {
     await guard(s);
     const list = ids(fd);
     if (!list.length) throw new BusinessError("Selecione ao menos um produto.");
@@ -208,7 +208,7 @@ export async function setPresenceAction(published: boolean, fd: FormData) {
 }
 
 export async function validateSelectionAction(fd: FormData) {
-  return runAction(opts("/catalogo", "/monitor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "validateSelectionAction", ...opts("/catalogo", "/monitor") }, async (s) => {
     await guard(s);
     const list = ids(fd);
     if (!list.length) throw new BusinessError("Selecione os produtos a validar.");
@@ -220,7 +220,7 @@ export async function validateSelectionAction(fd: FormData) {
 }
 
 export async function saveListingAction(productId: string, fd: FormData) {
-  return runAction(opts("/catalogo"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "saveListingAction", ...opts("/catalogo") }, async (s) => {
     await guard(s);
     const num = (k: string) => (fopt(fd, k) ? Math.round(Number(fstr(fd, k).replace(",", "."))) : null);
     await saveListing(s.ctx, productId, {
@@ -245,7 +245,7 @@ export async function saveListingAction(productId: string, fd: FormData) {
 }
 
 export async function uploadListingImageAction(productId: string, fd: FormData) {
-  return runAction(opts("/catalogo"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "uploadListingImageAction", ...opts("/catalogo") }, async (s) => {
     await guard(s);
     const st = await requireStore(s.ctx);
     const l = await listingOf(s.ctx.store, st.id, productId);
@@ -261,7 +261,7 @@ export async function uploadListingImageAction(productId: string, fd: FormData) 
 }
 
 export async function removeListingImageAction(productId: string, fileId: string, _fd: FormData) {
-  return runAction(opts("/catalogo"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "removeListingImageAction", ...opts("/catalogo") }, async (s) => {
     await guard(s);
     const st = await requireStore(s.ctx);
     const l = await listingOf(s.ctx.store, st.id, productId);
@@ -275,7 +275,7 @@ export async function removeListingImageAction(productId: string, fileId: string
 // ───────────────────────────── Canais (Tela 53)
 
 export async function prepareChannelAction(key: string, fd: FormData) {
-  return runAction(opts("/canais", "/monitor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.canais", action: "prepareChannelAction", ...opts("/canais", "/monitor") }, async (s) => {
     await guard(s);
     await prepareChannel(s.ctx, key, { accountName: fstr(fd, "accountName"), catalogScope: fstr(fd, "catalogScope") === "categories" ? "categories" : "all", categoryIds: fd.getAll("categoryIds").map(String).filter(Boolean), notes: fopt(fd, "notes") });
     return { ok: true as const, message: "Conta preparada em rascunho. Salvar não conecta: a ativação depende do conector do canal." };
@@ -287,7 +287,7 @@ export async function prepareChannelAction(key: string, fd: FormData) {
 const orderPaths = (id: string) => opts("/pedidos", `/pedidos/${id}`, "/expedicao", "/monitor", "/banco");
 
 export async function invoiceOrderAction(id: string, _fd: FormData) {
-  return runAction({ ...orderPaths(id), revalidate: [...orderPaths(id).revalidate, "/fiscal/nfe"] }, async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "invoiceOrderAction", ...orderPaths(id), revalidate: [...orderPaths(id).revalidate, "/fiscal/nfe"] }, async (s) => {
     await guard(s);
     const o = await invoiceOrder(s.ctx, id);
     return { ok: true as const, message: o.fiscalStatus === "authorized" ? "NF-e autorizada: pedido liberado para a expedição." : `NF-e enviada (${o.fiscalStatus}). A autorização libera a expedição.` };
@@ -295,7 +295,7 @@ export async function invoiceOrderAction(id: string, _fd: FormData) {
 }
 
 export async function cancelOrderAction(id: string, fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "cancelOrderAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     const o = await cancelOrder(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: o.refundStatus === "pending" ? "Pedido cancelado; estorno ao cliente pendente." : "Pedido cancelado e reserva liberada." };
@@ -303,7 +303,7 @@ export async function cancelOrderAction(id: string, fd: FormData) {
 }
 
 export async function confirmPickingAction(id: string, fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "confirmPickingAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     const o = await confirmPicking(s.ctx, id, { volumes: fint(fd, "volumes", 1), note: fopt(fd, "note") });
     return { ok: true as const, message: o.status === "ready_for_pickup" ? "Separação conferida: pedido pronto para retirada (cliente avisado)." : "Separação e conferência registradas." };
@@ -311,7 +311,7 @@ export async function confirmPickingAction(id: string, fd: FormData) {
 }
 
 export async function generateLabelAction(id: string, _fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "generateLabelAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     const o = await generateLabel(s.ctx, id);
     return { ok: true as const, message: `Etiqueta ${o.delivery?.trackingCode}: ${o.delivery?.labelNote ?? ""}` };
@@ -319,7 +319,7 @@ export async function generateLabelAction(id: string, _fd: FormData) {
 }
 
 export async function dispatchOrderAction(id: string, _fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "dispatchOrderAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     await dispatchOrder(s.ctx, id);
     return { ok: true as const, message: "Despacho registrado e estoque baixado." };
@@ -327,7 +327,7 @@ export async function dispatchOrderAction(id: string, _fd: FormData) {
 }
 
 export async function confirmPickupAction(id: string, fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "confirmPickupAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     await confirmPickup(s.ctx, id, fstr(fd, "code"));
     return { ok: true as const, message: "Retirada confirmada e estoque baixado." };
@@ -335,7 +335,7 @@ export async function confirmPickupAction(id: string, fd: FormData) {
 }
 
 export async function confirmDeliveryAction(id: string, fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "confirmDeliveryAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     await confirmDelivery(s.ctx, id, fopt(fd, "note"));
     return { ok: true as const, message: "Entrega concluída." };
@@ -343,7 +343,7 @@ export async function confirmDeliveryAction(id: string, fd: FormData) {
 }
 
 export async function completeReturnAction(id: string, fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "completeReturnAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     const o = await completeReturn(s.ctx, id, fstr(fd, "note"));
     return { ok: true as const, message: o.refundStatus === "pending" ? "Devolução registrada; estorno pendente." : "Devolução registrada e estorno feito." };
@@ -351,7 +351,7 @@ export async function completeReturnAction(id: string, fd: FormData) {
 }
 
 export async function retryChargeAction(id: string, _fd: FormData) {
-  return runAction(orderPaths(id), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "retryChargeAction", ...orderPaths(id) }, async (s) => {
     await guard(s);
     const o = await orderOfCompany(s.ctx, id);
     const after = await retryCharge(s.ctx.store, o);
@@ -362,7 +362,7 @@ export async function retryChargeAction(id: string, _fd: FormData) {
 // ───────────────────────────── Promoções e carrinhos (Tela 55)
 
 export async function saveCouponAction(fd: FormData) {
-  return runAction(opts("/promocoes"), async (s) => {
+  return runAction({ entitlement: "ecommerce.promocoes", action: "saveCouponAction", ...opts("/promocoes") }, async (s) => {
     await guard(s);
     const c = await saveCoupon(s.ctx, {
       code: fstr(fd, "code"),
@@ -382,7 +382,7 @@ export async function saveCouponAction(fd: FormData) {
 }
 
 export async function setCouponActiveAction(id: string, active: boolean, _fd: FormData) {
-  return runAction(opts("/promocoes"), async (s) => {
+  return runAction({ entitlement: "ecommerce.promocoes", action: "setCouponActiveAction", ...opts("/promocoes") }, async (s) => {
     await guard(s);
     await setCouponActive(s.ctx, id, active);
     return { ok: true as const, message: active ? "Cupom ativado." : "Cupom pausado." };
@@ -402,7 +402,7 @@ export async function testCouponAction(couponId: string, fd: FormData) {
 }
 
 export async function saveRecoveryDraftAction(cartId: string, fd: FormData) {
-  return runAction(opts("/promocoes"), async (s) => {
+  return runAction({ entitlement: "ecommerce.promocoes", action: "saveRecoveryDraftAction", ...opts("/promocoes") }, async (s) => {
     await guard(s);
     await saveRecoveryDraft(s.ctx, cartId, fstr(fd, "message"));
     return { ok: true as const, message: "Mensagem salva em rascunho. Nenhuma mensagem foi enviada." };
@@ -412,7 +412,7 @@ export async function saveRecoveryDraftAction(cartId: string, fd: FormData) {
 // ───────────────────────────── Gateway e checkout (Tela 56)
 
 export async function savePaymentsAction(fd: FormData) {
-  return runAction(opts("/pagamentos"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "savePaymentsAction", ...opts("/pagamentos") }, async (s) => {
     await guard(s);
     const st = await requireStore(s.ctx);
     const cur = paymentsOf(st);
@@ -431,7 +431,7 @@ export async function savePaymentsAction(fd: FormData) {
 }
 
 export async function simulateEventAction(fd: FormData) {
-  return runAction(opts("/pagamentos", "/pedidos", "/monitor", "/banco", "/expedicao"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "simulateEventAction", ...opts("/pagamentos", "/pedidos", "/monitor", "/banco", "/expedicao") }, async (s) => {
     await guard(s);
     const o = await orderOfCompany(s.ctx, fstr(fd, "orderId"));
     const type = fstr(fd, "type") as "approved" | "pending" | "failed" | "expired";
@@ -446,7 +446,7 @@ export async function simulateEventAction(fd: FormData) {
 // ───────────────────────────── Banco (Tela 57)
 
 export async function simulateCreditsAction(_fd: FormData) {
-  return runAction(opts("/banco", "/monitor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.banco", action: "simulateCreditsAction", ...opts("/banco", "/monitor") }, async (s) => {
     await guard(s);
     const n = await simulateCredits(s.ctx);
     return { ok: true as const, message: n ? `${n} crédito(s) simulado(s) no prazo do meio de pagamento.` : "Nenhum crédito previsto até hoje." };
@@ -454,7 +454,7 @@ export async function simulateCreditsAction(_fd: FormData) {
 }
 
 export async function reconcileAction(txId: string, fd: FormData) {
-  return runAction({ ...opts("/banco", "/monitor"), revalidate: [`${BASE}/banco`, `${BASE}/monitor`, "/financeiro/receber"] }, async (s) => {
+  return runAction({ entitlement: "ecommerce.banco", action: "reconcileAction", ...opts("/banco", "/monitor"), revalidate: [`${BASE}/banco`, `${BASE}/monitor`, "/financeiro/receber"] }, async (s) => {
     await guard(s);
     const accountId = fstr(fd, "accountId");
     if (!accountId) throw new BusinessError("Escolha a conta que recebeu o crédito.");
@@ -464,7 +464,7 @@ export async function reconcileAction(txId: string, fd: FormData) {
 }
 
 export async function setSettlementAccountAction(fd: FormData) {
-  return runAction(opts("/banco"), async (s) => {
+  return runAction({ entitlement: "ecommerce.banco", action: "setSettlementAccountAction", ...opts("/banco") }, async (s) => {
     await guard(s);
     await setSettlementAccount(s.ctx, fstr(fd, "accountId"));
     return { ok: true as const, message: "Conta dos créditos da loja definida." };
@@ -472,7 +472,7 @@ export async function setSettlementAccountAction(fd: FormData) {
 }
 
 export async function preparePayoutAction(fd: FormData) {
-  return runAction(opts("/banco"), async (s) => {
+  return runAction({ entitlement: "ecommerce.banco", action: "preparePayoutAction", ...opts("/banco") }, async (s) => {
     await guard(s);
     await preparePayout(s.ctx, { amount: fint(fd, "amount"), notes: fopt(fd, "notes"), idemKey: fstr(fd, "_idem") || String(Date.now()) });
     return { ok: true as const, message: "Repasse preparado em rascunho: nenhum valor foi movimentado." };
@@ -482,7 +482,7 @@ export async function preparePayoutAction(fd: FormData) {
 // ───────────────────────────── Frete (Tela 58)
 
 export async function saveShippingAction(fd: FormData) {
-  return runAction(opts("/frete", "/editor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "saveShippingAction", ...opts("/frete", "/editor") }, async (s) => {
     await guard(s);
     const st = await requireStore(s.ctx);
     const cur = shippingOf(st);
@@ -527,7 +527,7 @@ async function deliveryOptionsForSample(s: SessionInfo, st: any, zip: string, va
 // ───────────────────────────── Monitor (Tela 60)
 
 export async function reprocessEventAction(id: string, _fd: FormData) {
-  return runAction(opts("/monitor", "/catalogo", "/pedidos"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "reprocessEventAction", ...opts("/monitor", "/catalogo", "/pedidos") }, async (s) => {
     await guard(s);
     const r = await reprocessEvent(s.ctx, id);
     return { ok: true as const, message: `Reprocessado (${r.status === "ok" ? "concluído" : r.status === "failed" ? "ainda com falha" : r.status === "pending" ? "pendente" : "ignorado"}): ${r.message}` };
@@ -535,7 +535,7 @@ export async function reprocessEventAction(id: string, _fd: FormData) {
 }
 
 export async function dismissEventAction(id: string, fd: FormData) {
-  return runAction(opts("/monitor"), async (s) => {
+  return runAction({ entitlement: "ecommerce.loja", action: "dismissEventAction", ...opts("/monitor") }, async (s) => {
     await guard(s);
     await dismissEvent(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Evento marcado como ignorado." };

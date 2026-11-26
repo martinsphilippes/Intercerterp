@@ -128,6 +128,14 @@ async function runStep(req: NextRequest, backend: "postgres" | "appwrite", step:
     return NextResponse.json({ ok: true, step, ...r, log: log.slice(-8), ms: Date.now() - started });
   }
 
+  // habilitação de módulos (docs/modulos/lancamento-gradual.md): linha de base de todas as empresas sem estado. Aditiva e
+  // idempotente — grava o estado em modo "legacy" (nada muda para ninguém); permitida também depois de "finish"
+  if (step === "modules-baseline") {
+    const { baselineAllCompanies } = await import("@/domain/modules/baseline");
+    const companies = await baselineAllCompanies(store);
+    return NextResponse.json({ ok: true, step, companies, ms: Date.now() - started });
+  }
+
   // a partir daqui o banco precisa estar provisionado
   const completed = await store.get("operations", DONE_ID).catch(() => null);
 

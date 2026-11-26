@@ -6,6 +6,7 @@ import { requireSession, type SessionInfo } from "./session";
 import type { Crud, ModuleKey } from "../permissions";
 import { can } from "../permissions";
 import { scheduleBackgroundJobs } from "./background-jobs";
+import { assertActionModule } from "./modules";
 
 export type ActionResult<T = unknown> = { ok: true; data?: T; message?: string; redirect?: string } | { ok: false; error: string; code?: string; fields?: Record<string, string> };
 
@@ -14,11 +15,22 @@ export type ActionResult<T = unknown> = { ok: true; data?: T; message?: string; 
  * registra falhas inesperadas no log do servidor e revalida caminhos informados.
  */
 export async function runAction<T>(
-  opts: { module?: ModuleKey; op?: Crud; revalidate?: string[]; requireBranch?: boolean },
+  opts: {
+    module?: ModuleKey;
+    op?: Crud;
+    revalidate?: string[];
+    requireBranch?: boolean;
+    /** módulo(s) do catálogo que governam a ação (basta um habilitado) — docs/modulos; marcado em todas as ações */
+    entitlement?: string | string[];
+    /** nome da ação (libera a conclusão/histórico conforme a política de desligamento do módulo) */
+    action?: string;
+  },
   fn: (s: SessionInfo) => Promise<T | ActionResult<T>>,
 ): Promise<ActionResult<T>> {
   try {
     const s = await requireSession();
+    // habilitação do módulo para a empresa (antes do perfil: módulo não contratado não depende de permissão)
+    if (opts.entitlement) await assertActionModule(s.ctx, s.company, opts.entitlement, opts.action);
     if (opts.module && !can(s.user, opts.module, opts.op ?? "view")) {
       const { audit } = await import("../core/audit");
       await audit(s.ctx, { module: opts.module, action: `${opts.module}.denied`, entityType: "permission", entityId: `${opts.module}:${opts.op ?? "view"}`, summary: `Ação negada: sem permissão "${opts.op ?? "view"}" em ${opts.module}`, result: "failure" });

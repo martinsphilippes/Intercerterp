@@ -9,7 +9,7 @@ import { downloadIssuedCertificate } from "@/domain/accounting/certificates";
  * é contado e registrado no histórico da solicitação; a senha do certificado nunca passa por aqui.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const s = await requireApiSession("text");
+  const s = await requireApiSession("text", { modules: ["contabil.certificados", "integracao.contabilidade", "rede.plataforma"], surface: "api certificados" });
   if (s instanceof NextResponse) return s;
   const { id } = await params;
   let password = "";

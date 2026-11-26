@@ -1375,6 +1375,38 @@ export const COLLECTIONS: CollectionDef[] = [
     },
     indexes: [k("i_store", "storeId")],
   },
+  // ───────────────────────────── Habilitação de módulos por empresa (docs/modulos) — fonte oficial no ERP
+  {
+    id: "company_modules",
+    label: "Módulos habilitados da empresa (estado vigente, versão e modo de controle)",
+    // um registro por empresa (id determinístico); modules = { chave: { state, since, source, history, config, ... } }
+    fields: { companyId: id(true), mode: s(20), version: int, modules: json, baselineAt: dt, updatedBy: s(200) },
+    indexes: [u("u_company", "companyId")],
+  },
+  {
+    id: "module_changes",
+    label: "Histórico de alterações de módulos (uma linha por versão; índice único impede edição concorrente)",
+    fields: {
+      companyId: id(true), version: int, operationId: id(), actor: s(200), actorType: s(20), reason: s(500), changes: json,
+      before: json, after: json, at: dt,
+    },
+    indexes: [u("u_company_version", "companyId", "version"), k("i_operation", "operationId")],
+  },
+  {
+    id: "module_operations",
+    label: "Operações de módulos recebidas (Interos): idempotência, estado e resultado confirmado",
+    fields: {
+      companyId: id(), idempotencyKey: s(200), requestHash: s(80), clientId: s(80), kind: s(30), status: s(20), actor: s(200),
+      reason: s(500), request: json, result: json, error: json, versionBefore: int, versionAfter: int, scheduledFor: dt, finishedAt: dt,
+    },
+    indexes: [u("u_idem", "clientId", "idempotencyKey"), k("i_company", "companyId")],
+  },
+  {
+    id: "module_baselines",
+    label: "Linha de base da migração por empresa (o que estava disponível e em uso) e divergências para revisão",
+    fields: { companyId: id(true), takenAt: dt, kind: s(20), modules: json, usage: json, divergences: json, status: s(20), reviewedBy: s(200), reviewedAt: dt, notes: txt },
+    indexes: [u("u_company", "companyId")],
+  },
   {
     id: "files",
     label: "Arquivos",

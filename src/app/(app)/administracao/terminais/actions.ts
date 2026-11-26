@@ -25,26 +25,26 @@ function parse(fd: FormData): TerminalInput {
 
 export async function saveTerminalAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/terminais"] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "saveTerminalAction", module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/terminais"] }, async (s) => {
     const t = id ? await updateTerminal(s.ctx, id, parse(fd)) : await createTerminal(s.ctx, parse(fd));
     return { ok: true as const, message: id ? "Terminal atualizado." : "Terminal cadastrado.", redirect: `/administracao/terminais/${t.id}` };
   });
 }
 
 export async function setTerminalStatusAction(id: string, status: "active" | "inactive", fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "setTerminalStatusAction", module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
     await setTerminalStatus(s.ctx, id, status, fopt(fd, "reason"));
     return { ok: true as const, message: status === "inactive" ? "Terminal inativado." : "Terminal reativado." };
   });
 }
 
 export async function recordPrintPageAction(id: string, userAgent: string) {
-  return runAction({ module: "admin" }, async (s) => ({ message: await recordBrowserPrintPage(s.ctx, id, { userAgent }) }));
+  return runAction({ entitlement: "vendas.pdv", action: "recordPrintPageAction", module: "admin" }, async (s) => ({ message: await recordBrowserPrintPage(s.ctx, id, { userAgent }) }));
 }
 
 /** Terminal sem conector: registra "não verificado" (o servidor nunca contata a URL do conector). */
 export async function recordNoConnectorAction(id: string) {
-  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "recordNoConnectorAction", module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
     const r = await recordConnectorNotConfigured(s.ctx, id);
     return { ok: true as const, data: r, message: r.message };
   });
@@ -52,7 +52,7 @@ export async function recordNoConnectorAction(id: string) {
 
 /** Resultado medido no navegador do terminal (o conector local só é alcançável a partir da própria máquina). */
 export async function recordBrowserConnectorAction(id: string, status: { ok: boolean; httpStatus?: number; latencyMs?: number; error?: string; body?: unknown }) {
-  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
+  return runAction({ entitlement: "vendas.pdv", action: "recordBrowserConnectorAction", module: "admin", op: "edit", revalidate: [`/administracao/terminais/${id}`] }, async (s) => {
     const httpStatus = Number.isInteger(status.httpStatus) ? status.httpStatus : undefined;
     const latencyMs = Number.isFinite(status.latencyMs) ? Math.round(status.latencyMs!) : undefined;
     const message = status.error ? `Falha ao contatar o conector a partir do navegador: ${String(status.error).slice(0, 200)}` : `HTTP ${httpStatus ?? "?"} em ${latencyMs ?? "?"} ms — ${describeConnectorBody(status.body).slice(0, 300)}`;

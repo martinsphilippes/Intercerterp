@@ -26,7 +26,7 @@ function bps(fd: FormData, key: string): number {
 }
 
 export async function saveAgreementAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "saveAgreementAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const kind = fstr(fd, "referralKind");
     const input: AgreementInput = {
@@ -42,7 +42,7 @@ export async function saveAgreementAction(fd: FormData) {
 }
 
 export async function requestRechargeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "requestRechargeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await requestRecharge(s.ctx, fstr(fd, "childNodeId"), { amount: fint(fd, "amount"), dueDate: fopt(fd, "dueDate"), idemKey: fstr(fd, "_idem") });
     return { ok: true as const, message: `Recarga ${r.code} de ${formatMoney(r.amount)} lançada: a receber do parceiro acima e a pagar do parceiro. O crédito entra na confirmação do recebimento.${r.financeNote ? ` Atenção: ${r.financeNote}` : ""}` };
@@ -50,7 +50,7 @@ export async function requestRechargeAction(fd: FormData) {
 }
 
 export async function confirmRechargeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "confirmRechargeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await confirmRecharge(s.ctx, fstr(fd, "id"), { ref: fstr(fd, "ref") });
     return { ok: true as const, message: `Recarga ${r.code} confirmada: ${formatMoney(r.amount)} creditados na carteira.` };
@@ -58,7 +58,7 @@ export async function confirmRechargeAction(fd: FormData) {
 }
 
 export async function cancelRechargeAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "cancelRechargeAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await cancelRecharge(s.ctx, fstr(fd, "id"), fstr(fd, "reason"));
     return { ok: true as const, message: `Recarga ${r.code} cancelada (títulos cancelados).` };
@@ -66,7 +66,7 @@ export async function cancelRechargeAction(fd: FormData) {
 }
 
 export async function adjustWalletAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "adjustWalletAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const amount = fint(fd, "amount") * (fstr(fd, "direction") === "debit" ? -1 : 1);
     const w = await adjustWallet(s.ctx, fstr(fd, "childNodeId"), { amount, reason: fstr(fd, "reason"), idemKey: fstr(fd, "_idem") });
@@ -75,7 +75,7 @@ export async function adjustWalletAction(fd: FormData) {
 }
 
 export async function closeNowAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "closeNowAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await closeRelationNow(s.ctx, fstr(fd, "childNodeId"), fstr(fd, "relationKey"));
     if (r.carried != null) return { ok: true as const, message: `Sem valor a faturar: crédito de ${formatMoney(-r.carried)} transportado para o próximo fechamento.` };
@@ -85,7 +85,7 @@ export async function closeNowAction(fd: FormData) {
 }
 
 export async function reverseSaleAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "reverseSaleAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     const r = await reverseNetworkSale(s.ctx, fstr(fd, "id"), { reason: fstr(fd, "reason") });
     return { ok: true as const, message: `Venda ${r.protocol} estornada: os lançamentos de todas as camadas foram revertidos.` };
@@ -93,7 +93,7 @@ export async function reverseSaleAction(fd: FormData) {
 }
 
 export async function reprocessSaleAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "reprocessSaleAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     if (!isPlatform(s.ctx)) throw new BusinessError("Reprocessar lançamentos é da plataforma.", "platform");
     const r = await reprocessSaleFinance(s.ctx, fstr(fd, "id"));
@@ -102,7 +102,7 @@ export async function reprocessSaleAction(fd: FormData) {
 }
 
 export async function savePlatformFinanceAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "rede.financeiro", action: "savePlatformFinanceAction", module: "dashboard", revalidate: PATHS }, async (s) => {
     await guard(s);
     await savePlatformFinance(s.ctx, { platformCompanyId: fopt(fd, "platformCompanyId"), acClosingDay: fint(fd, "acClosingDay", 1), acDueDays: fint(fd, "acDueDays", 15) });
     return { ok: true as const, message: "Financeiro da plataforma salvo." };
