@@ -1,0 +1,323 @@
+# Auditoria módulos 26–33 e 37–50 (26/11/2026)
+26.01	PARC	src/lib/db/schema.ts:222	produto tipo serviço com LC116/ISS; sem cadastro próprio cadastros.produtos
+26.02	PLAN	docs/evolucao/04-ausentes.md:144	SRV-01 ordem de serviço ausente
+26.03	PARC	src/domain/sales-documents.ts:196	orçamento comercial aceita item serviço vendas.documentos
+26.04	PARC	src/app/(app)/vendas/_documentos/actions.ts:59	aprovação de orçamento genérica, não de OS vendas.documentos
+26.05	PLAN	docs/evolucao/04-ausentes.md:144	agenda por técnico prevista em SRV-01
+26.06	PLAN	docs/evolucao/04-ausentes.md:144	técnicos previstos em SRV-01
+26.07	PLAN	docs/analise-gestao-contabil.md:157	apontamento de horas ausente
+26.08	NAO	-	sem OS nem consumo de materiais
+26.09	NAO	-	inexistente
+26.10	NAO	-	sem app do técnico
+26.11	NAO	-	inexistente
+26.12	NAO	-	sem assinatura do cliente
+26.13	NAO	-	sem laudos
+26.14	NAO	-	sem garantia de serviço
+26.15	EXT	src/domain/fiscal/service.ts:2036	NFS-e avulsa via Focus NFe fiscal.nfse
+26.16	NAO	-	sem recorrência de serviço
+26.17	NAO	-	inexistente
+26.18	NAO	-	inexistente
+27.01	PLAN	docs/analise-gestao-contabil.md:63	sem tabela de contratos
+27.02	NAO	-	sem modelos de contrato
+27.03	PLAN	docs/analise-gestao-contabil.md:65	sem provedor de assinatura eletrônica
+27.04	PLAN	docs/analise-gestao-contabil.md:63	vigência de contrato ausente
+27.05	PLAN	docs/analise-gestao-contabil.md:64	renovação ausente
+27.06	PLAN	docs/analise-gestao-contabil.md:63	reajuste ausente
+27.07	PLAN	docs/analise-gestao-contabil.md:95	faturamento recorrente ausente
+27.08	PLAN	docs/analise-gestao-contabil.md:63	contrato de serviços ausente
+27.09	NAO	-	inexistente
+27.10	NAO	-	inexistente
+27.11	PLAN	docs/analise-gestao-contabil.md:64	aditivos ausentes
+27.12	PLAN	docs/analise-gestao-contabil.md:64	distrato ausente
+27.13	NAO	-	sem SLA contratual
+27.14	NAO	-	inexistente
+27.15	NAO	-	alertas só de certificados/obrigações
+27.16	PLAN	docs/analise-gestao-contabil.md:64	histórico contratual ausente
+28.01	NAO	-	Inexistente (grep sem ocorrência)
+28.02	NAO	-	Inexistente (grep sem ocorrência)
+28.03	NAO	-	Inexistente (grep sem ocorrência)
+28.04	NAO	-	Inexistente (grep sem ocorrência)
+28.05	NAO	-	Inexistente (grep sem ocorrência)
+28.06	NAO	-	Inexistente (grep sem ocorrência)
+28.07	NAO	-	Inexistente (grep sem ocorrência)
+28.08	NAO	-	Inexistente (grep sem ocorrência)
+28.09	NAO	-	Inexistente (grep sem ocorrência)
+28.10	NAO	-	Inexistente (grep sem ocorrência)
+28.11	NAO	-	Inexistente (grep sem ocorrência)
+28.12	NAO	-	Inexistente (grep sem ocorrência)
+28.13	NAO	-	Inexistente (grep sem ocorrência)
+28.14	NAO	-	Inexistente (grep sem ocorrência)
+29.01	NAO	src/domain/fiscal/entries.ts:89	só CFOP 1551 classifica entrada de imobilizado
+29.02	NAO	-	Inexistente (grep sem ocorrência)
+29.03	NAO	-	Inexistente (grep sem ocorrência)
+29.04	NAO	-	Inexistente (grep sem ocorrência)
+29.05	NAO	-	Inexistente (grep sem ocorrência)
+29.06	NAO	-	Inexistente (grep sem ocorrência)
+29.07	NAO	-	Inexistente (grep sem ocorrência)
+29.08	NAO	-	Inexistente (grep sem ocorrência)
+29.09	NAO	-	Inexistente (grep sem ocorrência)
+29.10	NAO	-	Inexistente (grep sem ocorrência)
+29.11	NAO	-	Inexistente (grep sem ocorrência)
+29.12	NAO	-	Inexistente (grep sem ocorrência)
+30.01	NAO	-	Inexistente (grep sem ocorrência)
+30.02	NAO	-	Inexistente (grep sem ocorrência)
+30.03	NAO	-	Inexistente (grep sem ocorrência)
+30.04	NAO	-	Inexistente (grep sem ocorrência)
+30.05	NAO	-	Inexistente (grep sem ocorrência)
+30.06	NAO	-	Inexistente (grep sem ocorrência)
+30.07	NAO	-	Inexistente (grep sem ocorrência)
+30.08	NAO	-	Inexistente (grep sem ocorrência)
+30.09	NAO	-	Inexistente (grep sem ocorrência)
+30.10	NAO	-	Inexistente (grep sem ocorrência)
+30.11	NAO	-	Inexistente (grep sem ocorrência)
+30.12	NAO	-	Inexistente (grep sem ocorrência)
+30.13	NAO	-	Inexistente (grep sem ocorrência)
+31.01	PLAN	docs/analise-gestao-contabil.md:156	usuários sem cargo/jornada
+31.02	PARC	src/lib/db/schema.ts:1044	departamentos só do escritório contábil contabil.carteira
+31.03	PLAN	docs/analise-gestao-contabil.md:156	perfis são permissões, não cargos
+31.04	NAO	-	Inexistente (grep sem ocorrência)
+31.05	NAO	-	Inexistente (grep sem ocorrência)
+31.06	NAO	-	Inexistente (grep sem ocorrência)
+31.07	NAO	-	Inexistente (grep sem ocorrência)
+31.08	PLAN	docs/analise-gestao-contabil.md:156	férias ausentes
+31.09	PLAN	docs/analise-gestao-contabil.md:156	afastamentos ausentes
+31.10	NAO	-	Inexistente (grep sem ocorrência)
+31.11	NAO	-	Inexistente (grep sem ocorrência)
+31.12	PLAN	docs/analise-gestao-contabil.md:295	folha ausente
+31.13	PLAN	docs/analise-gestao-contabil.md:295	eSocial ausente
+31.14	NAO	-	Inexistente (grep sem ocorrência)
+31.15	NAO	-	Inexistente (grep sem ocorrência)
+31.16	NAO	-	Inexistente (grep sem ocorrência)
+31.17	NAO	-	Inexistente (grep sem ocorrência)
+31.18	NAO	-	Inexistente (grep sem ocorrência)
+31.19	NAO	-	Inexistente (grep sem ocorrência)
+31.20	NAO	-	Inexistente (grep sem ocorrência)
+32.01	PLAN	docs/analise-gestao-contabil.md:149	sem tabela de tarefas (jobs é fila técnica)
+32.02	PLAN	docs/analise-gestao-contabil.md:149	inexistente
+32.03	PARC	src/lib/db/schema.ts:1056	responsáveis por cliente contábil contabil.carteira
+32.04	PARC	src/app/(app)/fiscal/relatorios/page.tsx:451	calendário só de obrigações fiscais tec.fiscal
+32.05	PLAN	docs/analise-gestao-contabil.md:149	checklists ausentes
+32.06	PARC	src/domain/fiscal/obligations.ts:104	obrigações recorrentes geradas, não tarefas genéricas tec.fiscal
+32.07	OP	src/domain/approvals.ts:263	alçadas e etapas só para compras compras.aprovacoes
+32.08	PARC	src/domain/fiscal/obligations.ts:43	prazo de obrigação com alerta tec.fiscal
+32.09	NAO	-	Inexistente (grep sem ocorrência)
+32.10	PLAN	docs/analise-gestao-contabil.md:152	Kanban ausente
+32.11	PLAN	docs/analise-gestao-contabil.md:247	SLA ausente
+32.12	PARC	src/domain/scheduler.ts:17	rotinas fixas no código, não configuráveis plataforma.painel
+32.13	PARC	src/lib/core/notify.ts:97	ocorrências com resolução na origem plataforma.painel
+32.14	NAO	-	Inexistente (grep sem ocorrência)
+32.15	NAO	-	Inexistente (grep sem ocorrência)
+33.01	PARC	src/lib/db/schema.ts:1411; src/app/api/files/[id]/route.ts	arquivos com conferência de permissão plataforma.arquivos
+33.02	PLAN	docs/analise-gestao-contabil.md:240	sem pastas
+33.03	PLAN	docs/analise-gestao-contabil.md:240	só files.kind técnico
+33.04	PLAN	docs/analise-gestao-contabil.md:240	sem versões
+33.05	PARC	src/lib/db/schema.ts:1062	conferência de entregas do escritório contabil.entregas
+33.06	PLAN	docs/analise-gestao-contabil.md:65	sem assinatura eletrônica
+33.07	PLAN	docs/analise-gestao-contabil.md:216	vencimentos só de certificados
+33.08	PARC	src/app/documento/[token]/page.tsx:13	link por token de orçamento/pedido vendas.documentos
+33.09	PARC	src/app/api/files/[id]/route.ts:15	download conferido por empresa e permissão plataforma.arquivos
+33.10	PLAN	docs/analise-gestao-contabil.md:244	sem OCR
+33.11	PARC	src/domain/collection-templates.ts:1	só modelos de mensagem de cobrança financeiro.cobranca_whatsapp
+33.12	PARC	src/domain/fiscal/export.ts:231	pacote contábil, carnê e DANFE; sem gerador genérico tec.fiscal
+33.13	PARC	src/lib/db/schema.ts:956	audit_logs com antes/depois plataforma.administracao
+37.01	PARC	src/app/manifest.ts:4	PWA genérico do ERP; sem app do vendedor
+37.02	PLAN	docs/evolucao/04-ausentes.md:91	VEN-15 força de vendas ausente
+37.03	NAO	-	Inexistente (grep sem ocorrência)
+37.04	NAO	-	Inexistente (grep sem ocorrência)
+37.05	PARC	src/app/manifest.ts:4	PWA com atalho do painel plataforma.painel
+37.06	PARC	src/app/loja/[store]/pedido/[token]/page.tsx:1	acompanhamento do pedido na loja ecommerce.loja
+37.07	NAO	-	Inexistente (grep sem ocorrência)
+37.08	NAO	-	sem portal do fornecedor
+37.09	OP	src/app/(app)/contabil/page.tsx; src/domain/accounting/link.ts	área do escritório contábil com empresas vinculadas contabil.carteira
+37.10	PLAN	docs/analise-gestao-contabil.md:249	portal do cliente ausente
+37.11	NAO	-	Inexistente (grep sem ocorrência)
+37.12	NAO	-	loja só B2C
+37.13	PARC	src/domain/count-scan.ts:1	folha de contagem com bipagem estoque.inventario
+37.14	PARC	src/app/(app)/comercio-digital/expedicao/page.tsx:80	separação web só de pedidos on-line ecommerce.loja
+37.15	NAO	-	Inexistente (grep sem ocorrência)
+37.16	NAO	-	Inexistente (grep sem ocorrência)
+38.01	PARC	src/domain/routines/finance.ts:16	aviso interno de vencidos; WhatsApp manual financeiro.contas_receber
+38.02	OP	src/lib/core/notify.ts:61	rotinas diárias geram notificações deduplicadas plataforma.painel
+38.03	PARC	src/domain/routines/purchases.ts:14	follow-up de pedidos compras.pedidos
+38.04	PARC	src/domain/replenishment.ts:258	sugestão vira rascunho manual compras.reposicao
+38.05	PARC	src/domain/routines/fiscal.ts:49	só pacote contábil agendado integracao.contabilidade
+38.06	NAO	src/domain/ecommerce/promotions.ts:164	recuperação de carrinho só rascunho
+38.07	PLAN	docs/analise-gestao-contabil.md:296	IA ausente
+38.08	PLAN	docs/analise-gestao-contabil.md:296	IA ausente
+38.09	NAO	-	Inexistente (grep sem ocorrência)
+38.10	NAO	-	Inexistente (grep sem ocorrência)
+38.11	PARC	src/domain/replenishment.ts:1	média de consumo, sem modelo preditivo compras.reposicao
+38.12	OP	src/domain/replenishment.ts:115	sugestão de compra por cobertura compras.reposicao
+38.13	OP	src/domain/receipt-pricing.ts:164	preço sugerido após a entrada com prévia compras.precificacao
+38.14	NAO	-	Inexistente (grep sem ocorrência)
+38.15	PLAN	docs/analise-gestao-contabil.md:244	classificação OCR/IA ausente
+38.16	NAO	-	Inexistente (grep sem ocorrência)
+38.17	NAO	-	Inexistente (grep sem ocorrência)
+38.18	PARC	src/domain/scheduler.ts:39	marcador lastRun por rotina; fila jobs plataforma.painel
+39.01	PARC	src/domain/receipts.ts:35	conferência quantitativa; sem inspeção de qualidade compras.recebimento
+39.02	NAO	-	Inexistente (grep sem ocorrência)
+39.03	NAO	-	Inexistente (grep sem ocorrência)
+39.04	NAO	-	Inexistente (grep sem ocorrência)
+39.05	NAO	-	Inexistente (grep sem ocorrência)
+39.06	NAO	-	Inexistente (grep sem ocorrência)
+39.07	NAO	-	Inexistente (grep sem ocorrência)
+39.08	NAO	-	Inexistente (grep sem ocorrência)
+39.09	NAO	-	Inexistente (grep sem ocorrência)
+39.10	NAO	-	Inexistente (grep sem ocorrência)
+39.11	NAO	-	Inexistente (grep sem ocorrência)
+39.12	NAO	-	Inexistente (grep sem ocorrência)
+39.13	NAO	-	sem bloqueio/quarentena
+39.14	PARC	src/domain/lots.ts:54	lote rastreável na venda; sem fluxo de recall estoque.lotes
+40.01	PLAN	docs/evolucao/04-ausentes.md:59	CAD-04 veículos; placa digitada na NF-e
+40.02	NAO	-	Inexistente (grep sem ocorrência)
+40.03	NAO	-	Inexistente (grep sem ocorrência)
+40.04	NAO	-	Inexistente (grep sem ocorrência)
+40.05	NAO	-	Inexistente (grep sem ocorrência)
+40.06	NAO	-	Inexistente (grep sem ocorrência)
+40.07	NAO	-	Inexistente (grep sem ocorrência)
+40.08	NAO	-	Inexistente (grep sem ocorrência)
+40.09	NAO	-	Inexistente (grep sem ocorrência)
+40.10	NAO	-	Inexistente (grep sem ocorrência)
+40.11	NAO	-	Inexistente (grep sem ocorrência)
+40.12	NAO	-	Inexistente (grep sem ocorrência)
+40.13	NAO	-	Inexistente (grep sem ocorrência)
+40.14	NAO	-	Inexistente (grep sem ocorrência)
+40.15	PARC	src/domain/freight-cte.ts:17	só CT-e de frete de compra compras.cte
+41.01	PARC	src/lib/db/schema.ts:324	depósitos por filial, não WMS estoque.gestao
+41.02	PARC	src/lib/db/schema.ts:340	campo texto location no saldo estoque.gestao
+41.03	NAO	-	Inexistente (grep sem ocorrência)
+41.04	NAO	-	Inexistente (grep sem ocorrência)
+41.05	NAO	-	Inexistente (grep sem ocorrência)
+41.06	PARC	src/app/(app)/comercio-digital/expedicao/page.tsx:80	separação de pedidos on-line ecommerce.loja
+41.07	PARC	src/app/(app)/comercio-digital/expedicao/page.tsx:111	conferência e volumes do pedido on-line ecommerce.loja
+41.08	NAO	-	Inexistente (grep sem ocorrência)
+41.09	NAO	-	Inexistente (grep sem ocorrência)
+41.10	NAO	-	Inexistente (grep sem ocorrência)
+41.11	NAO	-	Inexistente (grep sem ocorrência)
+41.12	NAO	-	Inexistente (grep sem ocorrência)
+41.13	PARC	src/domain/count-scan.ts:1	bipagem só na contagem estoque.inventario
+41.14	EXT	src/domain/ecommerce/providers.ts:312	etiqueta só em simulação
+41.15	NAO	-	Inexistente (grep sem ocorrência)
+41.16	PARC	src/app/(app)/comercio-digital/expedicao/page.tsx:111	volumes do pedido on-line ecommerce.loja
+41.17	PARC	src/app/(app)/comercio-digital/expedicao/page.tsx:22	expedição só e-commerce ecommerce.loja
+41.18	NAO	-	Inexistente (grep sem ocorrência)
+42.01	NAO	-	Inexistente (grep sem ocorrência)
+42.02	NAO	-	Inexistente (grep sem ocorrência)
+42.03	PLAN	docs/evolucao/04-ausentes.md:128	FIS-10 importação ausente
+42.04	PLAN	docs/evolucao/04-ausentes.md:128	FIS-10 exportação ausente
+42.05	NAO	-	Inexistente (grep sem ocorrência)
+42.06	NAO	-	Inexistente (grep sem ocorrência)
+42.07	NAO	-	Inexistente (grep sem ocorrência)
+42.08	NAO	-	Inexistente (grep sem ocorrência)
+42.09	NAO	-	Inexistente (grep sem ocorrência)
+42.10	NAO	-	moeda fixa BRL
+42.11	NAO	-	só rateio genérico no recebimento
+42.12	PLAN	docs/evolucao/04-ausentes.md:128	nacionalização ausente
+42.13	NAO	-	Inexistente (grep sem ocorrência)
+42.14	NAO	-	Inexistente (grep sem ocorrência)
+42.15	NAO	-	Inexistente (grep sem ocorrência)
+42.16	NAO	-	Inexistente (grep sem ocorrência)
+43.01	PLAN	docs/evolucao/04-ausentes.md:91	VEN-15; só vendedores
+43.02	NAO	-	Inexistente (grep sem ocorrência)
+43.03	NAO	-	Inexistente (grep sem ocorrência)
+43.04	NAO	-	Inexistente (grep sem ocorrência)
+43.05	PLAN	docs/evolucao/04-ausentes.md:91	pedido externo ausente
+43.06	PLAN	docs/evolucao/04-ausentes.md:91	pedido offline ausente
+43.07	PLAN	docs/evolucao/04-ausentes.md:91	catálogo do representante ausente
+43.08	PARC	src/domain/commissions.ts:197	comissão por vendedor, não representante vendas.comissoes
+43.09	PARC	src/lib/db/schema.ts:106	percentual por categoria, não produto vendas.comissoes
+43.10	OP	src/domain/commissions.ts:129	base valor recebido vendas.comissoes
+43.11	NAO	-	Inexistente (grep sem ocorrência)
+43.12	OP	src/domain/goals.ts:99	meta por vendedor/mês gestao.metas
+43.13	NAO	-	Inexistente (grep sem ocorrência)
+43.14	NAO	-	Inexistente (grep sem ocorrência)
+44.01	NAO	-	Inexistente (grep sem ocorrência)
+44.02	NAO	-	Inexistente (grep sem ocorrência)
+44.03	NAO	-	Inexistente (grep sem ocorrência)
+44.04	NAO	-	Inexistente (grep sem ocorrência)
+44.05	NAO	-	Inexistente (grep sem ocorrência)
+44.06	NAO	-	Inexistente (grep sem ocorrência)
+44.07	NAO	-	Inexistente (grep sem ocorrência)
+44.08	NAO	-	Inexistente (grep sem ocorrência)
+44.09	NAO	-	Inexistente (grep sem ocorrência)
+44.10	NAO	-	Inexistente (grep sem ocorrência)
+44.11	NAO	-	Inexistente (grep sem ocorrência)
+44.12	NAO	-	Inexistente (grep sem ocorrência)
+44.13	NAO	-	Inexistente (grep sem ocorrência)
+44.14	NAO	-	Inexistente (grep sem ocorrência)
+45.01	NAO	-	Inexistente (grep sem ocorrência)
+45.02	NAO	-	sem número de série
+45.03	NAO	-	Inexistente (grep sem ocorrência)
+45.04	NAO	-	Inexistente (grep sem ocorrência)
+45.05	NAO	-	Inexistente (grep sem ocorrência)
+45.06	NAO	-	Inexistente (grep sem ocorrência)
+45.07	NAO	-	Inexistente (grep sem ocorrência)
+45.08	PARC	src/domain/sales.ts:1334	trocas e devoluções genéricas vendas.devolucoes
+45.09	NAO	-	Inexistente (grep sem ocorrência)
+45.10	NAO	-	Inexistente (grep sem ocorrência)
+45.11	NAO	-	Inexistente (grep sem ocorrência)
+45.12	NAO	-	Inexistente (grep sem ocorrência)
+46.01	PARC	src/domain/scale.ts:277; src/domain/scale-files.ts:4	arquivo de carga Toledo/Filizola; layout a conferir produtos.balanca
+46.02	OP	src/domain/scale-barcode.ts:74	EAN 2 peso/valor no PDV produtos.balanca
+46.03	OP	src/domain/routines/stock.ts:62	lotes, validades e alerta diário estoque.lotes
+46.04	NAO	-	sem controle específico
+46.05	NAO	-	sem controle de açougue
+46.06	NAO	-	sem controle de padaria
+46.07	PARC	src/domain/product-components.ts:312	desmembramento com rateio de custo produtos.kits
+46.08	PARC	src/lib/db/schema.ts:262	conversões e desmembramento cadastros.produtos
+46.09	PARC	src/domain/stock.ts:51	movimento perda/avaria sem análise estoque.gestao
+46.10	OP	src/domain/labels.ts:18	gôndola/adesiva/A4 produtos.etiquetas
+46.11	PLAN	docs/evolucao/04-ausentes.md:90	VEN-13 terminal de consulta ausente
+46.12	PARC	src/lib/db/schema.ts:286	promoções com vigência; sem encarte produtos.promocoes
+46.13	NAO	-	sem vasilhames
+46.14	NAO	-	inexistente
+47.01	NAO	-	Inexistente (grep sem ocorrência)
+47.02	NAO	-	Inexistente (grep sem ocorrência)
+47.03	OP	src/domain/products.ts:227	eixos livres cor/tamanho geram SKU cadastros.produtos
+47.04	PARC	src/lib/db/schema.ts:755	pedido por SKU, sem matriz compras.pedidos
+47.05	PARC	src/app/(app)/pdv/product-search.tsx:59	variação no PDV, sem matriz vendas.pdv
+47.06	PARC	src/domain/replenishment.ts:115	reposição por SKU compras.reposicao
+47.07	PARC	src/lib/db/schema.ts:370	transferência por SKU estoque.transferencias
+47.08	PARC	src/lib/db/schema.ts:390	contagem por SKU estoque.inventario
+47.09	NAO	-	Inexistente (grep sem ocorrência)
+47.10	NAO	-	Inexistente (grep sem ocorrência)
+47.11	OP	src/domain/labels.ts:98	etiqueta por variação produtos.etiquetas
+47.12	NAO	-	Inexistente (grep sem ocorrência)
+48.01	OP	src/domain/accounting/certificates.ts:769; src/domain/fiscal/config.ts:163	certificados conhecidos e A1 da empresa contabil.certificados
+48.02	OP	src/domain/accounting/certificates.ts:763	validade e dias restantes contabil.certificados
+48.03	OP	src/domain/accounting/certificates.ts:872; src/domain/routines/fiscal.ts:24	alertas 30/7/vencido contabil.certificados
+48.04	EXT	src/domain/fiscal/config.ts:180	só NF-e assinada na Focus
+48.05	NAO	-	sem validação de assinaturas
+48.06	OP	src/domain/accounting/certificates.ts:286	protocolo, cobrança, validação, emissão, download contabil.certificados
+48.07	OP	src/domain/network/renewals.ts:1	renovações por camada rede.renovacoes
+48.08	PARC	src/domain/accounting/certificates.ts:575	emissão registrada manualmente; gateway pendente contabil.certificados
+48.09	OP	src/domain/accounting/certificates.ts:701	cada download auditado contabil.certificados
+48.10	PARC	src/domain/fiscal/config.ts:163	senha A1 só por nome de variável tec.fiscal
+49.01	OP	src/domain/support.ts:98	chamados com categoria, prioridade e anexos plataforma.painel
+49.02	OP	src/domain/support.ts:180	resposta, status, responsável, notas plataforma.painel
+49.03	OP	src/domain/help-content.ts:118	artigos com busca plataforma.painel
+49.04	PARC	src/domain/help-content.ts:118	tutoriais = artigos plataforma.painel
+49.05	PARC	src/app/(auth)/primeiro-acesso/page.tsx:1	provisionamento; sem tour guiado plataforma.acesso
+49.06	PLAN	docs/evolucao/04-ausentes.md:41	PLA-13 novidades ausente
+49.07	PARC	src/domain/integrations.ts:542	teste de integração, rejeições SEFAZ plataforma.administracao
+49.08	PARC	src/domain/support.ts:28	categoria sugestão no chamado plataforma.painel
+49.09	PARC	src/lib/db/outage.ts:16	aviso de banco indisponível plataforma.acesso
+49.10	NAO	-	inexistente
+49.11	PLAN	docs/analise-gestao-contabil.md:245	avaliação ausente
+49.12	OP	src/domain/support.ts:333	mensagens do chamado plataforma.painel
+50.01	PARC	src/lib/db/schema.ts:1271	tema só da loja virtual ecommerce.loja
+50.02	PARC	src/app/(app)/layout.tsx	menu segue módulos ativos; sem personalização plataforma.administracao
+50.03	NAO	-	sem personalização de painel
+50.04	PARC	src/domain/collection-templates.ts:1	modelos de etiqueta e mensagem; DANFE fixo financeiro.cobranca_whatsapp
+50.05	NAO	-	inexistente
+50.06	PLAN	docs/evolucao/04-ausentes.md:42	PLA-22 campos personalizados
+50.07	NAO	-	só pt-BR
+50.08	NAO	src/lib/money.ts:66	BRL fixo
+50.09	OP	src/lib/db/schema.ts:213	unidades e conversões cadastros.produtos
+50.10	OP	src/domain/notifications.ts:167	silenciar tipos por usuário plataforma.painel
+50.11	PARC	src/domain/fiscal/config.ts:90	só série/próximo número fiscal tec.fiscal
+50.12	NAO	-	inexistente
+50.13	PARC	src/domain/approvals.ts:263	alçadas de compras compras.aprovacoes
+50.14	NAO	-	relatórios fixos
+50.15	OP	src/domain/ecommerce/domains.ts:73	DNS/TXT verificado ecommerce.loja
+50.16	OP	src/app/(app)/administracao/parametros/catalog.ts:41	parâmetros por empresa/filial plataforma.administracao

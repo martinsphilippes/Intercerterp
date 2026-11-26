@@ -1,0 +1,137 @@
+# tabela	código v2 proprietário	chave v1	observação
+companies	34.01	plataforma.administracao	empresas (tipo: varejo, escritório, parceiro da rede)
+branches	01.01	plataforma.administracao	filiais
+users	24.01	plataforma.administracao	usuários (perfil por empresa, filiais permitidas)
+roles	24.03	plataforma.administracao	perfis e permissões
+sessions	24.08	plataforma.acesso	sessões de login
+auth_challenges	24.07	plataforma.acesso	segunda etapa do login
+terminals	07.16	vendas.pdv	terminais do PDV
+user_prefs	50.02	plataforma.administracao	preferências do usuário (colunas, filtros)
+settings	50.16	plataforma.administracao	parâmetros por empresa/filial (inclui feature.*)
+counters	04.25	tec.fiscal	numeradores (documentos, séries, códigos)
+goals	06.13	gestao.metas	metas
+customers	01.02	cadastros.clientes	clientes
+suppliers	01.03	cadastros.fornecedores	fornecedores
+units	01.08	cadastros.produtos	unidades de medida
+products	01.04	cadastros.produtos	produtos e serviços
+product_components	15.01	produtos.kits	componentes de kit
+skus	09.04	cadastros.produtos	variações (SKU)
+unit_conversions	15.13	cadastros.produtos	conversões de unidade
+price_tables	01.13	tec.precos	tabelas de preço
+prices	01.13	tec.precos	preços por tabela/filial/vigência
+promotions	25.01	produtos.promocoes	promoções
+price_history	09.14	tec.precos	histórico de preços
+supplier_products	05.10	cadastros.fornecedores	produtos por fornecedor (custo, código)
+product_imports	09.22	cadastros.produtos	importação de produtos por planilha
+warehouses	10.06	tec.estoque	depósitos
+stock_balances	10.01	tec.estoque	saldos (inclui lotes)
+stock_movements	10.16	tec.estoque	movimentos
+stock_reservations	10.13	tec.estoque	reservas
+transfers	10.05	estoque.transferencias	transferências
+inventories	10.09	estoque.inventario	inventários
+inventory_counts	10.09	estoque.inventario	contagens
+cash_sessions	07.02	caixa.operacao	sessões de caixa
+cash_movements	07.04	caixa.operacao	sangria/suprimento/recebimentos
+carts	07.01	vendas.pdv	atendimentos (pré-venda)
+sales	06.14	vendas.pdv	vendas
+sales_documents	06.01	vendas.documentos	orçamentos e pedidos de venda
+sales_document_items	06.01	vendas.documentos	itens dos documentos comerciais
+sale_items	06.14	vendas.pdv	itens da venda
+sale_payments	07.08	vendas.pdv	pagamentos da venda
+payment_intents	36.04	tec.pagamentos	intenções de Pix
+returns	08.04	vendas.devolucoes	devoluções/trocas
+return_items	08.04	vendas.devolucoes	itens devolvidos
+credit_vouchers	08.06	vendas.devolucoes	vales-crédito
+credit_voucher_moves	08.06	vendas.devolucoes	movimentos do vale
+financial_accounts	18.04	tec.financeiro	contas caixa/banco
+account_entries	18.03	tec.financeiro	lançamentos em conta
+payment_methods	01.12	tec.financeiro	meios de pagamento (inclui taxas por bandeira)
+payment_terms	01.20	tec.financeiro	condições de pagamento
+fin_categories	18.17	tec.financeiro	categorias / plano de contas / centros de custo
+titles	18.02	tec.financeiro	títulos a receber e a pagar
+installments	18.40	tec.financeiro	parcelas
+settlements	18.08	tec.financeiro	baixas
+fin_transfers	18.03	tec.financeiro	transferências entre contas
+bank_imports	18.10	financeiro.conciliacao	importações de extrato/retorno
+bank_transactions	18.10	financeiro.conciliacao	linhas de extrato
+reconciliations	18.10	financeiro.conciliacao	conciliações
+reconciliation_links	18.10	financeiro.conciliacao	vínculos da conciliação
+quotations	05.02	compras.cotacoes	cotações
+quotation_proposals	05.03	compras.cotacoes	propostas de fornecedores
+purchase_orders	05.04	compras.pedidos	pedidos de compra
+purchase_order_items	05.04	compras.pedidos	itens do pedido
+purchase_order_revisions	05.04	compras.pedidos	revisões do pedido
+purchase_requests	05.01	compras.aprovacoes	solicitações de compra (aprovação)
+approval_policies	05.05	compras.aprovacoes	políticas de alçada
+approval_decisions	05.05	compras.aprovacoes	decisões
+receipts	05.06	compras.recebimento	recebimentos (inclui nota a confirmar)
+inbound_ctes	03.13	compras.cte	CT-e de entrada
+fiscal_configs	02.11	tec.fiscal	configuração fiscal por filial
+tax_groups	02.13	tec.fiscal	grupos tributários
+fiscal_documents	04.12	tec.fiscal	documentos fiscais (NF-e, NFC-e, NFS-e)
+fiscal_events	04.24	tec.fiscal	eventos fiscais
+fiscal_obligations	22.18	tec.fiscal	obrigações fiscais
+fiscal_sim_state	04.21	tec.fiscal	estado do provedor simulado
+integrations	24.23	plataforma.administracao	central de integrações (segredos por referência)
+integration_logs	19.23	plataforma.administracao	registro das integrações
+webhook_events	24.12	plataforma.administracao	avisos recebidos de provedores
+jobs	38.18	plataforma.painel	fila de tarefas duráveis
+operations	24.05	plataforma.painel	idempotência/reivindicações
+notifications	24.24	plataforma.painel	notificações
+audit_logs	24.05	plataforma.administracao	auditoria
+tickets	49.01	plataforma.painel	chamados
+ticket_messages	49.02	plataforma.painel	mensagens dos chamados
+help_articles	49.03	plataforma.painel	base de conhecimento
+backups	24.20	plataforma.backup	cópias
+restore_jobs	24.20	plataforma.backup	restaurações
+accounting_clients	51.01	contabil.carteira	clientes contábeis
+accounting_client_people	51.01	contabil.carteira	sócios e contatos
+accounting_client_establishments	51.01	contabil.carteira	estabelecimentos
+accounting_client_regimes	51.01	contabil.carteira	regime com vigência
+accounting_client_groups	51.02	contabil.carteira	grupos de clientes
+departments	51.03	contabil.carteira	departamentos do escritório
+department_members	51.03	contabil.carteira	membros
+accounting_client_assignments	51.03	contabil.carteira	responsáveis
+accounting_deliveries	51.04	contabil.entregas	caixa de entrada do escritório
+certificate_requests	48.06	contabil.certificados	solicitações de certificado
+accounting_certificates	48.01	contabil.certificados	certificados emitidos
+cert_network_nodes	52.01	rede.parceiro	nós da rede
+cert_price_rules	52.02	rede.parceiro	preços em cascata
+cert_customers	52.03	rede.vendas	clientes de certificado
+cert_voucher_packages	52.04	rede.vouchers_cupons	pacotes de voucher
+cert_voucher_purchases	52.04	rede.vouchers_cupons	compras de pacote
+cert_voucher_lots	52.04	rede.vouchers_cupons	lotes de voucher
+cert_voucher_codes	52.04	rede.vouchers_cupons	códigos
+cert_voucher_redemptions	52.04	rede.vouchers_cupons	resgates
+cert_coupons	52.05	rede.vouchers_cupons	cupons
+cert_coupon_uses	52.05	rede.vouchers_cupons	usos do cupom
+cert_coupon_holders	52.05	rede.vouchers_cupons	titulares do cupom
+cert_free_claims	52.05	rede.vouchers_cupons	gratuidades
+cert_sale_cascades	52.03	rede.vendas	cascata da venda
+cert_renewal_contacts	52.06	rede.renovacoes	contatos de renovação
+cert_billing_agreements	52.07	rede.financeiro	modalidade (pré/pós-pago)
+cert_wallets	52.07	rede.financeiro	carteiras
+cert_wallet_moves	52.07	rede.financeiro	movimentos
+cert_wallet_recharges	52.07	rede.financeiro	recargas
+cert_sale_finance	52.07	rede.financeiro	financeiro da venda
+cert_fin_entries	52.07	rede.financeiro	lançamentos da rede
+cert_closings	52.07	rede.financeiro	fechamentos
+stores	12.01	ecommerce.loja	lojas
+store_domains	12.24	ecommerce.loja	domínios
+store_products	12.01	ecommerce.loja	catálogo digital
+store_carts	12.04	ecommerce.loja	carrinhos
+store_coupons	12.09	ecommerce.promocoes	cupons da loja
+online_orders	12.11	ecommerce.loja	pedidos on-line
+online_order_events	12.18	ecommerce.loja	linha do tempo
+commerce_events	12.10	ecommerce.loja	monitor de integrações
+store_channels	35.18	ecommerce.canais	contas preparadas em canais
+gateway_transactions	36.11	ecommerce.banco	recebimentos do gateway
+store_payouts	36.01	ecommerce.banco	repasses
+company_modules	53.01	plataforma.administracao	habilitação de módulos
+module_changes	53.01	plataforma.administracao	histórico de habilitação
+module_operations	53.02	plataforma.administracao	operações do Interos
+module_baselines	53.03	plataforma.administracao	linha de base da migração
+files	24.20	plataforma.arquivos	arquivos (XML, anexos, cópias)
+categories	01.06	cadastros.produtos	categorias e subcategorias
+brands	01.07	cadastros.produtos	marcas
+cost_centers	18.16	tec.financeiro	centros de custo
