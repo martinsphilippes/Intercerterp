@@ -249,7 +249,9 @@ save();
 // bloqueado = página de "não encontrado" (com carregamento progressivo, o Next responde 200 e envia a página de erro),
 // 404, ou redirecionamento para sem-permissão — e NENHUM dado identificador do registro da outra empresa na resposta
 const NOT_FOUND_MARK = "Página ou registro não encontrado";
-const notFound = (r) => r.status === 404 || (r.status >= 300 && r.status < 400 && /sem-permissao|login/.test(r.location ?? "")) || r.text.includes(NOT_FOUND_MARK) || /Sem permissão|sem-permissao/.test(r.text);
+// (módulo não contratado: redireciona para "módulo indisponível" — também é recusa, sem dado nenhum)
+const notFound = (r) => r.status === 404 || (r.status >= 300 && r.status < 400 && /sem-permissao|login|modulo-indisponivel/.test(r.location ?? "")) || r.text.includes(NOT_FOUND_MARK) || /Sem permissão|sem-permissao/.test(r.text);
+const moduleOff = (r) => r.status >= 300 && r.status < 400 && /modulo-indisponivel|sem-permissao/.test(r.location ?? "");
 for (const [k, other] of [["A", "B"], ["B", "A"]]) {
   const t = tenants[k];
   const o = tenants[other];
@@ -284,7 +286,8 @@ for (const [k, other] of [["A", "B"], ["B", "A"]]) {
   const after = await fetchAs(t.ctx, `/clientes?q=${encodeURIComponent("Cliente Exclusivo")}`);
   check(`${k} → troca para a empresa ${other}: recusada (continua na própria)`, after.text.includes(t.cliente) && !after.text.includes(o.cliente), { status: sw.status, location: sw.location });
   const rel = await fetchAs(t.ctx, `/relatorios`);
-  check(`${k} → relatórios: sem dados de outra empresa`, rel.status === 200 && !(demo.nomeProduto && rel.text.includes(demo.nomeProduto)), { status: rel.status });
+  // relatórios sem o módulo contratado (B): "módulo indisponível" — nenhum dado, da própria ou de outra empresa
+  check(`${k} → relatórios: sem dados de outra empresa`, (rel.status === 200 && !(demo.nomeProduto && rel.text.includes(demo.nomeProduto))) || moduleOff(rel), { status: rel.status, location: rel.location ?? null });
 }
 save();
 
@@ -421,10 +424,14 @@ if (process.env.LIC_TOKEN_FILE && process.env.LIC_SIGN_FILE) {
   const snap = (version, extra = {}) => ({ licenseVersion: version, companyId: A.idEmpresa, product: "erp-intercert", commercialStatus: "active", issuedAt: new Date().toISOString(), items: [{ code: "07.01", state: "active" }, { code: "07.02", state: "active" }, { code: "01.02", state: "active" }, { code: "01.03", state: "active" }, { code: "01.04", state: "active" }, { code: "18.02", state: "active" }, { code: "05.04", state: "suspended" }], ...extra });
   const bad = await putLicense(A.idEmpresa, { ...snap(1), licenseVersion: "um" }, `homolog-lic-${RUN}-1`);
   check("v2: retrato inválido → 400, sem consumir o Event-Id", bad.status === 400, { status: bad.status, erro: bad.json?.error?.code });
-  const l1 = await putLicense(A.idEmpresa, snap(1), `homolog-lic-${RUN}-1`);
+  // o MESMO corpo (mesmo issuedAt) na repetição: corpo diferente com o mesmo Event-Id é recusado (409), como deve
+  const first = snap(1);
+  const l1 = await putLicense(A.idEmpresa, first, `homolog-lic-${RUN}-1`);
   check("v2: o mesmo Event-Id com o retrato corrigido é aceito (201 applied)", l1.status === 201 && l1.json?.data?.status === "applied", { status: l1.status, dados: l1.json?.data?.status ?? l1.json?.error });
-  const rep = await putLicense(A.idEmpresa, snap(1), `homolog-lic-${RUN}-1`);
+  const rep = await putLicense(A.idEmpresa, first, `homolog-lic-${RUN}-1`);
   check("v2: repetição do evento devolve a resposta original", rep.headers.get("idempotent-replayed") === "true", { status: rep.status });
+  const changed = await putLicense(A.idEmpresa, snap(1), `homolog-lic-${RUN}-1`);
+  check("v2: mesmo Event-Id com outro conteúdo → 409 event_replay_mismatch", changed.status === 409 && changed.json?.error?.code === "event_replay_mismatch", { status: changed.status });
   const unsigned = await fetch(`${BASE}/api/interos/v2/companies/${A.idEmpresa}/license`, { method: "PUT", headers: { authorization: `Bearer ${LIC}`, "content-type": "application/json", "x-interos-event-id": `homolog-lic-${RUN}-sem` }, body: JSON.stringify(snap(2)) });
   check("v2: gravação sem assinatura → 401 signature_required", unsigned.status === 401 && (await unsigned.json())?.error?.code === "signature_required");
   const st = await v2("GET", `/companies/${A.idEmpresa}/license`);

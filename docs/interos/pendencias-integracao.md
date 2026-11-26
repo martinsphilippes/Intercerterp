@@ -121,3 +121,20 @@ Ordem combinada:
 
 Cada valor vai **direto para as variáveis da Vercel**, colado por quem tem acesso a elas. Nunca por chat, e-mail ou
 documento. `INTEROS_EVENTS_URL` não é usado nesta fase: o Interos consulta o histórico de licença a cada 5 minutos.
+
+## 7. Resultado na homologação (prévia publicada, 26/11/2026)
+
+A versão unificada foi publicada na homologação e homologada de ponta a ponta na prévia real (Vercel + Neon), com
+duas empresas fictícias criadas pelo provisionamento: **97 verificações, 0 falhas**. A evidência, sem tokens, senhas
+nem links de convite, está em `docs/multiempresa/evidencias/homologacao-unificada/`.
+
+| Bloco | O que foi conferido |
+|---|---|
+| Interface de serviço | Credencial ausente ou errada (401, mesma resposta), escopos separados (403) e produção sem credenciais (503) |
+| Migração | Simular e aplicar com o retrato antes e depois idêntico |
+| Provisionamento | Criar; reenviar com a mesma chave (resposta original); reenviar com outra chave (volta como está, `criacao: "ja_existia"`) |
+| Acesso pela tela | Convites aceitos e de uso único; dados próprios cadastrados |
+| Isolamento | Acesso cruzado entre as empresas e a demonstração (tela, APIs, busca, exportação, arquivos, troca de empresa, Torre e provisionamento): bloqueado, sem vazar dados. Módulo não contratado leva a "módulo indisponível". |
+| Administração pelo cliente | Logins e filiais da própria empresa; empresa nova, não |
+| Suspensão | Somente leitura, bloqueio e reativação na hora |
+| Licenças (v2) | Catálogo com a tradução; retrato inválido sem consumir o Event-Id; o mesmo Event-Id corrigido aceito; repetição idêntica devolve a original; outro conteúdo, `409`; sem assinatura, `401`; licença como referência (`origemModulos: "licenca"`, `409 licenca_governa`); Torre pelo contrato (`null` e `409 modulo_nao_contratado`); histórico; LGPD; credencial restrita ao piloto com `403 company_not_allowed` (v2 e v1) e lista filtrada |
