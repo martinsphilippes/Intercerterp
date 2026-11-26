@@ -86,4 +86,25 @@ Na **homologação** (prévia), os passos 1 e 5 foram pulados: a prévia já rod
 
 ## 6. Resultado na homologação
 
-<!-- RESULTADO-MIGRACAO -->
+Base: prévia (branch `claude/eager-tesla-oark2w`, Neon São Paulo), em modo `estrito`, com a demonstração carregada. As
+evidências estão em `docs/multiempresa/evidencias/homologacao-previa-execucao-1/` (primeira aplicação) e
+`.../homologacao-previa/` (segunda, que confirma a idempotência). Os relatórios completos estão em
+`migracao-simular.json` e `migracao-aplicar.json`.
+
+**Retrato da base:** 132 coleções e 11 empresas na primeira execução; na segunda, 13 (as duas a mais são as empresas fictícias criadas pela primeira homologação).
+
+| Execução | Modo | Tempo | Preenchidos | Revisão | Plataforma | Vínculos | Registros (antes → depois) | Valores de conferência (antes = depois) |
+|---|---|---|---|---|---|---|---|---|
+| 1ª | simular | 3,6 s | 0 | 0 | 1 candidata identificada (não marcada: simulação) | 1 contábil e 6 de rede ativos; 1 sem origem (plataforma ainda não marcada) | 3.314 → 3.314 | 48 vendas · R$ 5.994,22 · estoque 943 un. · 60 documentos fiscais |
+| 1ª | aplicar | 2,2 s | 0 | 0 | marcada agora; equipe de certificação da demonstração movida para ela | **8 vínculos criados** (1 contábil e 7 de rede) | 3.314 → 3.324 (+8 vínculos, +1 perfil da equipe na plataforma, +1 registro de auditoria) | idênticos: `conferencia.ok = true`, sem diferenças |
+| 2ª | simular | 3,0 s | 0 | 0 | já marcada | 1 contábil e 7 de rede ativos, 0 a criar | 3.441 → 3.441 (com as empresas da 1ª homologação) | idênticos |
+| 2ª | aplicar | 1,4 s | 0 | 0 | já marcada | 0 criados e 0 atualizados (idempotente) | 3.441 → 3.441 | idênticos |
+
+**Observações:**
+- **Nada ambíguo:** a demonstração já nasce com empresa em todos os registros, então não houve preenchimento nem
+  revisão. Uma base vinda de outro sistema pode ter os dois casos, e eles estão cobertos pelos testes de migração
+  (`tests/multiempresa-migracao.test.ts`).
+- **Perfil para limpeza:** um perfil de cliente tem `certification.operate` (operação da plataforma). Ele aparece em
+  `perfisComOperacaoDePlataforma` e não tem efeito fora da plataforma.
+- **Credenciais compartilhadas:** nenhuma.
+

@@ -481,6 +481,9 @@ sequenceDiagram
 | Loja virtual | fora do ar | fora do ar |
 | Dados e histórico | preservados | preservados |
 
+- Os efeitos valem **na hora**, em todas as instâncias do ERP: a situação da empresa, o contrato e os perfis não ficam
+  em memória entre requisições. Isso foi conferido na homologação: gravação recusada logo depois da suspensão e login
+  aceito logo depois da reativação.
 - A **reativação** devolve a situação anterior e libera as tarefas retidas, na fila em que estavam. Sessões
   encerradas não voltam; as pessoas entram de novo.
 - Cada suspensão e reativação fica registrada em três lugares:
