@@ -177,3 +177,14 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
   - tela da regra "perfil por cargo";
   - configurar `INTEROS_*` e homologar com o Interos real;
   - homologar Focus/SEFAZ e Banco Intercert.
+
+## Integração Interos unificada — pendências do Interos (26/11)
+
+- [x] Uma versão com as quatro APIs (merge da modularização sobre o multiempresa; 12 conflitos resolvidos).
+- [x] Um esquema de credencial: registro único, famílias de escopo, empresas do piloto, assinatura e rotação (`docs/interos/credenciais.md`).
+- [x] v1 de módulos respeita as empresas da credencial (403 `company_not_allowed`, com teste).
+- [x] As 15 correções de comportamento, cada uma com teste de regressão (`docs/interos/pendencias-integracao.md` §2).
+- [x] Vocabulário único: unidades v2 como referência, com a tradução publicada no catálogo; o provisionamento nasce com a habilitação traduzida.
+- [x] Catálogo v2 com `companyKinds` por unidade e dependências "basta um".
+- [ ] Validação do catálogo v2 pelo titular (versão `2.0.0` sem "proposta").
+- [ ] Publicação na homologação e credenciais restritas às empresas do piloto; produção depois da aprovação.

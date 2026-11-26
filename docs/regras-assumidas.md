@@ -1215,3 +1215,29 @@ empresas contratantes reais deve rodar em `producao`, e essa troca depende do ti
 - **Retrato envelhecido:** sem retrato novo há mais de 3 dias, gera o evento `sync.stale`, e a última licença válida continua valendo.
 - **Migração sem bloqueio:** sem retrato, a empresa segue o runtime atual. O controle só passa a bloquear quando o retrato traz `controlMode: "enforced"`.
 - **Cargo, departamento e função** são atributos do usuário. A regra `access.attributeRoles` aplica o perfil quando nenhum é escolhido; o perfil continua sendo o único contêiner de permissões.
+
+## 53. Integração Interos unificada: uma versão, um esquema de credencial, um vocabulário [Decisão, 26/11/2026]
+
+Resposta às pendências do Interos (`docs/interos/pendencias-integracao.md`).
+
+- **Uma versão.** Provisionamento, Torre, módulos (v1) e licenças (v2) no mesmo ERP e endereço (`/api/interos`).
+- **Um esquema de credencial** (`docs/interos/credenciais.md`):
+  - registro único `INTEROS_CREDENCIAIS`, só hashes, e token `Bearer <id>.<segredo>` nas três APIs;
+  - famílias de escopo separadas: uma credencial que misture famílias é recusada inteira;
+  - `empresas` restringe a credencial ao piloto em todas as APIs;
+  - `assinatura` (HMAC) obrigatória para gravar licença;
+  - rotação com o novo e o antigo valendo juntos.
+- **Contrato da empresa no isolamento.** Os registros de módulos e licença (`company_modules`, `module_changes`,
+  `module_baselines`, `company_licenses`, `license_history`) são **só leitura** para a empresa (`CONTRACT_READONLY`):
+  só a plataforma grava. `module_operations` e `interos_events` são da plataforma.
+- **Vocabulário único.** As unidades v2 são a referência. O módulo amplo do provisionamento e a chave v1 são
+  traduções, publicadas no catálogo. Empresa criada pelo provisionamento nasce com a habilitação traduzida (só
+  vendáveis). Com licença aplicada, o contrato amplo é derivado dela e `PUT /modulos` responde `409 licenca_governa`.
+- **Transições na hora.** Teste, carência, agendamento, vigência e operações agendadas valem na primeira requisição
+  depois do instante. A rotina diária é rede de segurança (o plano da Vercel não garante rotina de hora em hora).
+- **Teto da empresa sobre tudo.** Suspensa, somente leitura ou vigência vencida desligam também as unidades
+  preservadas, que voltam na reativação.
+- **Obrigação declarada.** As devoluções no prazo do CDC (90 dias) seguram o desligamento: função opcional em conclusão
+  continua mesmo com o pai desligado.
+- **LGPD.** O Interos recebe quem pediu uma contratação como identificador pseudônimo e perfil, nunca o nome.
+- **Pendente do titular:** validar as 67 unidades do catálogo v2 para publicar a versão `2.0.0` (sem "proposta").

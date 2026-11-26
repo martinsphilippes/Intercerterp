@@ -193,6 +193,8 @@ extras dentro de `erro`, como `campos` (validação) e `idEmpresa` (conflito de 
 | 409 | `usuario_bloqueado` | E-mail de um acesso suspenso ou inativo no ERP | Informar outro e-mail ou pedir a reativação à empresa |
 | 409 | `convite_ja_aceito` | Reenvio de convite para quem já ativou o acesso | Nada a fazer; a pessoa recupera a senha pela tela de login |
 | 409 | `nada_a_retomar` | Retomada de empresa sem implantação de criação | Nada a fazer |
+| 409 | `licenca_governa` | `PUT /modulos` numa empresa com licença v2 aplicada | Mudar os módulos pelo retrato de licença (v2) |
+| 409 | `modulo_nao_contratado` | Consulta da Torre de um módulo que a empresa não contratou | Nada a consultar; o resumo traz o bloco `null` |
 | 409 | `conflito` | Conflito com registro existente (ex.: código de unidade repetido) | Consultar o estado e corrigir |
 | 413 | `conteudo_grande_demais` | Corpo acima de 256 KB | Reduzir |
 | 422 | `validacao` | Campos inválidos: **todos** os problemas, por campo, em `campos[]` | Corrigir e enviar com **chave nova** |
@@ -404,6 +406,13 @@ imediato e central:
 - recursos de contrato (loja virtual, rede de certificação) são ligados ou desligados.
 
 Nenhum dado é apagado. Recontratar devolve o acesso aos perfis como eram.
+
+**Vocabulário único (pendência 4).** O módulo amplo é uma **tradução** das unidades comerciais v2, publicada no
+catálogo (`GET /api/interos/v2/catalog` → `translations.provisioningModules`):
+- a empresa recebe a habilitação real dessas unidades: só as vendáveis, com as dependências fechadas e o controle
+  aplicado;
+- com **licença v2 aplicada**, a licença é a referência: esta operação responde `409 licenca_governa` e os módulos
+  mudam pelo retrato de licença. A consulta mostra `contrato.origemModulos` (`provisionamento` ou `licenca`).
 
 ### 8.8 `POST /empresas/{idEmpresa}/administradores`: convidar administrador
 Corpo: `{ administrador: { nome, email, telefone? }, entregaConvite? }`. Mesmas regras de e-mail de §8.2. Útil quando
