@@ -1,0 +1,75 @@
+{
+  "titulo": "Campos inválidos (todos os problemas de uma vez, por campo)",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e422",
+      "Idempotency-Key": "delta-criar-20261125-001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "contaInterosId": "conta-delta-0004",
+      "empresa": {
+        "tipo": "varejo",
+        "razaoSocial": "",
+        "cnpj": "11.111.111/1111-11",
+        "endereco": {
+          "uf": "XX",
+          "cep": "123"
+        }
+      },
+      "modulos": [
+        "pdv",
+        "folha_de_pagamento"
+      ],
+      "administrador": {
+        "nome": "Davi",
+        "email": "davi@"
+      }
+    }
+  },
+  "resposta": {
+    "status": 422,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e422",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "validacao",
+        "mensagem": "Há campos inválidos na solicitação.",
+        "campos": [
+          {
+            "campo": "empresa.razaoSocial",
+            "mensagem": "Informe a razão social."
+          },
+          {
+            "campo": "empresa.cnpj",
+            "mensagem": "CNPJ inválido."
+          },
+          {
+            "campo": "empresa.endereco.uf",
+            "mensagem": "UF inválida."
+          },
+          {
+            "campo": "empresa.endereco.cep",
+            "mensagem": "CEP deve ter 8 dígitos."
+          },
+          {
+            "campo": "modulos",
+            "mensagem": "Módulo(s) inválido(s) para este tipo de empresa: folha_de_pagamento."
+          },
+          {
+            "campo": "administrador.email",
+            "mensagem": "Informe um e-mail válido para o administrador."
+          }
+        ]
+      },
+      "requestId": "req-exemplo-e422"
+    }
+  }
+}

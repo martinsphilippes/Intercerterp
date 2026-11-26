@@ -1,5 +1,6 @@
 import { detId, isConflict } from "../db";
 import type { Store } from "../db/types";
+import { CONTRACT_FEATURES, featureAllowedByContract } from "@/domain/tenancy/contract";
 
 const scopeKey = (companyId: string, branchId: string | null | undefined, key: string) => `${companyId}|${branchId ?? "*"}|${key}`;
 
@@ -101,7 +102,15 @@ export const featureDefault = (key: string, fallback = true) => FEATURE_DEFAULTS
  * Chave de liga/desliga de recursos novos (evolução por fases). Lê o parâmetro `feature.<key>` (filial → empresa);
  * sem valor gravado, vale o padrão informado, o que permite reverter uma fase sem reimplantar.
  */
+/**
+ * Recurso ligado? Recursos governados por contrato (loja virtual, rede de certificação — multiempresa, contrato §9) só
+ * valem se o módulo estiver contratado: fora do contrato ficam desligados mesmo que alguém os ligue em Parâmetros.
+ * Empresa sem contrato registrado (anterior ao multiempresa) segue só o parâmetro.
+ */
 export async function isFeatureOn(store: Store, companyId: string, branchId: string | null | undefined, key: string, fallback = false): Promise<boolean> {
-  return Boolean(await getSetting(store, companyId, branchId, `feature.${key}`, fallback));
+  const on = Boolean(await getSetting(store, companyId, branchId, `feature.${key}`, fallback));
+  if (!on || !companyId || !CONTRACT_FEATURES.has(key)) return on;
+  const company = await store.get("companies", companyId).catch(() => null);
+  return featureAllowedByContract(company, key);
 }
 

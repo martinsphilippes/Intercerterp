@@ -1,0 +1,34 @@
+{
+  "titulo": "Conferir a credencial e a saúde da interface",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/status",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-0001"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-0001",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "situacao": "ok",
+      "versao": "v1",
+      "cliente": {
+        "id": "interos-prov-homolog",
+        "nome": "Interos — provisionamento (homologação)",
+        "escopos": [
+          "provisionamento:leitura",
+          "provisionamento:escrita"
+        ]
+      },
+      "horarioServidor": "2026-11-20T12:01:00.000Z",
+      "requestId": "req-exemplo-0001"
+    }
+  }
+}

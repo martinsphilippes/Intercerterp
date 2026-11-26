@@ -1,0 +1,1097 @@
+{
+  "base": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app",
+  "run": "202611260142",
+  "iniciadoEm": "2026-11-26T01:42:57.915Z",
+  "etapas": [
+    {
+      "etapa": "interface de serviço",
+      "status": "v1"
+    },
+    {
+      "etapa": "migração (simular)",
+      "ms": 3598,
+      "resumo": {
+        "ok": true,
+        "step": "multiempresa",
+        "runId": "2d182276300e4c43abe8c678b0ae28b5",
+        "modo": "simular",
+        "isolamento": "estrito",
+        "conferencia": {
+          "ok": true,
+          "diferencas": []
+        },
+        "preenchidos": 0,
+        "revisao": 0,
+        "plataforma": {
+          "empresa": "2b44446792ee1777b885f59357c09dee",
+          "marcadaAgora": false,
+          "observacao": "única empresa de parceiro da rede com perfil de gestão da rede inteira"
+        },
+        "equipeDemonstracao": {
+          "movida": false,
+          "observacao": "perfil da equipe na plataforma ainda não existe (rode a demonstração atualizada)"
+        },
+        "perfisComOperacaoDePlataforma": 1,
+        "credenciaisCompartilhadas": [],
+        "vinculos": {
+          "contabilidade": {
+            "ativos": 1,
+            "revogados": 0
+          },
+          "rede": {
+            "ativos": 6,
+            "suspensos": 0,
+            "revogados": 0,
+            "semOrigem": 1
+          },
+          "criados": 0,
+          "atualizados": 0
+        },
+        "empresas": 11,
+        "ms": 2520
+      }
+    },
+    {
+      "etapa": "migração (aplicar)",
+      "ms": 2192,
+      "resumo": {
+        "ok": true,
+        "step": "multiempresa",
+        "runId": "009c86390985250a5c30199ac42dd8a3",
+        "modo": "aplicar",
+        "isolamento": "estrito",
+        "conferencia": {
+          "ok": true,
+          "diferencas": []
+        },
+        "preenchidos": 0,
+        "revisao": 0,
+        "plataforma": {
+          "empresa": "2b44446792ee1777b885f59357c09dee",
+          "marcadaAgora": true,
+          "observacao": "única empresa de parceiro da rede com perfil de gestão da rede inteira"
+        },
+        "equipeDemonstracao": {
+          "movida": true,
+          "observacao": "perfil da equipe criado na empresa da plataforma e usuário de demonstração movido"
+        },
+        "perfisComOperacaoDePlataforma": 1,
+        "credenciaisCompartilhadas": [],
+        "vinculos": {
+          "contabilidade": {
+            "ativos": 1,
+            "revogados": 0
+          },
+          "rede": {
+            "ativos": 7,
+            "suspensos": 0,
+            "revogados": 0,
+            "semOrigem": 0
+          },
+          "criados": 8,
+          "atualizados": 0
+        },
+        "empresas": 11,
+        "ms": 1910
+      }
+    },
+    {
+      "etapa": "provisionamento A",
+      "idEmpresa": "c59e7eba3121f6d5a22534cc985c89ce",
+      "contaInterosId": "homolog-a-202611260142",
+      "modulos": [
+        "pdv",
+        "vendas",
+        "estoque",
+        "compras",
+        "financeiro",
+        "fiscal",
+        "relatorios"
+      ],
+      "resposta": {
+        "empresa": {
+          "idEmpresa": "c59e7eba3121f6d5a22534cc985c89ce",
+          "contaInterosId": "homolog-a-202611260142",
+          "tipo": "varejo",
+          "razaoSocial": "Aurora Utilidades Ltda (homologação 202611260142)",
+          "nomeFantasia": "Aurora Utilidades 202611260142",
+          "cnpj": "44028041000161",
+          "situacao": "ativa",
+          "suspensao": null,
+          "historicoSituacao": [],
+          "modulos": [
+            "compras",
+            "estoque",
+            "financeiro",
+            "fiscal",
+            "pdv",
+            "relatorios",
+            "vendas"
+          ],
+          "contrato": {
+            "referencia": "HML-202611260142-A",
+            "plano": "homologacao"
+          },
+          "implantacao": {
+            "operacao": "criar",
+            "estado": "concluida",
+            "etapas": [
+              {
+                "etapa": "empresa",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.255Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "unidade_inicial",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.280Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "modulos",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.311Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "administrador",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.353Z",
+                "erro": null,
+                "tentativas": 1
+              }
+            ],
+            "tentativas": 1,
+            "ultimoErro": null,
+            "iniciadaEm": "2026-11-26T01:43:06.908Z",
+            "concluidaEm": "2026-11-26T01:43:07.360Z"
+          },
+          "unidades": [
+            {
+              "idUnidade": "a81818692a1ffe9014807c09ce0631e7",
+              "codigo": "01",
+              "nome": "Aurora Utilidades — Matriz",
+              "cnpj": "44028041000161",
+              "situacao": "ativa"
+            }
+          ],
+          "administradores": [
+            {
+              "idUsuario": "84d02a3a228bb944ba0df1dc48c86d07",
+              "nome": "Admin A (homologação)",
+              "email": "admin.a.202611260142@homologacao.example",
+              "situacao": "convidado",
+              "convite": {
+                "estado": "pendente",
+                "expiraEm": "2026-12-03T01:43:07.337Z",
+                "enviadoEm": "2026-11-26T01:43:07.341Z",
+                "detalheEntrega": "Link devolvido ao Interos para entrega."
+              },
+              "primeiroAcessoEm": null,
+              "ultimoAcessoEm": null
+            }
+          ],
+          "usuarios": {
+            "ativos": 0,
+            "convidados": 1,
+            "suspensos": 0,
+            "inativos": 0
+          },
+          "ultimaAtividadeEm": null,
+          "vinculadaEm": "2026-11-26T01:43:07.235Z",
+          "atualizadaEm": "2026-11-26T01:43:07.287Z"
+        },
+        "convite": {
+          "idUsuario": "84d02a3a228bb944ba0df1dc48c86d07",
+          "entrega": "interos",
+          "entregue": null,
+          "canal": "interos",
+          "detalhe": "Link devolvido ao Interos para entrega.",
+          "expiraEm": "2026-12-03T01:43:07.337Z",
+          "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
+          "linkRedigido": false
+        }
+      }
+    },
+    {
+      "etapa": "provisionamento B",
+      "idEmpresa": "f84095de26c6761e8e1e7f38774ce4c5",
+      "contaInterosId": "homolog-b-202611260142",
+      "modulos": [
+        "pdv",
+        "vendas",
+        "estoque",
+        "financeiro"
+      ],
+      "resposta": {
+        "empresa": {
+          "idEmpresa": "f84095de26c6761e8e1e7f38774ce4c5",
+          "contaInterosId": "homolog-b-202611260142",
+          "tipo": "varejo",
+          "razaoSocial": "Boreal Papelaria Ltda (homologação 202611260142)",
+          "nomeFantasia": "Boreal Papelaria 202611260142",
+          "cnpj": "79085707000106",
+          "situacao": "ativa",
+          "suspensao": null,
+          "historicoSituacao": [],
+          "modulos": [
+            "estoque",
+            "financeiro",
+            "pdv",
+            "vendas"
+          ],
+          "contrato": {
+            "referencia": "HML-202611260142-B",
+            "plano": "homologacao"
+          },
+          "implantacao": {
+            "operacao": "criar",
+            "estado": "concluida",
+            "etapas": [
+              {
+                "etapa": "empresa",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.466Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "unidade_inicial",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.486Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "modulos",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.516Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "administrador",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.554Z",
+                "erro": null,
+                "tentativas": 1
+              }
+            ],
+            "tentativas": 1,
+            "ultimoErro": null,
+            "iniciadaEm": "2026-11-26T01:43:08.159Z",
+            "concluidaEm": "2026-11-26T01:43:08.560Z"
+          },
+          "unidades": [
+            {
+              "idUnidade": "9a32b6d0f43077a1a468426be4635011",
+              "codigo": "01",
+              "nome": "Boreal Papelaria — Matriz",
+              "cnpj": "79085707000106",
+              "situacao": "ativa"
+            }
+          ],
+          "administradores": [
+            {
+              "idUsuario": "21fcb8877b0f86fa6deb7e74545fd6f2",
+              "nome": "Admin B (homologação)",
+              "email": "admin.b.202611260142@homologacao.example",
+              "situacao": "convidado",
+              "convite": {
+                "estado": "pendente",
+                "expiraEm": "2026-12-03T01:43:08.539Z",
+                "enviadoEm": "2026-11-26T01:43:08.543Z",
+                "detalheEntrega": "Link devolvido ao Interos para entrega."
+              },
+              "primeiroAcessoEm": null,
+              "ultimoAcessoEm": null
+            }
+          ],
+          "usuarios": {
+            "ativos": 0,
+            "convidados": 1,
+            "suspensos": 0,
+            "inativos": 0
+          },
+          "ultimaAtividadeEm": null,
+          "vinculadaEm": "2026-11-26T01:43:08.448Z",
+          "atualizadaEm": "2026-11-26T01:43:08.493Z"
+        },
+        "convite": {
+          "idUsuario": "21fcb8877b0f86fa6deb7e74545fd6f2",
+          "entrega": "interos",
+          "entregue": null,
+          "canal": "interos",
+          "detalhe": "Link devolvido ao Interos para entrega.",
+          "expiraEm": "2026-12-03T01:43:08.539Z",
+          "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
+          "linkRedigido": false
+        }
+      }
+    },
+    {
+      "etapa": "ids da empresa de demonstração (outra empresa)",
+      "ids": {
+        "cliente": "abd4825a8ffd924847fc3dcde832e77f",
+        "produto": "0a1dbf4ef41356283e54036700ff9b08",
+        "venda": "54aa5773c9dc12fe543341f2348a0dde",
+        "fornecedor": "a2182f5125325a1d4734430e84554532",
+        "empresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "arquivo": "215ccbf6d91c63725a40",
+        "nomeProduto": "Ajuste de barra (costura)"
+      }
+    }
+  ],
+  "verificacoes": [
+    {
+      "nome": "status com a credencial de provisionamento",
+      "ok": true,
+      "detalhe": {
+        "situacao": "ok",
+        "versao": "v1",
+        "cliente": {
+          "id": "interos-prov-homolog",
+          "nome": "interos-prov-homolog",
+          "escopos": [
+            "provisionamento:leitura",
+            "provisionamento:escrita"
+          ]
+        },
+        "horarioServidor": "2026-11-26T01:42:59.235Z",
+        "requestId": "homolog-202611260142-2afc6d"
+      }
+    },
+    {
+      "nome": "status com a credencial da Torre",
+      "ok": true,
+      "detalhe": {
+        "situacao": "ok",
+        "versao": "v1",
+        "cliente": {
+          "id": "interos-torre-homolog",
+          "nome": "interos-torre-homolog",
+          "escopos": [
+            "torre:resumo",
+            "torre:detalhe",
+            "torre:transacoes"
+          ]
+        },
+        "horarioServidor": "2026-11-26T01:42:59.531Z",
+        "requestId": "homolog-202611260142-464236"
+      }
+    },
+    {
+      "nome": "sem credencial → 401 nao_autenticado",
+      "ok": true,
+      "detalhe": null
+    },
+    {
+      "nome": "segredo errado → 401 (mesma resposta)",
+      "ok": true,
+      "detalhe": null
+    },
+    {
+      "nome": "credencial da Torre não provisiona → 403",
+      "ok": true,
+      "detalhe": null
+    },
+    {
+      "nome": "credencial de provisionamento não lê a Torre → 403",
+      "ok": true,
+      "detalhe": {
+        "erro": {
+          "codigo": "sem_permissao",
+          "mensagem": "Esta credencial não tem o escopo exigido (torre:resumo)."
+        },
+        "requestId": "homolog-202611260142-0ffe80"
+      }
+    },
+    {
+      "nome": "produção sem credenciais → 503 servico_nao_configurado (ou ainda sem a rota)",
+      "ok": true,
+      "detalhe": {
+        "status": 404
+      }
+    },
+    {
+      "nome": "migração simular: conferência antes/depois sem diferença",
+      "ok": true,
+      "detalhe": {
+        "ok": true,
+        "step": "multiempresa",
+        "runId": "2d182276300e4c43abe8c678b0ae28b5",
+        "modo": "simular",
+        "isolamento": "estrito",
+        "conferencia": {
+          "ok": true,
+          "diferencas": []
+        },
+        "preenchidos": 0,
+        "revisao": 0,
+        "plataforma": {
+          "empresa": "2b44446792ee1777b885f59357c09dee",
+          "marcadaAgora": false,
+          "observacao": "única empresa de parceiro da rede com perfil de gestão da rede inteira"
+        },
+        "equipeDemonstracao": {
+          "movida": false,
+          "observacao": "perfil da equipe na plataforma ainda não existe (rode a demonstração atualizada)"
+        },
+        "perfisComOperacaoDePlataforma": 1,
+        "credenciaisCompartilhadas": [],
+        "vinculos": {
+          "contabilidade": {
+            "ativos": 1,
+            "revogados": 0
+          },
+          "rede": {
+            "ativos": 6,
+            "suspensos": 0,
+            "revogados": 0,
+            "semOrigem": 1
+          },
+          "criados": 0,
+          "atualizados": 0
+        },
+        "empresas": 11,
+        "ms": 2520
+      }
+    },
+    {
+      "nome": "migração aplicar: conferência antes/depois sem diferença",
+      "ok": true,
+      "detalhe": {
+        "ok": true,
+        "step": "multiempresa",
+        "runId": "009c86390985250a5c30199ac42dd8a3",
+        "modo": "aplicar",
+        "isolamento": "estrito",
+        "conferencia": {
+          "ok": true,
+          "diferencas": []
+        },
+        "preenchidos": 0,
+        "revisao": 0,
+        "plataforma": {
+          "empresa": "2b44446792ee1777b885f59357c09dee",
+          "marcadaAgora": true,
+          "observacao": "única empresa de parceiro da rede com perfil de gestão da rede inteira"
+        },
+        "equipeDemonstracao": {
+          "movida": true,
+          "observacao": "perfil da equipe criado na empresa da plataforma e usuário de demonstração movido"
+        },
+        "perfisComOperacaoDePlataforma": 1,
+        "credenciaisCompartilhadas": [],
+        "vinculos": {
+          "contabilidade": {
+            "ativos": 1,
+            "revogados": 0
+          },
+          "rede": {
+            "ativos": 7,
+            "suspensos": 0,
+            "revogados": 0,
+            "semOrigem": 0
+          },
+          "criados": 8,
+          "atualizados": 0
+        },
+        "empresas": 11,
+        "ms": 1910
+      }
+    },
+    {
+      "nome": "empresa A criada pelo Interos → 201",
+      "ok": true,
+      "detalhe": {
+        "empresa": {
+          "idEmpresa": "c59e7eba3121f6d5a22534cc985c89ce",
+          "contaInterosId": "homolog-a-202611260142",
+          "tipo": "varejo",
+          "razaoSocial": "Aurora Utilidades Ltda (homologação 202611260142)",
+          "nomeFantasia": "Aurora Utilidades 202611260142",
+          "cnpj": "44028041000161",
+          "situacao": "ativa",
+          "suspensao": null,
+          "historicoSituacao": [],
+          "modulos": [
+            "compras",
+            "estoque",
+            "financeiro",
+            "fiscal",
+            "pdv",
+            "relatorios",
+            "vendas"
+          ],
+          "contrato": {
+            "referencia": "HML-202611260142-A",
+            "plano": "homologacao"
+          },
+          "implantacao": {
+            "operacao": "criar",
+            "estado": "concluida",
+            "etapas": [
+              {
+                "etapa": "empresa",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.255Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "unidade_inicial",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.280Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "modulos",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.311Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "administrador",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:07.353Z",
+                "erro": null,
+                "tentativas": 1
+              }
+            ],
+            "tentativas": 1,
+            "ultimoErro": null,
+            "iniciadaEm": "2026-11-26T01:43:06.908Z",
+            "concluidaEm": "2026-11-26T01:43:07.360Z"
+          },
+          "unidades": [
+            {
+              "idUnidade": "a81818692a1ffe9014807c09ce0631e7",
+              "codigo": "01",
+              "nome": "Aurora Utilidades — Matriz",
+              "cnpj": "44028041000161",
+              "situacao": "ativa"
+            }
+          ],
+          "administradores": [
+            {
+              "idUsuario": "84d02a3a228bb944ba0df1dc48c86d07",
+              "nome": "Admin A (homologação)",
+              "email": "admin.a.202611260142@homologacao.example",
+              "situacao": "convidado",
+              "convite": {
+                "estado": "pendente",
+                "expiraEm": "2026-12-03T01:43:07.337Z",
+                "enviadoEm": "2026-11-26T01:43:07.341Z",
+                "detalheEntrega": "Link devolvido ao Interos para entrega."
+              },
+              "primeiroAcessoEm": null,
+              "ultimoAcessoEm": null
+            }
+          ],
+          "usuarios": {
+            "ativos": 0,
+            "convidados": 1,
+            "suspensos": 0,
+            "inativos": 0
+          },
+          "ultimaAtividadeEm": null,
+          "vinculadaEm": "2026-11-26T01:43:07.235Z",
+          "atualizadaEm": "2026-11-26T01:43:07.287Z"
+        },
+        "convite": {
+          "idUsuario": "84d02a3a228bb944ba0df1dc48c86d07",
+          "entrega": "interos",
+          "entregue": null,
+          "canal": "interos",
+          "detalhe": "Link devolvido ao Interos para entrega.",
+          "expiraEm": "2026-12-03T01:43:07.337Z",
+          "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
+          "linkRedigido": false
+        }
+      }
+    },
+    {
+      "nome": "empresa A: reenvio com a mesma chave devolve a resposta original sem o link",
+      "ok": true,
+      "detalhe": null
+    },
+    {
+      "nome": "empresa A: reenvio com outra chave não duplica (200)",
+      "ok": true,
+      "detalhe": null
+    },
+    {
+      "nome": "empresa B criada pelo Interos → 201",
+      "ok": true,
+      "detalhe": {
+        "empresa": {
+          "idEmpresa": "f84095de26c6761e8e1e7f38774ce4c5",
+          "contaInterosId": "homolog-b-202611260142",
+          "tipo": "varejo",
+          "razaoSocial": "Boreal Papelaria Ltda (homologação 202611260142)",
+          "nomeFantasia": "Boreal Papelaria 202611260142",
+          "cnpj": "79085707000106",
+          "situacao": "ativa",
+          "suspensao": null,
+          "historicoSituacao": [],
+          "modulos": [
+            "estoque",
+            "financeiro",
+            "pdv",
+            "vendas"
+          ],
+          "contrato": {
+            "referencia": "HML-202611260142-B",
+            "plano": "homologacao"
+          },
+          "implantacao": {
+            "operacao": "criar",
+            "estado": "concluida",
+            "etapas": [
+              {
+                "etapa": "empresa",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.466Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "unidade_inicial",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.486Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "modulos",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.516Z",
+                "erro": null,
+                "tentativas": 1
+              },
+              {
+                "etapa": "administrador",
+                "estado": "concluida",
+                "concluidaEm": "2026-11-26T01:43:08.554Z",
+                "erro": null,
+                "tentativas": 1
+              }
+            ],
+            "tentativas": 1,
+            "ultimoErro": null,
+            "iniciadaEm": "2026-11-26T01:43:08.159Z",
+            "concluidaEm": "2026-11-26T01:43:08.560Z"
+          },
+          "unidades": [
+            {
+              "idUnidade": "9a32b6d0f43077a1a468426be4635011",
+              "codigo": "01",
+              "nome": "Boreal Papelaria — Matriz",
+              "cnpj": "79085707000106",
+              "situacao": "ativa"
+            }
+          ],
+          "administradores": [
+            {
+              "idUsuario": "21fcb8877b0f86fa6deb7e74545fd6f2",
+              "nome": "Admin B (homologação)",
+              "email": "admin.b.202611260142@homologacao.example",
+              "situacao": "convidado",
+              "convite": {
+                "estado": "pendente",
+                "expiraEm": "2026-12-03T01:43:08.539Z",
+                "enviadoEm": "2026-11-26T01:43:08.543Z",
+                "detalheEntrega": "Link devolvido ao Interos para entrega."
+              },
+              "primeiroAcessoEm": null,
+              "ultimoAcessoEm": null
+            }
+          ],
+          "usuarios": {
+            "ativos": 0,
+            "convidados": 1,
+            "suspensos": 0,
+            "inativos": 0
+          },
+          "ultimaAtividadeEm": null,
+          "vinculadaEm": "2026-11-26T01:43:08.448Z",
+          "atualizadaEm": "2026-11-26T01:43:08.493Z"
+        },
+        "convite": {
+          "idUsuario": "21fcb8877b0f86fa6deb7e74545fd6f2",
+          "entrega": "interos",
+          "entregue": null,
+          "canal": "interos",
+          "detalhe": "Link devolvido ao Interos para entrega.",
+          "expiraEm": "2026-12-03T01:43:08.539Z",
+          "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
+          "linkRedigido": false
+        }
+      }
+    },
+    {
+      "nome": "empresa B: reenvio com a mesma chave devolve a resposta original sem o link",
+      "ok": true,
+      "detalhe": null
+    },
+    {
+      "nome": "empresa B: reenvio com outra chave não duplica (200)",
+      "ok": true,
+      "detalhe": null
+    },
+    {
+      "nome": "convite A aceito pela tela (volta ao login)",
+      "ok": true,
+      "detalhe": {
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/login"
+      }
+    },
+    {
+      "nome": "convite A é de uso único (o mesmo link não ativa de novo)",
+      "ok": true,
+      "detalhe": {
+        "trecho": "IC\n\nIntercert ERP\n\nComércio e varejo\n\nVendas, estoque, financeiro, compras e fiscal na mesma operação.\n• PDV rápido com leitor de código de barras e atalhos de ",
+        "depois": "IC\n\nIntercert ERP\n\nComércio e varejo\n\nVendas, estoque, financeiro, compras e fiscal na mesma operação.\n• PDV rápido com leitor de código de barras e atalhos de "
+      }
+    },
+    {
+      "nome": "administrador A entra no ERP",
+      "ok": true,
+      "detalhe": {
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/dashboard"
+      }
+    },
+    {
+      "nome": "convite B aceito pela tela (volta ao login)",
+      "ok": true,
+      "detalhe": {
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/login"
+      }
+    },
+    {
+      "nome": "convite B é de uso único (o mesmo link não ativa de novo)",
+      "ok": true,
+      "detalhe": {
+        "trecho": "IC\n\nIntercert ERP\n\nComércio e varejo\n\nVendas, estoque, financeiro, compras e fiscal na mesma operação.\n• PDV rápido com leitor de código de barras e atalhos de ",
+        "depois": "IC\n\nIntercert ERP\n\nComércio e varejo\n\nVendas, estoque, financeiro, compras e fiscal na mesma operação.\n• PDV rápido com leitor de código de barras e atalhos de "
+      }
+    },
+    {
+      "nome": "administrador B entra no ERP",
+      "ok": true,
+      "detalhe": {
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/dashboard"
+      }
+    },
+    {
+      "nome": "empresa A: cliente próprio cadastrado pela tela",
+      "ok": true,
+      "detalhe": {
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/clientes/667ede19fa0379cde261d8669811677a"
+      }
+    },
+    {
+      "nome": "empresa B: cliente próprio cadastrado pela tela",
+      "ok": true,
+      "detalhe": {
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/clientes/78223cb3e3171ed5bd623e75ac0f3e73"
+      }
+    },
+    {
+      "nome": "ids da demonstração coletados para as tentativas cruzadas",
+      "ok": true,
+      "detalhe": {
+        "cliente": "abd4825a8ffd924847fc3dcde832e77f",
+        "produto": "0a1dbf4ef41356283e54036700ff9b08",
+        "venda": "54aa5773c9dc12fe543341f2348a0dde",
+        "fornecedor": "a2182f5125325a1d4734430e84554532",
+        "empresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "arquivo": "215ccbf6d91c63725a40",
+        "nomeProduto": "Ajuste de barra (costura)"
+      }
+    },
+    {
+      "nome": "A → tela: cliente da empresa B: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "A → tela: cliente da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "A → tela: produto da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "A → tela: venda da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "A → tela: fornecedor da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "A → arquivo da demonstração: 404",
+      "ok": true,
+      "detalhe": {
+        "status": 404
+      }
+    },
+    {
+      "nome": "A → lista de clientes: só o próprio",
+      "ok": true,
+      "detalhe": {
+        "status": 200
+      }
+    },
+    {
+      "nome": "A → exportação de clientes: só o próprio",
+      "ok": false,
+      "detalhe": {
+        "status": 404,
+        "linhas": 0
+      }
+    },
+    {
+      "nome": "A → busca global: nada de outra empresa",
+      "ok": true,
+      "detalhe": {
+        "status": 200,
+        "trecho": "{\"hits\":[]}"
+      }
+    },
+    {
+      "nome": "A → busca pelo cliente de B: nada",
+      "ok": true,
+      "detalhe": {
+        "status": 200
+      }
+    },
+    {
+      "nome": "A → troca para a empresa B: recusada (continua na própria)",
+      "ok": true,
+      "detalhe": {
+        "status": 307,
+        "location": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/selecionar-unidade"
+      }
+    },
+    {
+      "nome": "A → relatórios: sem dados de outra empresa",
+      "ok": true,
+      "detalhe": {
+        "status": 200
+      }
+    },
+    {
+      "nome": "B → tela: cliente da empresa A: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "B → tela: cliente da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "B → tela: produto da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "B → tela: venda da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "B → tela: fornecedor da demonstração: bloqueado",
+      "ok": false,
+      "detalhe": {
+        "status": 200,
+        "location": null
+      }
+    },
+    {
+      "nome": "B → arquivo da demonstração: 404",
+      "ok": true,
+      "detalhe": {
+        "status": 404
+      }
+    },
+    {
+      "nome": "B → lista de clientes: só o próprio",
+      "ok": true,
+      "detalhe": {
+        "status": 200
+      }
+    },
+    {
+      "nome": "B → exportação de clientes: só o próprio",
+      "ok": false,
+      "detalhe": {
+        "status": 404,
+        "linhas": 0
+      }
+    },
+    {
+      "nome": "B → busca global: nada de outra empresa",
+      "ok": true,
+      "detalhe": {
+        "status": 200,
+        "trecho": "{\"hits\":[]}"
+      }
+    },
+    {
+      "nome": "B → busca pelo cliente de A: nada",
+      "ok": true,
+      "detalhe": {
+        "status": 200
+      }
+    },
+    {
+      "nome": "B → troca para a empresa A: recusada (continua na própria)",
+      "ok": true,
+      "detalhe": {
+        "status": 307,
+        "location": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/selecionar-unidade"
+      }
+    },
+    {
+      "nome": "B → relatórios: sem dados de outra empresa",
+      "ok": true,
+      "detalhe": {
+        "status": 200
+      }
+    },
+    {
+      "nome": "Torre A: resumo só da própria empresa (sem as vendas da demonstração)",
+      "ok": true,
+      "detalhe": {
+        "status": 200,
+        "vendas": 0
+      }
+    },
+    {
+      "nome": "Torre A: adoção com o próprio administrador ativo",
+      "ok": true,
+      "detalhe": {
+        "total": 1,
+        "ativos": 1,
+        "convitesPendentes": 0,
+        "convitesExpirados": 0,
+        "suspensos": 0,
+        "inativos": 0,
+        "nuncaAcessaram": 0
+      }
+    },
+    {
+      "nome": "Torre A: unidade de outra empresa no filtro → 422",
+      "ok": true,
+      "detalhe": {
+        "codigo": "validacao",
+        "mensagem": "Unidade(s) que não pertence(m) a esta empresa: 9a32b6d0f43077a1a468426be4635011.",
+        "campos": [
+          {
+            "campo": "idUnidade",
+            "mensagem": "Unidade(s) que não pertence(m) a esta empresa: 9a32b6d0f43077a1a468426be4635011."
+          }
+        ]
+      }
+    },
+    {
+      "nome": "Torre B: resumo só da própria empresa (sem as vendas da demonstração)",
+      "ok": true,
+      "detalhe": {
+        "status": 200,
+        "vendas": 0
+      }
+    },
+    {
+      "nome": "Torre B: adoção com o próprio administrador ativo",
+      "ok": true,
+      "detalhe": {
+        "total": 1,
+        "ativos": 1,
+        "convitesPendentes": 0,
+        "convitesExpirados": 0,
+        "suspensos": 0,
+        "inativos": 0,
+        "nuncaAcessaram": 0
+      }
+    },
+    {
+      "nome": "Torre B: unidade de outra empresa no filtro → 422",
+      "ok": true,
+      "detalhe": {
+        "codigo": "validacao",
+        "mensagem": "Unidade(s) que não pertence(m) a esta empresa: a81818692a1ffe9014807c09ce0631e7.",
+        "campos": [
+          {
+            "campo": "idUnidade",
+            "mensagem": "Unidade(s) que não pertence(m) a esta empresa: a81818692a1ffe9014807c09ce0631e7."
+          }
+        ]
+      }
+    },
+    {
+      "nome": "provisionamento: lista só empresas vinculadas (A e B presentes; nenhuma da demonstração)",
+      "ok": true,
+      "detalhe": {
+        "total": 2
+      }
+    },
+    {
+      "nome": "provisionamento: empresa existente mas não vinculada (demonstração) não existe para o Interos (404)",
+      "ok": true,
+      "detalhe": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "status": 404
+      }
+    },
+    {
+      "nome": "Torre: empresa não vinculada (demonstração) → 404",
+      "ok": true,
+      "detalhe": {
+        "status": 404
+      }
+    }
+  ]
+}

@@ -24,7 +24,7 @@ const fiscalLabel: Record<string, [string, "good" | "warn" | "sim" | "neutral"]>
 const fmtCnpj = (v: string) => (v?.length === 14 ? v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : v || "");
 
 /** Duas etapas: empresa → unidade (pula a 1ª quando há uma única empresa). */
-export function UnitPicker({ companies, branches, canConsolidate = true }: { companies: C[]; branches: B[]; canConsolidate?: boolean }) {
+export function UnitPicker({ companies, branches, canConsolidate = true }: { companies: C[]; branches: B[]; canConsolidate?: boolean | Record<string, boolean> }) {
   const [companyId, setCompanyId] = useState<string | null>(companies.length === 1 ? companies[0].id : null);
   const [q, setQ] = useState("");
   const [pending, start] = useTransition();
@@ -61,14 +61,17 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
         <div className="grid gap-2">
           {filteredCompanies.map((c) => {
             const count = branches.filter((b) => b.companyId === c.id && b.status !== "inactive").length;
-            const inactive = c.status === "inactive";
+            const suspended = c.status === "suspended";
+            const readonly = c.status === "readonly";
+            const inactive = c.status === "inactive" || suspended;
+            const why = suspended ? "Acesso suspenso pelo contrato: os dados estão preservados; procure o responsável pelo contrato." : "Empresa inativa: não pode ser selecionada. Um administrador pode reativá-la em Administração → Empresas.";
             return (
-              <button key={c.id} disabled={inactive} title={inactive ? "Empresa inativa: não pode ser selecionada. Um administrador pode reativá-la em Administração → Empresas." : undefined} onClick={() => { setCompanyId(c.id); setQ(""); }} className={CARD}>
+              <button key={c.id} disabled={inactive} title={inactive ? why : readonly ? "Contrato suspenso: acesso em somente leitura (consultas e exportações)." : undefined} onClick={() => { setCompanyId(c.id); setQ(""); }} className={CARD}>
                 <span className="flex items-center gap-3">
                   <Building2 className="size-5 text-brand-700" />
                   <span>
-                    <span className="flex items-center gap-2 text-sm font-medium">{c.name}{c.isDemo && <Badge tone="sim">DEMO</Badge>}{inactive && <Badge tone="neutral">Inativa</Badge>}</span>
-                    <span className="block text-xs text-slate-500">{c.legal !== c.name ? `${c.legal} · ` : ""}CNPJ {fmtCnpj(c.cnpj) || "—"} · {inactive ? "empresa inativa — seleção bloqueada" : `${count} unidade${count === 1 ? "" : "s"} disponíve${count === 1 ? "l" : "is"}`}</span>
+                    <span className="flex items-center gap-2 text-sm font-medium">{c.name}{c.isDemo && <Badge tone="sim">DEMO</Badge>}{suspended ? <Badge tone="neutral">Suspensa</Badge> : inactive && <Badge tone="neutral">Inativa</Badge>}{readonly && <Badge tone="neutral">Somente leitura</Badge>}</span>
+                    <span className="block text-xs text-slate-500">{c.legal !== c.name ? `${c.legal} · ` : ""}CNPJ {fmtCnpj(c.cnpj) || "—"} · {suspended ? "contrato suspenso — seleção bloqueada" : inactive ? "empresa inativa — seleção bloqueada" : `${count} unidade${count === 1 ? "" : "s"} disponíve${count === 1 ? "l" : "is"}`}</span>
                   </span>
                 </span>
                 <ChevronRight className="size-4 text-slate-400" />
@@ -110,7 +113,7 @@ export function UnitPicker({ companies, branches, canConsolidate = true }: { com
               );
             })}
             {units.length === 0 && <p className="py-4 text-center text-sm text-slate-500">Nenhuma unidade autorizada para você nesta empresa.</p>}
-            {canConsolidate && <button disabled={pending} onClick={() => choose(company.id, "all")} aria-busy={chosen === "all" || undefined} className={`${CARD} justify-start border-dashed text-sm ${chosen === "all" ? "border-brand-500 bg-brand-50 disabled:opacity-100 disabled:bg-brand-50" : ""}`}>
+            {(typeof canConsolidate === "boolean" ? canConsolidate : Boolean(canConsolidate[company.id])) && <button disabled={pending} onClick={() => choose(company.id, "all")} aria-busy={chosen === "all" || undefined} className={`${CARD} justify-start border-dashed text-sm ${chosen === "all" ? "border-brand-500 bg-brand-50 disabled:opacity-100 disabled:bg-brand-50" : ""}`}>
               {chosen === "all" ? <Spinner className="size-5 text-brand-700" /> : <Layers className="size-5 text-slate-400" />}
               <span>
                 <span className="block font-medium">Consolidado da empresa</span>

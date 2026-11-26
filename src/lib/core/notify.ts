@@ -2,7 +2,7 @@ import { resolveRoleId } from "@/lib/auth/users";
 import { unscoped } from "../db/scoped-store";
 import { detId, isConflict, listAll } from "../db";
 import type { Store } from "../db/types";
-import { can, canDo, type ModuleKey, type SpecialAction } from "../permissions";
+import { can, canDo, PLATFORM_ACTIONS, type ModuleKey, type SpecialAction } from "../permissions";
 
 export interface NotifyInput {
   companyId: string;
@@ -22,8 +22,14 @@ export interface NotifyInput {
 }
 
 async function resolveAudience(store: Store, input: NotifyInput): Promise<string[]> {
-  if (input.audience.userIds) return input.audience.userIds;
-  const users = await listAll(store, "users", { filters: [["eq", "status", "active"]] });
+  if (input.audience.userIds) {
+    // destinatários informados: só quem é vinculado à empresa da notificação (ou administrador da plataforma)
+    const wanted = [...new Set(input.audience.userIds.filter(Boolean))];
+    const found = await Promise.all(wanted.map((id) => unscoped(store).get("users", id)));
+    return found.filter((u): u is NonNullable<typeof u> => Boolean(u && ((u.companyIds ?? []).includes(input.companyId) || u.isAdmin))).map((u) => u.id);
+  }
+  // identidades são globais: a lista sai sem escopo e é filtrada pelo vínculo com a empresa da notificação
+  const users = await listAll(unscoped(store), "users", { filters: [["eq", "status", "active"]] });
   // perfis lidos sem restrição de empresa: o perfil legado do usuário pode ser de outra empresa (perfil de sistema equivalente)
   const roleList = await listAll(unscoped(store), "roles");
   const roles = new Map(roleList.map((r) => [r.id, r]));
@@ -58,7 +64,21 @@ async function withoutMuted(store: Store, input: NotifyInput, userIds: string[])
 }
 
 /** Cria notificações por destinatário, deduplicadas pela ocorrência. */
-export async function notify(store: Store, input: NotifyInput) {
+export async function notify(store: Store, input: NotifyInput): Promise<number> {
+  // multiempresa: avisos para operações da PLATAFORMA (equipe de certificação, gestão da rede) vão para a empresa da
+  // plataforma — é lá que essas pessoas trabalham — e não para a empresa dona do registro
+  if (input.audience.action && (PLATFORM_ACTIONS as string[]).includes(input.audience.action)) {
+    const platforms = await listAll(unscoped(store), "companies", { filters: [["eq", "isPlatform", true]] });
+    if (platforms.length) {
+      let n = 0;
+      for (const p of platforms) n += await notifyCompany(unscoped(store), { ...input, companyId: p.id, branchId: null });
+      return n;
+    }
+  }
+  return notifyCompany(store, input);
+}
+
+async function notifyCompany(store: Store, input: NotifyInput): Promise<number> {
   const userIds = await withoutMuted(store, input, await resolveAudience(store, input));
   const occ = input.occurrenceKey ?? `${input.type}:${input.originType ?? ""}:${input.originId ?? ""}:${Date.now()}`;
   let created = 0;

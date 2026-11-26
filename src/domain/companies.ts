@@ -1,6 +1,6 @@
 import { detId, findOne, isConflict, listAll, newId } from "@/lib/db";
 import { NotFoundError, type Doc, type Store } from "@/lib/db/types";
-import { unscoped } from "@/lib/db/scoped-store";
+import { isolationMode, unscoped } from "@/lib/db/scoped-store";
 import { BusinessError, PermissionError, assert } from "@/lib/core/errors";
 import { ctxForCompany, requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit, diff } from "@/lib/core/audit";
@@ -138,14 +138,15 @@ export function companyData(input: CompanyInput) {
 /** Nova empresa com parametrização inicial (matriz, depósitos, perfis, tabela, contas, meios e condições). */
 export async function createCompany(ctx: Ctx, input: CompanyInput & { branchName?: string }) {
   requirePerm(ctx, "admin", "create");
+  // multiempresa: empresa nova é empresa contratante — criada pelo Interos (provisionamento) ou pela administração da
+  // plataforma, nunca a partir de outra empresa cliente (docs/multiempresa/arquitetura.md §4)
+  if (isolationMode() === "estrito" && !ctx.user.isAdmin)
+    throw new BusinessError("Empresas novas são contratadas pelo Interos (ou criadas pela administração da plataforma Intercert). Para uma nova filial desta empresa, use Empresas → Filiais.", "forbidden");
   const data = companyData(input);
-  if (data.cnpj) {
-    const dup = await findOne(ctx.store, "companies", [["eq", "cnpj", data.cnpj]]);
-    if (dup) throw new BusinessError(`Já existe empresa com este CNPJ: ${dup.name}.`, "duplicate");
-  } else {
-    const all = await listAll(ctx.store, "companies");
-    if (all.some((c) => c.name.toLowerCase() === data.name.toLowerCase())) throw new BusinessError("Já existe empresa com esta razão social; informe o CNPJ para diferenciá-las.", "duplicate");
-  }
+  const all = await listAll(unscoped(ctx.store), "companies");
+  // sem revelar a outra empresa (que pode ser de outro cliente)
+  if (data.cnpj && all.some((c) => c.cnpj === data.cnpj)) throw new BusinessError("Já existe empresa com este CNPJ no ERP.", "duplicate");
+  if (!data.cnpj && all.some((c) => c.name.toLowerCase() === data.name.toLowerCase())) throw new BusinessError("Já existe empresa com esta razão social; informe o CNPJ para diferenciá-las.", "duplicate");
   const { company, branch, roles } = await createCompanyWithDefaults(unscoped(ctx.store), {
     key: newId(),
     name: data.name, tradeName: data.tradeName, cnpj: data.cnpj ?? undefined, regime: data.regime, uf: data.address.uf, cityName: data.address.cityName,
@@ -361,7 +362,10 @@ export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: stri
   requireAction(c, "admin.users");
   const company = await c.store.getOrThrow("companies", companyId);
   const mine = new Set(ctx.user.companyIds ?? []);
-  const users = (await listAll(c.store, "users")).filter((u) => !u.isAdmin && (ctx.user.isAdmin || (u.id !== ctx.user.id && (u.companyIds ?? []).some((x: string) => mine.has(x)))));
+  // vínculo entre empresas (porta explícita): candidatos são os usuários das empresas que o próprio gestor acessa —
+  // a leitura e a gravação saem do escopo da empresa-alvo de propósito, com a autorização conferida acima
+  const cross = unscoped(c.store);
+  const users = (await listAll(cross, "users")).filter((u) => !u.isAdmin && (ctx.user.isAdmin || (u.id !== ctx.user.id && (u.companyIds ?? []).some((x: string) => mine.has(x)))));
   const branchIds = new Set((await listAll(c.store, "branches", { filters: [["eq", "companyId", companyId]] })).map((b) => b.id));
   const wanted = new Set(userIds);
   // fase 1: plano + validação (nenhuma escrita)
@@ -382,18 +386,30 @@ export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: stri
       }
       const roleByCompany = { ...(u.roleByCompany ?? {}) };
       delete roleByCompany[companyId];
-      plan.push({ user: u, patch: { companyIds: (u.companyIds ?? []).filter((x: string) => x !== companyId), branchIds: (u.branchIds ?? []).filter((b: string) => !branchIds.has(b)), roleByCompany }, change: `−${u.name}` });
+      // cargo e filiais por empresa saem junto com o vínculo (nada fica apontando para a empresa desvinculada)
+      const jobTitleByCompany = { ...(u.jobTitleByCompany ?? {}) };
+      delete jobTitleByCompany[companyId];
+      const branchIdsByCompany = { ...(u.branchIdsByCompany ?? {}) };
+      delete branchIdsByCompany[companyId];
+      plan.push({
+        user: u,
+        patch: { companyIds: (u.companyIds ?? []).filter((x: string) => x !== companyId), branchIds: (u.branchIds ?? []).filter((b: string) => !branchIds.has(b)), roleByCompany, jobTitleByCompany, branchIdsByCompany },
+        change: `−${u.name}`,
+      });
     }
   }
   if (blocked.length) {
     throw new BusinessError(`${blocked.join(", ")} ficaria(m) sem empresa vinculada; inative o usuário em vez de desvincular. Nenhum vínculo foi alterado.`, "last_company");
   }
+  // a empresa não fica sem administrador próprio (mesma regra do cadastro de usuários)
+  const { assertCompanyKeepsAdmin } = await import("./users");
+  await assertCompanyKeepsAdmin(c, companyId, plan.filter((p) => p.change.startsWith("−")).map((p) => p.user.id));
   // fase 2: gravação em blocos (limite de 100 operações por transação) e auditoria
   const changes: string[] = [];
   try {
     for (let i = 0; i < plan.length; i += 100) {
       const chunk = plan.slice(i, i + 100);
-      await c.store.transaction(async (tx) => {
+      await cross.transaction(async (tx) => {
         for (const p of chunk) await tx.update("users", p.user.id, p.patch);
       });
       changes.push(...chunk.map((p) => p.change));

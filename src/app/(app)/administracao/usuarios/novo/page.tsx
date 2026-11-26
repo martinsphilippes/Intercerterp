@@ -14,7 +14,7 @@ export default async function Page() {
   return (
     <>
       <PageHeader title="Novo usuário" crumbs={[{ label: "Administração" }, { label: "Usuários", href: "/administracao/usuarios" }, { label: "Novo" }]} description="Crie o acesso com senha inicial ou envie um convite de primeiro acesso com validade." />
-      <UserForm roles={o.roles} companies={o.companies} branches={o.branches} canGrantAdmin={o.canGrantAdmin} currentCompanyId={s.ctx.companyId} />
+      <UserForm roles={o.roles} companies={o.companies} branches={o.branches} canGrantAdmin={o.canGrantAdmin} currentCompanyId={s.ctx.companyId} editorRestricted={o.editorRestricted} />
     </>
   );
 }

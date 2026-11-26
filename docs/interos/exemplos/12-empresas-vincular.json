@@ -1,0 +1,115 @@
+{
+  "titulo": "Vincular uma empresa que já usa o ERP (ID ERP + CNPJ + código de vínculo gerado pelo administrador dela)",
+  "nota": "O código vale 72 horas e só uma vez. Empresa inexistente, CNPJ diferente ou código errado têm a mesma resposta (identidade_nao_confere).",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/vincular",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-0012",
+      "Idempotency-Key": "beta-vincular-20261124-001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "contaInterosId": "conta-beta-0002",
+      "idEmpresa": "38a257a19387152ffb16ee0b59c2a05a",
+      "cnpj": "13.579.246/0001-01",
+      "codigoVinculo": "K7Q2M-XR4TP",
+      "modulos": [
+        "pdv",
+        "vendas",
+        "estoque",
+        "financeiro"
+      ],
+      "contrato": {
+        "referencia": "CT-2026-0049",
+        "plano": "essencial"
+      }
+    }
+  },
+  "resposta": {
+    "status": 201,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-0012",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "empresa": {
+        "idEmpresa": "38a257a19387152ffb16ee0b59c2a05a",
+        "contaInterosId": "conta-beta-0002",
+        "tipo": "varejo",
+        "razaoSocial": "Beta Moda e Acessórios Ltda",
+        "nomeFantasia": "Beta Moda",
+        "cnpj": "13579246000101",
+        "situacao": "ativa",
+        "suspensao": null,
+        "historicoSituacao": [],
+        "modulos": [
+          "estoque",
+          "financeiro",
+          "pdv",
+          "vendas"
+        ],
+        "contrato": {
+          "referencia": "CT-2026-0049",
+          "plano": "essencial"
+        },
+        "implantacao": {
+          "operacao": "vincular",
+          "estado": "concluida",
+          "etapas": [
+            {
+              "etapa": "vinculo",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:12:00.000Z",
+              "erro": null,
+              "tentativas": 1
+            },
+            {
+              "etapa": "modulos",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:12:00.000Z",
+              "erro": null,
+              "tentativas": 1
+            }
+          ],
+          "tentativas": 1,
+          "ultimoErro": null,
+          "iniciadaEm": "2026-11-20T12:12:00.000Z",
+          "concluidaEm": "2026-11-20T12:12:00.000Z"
+        },
+        "unidades": [
+          {
+            "idUnidade": "b3cf134691e970f41db3e758074cf421",
+            "codigo": "01",
+            "nome": "Matriz",
+            "cnpj": "13579246000101",
+            "situacao": "ativa"
+          }
+        ],
+        "administradores": [
+          {
+            "idUsuario": "exemplo-bruno-beta",
+            "nome": "Bruno Barros",
+            "email": "bruno@beta-moda.example",
+            "situacao": "ativo",
+            "convite": null,
+            "primeiroAcessoEm": null,
+            "ultimoAcessoEm": null
+          }
+        ],
+        "usuarios": {
+          "ativos": 1,
+          "convidados": 0,
+          "suspensos": 0,
+          "inativos": 0
+        },
+        "ultimaAtividadeEm": null,
+        "vinculadaEm": "2026-11-20T12:12:00.000Z",
+        "atualizadaEm": "2026-11-20T12:12:00.000Z"
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "titulo": "Implantação que falha no meio (erro do servidor): a chave fica liberada para retomar",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-0013",
+      "Idempotency-Key": "gama-criar-20261124-001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "contaInterosId": "conta-gama-0003",
+      "empresa": {
+        "tipo": "varejo",
+        "razaoSocial": "Gama Papelaria e Presentes Ltda",
+        "nomeFantasia": "Gama Papelaria",
+        "cnpj": "31.415.926/0001-71",
+        "regimeTributario": "simples",
+        "endereco": {
+          "cep": "30130-010",
+          "logradouro": "Avenida Afonso Pena",
+          "numero": "500",
+          "bairro": "Centro",
+          "municipio": "Belo Horizonte",
+          "codigoMunicipioIbge": "3106200",
+          "uf": "MG"
+        }
+      },
+      "modulos": [
+        "pdv",
+        "vendas",
+        "estoque",
+        "financeiro"
+      ],
+      "administrador": {
+        "nome": "Gustavo Gomes",
+        "email": "gustavo@gama-papelaria.example"
+      },
+      "entregaConvite": "erp",
+      "contrato": {
+        "referencia": "CT-2026-0057",
+        "plano": "essencial"
+      }
+    }
+  },
+  "resposta": {
+    "status": 500,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-0013",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "erro_interno",
+        "mensagem": "Erro inesperado no ERP. A solicitação pode ser repetida com a mesma Idempotency-Key."
+      },
+      "requestId": "req-exemplo-0013"
+    }
+  }
+}

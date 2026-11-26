@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, Input, Select, Checkbox, FormGrid, FormSection } from "@/components/ui/form";
@@ -9,7 +9,7 @@ import { saveUserAction } from "./actions";
 import { InviteLinkPanel } from "./invite-link";
 
 type Opt = { value: string; label: string };
-type RoleOpt = Opt & { discountLimitBps: number; description?: string | null };
+type RoleOpt = Opt & { discountLimitBps: number; description?: string | null; disabled?: boolean };
 
 export function UserForm({
   user,
@@ -20,33 +20,48 @@ export function UserForm({
   currentCompanyId,
   kept,
   self = false,
+  editorRestricted = false,
+  roleLocked = false,
+  branchScope,
+  jobTitle,
 }: {
   user?: Record<string, any> | null;
   roles: RoleOpt[];
   companies: Opt[];
+  /** filiais DESTA empresa que o editor pode conceder (multiempresa: a atribuição vale por empresa) */
   branches: Array<Opt & { companyId: string }>;
   canGrantAdmin: boolean;
   currentCompanyId: string;
-  /** vínculos do usuário com empresas/filiais fora do alcance do editor (preservados pelo servidor) */
+  /** vínculos do usuário com empresas fora do alcance do editor (preservados pelo servidor) */
   kept?: { companies: number; branches: number };
-  /** editor (não administrador) editando o próprio cadastro: vínculo, perfil e limite ficam somente leitura */
+  /** editor (não administrador) editando o próprio cadastro: vínculo, cargo, perfil e limite ficam somente leitura */
   self?: boolean;
+  /** o editor acessa só algumas filiais desta empresa: só concede as dele e não libera “todas” */
+  editorRestricted?: boolean;
+  /** o perfil atual do usuário vai além do acesso do editor: só quem tem esse acesso troca o perfil */
+  roleLocked?: boolean;
+  /** filiais do usuário NESTA empresa (null = todas; ausente = usuário novo) */
+  branchScope?: string[] | null;
+  /** cargo do usuário NESTA empresa */
+  jobTitle?: string | null;
 }) {
   const u = user ?? {};
   const router = useRouter();
   const [mode, setMode] = useState<"invite" | "password">("invite");
-  const [roleId, setRoleId] = useState<string>(u.roleId ?? roles.find((r) => r.label === "Caixa")?.value ?? roles[0]?.value ?? "");
+  const defaultRole = roles.find((r) => !r.disabled && r.label === "Caixa")?.value ?? roles.find((r) => !r.disabled)?.value ?? "";
+  const [roleId, setRoleId] = useState<string>(u.roleId ?? defaultRole);
   const [isAdmin, setIsAdmin] = useState<boolean>(Boolean(u.isAdmin));
   const [companyIds, setCompanyIds] = useState<string[]>(u.companyIds?.length ? u.companyIds : [currentCompanyId]);
-  const [branchIds, setBranchIds] = useState<string[]>(u.branchIds ?? []);
+  const isNew = !u.id;
+  // filiais desta empresa: "todas" ou "só as marcadas"
+  const [branchMode, setBranchMode] = useState<"all" | "some">(isNew ? (editorRestricted ? "some" : "all") : branchScope === null || branchScope === undefined ? "all" : "some");
+  const [companyBranchIds, setCompanyBranchIds] = useState<string[]>((branchScope ?? []).filter((b) => branches.some((o) => o.value === b)));
   const [ownDiscount, setOwnDiscount] = useState<boolean>(u.discountLimitBps != null);
   const [invite, setInvite] = useState<{ id: string; invite: any } | null>(null);
   const role = roles.find((r) => r.value === roleId);
-  const visibleBranches = useMemo(() => branches.filter((b) => isAdmin || companyIds.includes(b.companyId)), [branches, companyIds, isAdmin]);
-  // restrição de filiais é uma lista única para todas as empresas do usuário: com empresa fora do alcance do editor, a
-  // restrição não pode ser incluída (usuário sem restrição) nem removida; com restrição, vale por empresa do alcance
-  const outsideReach = !isAdmin && (kept?.companies ?? 0) > 0;
-  const lockBranches = outsideReach && !(u.branchIds ?? []).length;
+  // editor com acesso a só algumas filiais diante de quem acessa todas: não restringe (mexeria em filiais fora do alcance dele)
+  const lockedAll = !isNew && editorRestricted && (branchScope === null || branchScope === undefined);
+  const hiddenOutside = (branchScope ?? []).filter((b) => !branches.some((o) => o.value === b)).length;
   const toggle = (list: string[], v: string, on: boolean) => (on ? [...new Set([...list, v])] : list.filter((x) => x !== v));
 
   if (invite) {
@@ -87,6 +102,9 @@ export function UserForm({
               <Field label="Telefone">
                 <Input name="phone" defaultValue={u.phone ?? ""} inputMode="tel" />
               </Field>
+              <Field label="Cargo nesta empresa" hint="Função da pessoa (ex.: Gerente de loja). Não dá permissões: o acesso vem do perfil." className="sm:col-span-2">
+                {self ? <Input defaultValue={jobTitle ?? ""} disabled aria-label="Cargo nesta empresa" /> : <Input name="jobTitle" defaultValue={jobTitle ?? ""} maxLength={80} autoComplete="off" />}
+              </Field>
             </FormGrid>
           </FormSection>
 
@@ -114,10 +132,10 @@ export function UserForm({
 
           {self && (
             <>
-              <Notice tone="info">Você está editando o próprio cadastro: perfil, empresas, filiais e limite de desconto só podem ser alterados por outro gestor de usuários.</Notice>
+              <Notice tone="info">Você está editando o próprio cadastro: cargo, perfil, empresas, filiais e limite de desconto só podem ser alterados por outro gestor de usuários.</Notice>
               <input type="hidden" name="roleId" value={roleId} />
               {companyIds.map((c) => <input key={c} type="hidden" name="companyIds" value={c} />)}
-              {branchIds.map((b) => <input key={b} type="hidden" name="branchIds" value={b} />)}
+              {(u.branchIds ?? []).map((b: string) => <input key={b} type="hidden" name="branchIds" value={b} />)}
               {u.discountLimitBps != null && (
                 <>
                   <input type="hidden" name="ownDiscount" value="on" />
@@ -126,24 +144,28 @@ export function UserForm({
               )}
             </>
           )}
+          {!self && roleLocked && <input type="hidden" name="roleId" value={roleId} />}
           <fieldset disabled={self} className="space-y-5">
-          <FormSection title="Perfil e permissões" description="O perfil define a matriz por módulo e as operações específicas. Vale na empresa em uso; nas demais empresas do usuário, o perfil de cada uma é mantido.">
+          <FormSection title="Perfil e permissões" description="O perfil define a matriz por módulo e as operações específicas. Vale na empresa em uso; nas demais empresas do usuário, o perfil de cada uma é mantido. Você só atribui perfis cujo acesso você mesmo tem.">
             <FormGrid cols={3}>
               <Field label="Perfil de acesso nesta empresa" required={!isAdmin}>
-                <Select name={self ? undefined : "roleId"} value={roleId} onChange={(e) => setRoleId(e.target.value)} options={roles} placeholder={isAdmin ? "— (administrador)" : "Selecione"} />
+                <Select name={self || roleLocked ? undefined : "roleId"} value={roleId} disabled={roleLocked} onChange={(e) => setRoleId(e.target.value)} options={roles} placeholder={isAdmin ? "— (administrador)" : "Selecione"} />
               </Field>
               <div className="flex flex-col justify-end gap-2 sm:col-span-2">
                 <Checkbox
                   name="isAdmin"
-                  label="Administrador do sistema (acesso total a todas as empresas, ignora a matriz)"
+                  label="Administrador da plataforma (acesso total a todas as empresas, ignora a matriz)"
                   checked={isAdmin}
                   disabled={!canGrantAdmin}
                   onChange={(e) => setIsAdmin(e.target.checked)}
                 />
-                {!canGrantAdmin && <span className="text-xs text-slate-500">Somente administradores concedem ou revogam acesso de administrador.</span>}
+                {!canGrantAdmin && <span className="text-xs text-slate-500">Somente o administrador da plataforma concede ou revoga esse acesso.</span>}
                 {!canGrantAdmin && isAdmin && <input type="hidden" name="isAdmin" value="on" />}
               </div>
             </FormGrid>
+            {roleLocked && !self && (
+              <p className="mt-3 text-xs text-amber-800">O perfil atual desta pessoa tem acessos que você não tem nesta empresa: só quem tem esses acessos troca o perfil dela.</p>
+            )}
             {role?.description && !isAdmin && <p className="mt-3 text-xs text-slate-500">{role.description}</p>}
             <div className="mt-4 rounded-md border border-line p-3">
               <Checkbox name="ownDiscount" label="Definir limite de desconto próprio para este usuário" checked={ownDiscount} onChange={(e) => setOwnDiscount(e.target.checked)} />
@@ -160,9 +182,9 @@ export function UserForm({
             </div>
           </FormSection>
 
-          <FormSection title="Empresas e filiais" description="Sem filiais marcadas, o usuário acessa todas as filiais das empresas vinculadas.">
+          <FormSection title="Empresas e filiais" description="As filiais valem por empresa: aqui você define as filiais desta empresa. Nas demais empresas do usuário, as filiais são definidas a partir de cada uma.">
             {isAdmin ? (
-              <p className="text-sm text-slate-600">Administradores acessam todas as empresas e filiais.</p>
+              <p className="text-sm text-slate-600">O administrador da plataforma acessa todas as empresas e filiais.</p>
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
@@ -170,40 +192,66 @@ export function UserForm({
                   <div className="space-y-1.5">
                     {companies.map((c) => (
                       <div key={c.value}>
-                        <Checkbox name="companyIds" value={c.value} label={c.label} checked={companyIds.includes(c.value)} onChange={(e) => setCompanyIds((l) => toggle(l, c.value, e.target.checked))} />
+                        <Checkbox
+                          name="companyIds"
+                          value={c.value}
+                          label={c.label}
+                          checked={companyIds.includes(c.value)}
+                          disabled={c.value === currentCompanyId}
+                          onChange={(e) => setCompanyIds((l) => toggle(l, c.value, e.target.checked))}
+                        />
                       </div>
                     ))}
+                    {/* a empresa em uso sempre fica vinculada (o perfil escolhido vale nela) */}
+                    {!self && <input type="hidden" name="companyIds" value={currentCompanyId} />}
                   </div>
                 </div>
                 <div>
-                  <p className="mb-2 text-xs font-semibold text-slate-600">Filiais permitidas</p>
-                  <div className="space-y-1.5">
-                    {visibleBranches.map((b) => (
-                      <div key={b.value}>
-                        <Checkbox name="branchIds" value={b.value} label={b.label} checked={branchIds.includes(b.value)} disabled={lockBranches} onChange={(e) => setBranchIds((l) => toggle(l, b.value, e.target.checked))} />
-                      </div>
-                    ))}
-                    {!visibleBranches.length && <p className="text-xs text-slate-500">Selecione ao menos uma empresa.</p>}
-                  </div>
-                  {lockBranches ? (
-                    <p className="mt-2 text-xs text-slate-500">
-                      O usuário acessa todas as filiais. A restrição de filiais vale para todas as empresas dele, inclusive as que estão fora do seu alcance, por isso só um administrador (ou quem administra usuários em todas as empresas dele) pode restringi-las.
-                    </p>
-                  ) : outsideReach ? (
-                    <p className="mt-2 text-xs text-slate-500">
-                      Com restrição de filiais, a lista vale para todas as empresas: marque as filiais que o usuário deve acessar em cada empresa do seu alcance (empresa sem filial marcada fica sem acesso). A restrição nas empresas fora do seu alcance é mantida
-                      {(kept?.branches ?? 0) === 0 ? " — mantenha ao menos uma filial marcada, senão a restrição deixaria de valer também nelas." : "."}
-                    </p>
+                  <p className="mb-2 text-xs font-semibold text-slate-600">Filiais nesta empresa</p>
+                  {self ? (
+                    <p className="text-sm text-slate-600">{branchScope === null || branchScope === undefined ? "Todas as filiais desta empresa." : `${companyBranchIds.length} filial(is) desta empresa.`}</p>
+                  ) : lockedAll ? (
+                    <>
+                      <input type="hidden" name="branchMode" value="all" />
+                      <p className="text-sm text-slate-600">Todas as filiais desta empresa.</p>
+                      <p className="mt-2 text-xs text-slate-500">Você acessa só algumas filiais desta empresa, e esta pessoa acessa todas: só quem acessa todas as filiais pode restringir esse acesso.</p>
+                    </>
                   ) : (
-                    branchIds.filter((b) => visibleBranches.some((v) => v.value === b)).length === 0 && <p className="mt-2 text-xs text-slate-500">Nenhuma marcada: todas as filiais.</p>
+                    <div className="space-y-2">
+                      <label className={`flex items-center gap-2 text-sm ${editorRestricted ? "text-slate-400" : ""}`}>
+                        <input type="radio" name="branchMode" value="all" checked={branchMode === "all"} disabled={editorRestricted} onChange={() => setBranchMode("all")} className="accent-brand-700" />
+                        Todas as filiais desta empresa (inclui o consolidado)
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name="branchMode" value="some" checked={branchMode === "some"} onChange={() => setBranchMode("some")} className="accent-brand-700" />
+                        Somente as filiais marcadas
+                      </label>
+                      <div className="space-y-1.5 pl-6">
+                        {branches.map((b) => (
+                          <div key={b.value}>
+                            <Checkbox
+                              name="companyBranchIds"
+                              value={b.value}
+                              label={b.label}
+                              checked={companyBranchIds.includes(b.value)}
+                              disabled={branchMode !== "some"}
+                              onChange={(e) => setCompanyBranchIds((l) => toggle(l, b.value, e.target.checked))}
+                            />
+                          </div>
+                        ))}
+                        {!branches.length && <p className="text-xs text-slate-500">Nenhuma filial disponível.</p>}
+                      </div>
+                      {editorRestricted && <p className="text-xs text-slate-500">Você acessa só algumas filiais desta empresa: só concede filiais dentre as suas{hiddenOutside ? `; as ${hiddenOutside} filial(is) desta pessoa fora do seu acesso são mantidas` : ""}.</p>}
+                      {branchMode === "some" && companyBranchIds.length === 0 && <p className="text-xs text-amber-800">Marque ao menos uma filial (ou escolha todas as filiais).</p>}
+                    </div>
                   )}
                 </div>
               </div>
             )}
             {isAdmin && !self && companyIds.map((c) => <input key={c} type="hidden" name="companyIds" value={c} />)}
-            {!isAdmin && kept && (kept.companies > 0 || kept.branches > 0) && (
+            {!isAdmin && kept && kept.companies > 0 && (
               <p className="mt-3 text-xs text-slate-500">
-                Este usuário também está vinculado a {kept.companies > 0 ? `${kept.companies} empresa(s)` : ""}{kept.companies > 0 && kept.branches > 0 ? " e " : ""}{kept.branches > 0 ? `${kept.branches} filial(is)` : ""} fora do seu alcance (empresas a que você não tem acesso ou em que não administra usuários). Esses vínculos são mantidos ao salvar.
+                Este usuário também está vinculado a {kept.companies} empresa(s) fora do seu alcance (empresas a que você não tem acesso ou em que não administra usuários). Esses vínculos, e o perfil, o cargo e as filiais dele nelas, são mantidos ao salvar.
               </p>
             )}
           </FormSection>

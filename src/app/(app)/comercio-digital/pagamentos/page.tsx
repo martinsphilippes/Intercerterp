@@ -39,7 +39,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const simulated = !integ || integ.provider === "simulated";
   const orders = (await listAll(unscoped(s.ctx.store), "online_orders", { filters: [["eq", "storeId", st.id]] }, 2000)).filter((o) => o.payment?.simulated !== false).sort((a, b) => (b.number ?? 0) - (a.number ?? 0)).slice(0, 40);
   const selected = sp(params, "pedido") || (orders.find((o) => o.status === "pending_payment")?.id ?? orders[0]?.id ?? "");
-  const lastEvent = selected ? (await listAll(unscoped(s.ctx.store), "commerce_events", { filters: [["eq", "orderId", selected]] })).filter((e) => e.area === "payment" && e.externalKey).sort((a, b) => (b.number ?? 0) - (a.number ?? 0))[0] : null;
+  const lastEvent = selected ? (await listAll(unscoped(s.ctx.store), "commerce_events", { filters: [["eq", "orderId", selected], ["eq", "companyId", s.ctx.companyId]] })).filter((e) => e.area === "payment" && e.externalKey).sort((a, b) => (b.number ?? 0) - (a.number ?? 0))[0] : null;
   const canSim = canDo(s.user, "ecommerce.manage") || canDo(s.user, "ecommerce.finance");
 
   return (

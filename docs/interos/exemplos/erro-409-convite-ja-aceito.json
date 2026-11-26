@@ -1,0 +1,32 @@
+{
+  "titulo": "Reenviar convite de quem já ativou o acesso",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/38a257a19387152ffb16ee0b59c2a05a/convites/reenviar",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e409d",
+      "Idempotency-Key": "beta-reenvio-20261125-001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "email": "bruno@beta-moda.example"
+    }
+  },
+  "resposta": {
+    "status": 409,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e409d",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "convite_ja_aceito",
+        "mensagem": "Este usuário já ativou o acesso: não há convite a reenviar. Para recuperar a senha, o próprio usuário usa “Esqueci minha senha”."
+      },
+      "requestId": "req-exemplo-e409d"
+    }
+  }
+}

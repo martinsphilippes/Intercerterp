@@ -1,0 +1,81 @@
+{
+  "titulo": "Transações de devolução",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/transacoes/devolucoes?de=2026-11-01&ate=2026-11-20&limite=2",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0007"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0007",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "itens": [
+        {
+          "idDevolucao": "3fa9f183c706daa3765576a1b4523537",
+          "numero": 1,
+          "tipo": "devolucao",
+          "situacao": "concluida",
+          "compensacao": "vale_credito",
+          "formaReembolso": null,
+          "idUnidade": "0f141ddae2733e13500593ac12e10236",
+          "idCliente": "abd4825a8ffd924847fc3dcde832e77f",
+          "registradaEm": "2026-11-20T18:00:00.000Z",
+          "data": "2026-11-20",
+          "idVendaOriginal": "5b0fb6dce99f0608d41aae75d2e5335c",
+          "numeroVendaOriginal": 45,
+          "vendaOriginalEm": "2026-11-20T18:00:00.000Z",
+          "vendaAnteriorAoPeriodo": false,
+          "quantidadeLinhas": 2,
+          "valorCentavos": 5980,
+          "custoRevertidoCentavos": 2240,
+          "valorAbatidoTituloCentavos": 0
+        },
+        {
+          "idDevolucao": "9b6b41619b1393f6ba0d842d83afec85",
+          "numero": 2,
+          "tipo": "troca",
+          "situacao": "concluida",
+          "compensacao": "troca",
+          "formaReembolso": null,
+          "idUnidade": "0f141ddae2733e13500593ac12e10236",
+          "idCliente": null,
+          "registradaEm": "2026-11-20T18:00:00.000Z",
+          "data": "2026-11-20",
+          "idVendaOriginal": "86576a20559c4b5efd278d1eae4e2468",
+          "numeroVendaOriginal": 42,
+          "vendaOriginalEm": "2026-11-20T18:00:00.000Z",
+          "vendaAnteriorAoPeriodo": false,
+          "quantidadeLinhas": 1,
+          "valorCentavos": 4990,
+          "custoRevertidoCentavos": 1890,
+          "valorAbatidoTituloCentavos": 0
+        }
+      ],
+      "proximoCursor": "eyJ2IjoxLCJmIjoiYzVhNmJlYmFhM2Y4N2VhNiIsImsiOlsiMjAyNi0xMS0yMFQxODowMDowMC4wMDBaIiwiOWI2YjQxNjE5YjEzOTNmNmJhMGQ4NDJkODNhZmVjODUiXX0",
+      "totais": {
+        "quantidade": 4,
+        "valorCentavos": 20750,
+        "custoRevertidoCentavos": 7630
+      }
+    }
+  }
+}

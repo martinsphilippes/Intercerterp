@@ -1,0 +1,119 @@
+{
+  "titulo": "Ranking de produtos (curva ABC), primeira página",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/produtos?de=2026-11-01&ate=2026-11-20&limite=2",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0004"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0004",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "itens": [
+        {
+          "idProduto": "d898086b2141a156930053c53b448abb",
+          "codigoProduto": "TENIS",
+          "nomeProduto": "Tênis Casual Couro",
+          "idCategoria": "45128439853071c4363b127d73fc6fd1",
+          "nomeCategoria": "Calçados",
+          "quantidadeSkusComMovimento": 2,
+          "receitaBrutaCentavos": 111960,
+          "descontosCentavos": 800,
+          "acrescimosCentavos": 0,
+          "devolucoesCentavos": 0,
+          "receitaLiquidaCentavos": 111160,
+          "quantidadeVendidaMilesimos": 4000,
+          "quantidadeDevolvidaMilesimos": 0,
+          "quantidadeLiquidaMilesimos": 4000,
+          "quantidadeVendas": 4,
+          "custoRegistrado": true,
+          "custoMercadoriaVendidaCentavos": 47600,
+          "lucroBrutoCentavos": 63560,
+          "margemBrutaBps": 5718,
+          "classeAbc": "A",
+          "posicaoAbc": 1,
+          "participacaoBps": 1921,
+          "acumuladoBps": 1921,
+          "semMovimento": false
+        },
+        {
+          "idProduto": "b28597bd1ee025658291e529f4f3949c",
+          "codigoProduto": "CAMISETA",
+          "nomeProduto": "Camiseta Algodão Básica",
+          "idCategoria": "687bc8c3a4cec210f56d8788ec4fa3cb",
+          "nomeCategoria": "Vestuário",
+          "quantidadeSkusComMovimento": 4,
+          "receitaBrutaCentavos": 94810,
+          "descontosCentavos": 0,
+          "acrescimosCentavos": 0,
+          "devolucoesCentavos": 4990,
+          "receitaLiquidaCentavos": 89820,
+          "quantidadeVendidaMilesimos": 19000,
+          "quantidadeDevolvidaMilesimos": 1000,
+          "quantidadeLiquidaMilesimos": 18000,
+          "quantidadeVendas": 14,
+          "custoRegistrado": true,
+          "custoMercadoriaVendidaCentavos": 34020,
+          "lucroBrutoCentavos": 55800,
+          "margemBrutaBps": 6212,
+          "classeAbc": "A",
+          "posicaoAbc": 2,
+          "participacaoBps": 1552,
+          "acumuladoBps": 3473,
+          "semMovimento": false
+        }
+      ],
+      "proximoCursor": "eyJ2IjoxLCJmIjoiMTA0NjY3ZGNjNmY3ZDNmYyIsImsiOls4OTgyMCwxODAwMCwiQ0FNSVNFVEEiLCJiMjg1OTdiZDFlZTAyNTY1ODI5MWU1MjlmNGYzOTQ5YyJdfQ",
+      "curva": {
+        "criterio": "receita_liquida",
+        "limites": {
+          "classeABps": 8000,
+          "classeBBps": 9500
+        },
+        "receitaLiquidaCentavos": 578672,
+        "receitaNaCurvaCentavos": 578672,
+        "receitaForaDaCurvaCentavos": 0,
+        "classes": {
+          "A": {
+            "quantidade": 7,
+            "receitaLiquidaCentavos": 479802,
+            "participacaoBps": 8291
+          },
+          "B": {
+            "quantidade": 3,
+            "receitaLiquidaCentavos": 73900,
+            "participacaoBps": 1277
+          },
+          "C": {
+            "quantidade": 2,
+            "receitaLiquidaCentavos": 24970,
+            "participacaoBps": 432
+          }
+        },
+        "semClasse": {
+          "comMovimento": 0,
+          "semMovimento": 9
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "titulo": "Limite de solicitações por minuto atingido",
+  "nota": "Aguarde os segundos de Retry-After. O limite é por credencial: leituras e alterações têm limites separados.",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/status",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e429"
+    }
+  },
+  "resposta": {
+    "status": 429,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e429",
+      "API-Version": "v1",
+      "Cache-Control": "no-store",
+      "Retry-After": "45"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "limite_excedido",
+        "mensagem": "Limite de solicitações por minuto atingido. Tente de novo em 45 s."
+      },
+      "requestId": "req-exemplo-e429"
+    }
+  }
+}

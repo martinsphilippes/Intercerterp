@@ -1,0 +1,91 @@
+{
+  "titulo": "Posição atual de estoque por SKU e depósito (sem período)",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/estoque?limite=2",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0008"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0008",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": null,
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "itens": [
+        {
+          "idSaldo": "0874ac3ba1a4f263d77df2928969a732",
+          "idSku": "1e5a44c05efe4928bb2cb67a9e1462f6",
+          "codigoSku": "BONE",
+          "descricaoSku": "Boné Aba Curva",
+          "idProduto": "e58e12f8a2fbf9ac3daf9d10bb3cd364",
+          "nomeProduto": "Boné Aba Curva",
+          "idCategoria": "d2388767fbfded438159115a3271b4aa",
+          "produtoAtivo": true,
+          "unidadeMedida": "UN",
+          "idUnidade": "0b78439599a73b3d1e0257af350abf8d",
+          "idDeposito": "6091e0725254f0ec7845321cebb14398",
+          "nomeDeposito": "Depósito principal",
+          "tipoDeposito": "disponivel",
+          "fisicoMilesimos": 15000,
+          "reservadoMilesimos": 0,
+          "disponivelMilesimos": 15000,
+          "emTransitoMilesimos": 3000,
+          "aChegarMilesimos": 0,
+          "minimoMilesimos": 4000,
+          "custoMedioCentavos": 1500,
+          "valorCentavos": 22500,
+          "abaixoDoMinimo": false,
+          "ultimoMovimentoEm": "2026-11-20T18:00:00.000Z"
+        },
+        {
+          "idSaldo": "e40eb459c592ddf2c7dda1626b592bf8",
+          "idSku": "1e5a44c05efe4928bb2cb67a9e1462f6",
+          "codigoSku": "BONE",
+          "descricaoSku": "Boné Aba Curva",
+          "idProduto": "e58e12f8a2fbf9ac3daf9d10bb3cd364",
+          "nomeProduto": "Boné Aba Curva",
+          "idCategoria": "d2388767fbfded438159115a3271b4aa",
+          "produtoAtivo": true,
+          "unidadeMedida": "UN",
+          "idUnidade": "0f141ddae2733e13500593ac12e10236",
+          "idDeposito": "e682d6a83ddd0d81af8daf4823c95194",
+          "nomeDeposito": "Depósito principal",
+          "tipoDeposito": "disponivel",
+          "fisicoMilesimos": 35000,
+          "reservadoMilesimos": 0,
+          "disponivelMilesimos": 35000,
+          "emTransitoMilesimos": 0,
+          "aChegarMilesimos": 0,
+          "minimoMilesimos": 4000,
+          "custoMedioCentavos": 1518,
+          "valorCentavos": 53130,
+          "abaixoDoMinimo": false,
+          "ultimoMovimentoEm": "2026-11-20T18:00:00.000Z"
+        }
+      ],
+      "proximoCursor": "eyJ2IjoxLCJmIjoiZDUzOWZkODdlMzU0NDNmMiIsImsiOlsiQk9ORSIsIjBmMTQxZGRhZTI3MzNlMTM1MDA1OTNhYzEyZTEwMjM2IiwiZTY4MmQ2YTgzZGRkMGQ4MWFmOGRhZjQ4MjNjOTUxOTQiLCJlNDBlYjQ1OWM1OTJkZGYyYzdkZGExNjI2YjU5MmJmOCJdfQ",
+      "totais": {
+        "saldos": 51,
+        "valorCentavos": 3218728,
+        "fisicoMilesimos": 931000,
+        "reservadoMilesimos": 19000,
+        "disponivelMilesimos": 912000,
+        "abaixoDoMinimo": 2
+      }
+    }
+  }
+}

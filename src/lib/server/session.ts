@@ -5,11 +5,14 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { getStore } from "../db";
 import { getAuth } from "../auth/provider";
-import { accessibleUnits, findUserByAuthId, toCtxUser } from "../auth/users";
+import { accessibleUnits, branchScopeOf, findUserByAuthId, toCtxUser } from "../auth/users";
 import type { Ctx } from "../core/ctx";
 import { can, type Crud, type ModuleKey } from "../permissions";
 import { ensureBootstrap } from "./bootstrap";
 import { ScopedStore, scopeStore } from "../db/scoped-store";
+import { readOnly } from "../db/read-only";
+import { demoCredentialBlocked } from "../auth/quick-access";
+import { companyBlockMessage, companyReadOnly, companySelectable } from "../../domain/tenancy/status";
 
 export const SESSION_COOKIE = "ic_session";
 export const UNIT_COOKIE = "ic_unit";
@@ -38,16 +41,18 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   if (!authId) return null;
   const userDoc = await findUserByAuthId(store, authId);
   if (!userDoc || userDoc.status !== "active" || userDoc.loginDisabled) return null;
+  // credencial de demonstração em ambiente de produção: sessão não vale (defesa além da tela de login)
+  if (demoCredentialBlocked(userDoc)) return null;
   const { companies, branches } = await accessibleUnits(store, userDoc);
   if (companies.length === 0) return null;
   const unit = jar.get(UNIT_COOKIE)?.value ?? "";
   const [cid, bid] = unit.split(":");
-  // empresa/filial inativa não é contexto de trabalho (volta para a seleção de unidade)
-  const company = companies.find((c) => c.id === cid && c.status !== "inactive") ?? null;
+  // empresa/filial inativa (ou suspensa com bloqueio pelo contrato) não é contexto de trabalho (volta para a seleção de unidade)
+  const company = companies.find((c) => c.id === cid && companySelectable(c)) ?? null;
   const companyBranches = company ? branches.filter((b) => b.companyId === company.id) : [];
   const branch = bid && bid !== "all" ? (companyBranches.find((b) => b.id === bid && b.status !== "inactive") ?? null) : null;
   // Consolidado só para quem acessa todas as filiais (usuário restrito escolhe uma filial)
-  const canConsolidate = Boolean(userDoc.isAdmin) || !(userDoc.branchIds ?? []).length;
+  const canConsolidate = company ? branchScopeOf(userDoc, company.id) === null : Boolean(userDoc.isAdmin) || !(userDoc.branchIds ?? []).length;
   const consolidated = bid === "all" && canConsolidate;
   // perfil da empresa ativa (perfil por empresa)
   const user = await toCtxUser(store, userDoc, company?.id ?? null);
@@ -69,8 +74,15 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
       canConsolidate,
     };
   }
+  // multiempresa: Store restrito à empresa (a da plataforma atende os chamados da tela de login); empresa suspensa em
+  // "somente leitura" recebe um Store que recusa qualquer gravação
+  const scoped = scopeStore(store, company.id, { platform: Boolean(company.isPlatform) });
   return {
-    ctx: { store: scopeStore(store, company.id), user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined },
+    // suspensa em somente leitura: toda gravação é recusada com o motivo; a trilha de auditoria continua registrando
+    ctx: {
+      store: companyReadOnly(company) ? readOnly(scoped, { message: companyBlockMessage(company) ?? undefined, appendOnly: ["audit_logs"] }) : scoped,
+      user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+    },
     user,
     company,
     branch,

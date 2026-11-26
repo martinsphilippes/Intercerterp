@@ -1,0 +1,121 @@
+{
+  "titulo": "Compras: pedidos, recebimentos e pendências",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/compras?de=2026-11-01&ate=2026-11-20",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0011"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0011",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "noPeriodo": {
+        "pedidosCriados": {
+          "quantidade": 3,
+          "valorCentavos": 866600
+        },
+        "pedidosRecebidos": {
+          "quantidade": 0,
+          "noPrazo": 0
+        },
+        "recebimentosConfirmados": {
+          "quantidade": 3,
+          "valorDevidoCentavos": 166780,
+          "valorFaturadoCentavos": 96480
+        },
+        "pedidosCriadosPorSituacao": [
+          {
+            "situacao": "em_analise",
+            "quantidade": 1,
+            "valorCentavos": 593000
+          },
+          {
+            "situacao": "enviado",
+            "quantidade": 1,
+            "valorCentavos": 162000
+          },
+          {
+            "situacao": "parcial",
+            "quantidade": 1,
+            "valorCentavos": 111600
+          }
+        ]
+      },
+      "posicaoAtual": {
+        "aguardandoAprovacao": {
+          "quantidade": 1,
+          "valorCentavos": 593000
+        },
+        "aReceber": {
+          "quantidade": 2,
+          "valorRestanteCentavos": 183120,
+          "atrasados": 0,
+          "previstosProximos7Dias": 2
+        },
+        "recebimentosEmConferencia": {
+          "quantidade": 1,
+          "valorFaturadoCentavos": 48000
+        },
+        "recebimentosComDivergencia": 1,
+        "aguardandoNota": {
+          "quantidade": 2,
+          "valorProvisorioCentavos": 43680,
+          "comPrazoVencido": 0
+        },
+        "pedidosPorSituacao": [
+          {
+            "situacao": "em_analise",
+            "quantidade": 1,
+            "valorCentavos": 593000
+          },
+          {
+            "situacao": "enviado",
+            "quantidade": 1,
+            "valorCentavos": 162000
+          },
+          {
+            "situacao": "parcial",
+            "quantidade": 1,
+            "valorCentavos": 111600
+          }
+        ],
+        "recebimentosPorSituacao": [
+          {
+            "situacao": "confirmado",
+            "quantidade": 3,
+            "valorCentavos": 166780
+          },
+          {
+            "situacao": "previsto",
+            "quantidade": 1,
+            "valorCentavos": 11880
+          },
+          {
+            "situacao": "rascunho",
+            "quantidade": 1,
+            "valorCentavos": 9600
+          }
+        ]
+      }
+    }
+  }
+}

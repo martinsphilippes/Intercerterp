@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getCollection, type CollectionDef } from "../schema";
 import { fromStored, toStored } from "../serialize";
-import { ConflictError, type Doc, type Filter, type ListOptions, type ListResult, NotFoundError, type Store } from "../types";
+import { ConflictError, type Doc, type Filter, type ListOptions, type ListResult, NotFoundError, type Store, type WriteGuard } from "../types";
 import { newId } from "../ids";
 import { normText } from "../norm";
 import type { PgConn, PgDriver, PgResult } from "./driver";
@@ -271,16 +271,16 @@ export class PostgresStore implements Store {
     return this.step(() => this.insertOne<T>(collection, data, id));
   }
 
-  update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
-    return this.step(() => this.updateOne<T>(collection, id, patch));
+  update<T = any>(collection: string, id: string, patch: Record<string, any>, guard?: WriteGuard): Promise<Doc<T>> {
+    return this.step(() => this.updateOne<T>(collection, id, patch, guard));
   }
 
-  delete(collection: string, id: string): Promise<void> {
-    return this.step(() => this.deleteOne(collection, id));
+  delete(collection: string, id: string, guard?: WriteGuard): Promise<boolean> {
+    return this.step(() => this.deleteOne(collection, id, guard));
   }
 
-  increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc> {
-    return this.step(() => this.incrementOne(collection, id, field, by, bounds));
+  increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard): Promise<Doc> {
+    return this.step(() => this.incrementOne(collection, id, field, by, bounds, guard));
   }
 
   private async readOne<T = any>(collection: string, id: string): Promise<Doc<T> | null> {
@@ -353,13 +353,15 @@ export class PostgresStore implements Store {
     return this.toDoc(collection, r.rows[0]) as Doc<T>;
   }
 
-  private async updateOne<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
+  private async updateOne<T = any>(collection: string, id: string, patch: Record<string, any>, guard?: WriteGuard): Promise<Doc<T>> {
     const t = table(collection);
     const stored = toStored(collection, patch);
     const sql = new Sql();
     const sets = Object.entries(stored).map(([k, v]) => `${ident(k)} = ${this.param(sql, t, k, v)}`);
     sets.push(`"updatedAt" = ${sql.p(new Date().toISOString())}`);
-    const text = `UPDATE ${ident(collection)} SET ${sets.join(", ")} WHERE "id" = ${sql.p(id)} RETURNING *`;
+    // multiempresa: com dono informado, o registro de outra empresa não é atingido (vira "não encontrado")
+    const owner = guard && t.kinds.has("companyId") ? ` AND "companyId" = ${sql.p(guard.companyId)}` : "";
+    const text = `UPDATE ${ident(collection)} SET ${sets.join(", ")} WHERE "id" = ${sql.p(id)}${owner} RETURNING *`;
     const tx = this.activeTx();
     let r: PgResult;
     if (tx && Object.keys(stored).some((k) => t.uniqueFields.has(k))) {
@@ -379,12 +381,14 @@ export class PostgresStore implements Store {
     return this.toDoc(collection, r.rows[0]) as Doc<T>;
   }
 
-  private async deleteOne(collection: string, id: string): Promise<void> {
-    table(collection);
-    await this.run(`DELETE FROM ${ident(collection)} WHERE "id" = $1`, [id]);
+  private async deleteOne(collection: string, id: string, guard?: WriteGuard): Promise<boolean> {
+    const t = table(collection);
+    const owned = guard && t.kinds.has("companyId");
+    const r = await this.run(`DELETE FROM ${ident(collection)} WHERE "id" = $1${owned ? ` AND "companyId" = $2` : ""}`, owned ? [id, guard!.companyId] : [id]);
+    return (r.rowCount ?? 0) > 0;
   }
 
-  private async incrementOne(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc> {
+  private async incrementOne(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard): Promise<Doc> {
     const t = table(collection);
     if (t.kinds.get(field) !== "int") throw new Error(`Campo ${collection}.${field} não é numérico (incremento)`);
     if (!Number.isInteger(by)) throw new Error(`Incremento de ${collection}.${field} exige inteiro (recebido ${String(by)})`);
@@ -393,12 +397,14 @@ export class PostgresStore implements Store {
     const delta = sql.p(by, "::bigint");
     const next = `COALESCE(${col}, 0) + ${delta}`;
     const conds = [`"id" = ${sql.p(id)}`];
+    const owned = Boolean(guard && t.kinds.has("companyId"));
+    if (owned) conds.push(`"companyId" = ${sql.p(guard!.companyId)}`);
     if (bounds?.min != null) conds.push(`${next} >= ${sql.p(bounds.min, "::numeric")}`);
     if (bounds?.max != null) conds.push(`${next} <= ${sql.p(bounds.max, "::numeric")}`);
     const r = await this.run(`UPDATE ${ident(collection)} SET ${col} = ${next}, "updatedAt" = ${sql.p(new Date().toISOString())} WHERE ${conds.join(" AND ")} RETURNING *`, sql.params);
     if (r.rows[0]) return this.toDoc(collection, r.rows[0]);
-    const cur = await this.run(`SELECT ${col} AS "v" FROM ${ident(collection)} WHERE "id" = $1`, [id]);
-    if (!cur.rows.length) throw new NotFoundError(collection, id);
+    const cur = await this.run(`SELECT ${col} AS "v"${owned ? `, "companyId" AS "c"` : ""} FROM ${ident(collection)} WHERE "id" = $1`, [id]);
+    if (!cur.rows.length || (owned && cur.rows[0].c !== guard!.companyId)) throw new NotFoundError(collection, id);
     const value = Number(cur.rows[0].v ?? 0) + by;
     if (bounds?.min != null && value < bounds.min) throw new ConflictError(`Limite mínimo violado em ${collection}.${field}`, collection, "bounds");
     throw new ConflictError(`Limite máximo violado em ${collection}.${field}`, collection, "bounds");

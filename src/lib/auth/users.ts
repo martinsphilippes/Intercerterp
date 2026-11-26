@@ -3,6 +3,8 @@ import type { Doc, Store } from "../db/types";
 import type { CtxUser } from "../core/ctx";
 import { ScopedStore, unscoped } from "../db/scoped-store";
 import { syncRoleTemplate, templateSyncPlan } from "./role-sync";
+import { PLATFORM_ACTIONS } from "../permissions";
+import { maskPermissionsByContract } from "../../domain/tenancy/contract";
 
 /**
  * Perfil por empresa: o vínculo usuário × empresa define o perfil (`roleByCompany[companyId]`).
@@ -51,6 +53,10 @@ export async function toCtxUser(store: Store, u: Doc, companyId?: string | null)
   let role = cid ? await userRoleIn(store, u, cid) : u.roleId ? await store.get("roles", u.roleId) : null;
   // perfil de sistema com operações novas no modelo padrão: aplica (idempotente, auditado); falha não bloqueia o acesso
   if (role && templateSyncPlan(role)) role = await syncRoleTemplate(store, role).catch(() => role);
+  // multiempresa (ponto central para menu, telas, ações e APIs): operações da plataforma só valem na empresa da
+  // plataforma; módulos não contratados ficam sem nenhuma operação
+  const company = cid ? await unscoped(store).get("companies", cid) : null;
+  const actions: string[] = (role?.actions ?? []).filter((a: string) => company?.isPlatform || !(PLATFORM_ACTIONS as string[]).includes(a));
   return {
     id: u.id,
     name: u.name,
@@ -59,10 +65,11 @@ export async function toCtxUser(store: Store, u: Doc, companyId?: string | null)
     roleId: role?.id ?? null,
     roleKey: role?.key ?? null,
     roleName: u.isAdmin ? "Administrador" : (role?.name ?? null),
-    permissions: role?.permissions ?? {},
-    actions: role?.actions ?? [],
+    permissions: maskPermissionsByContract(role?.permissions ?? {}, company),
+    actions,
     discountLimitBps: u.discountLimitBps ?? role?.discountLimitBps ?? 0,
-    branchIds: u.branchIds ?? [],
+    // filiais autorizadas na empresa do contexto (vazia = todas)
+    branchIds: cid ? (branchScopeOf(u, cid) ?? []) : (u.branchIds ?? []),
     companyIds: u.companyIds ?? [],
     twoFactorRequired: !u.isAdmin && Boolean(role?.requireTwoFactor),
   };
@@ -78,15 +85,31 @@ export async function findUserByAuthId(store: Store, authId: string): Promise<Do
   return findOne(store, "users", [["eq", "authId", authId]]);
 }
 
+/**
+ * Filiais autorizadas do usuário NA empresa (multiempresa): `null` = todas as filiais da empresa; lista = só essas
+ * (vazia = nenhuma). Ordem: atribuição por empresa (`branchIdsByCompany[empresa]`: [] = todas; lista = só essas) →
+ * lista legada `branchIds` (valia para todas as empresas do usuário: vazia = todas; senão, as da lista).
+ */
+export function branchScopeOf(u: Record<string, any> | null | undefined, companyId: string): string[] | null {
+  if (!u || u.isAdmin) return null;
+  const per = (u.branchIdsByCompany ?? {})[companyId];
+  if (Array.isArray(per)) return per.length ? per : null;
+  const legacy: string[] = u.branchIds ?? [];
+  return legacy.length ? legacy : null;
+}
+
 /** Empresas e filiais acessíveis ao usuário (inclui inativas — use `unitBlockReason` para saber se podem ser selecionadas). */
 export async function accessibleUnits(store: Store, u: Doc) {
   const { listAll } = await import("../db");
   const base = unscoped(store);
   const [allCompanies, allBranches] = await Promise.all([listAll(base, "companies"), listAll(base, "branches")]);
-  const companies = allCompanies.filter((c) => u.isAdmin || (u.companyIds ?? []).includes(c.id));
-  const branches = allBranches.filter(
-    (b) => companies.some((c) => c.id === b.companyId) && (u.isAdmin || !(u.branchIds?.length) || u.branchIds.includes(b.id)),
-  );
+  // credenciais de demonstração só alcançam empresas de demonstração (nunca uma empresa contratante real)
+  const companies = allCompanies.filter((c) => (u.isAdmin || (u.companyIds ?? []).includes(c.id)) && (!u.isDemo || c.isDemo));
+  const branches = allBranches.filter((b) => {
+    if (!companies.some((c) => c.id === b.companyId)) return false;
+    const scope = branchScopeOf(u, b.companyId);
+    return scope === null || scope.includes(b.id);
+  });
   return { companies, branches };
 }
 
@@ -96,6 +119,9 @@ export async function accessibleUnits(store: Store, u: Doc) {
  */
 export function unitBlockReason(company: Doc | Record<string, any> | null | undefined, branch: Doc | Record<string, any> | null | undefined): string | null {
   if (company && company.status === "inactive") return `Empresa ${company.tradeName || company.name} inativa: não pode ser selecionada nem operar. Um administrador pode reativá-la em Administração → Empresas.`;
+  // suspensão pelo contrato (Interos): com bloqueio não seleciona; em somente leitura seleciona (o aviso fica no topo)
+  if (company && company.status === "suspended" && company.suspension?.mode !== "somente_leitura")
+    return `${company.tradeName || company.name}: acesso suspenso pelo contrato. Os dados estão preservados; procure o responsável pelo contrato para reativar.`;
   if (branch && branch.status === "inactive") return `Filial ${branch.name} inativa: não pode ser selecionada nem operar. Consulte seus movimentos pelo consolidado da empresa ou peça a reativação.`;
   return null;
 }

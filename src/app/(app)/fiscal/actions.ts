@@ -426,6 +426,8 @@ export async function deleteObligationAction(id: string) {
 
 export async function generateObligationsAction() {
   return runAction({ module: "fiscal", op: "edit", revalidate: ["/fiscal/relatorios"] }, async (s) => {
+    // mesma operação que exibe o botão na tela (inventário multiempresa D4)
+    requireAction(s.ctx, "fiscal.issue");
     const r = await generateObligations(s.ctx);
     return { ok: true as const, message: r.created ? `${r.created} obrigação(ões) gerada(s) a partir do calendário.` : "Obrigações da competência já estavam geradas." };
   });

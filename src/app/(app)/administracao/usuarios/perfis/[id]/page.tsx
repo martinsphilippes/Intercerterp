@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/ui/empty";
 import { can, canDo } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/dates";
 import { roleUsers } from "@/domain/roles";
-import { companyUsers, inviteState } from "@/domain/users";
+import { inviteState, listedCompanyUsers } from "@/domain/users";
 import { RoleForm } from "../role-form";
 import { roleFormOptions } from "../role-options";
 import { RoleList } from "../role-list";
@@ -27,7 +27,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const { tab = "permissoes" } = await searchParams;
   const role = await s.ctx.store.get("roles", id);
   if (!role || role.companyId !== s.ctx.companyId) notFound();
-  const [users, roles, usersTotal] = await Promise.all([roleUsers(s.ctx.store, id), queryRoles(s.ctx), companyUsers(s.ctx.store, s.ctx.companyId)]);
+  const [users, roles, usersTotal] = await Promise.all([roleUsers(s.ctx.store, id), queryRoles(s.ctx), listedCompanyUsers(s.ctx)]);
   const manage = canDo(s.user, "admin.users");
   const base = `/administracao/usuarios/perfis/${id}`;
   return (
@@ -43,7 +43,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           </>
         }
       />
-      <UserTabs active="perfis" users={usersTotal.length} roles={roles.length} />
+      <UserTabs active="perfis" users={usersTotal.filter((u) => !u.loginDisabled).length} roles={roles.length} />
       <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
         <RoleList roles={roles} activeId={id} canCreate={manage && can(s.user, "admin", "create")} />
         <div className="min-w-0">

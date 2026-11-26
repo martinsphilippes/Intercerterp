@@ -1,0 +1,27 @@
+{
+  "titulo": "Empresa não vinculada ao Interos",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/cd4ba63f161929c5da343c83c8d12167/torre/resumo?de=2026-11-01&ate=2026-11-20",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-e404"
+    }
+  },
+  "resposta": {
+    "status": 404,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-e404",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "nao_encontrado",
+        "mensagem": "Empresa não encontrada para esta credencial."
+      },
+      "requestId": "req-torre-e404"
+    }
+  }
+}

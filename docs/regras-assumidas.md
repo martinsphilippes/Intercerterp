@@ -1142,3 +1142,48 @@ Contexto (reunião com o dono): a Intercert é uma AC2 da ICP-Brasil sob as AC1 
 **Demonstração.** “Loja Modelo” publicada (modelo Essencial, Azul Intercert), 11 produtos (o Cinto com “Peso pendente”, como no guia), cupom BEMVINDO10, conta preparada no Mercado Livre, carrinhos parados e 7 pedidos pelo checkout real (IC-1041 a IC-1047) em todas as etapas, inclusive um crédito do gateway conciliado.
 
 **Prévia fiel (18/11/2026).** A miniatura da loja na Central, no editor e na galeria de modelos mostra os produtos, preços, categorias e a ordem da vitrine — a mesma consulta da loja pública (`storePreviewData`) —, e no modelo Campanha o produto da oferta escolhido. Só a loja sem produto vendável vê exemplos, rotulados “Produtos de exemplo” (antes, a miniatura mostrava sempre produtos ilustrativos, que não existiam no catálogo). As fotos vêm pela rota de imagens da vitrine, que só entrega a identidade da loja e fotos de produtos do catálogo dela; foto que não abre volta para a ilustração da categoria, sem o ícone de imagem quebrada do navegador. A ilustração por categoria é a mesma na vitrine e no ERP (`src/components/storefront/product-icon.ts`).
+
+## 50. Multiempresa: várias empresas contratantes isoladas, provisionadas e acompanhadas pelo Interos [Decisão]
+
+Pedido do titular em 25/11/2026. Documentação: `docs/multiempresa/arquitetura.md`, `administracao.md`, `migracao.md`,
+`homologacao.md` e `docs/interos/contrato-interos-erp-v1.md`.
+
+**Isolamento no servidor, num ponto único.** Toda leitura e gravação passa por um Store restrito à empresa do
+contexto, que o servidor determina pela sessão e pela unidade, nunca por parâmetro do navegador. As gravações levam a
+condição de dono dentro do próprio SQL. As portas entre empresas são explícitas (`unscoped`) e conferem a autorização
+antes. Padrão `estrito`. `observar` e `legado` existem para a ativação gradual e para o rollback.
+
+**Empresa nova nasce pelo Interos ou pela plataforma.** O administrador de uma empresa cliente não cria outras
+empresas: no produto multiempresa, cada empresa é um contrato. A conta do Interos identifica a empresa contratante, e
+uma conta corresponde a uma empresa, garantido por índice único.
+
+**Empresa que já usa o ERP só é vinculada com consentimento.** O administrador dela gera um código de uso único que
+vale 72 h; o ERP guarda só o hash. O Interos informa ID ERP, CNPJ e código. Qualquer divergência tem a mesma resposta,
+para não permitir descobrir empresas por tentativa.
+
+**Senha nunca passa pelo Interos.** O administrador inicial recebe um convite de uso único com validade (padrão 7
+dias) e define a própria senha. O link é devolvido uma única vez, na primeira resposta, e nunca é gravado. Na
+repetição idempotente, ele volta redigido.
+
+**Suspensão pelo contrato, em dois modos.**
+- `bloqueio`: ninguém entra, as sessões são encerradas, tarefas e rotinas ficam retidas e a loja sai do ar.
+- `somente_leitura`: a equipe entra, consulta e exporta, sem gravar.
+
+Nada é apagado, e a reativação devolve a situação anterior.
+
+**Torre de Controle sem fórmulas próprias.** Cada indicador sai da mesma função da tela do ERP, para que o número do
+Interos seja o número que o cliente vê. Sem dados pessoais de clientes: pessoas aparecem só por id. Credenciais da
+Torre são separadas das de provisionamento.
+
+**Plataforma.** As operações da rede inteira e da equipe de certificação só têm efeito na empresa marcada como
+plataforma. Fora dela, não podem ser concedidas e são mascaradas.
+
+**Administração pelo cliente, sempre dentro do próprio escopo.**
+- Quem administra usuários só concede o acesso que tem.
+- Só assume a conta (senha, recuperação, e-mail/login, duas etapas) de quem não tem acesso maior que o dele.
+- Não deixa a empresa sem administrador.
+- Vê o impacto antes de salvar um perfil compartilhado.
+
+**Credenciais de demonstração só no ambiente de teste** (`ERP_AMBIENTE`). A publicação atual continua em `teste`
+porque o titular decidiu manter o acesso rápido na tela de login até ordem em contrário (§47). Uma produção com
+empresas contratantes reais deve rodar em `producao`, e essa troca depende do titular.

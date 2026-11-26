@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { companySelectable } from "@/domain/tenancy/status";
 import { getSession, UNIT_COOKIE } from "@/lib/server/session";
-import { unitBlockReason } from "@/lib/auth/users";
+import { accessibleUnits, branchScopeOf, unitBlockReason } from "@/lib/auth/users";
 import { UnitPicker } from "./picker";
 import { logoutAction } from "@/app/actions/session";
 
@@ -10,12 +11,16 @@ export const metadata = { title: "Selecionar empresa e filial" };
 export default async function Page() {
   const s = await getSession();
   if (!s) redirect("/login");
-  const companies = s.companies.map((c) => ({ id: c.id, name: c.tradeName || c.name, legal: c.name, cnpj: c.cnpj, status: c.status, isDemo: Boolean(c.isDemo) }));
-  const { listAll, getStore } = await import("@/lib/db");
-  const all = await listAll(getStore(), "branches");
-  const allowed = all.filter((b) => s.companies.some((c) => c.id === b.companyId) && (s.user.isAdmin || !s.user.branchIds.length || s.user.branchIds.includes(b.id)));
+  // situação para a tela: suspensa pelo contrato com bloqueio não é selecionável; em somente leitura, sim (com aviso)
+  const shownStatus = (c: Record<string, any>) => (c.status === "suspended" ? (companySelectable(c) ? "readonly" : "suspended") : c.status);
+  const companies = s.companies.map((c) => ({ id: c.id, name: c.tradeName || c.name, legal: c.name, cnpj: c.cnpj, status: shownStatus(c), isDemo: Boolean(c.isDemo) }));
+  const { getStore } = await import("@/lib/db");
+  // filiais autorizadas por empresa (multiempresa: a atribuição de filiais vale por empresa)
+  const userDoc = await getStore().get("users", s.user.id);
+  const { branches: allowed } = userDoc ? await accessibleUnits(getStore(), userDoc) : { branches: [] as Record<string, any>[] };
+  const consolidable = Object.fromEntries(s.companies.map((c) => [c.id, branchScopeOf(userDoc, c.id) === null]));
   // empresa/filial inativa não é selecionável (nem automaticamente)
-  const activeCompanies = s.companies.filter((c) => c.status !== "inactive");
+  const activeCompanies = s.companies.filter((c) => companySelectable(c));
   const usable = allowed.filter((b) => b.status !== "inactive" && activeCompanies.some((c) => c.id === b.companyId));
   if (activeCompanies.length === 1 && usable.length === 1) {
     // única opção: seleção automática
@@ -41,7 +46,7 @@ export default async function Page() {
           A unidade que você usava foi inativada. {blocked}
         </p>
       )}
-      <UnitPicker companies={companies} branches={branches} canConsolidate={s.user.isAdmin || !s.user.branchIds.length} />
+      <UnitPicker companies={companies} branches={branches} canConsolidate={consolidable} />
     </div>
   );
 }

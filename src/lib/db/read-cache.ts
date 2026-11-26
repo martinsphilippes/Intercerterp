@@ -1,5 +1,5 @@
 import { cache } from "react";
-import type { Doc, ListOptions, ListResult, Store } from "./types";
+import type { Doc, ListOptions, ListResult, Store, WriteGuard } from "./types";
 
 /**
  * Camada de leitura rápida sobre o Store, sem mudar o resultado das regras de negócio:
@@ -8,12 +8,15 @@ import type { Doc, ListOptions, ListResult, Store } from "./types";
  *    filtros) vai ao banco uma única vez — sessão, cabeçalho e página costumam repetir empresas, filiais, usuário e
  *    configurações. Fora da renderização do servidor (scripts, testes, tarefas) o `cache` do React não memoriza nada.
  * 2. Memória curta entre requisições (15 s, por instância) só para cadastros quase estáticos usados em toda tela.
+ *    Empresas e perfis ficam FORA dela (multiempresa): situação da empresa (suspensão, somente leitura), contrato e
+ *    permissões decidem o acesso e precisam valer na hora em todas as instâncias — uma suspensão feita pelo Interos
+ *    numa instância não pode esperar 15 s para valer nas outras. Dentro da requisição continuam memorizados.
  *
  * Qualquer gravação (create/update/delete/increment/transação) limpa a memória da requisição e as entradas da tabela
  * alterada; os resultados são entregues como cópias, para que um chamador não altere o objeto de outro.
  */
 const SHARED_TTL_MS = 15_000;
-const SHARED = new Set(["companies", "branches", "roles", "settings", "payment_methods"]);
+const SHARED = new Set(["branches", "settings", "payment_methods"]);
 
 const requestMemo = cache(() => new Map<string, Promise<unknown>>());
 const shared = new Map<string, { until: number; value: Promise<unknown> }>();
@@ -92,28 +95,28 @@ export class ReadCachedStore implements Store {
     }
   }
 
-  async update<T = any>(collection: string, id: string, patch: Partial<T> & Record<string, any>) {
+  async update<T = any>(collection: string, id: string, patch: Partial<T> & Record<string, any>, guard?: WriteGuard) {
     invalidate(collection);
     try {
-      return await this.inner.update<T>(collection, id, patch);
+      return await this.inner.update<T>(collection, id, patch, guard);
     } finally {
       invalidate(collection);
     }
   }
 
-  async delete(collection: string, id: string) {
+  async delete(collection: string, id: string, guard?: WriteGuard) {
     invalidate(collection);
     try {
-      return await this.inner.delete(collection, id);
+      return await this.inner.delete(collection, id, guard);
     } finally {
       invalidate(collection);
     }
   }
 
-  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }) {
+  async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard) {
     invalidate(collection);
     try {
-      return await this.inner.increment(collection, id, field, by, bounds);
+      return await this.inner.increment(collection, id, field, by, bounds, guard);
     } finally {
       invalidate(collection);
     }

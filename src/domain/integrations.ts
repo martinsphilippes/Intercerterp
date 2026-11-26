@@ -1,7 +1,8 @@
 import { detId, isConflict, listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { nowIso } from "@/lib/dates";
-import { assert } from "@/lib/core/errors";
+import { BusinessError, assert } from "@/lib/core/errors";
+import { unscoped } from "@/lib/db/scoped-store";
 import { requireAction, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 
@@ -304,6 +305,24 @@ export function secretRefProblem(name: string | null | undefined, opts: { label:
   return null;
 }
 
+/**
+ * Multiempresa: a variável de ambiente de uma credencial tem DONO — a primeira empresa que a vinculou. Outra empresa não
+ * pode apontar para ela (emitiria nota, cobraria ou enviaria e-mail com a conta alheia). Exceção: credenciais que a
+ * plataforma oferece a todas, listadas em `ERP_CREDENCIAIS_COMPARTILHADAS` (nomes separados por vírgula).
+ * A mensagem não revela qual empresa usa a variável.
+ */
+export async function assertSecretRefsOwned(ctx: Ctx, refs: string[]) {
+  const wanted = [...new Set(refs.map((r) => String(r ?? "").trim()).filter(Boolean))];
+  if (!wanted.length) return;
+  const shared = new Set(String(process.env.ERP_CREDENCIAIS_COMPARTILHADAS ?? "").split(",").map((x) => x.trim()).filter(Boolean));
+  const others = (await listAll(unscoped(ctx.store), "integrations")).filter((i) => i.companyId !== ctx.companyId);
+  for (const ref of wanted) {
+    if (shared.has(ref)) continue;
+    if (others.some((i) => Object.values(i.secretRefs ?? {}).includes(ref)))
+      throw new BusinessError(`A variável ${ref} já é a credencial de outra empresa desta instalação. Crie uma variável própria para esta empresa (ex.: ${ref}_${String(ctx.companyId).slice(0, 6).toUpperCase()}) e vincule-a aqui.`, "secret_ref_owned");
+  }
+}
+
 /** Problema no nome da variável de um segredo do provedor do catálogo. */
 export function providerSecretProblem(prov: CatalogProvider, secret: string, name: string | null | undefined) {
   return secretRefProblem(name, { label: SECRET_LABEL[secret] ?? secret, example: prov.defaultRefs?.[secret] ?? `${prov.refPrefixes?.[0] ?? "MINHA_"}CHAVE`, prefixes: prov.refPrefixes });
@@ -384,6 +403,11 @@ export async function saveIntegration(
   assert(cat, "Tipo de integração desconhecido.");
   // a loja virtual é uma por empresa: as integrações dela valem para a empresa inteira (nunca por filial)
   if (STORE_INTEGRATION_KINDS.includes(input.kind)) input = { ...input, branchId: null };
+  // multiempresa: filial de outra empresa (ou inexistente) não vira integração órfã nesta
+  if (input.branchId) {
+    const b = await ctx.store.get("branches", input.branchId);
+    assert(b && b.companyId === ctx.companyId, "Filial não encontrada nesta empresa.");
+  }
   const prov = cat.providers.find((p) => p.id === input.provider);
   assert(prov, "Provedor não suportado para esta integração.");
   // o endereço da API é fixo no código de cada provedor: nunca configurável (o servidor enviaria a credencial a ele)
@@ -410,6 +434,7 @@ export async function saveIntegration(
     const problem = validateDominioConfig(config);
     assert(!problem, problem ?? "", "invalid_config");
   }
+  await assertSecretRefsOwned(ctx, Object.values(refs));
   const sk = scopeKey(ctx.companyId, input.branchId, input.kind);
   const id = detId("integration", sk);
   const data = {
@@ -645,6 +670,8 @@ export async function saveFiscalIntegration(ctx: Ctx, branchId: string | null, i
   const { saveFiscalConfig, getFiscalConfig } = await import("./fiscal/service");
   const cur = await getFiscalConfig(ctx.store, ctx.companyId, branchId);
   const patch: Record<string, any> = { provider: input.provider, environment: input.environment, tokenRef: input.tokenRef === "" ? "" : input.tokenRef || "FOCUSNFE_TOKEN" };
+  // multiempresa: o token fiscal e o CSC têm dono (a mesma regra das demais credenciais)
+  if (input.provider === "focusnfe") await assertSecretRefsOwned(ctx, [patch.tokenRef, input.cscTokenRef ?? ""]);
   if (input.enabled !== undefined) {
     if (input.kind === "fiscal_nfe") Object.assign(patch, { nfeEnabled: input.enabled, nfceEnabled: input.enabled });
     else patch.nfseEnabled = input.enabled;

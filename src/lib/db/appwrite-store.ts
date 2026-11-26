@@ -1,7 +1,7 @@
 import { AppwriteException, Client, Query, TablesDB } from "node-appwrite";
-import { getCollection } from "./schema";
+import { getCollection, COLLECTION_MAP } from "./schema";
 import { fromStored, toStored } from "./serialize";
-import { ConflictError, Doc, Filter, ListOptions, ListResult, NotFoundError, Store } from "./types";
+import { ConflictError, Doc, Filter, ListOptions, ListResult, NotFoundError, Store, type WriteGuard } from "./types";
 import { newId } from "./ids";
 
 const META: Record<string, string> = { id: "$id", createdAt: "$createdAt", updatedAt: "$updatedAt" };
@@ -129,7 +129,15 @@ export class AppwriteStore implements Store {
     }
   }
 
-  async update<T = any>(collection: string, id: string, patch: Record<string, any>): Promise<Doc<T>> {
+  /** Multiempresa (legado Appwrite): confere o dono antes de gravar — o Appwrite não aceita condição na gravação. */
+  private async ownerMismatch(collection: string, id: string, guard?: WriteGuard): Promise<boolean> {
+    if (!guard || !COLLECTION_MAP[collection]?.fields.companyId) return false;
+    const cur = await this.get(collection, id);
+    return Boolean(cur) && (cur as any).companyId !== guard.companyId;
+  }
+
+  async update<T = any>(collection: string, id: string, patch: Record<string, any>, guard?: WriteGuard): Promise<Doc<T>> {
+    if (await this.ownerMismatch(collection, id, guard)) throw new NotFoundError(collection, id);
     try {
       const row = await this.db.updateRow({
         databaseId: this.cfg.databaseId,
@@ -144,7 +152,8 @@ export class AppwriteStore implements Store {
     }
   }
 
-  async delete(collection: string, id: string): Promise<void> {
+  async delete(collection: string, id: string, guard?: WriteGuard): Promise<void> {
+    if (await this.ownerMismatch(collection, id, guard)) return;
     try {
       await this.db.deleteRow({ databaseId: this.cfg.databaseId, tableId: collection, rowId: id, transactionId: this.txId });
     } catch (e) {
@@ -153,7 +162,8 @@ export class AppwriteStore implements Store {
     }
   }
 
-  async increment(collection: string, id: string, column: string, by: number, bounds?: { min?: number; max?: number }): Promise<Doc> {
+  async increment(collection: string, id: string, column: string, by: number, bounds?: { min?: number; max?: number }, guard?: WriteGuard): Promise<Doc> {
+    if (await this.ownerMismatch(collection, id, guard)) throw new NotFoundError(collection, id);
     try {
       const base = { databaseId: this.cfg.databaseId, tableId: collection, rowId: id, column, transactionId: this.txId };
       const row =

@@ -1,0 +1,129 @@
+{
+  "titulo": "Retomar a implantação com a entrada guardada (sem reenviar o corpo)",
+  "nota": "Só o que faltou é feito: a empresa e a unidade já existiam; o convite, que não chegou a sair, é gerado e entregue agora (por e-mail, entregaConvite: erp).",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/7f4cab206292e2b0bdffcdb30e780871/implantacao/retomar",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-0015",
+      "Idempotency-Key": "gama-retomar-20261124-001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {}
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-0015",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "empresa": {
+        "idEmpresa": "7f4cab206292e2b0bdffcdb30e780871",
+        "contaInterosId": "conta-gama-0003",
+        "tipo": "varejo",
+        "razaoSocial": "Gama Papelaria e Presentes Ltda",
+        "nomeFantasia": "Gama Papelaria",
+        "cnpj": "31415926000171",
+        "situacao": "ativa",
+        "suspensao": null,
+        "historicoSituacao": [],
+        "modulos": [
+          "estoque",
+          "financeiro",
+          "pdv",
+          "vendas"
+        ],
+        "contrato": {
+          "referencia": "CT-2026-0057",
+          "plano": "essencial"
+        },
+        "implantacao": {
+          "operacao": "criar",
+          "estado": "concluida",
+          "etapas": [
+            {
+              "etapa": "empresa",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:13:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            },
+            {
+              "etapa": "unidade_inicial",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:13:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            },
+            {
+              "etapa": "modulos",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:13:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            },
+            {
+              "etapa": "administrador",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:15:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            }
+          ],
+          "tentativas": 2,
+          "ultimoErro": null,
+          "iniciadaEm": "2026-11-20T12:13:00.000Z",
+          "concluidaEm": "2026-11-20T12:15:00.000Z"
+        },
+        "unidades": [
+          {
+            "idUnidade": "43b5371c6111264c1dcb242aa7232e9b",
+            "codigo": "01",
+            "nome": "Matriz",
+            "cnpj": "31415926000171",
+            "situacao": "ativa"
+          }
+        ],
+        "administradores": [
+          {
+            "idUsuario": "2651926fe4572c99297d2fa51721848d",
+            "nome": "Gustavo Gomes",
+            "email": "gustavo@gama-papelaria.example",
+            "situacao": "convidado",
+            "convite": {
+              "estado": "pendente",
+              "expiraEm": "2026-11-27T12:15:00.000Z",
+              "enviadoEm": "2026-11-20T12:15:00.000Z",
+              "detalheEntrega": "E-mail entregue ao provedor."
+            },
+            "primeiroAcessoEm": null,
+            "ultimoAcessoEm": null
+          }
+        ],
+        "usuarios": {
+          "ativos": 0,
+          "convidados": 1,
+          "suspensos": 0,
+          "inativos": 0
+        },
+        "ultimaAtividadeEm": null,
+        "vinculadaEm": "2026-11-20T12:13:00.000Z",
+        "atualizadaEm": "2026-11-20T12:15:00.000Z"
+      },
+      "convite": {
+        "idUsuario": "2651926fe4572c99297d2fa51721848d",
+        "entrega": "erp",
+        "entregue": true,
+        "canal": "smtp",
+        "detalhe": "E-mail entregue ao provedor.",
+        "expiraEm": "2026-11-27T12:15:00.000Z",
+        "link": null,
+        "linkRedigido": false
+      }
+    }
+  }
+}

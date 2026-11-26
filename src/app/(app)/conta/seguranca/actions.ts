@@ -1,11 +1,23 @@
 "use server";
 
 import QRCode from "qrcode";
+import { cookies } from "next/headers";
 import { runAction, fstr } from "@/lib/server/action";
+import { SESSION_COOKIE } from "@/lib/server/session";
 import { beginTwoFactorSetup, confirmTwoFactorSetup, disableTwoFactor, regenerateRecoveryCodes } from "@/domain/two-factor";
+import { revokeOtherSessions } from "@/domain/users";
 import { formatSecret } from "@/lib/auth/totp";
 
 const PATH = "/conta/seguranca";
+
+/** Multiempresa — o próprio usuário encerra as OUTRAS sessões dele; a desta requisição continua aberta. */
+export async function revokeOtherSessionsAction() {
+  return runAction({ revalidate: [PATH] }, async (s) => {
+    const current = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+    const r = await revokeOtherSessions(s.ctx, current);
+    return { ok: true as const, message: r.ended ? `${r.ended} outra(s) sessão(ões) encerrada(s). Esta continua aberta.` : "Não havia outras sessões abertas." };
+  });
+}
 
 /** Inicia (ou reinicia) o cadastro do aplicativo autenticador: QR code e chave para digitação. */
 export async function startTwoFactorSetupAction(restart = false) {

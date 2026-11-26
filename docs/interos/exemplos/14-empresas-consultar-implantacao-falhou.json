@@ -1,0 +1,115 @@
+{
+  "titulo": "Consultar a implantação que falhou: etapas, tentativas e último erro",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/7f4cab206292e2b0bdffcdb30e780871",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-0014"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-0014",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "empresa": {
+        "idEmpresa": "7f4cab206292e2b0bdffcdb30e780871",
+        "contaInterosId": "conta-gama-0003",
+        "tipo": "varejo",
+        "razaoSocial": "Gama Papelaria e Presentes Ltda",
+        "nomeFantasia": "Gama Papelaria",
+        "cnpj": "31415926000171",
+        "situacao": "ativa",
+        "suspensao": null,
+        "historicoSituacao": [],
+        "modulos": [
+          "estoque",
+          "financeiro",
+          "pdv",
+          "vendas"
+        ],
+        "contrato": {
+          "referencia": "CT-2026-0057",
+          "plano": "essencial"
+        },
+        "implantacao": {
+          "operacao": "criar",
+          "estado": "falhou",
+          "etapas": [
+            {
+              "etapa": "empresa",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:13:00.000Z",
+              "erro": null,
+              "tentativas": 1
+            },
+            {
+              "etapa": "unidade_inicial",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:13:00.000Z",
+              "erro": null,
+              "tentativas": 1
+            },
+            {
+              "etapa": "modulos",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:13:00.000Z",
+              "erro": null,
+              "tentativas": 1
+            },
+            {
+              "etapa": "administrador",
+              "estado": "falhou",
+              "concluidaEm": null,
+              "erro": "erro inesperado (provedor de e-mail fora do ar)",
+              "tentativas": 1
+            }
+          ],
+          "tentativas": 1,
+          "ultimoErro": "administrador: erro inesperado (provedor de e-mail fora do ar)",
+          "iniciadaEm": "2026-11-20T12:13:00.000Z",
+          "concluidaEm": null
+        },
+        "unidades": [
+          {
+            "idUnidade": "43b5371c6111264c1dcb242aa7232e9b",
+            "codigo": "01",
+            "nome": "Matriz",
+            "cnpj": "31415926000171",
+            "situacao": "ativa"
+          }
+        ],
+        "administradores": [
+          {
+            "idUsuario": "2651926fe4572c99297d2fa51721848d",
+            "nome": "Gustavo Gomes",
+            "email": "gustavo@gama-papelaria.example",
+            "situacao": "convidado",
+            "convite": {
+              "estado": "pendente",
+              "expiraEm": "2026-11-27T12:13:00.000Z",
+              "enviadoEm": null,
+              "detalheEntrega": null
+            },
+            "primeiroAcessoEm": null,
+            "ultimoAcessoEm": null
+          }
+        ],
+        "usuarios": {
+          "ativos": 0,
+          "convidados": 1,
+          "suspensos": 0,
+          "inativos": 0
+        },
+        "ultimaAtividadeEm": null,
+        "vinculadaEm": "2026-11-20T12:13:00.000Z",
+        "atualizadaEm": "2026-11-20T12:13:00.000Z"
+      }
+    }
+  }
+}

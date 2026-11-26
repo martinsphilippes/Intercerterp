@@ -981,6 +981,9 @@ export interface TitleAttachment {
 export async function addTitleAttachment(ctx: Ctx, titleId: string, att: Omit<TitleAttachment, "uploadedAt" | "uploadedBy" | "uploadedByName">) {
   const title = await ctx.store.getOrThrow("titles", titleId);
   assert(title.companyId === ctx.companyId, "Título de outra empresa.");
+  // multiempresa: o anexo só aponta para arquivo desta empresa (o Store restrito não enxerga os das outras)
+  const file = await ctx.store.get("files", att.fileId);
+  assert(file && file.companyId === ctx.companyId, "Arquivo não encontrado nesta empresa.");
   const list: TitleAttachment[] = Array.isArray(title.attachments) ? title.attachments : [];
   if (list.some((a) => a.fileId === att.fileId)) return title;
   const next = [...list, { ...att, uploadedAt: new Date().toISOString(), uploadedBy: ctx.user.id, uploadedByName: ctx.user.name }];

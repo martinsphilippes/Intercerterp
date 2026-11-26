@@ -69,7 +69,18 @@ export async function saveIssuer(ctx: Ctx, branchId: string | null, input: Issue
 
 // ───────────────────────────── Numeração
 
+/**
+ * Multiempresa: a filial da numeração precisa ser da empresa ativa. O numerador do RPS (`rps:<filial>`) não leva a
+ * empresa na chave e a coleção `counters` não tem `companyId` — sem esta conferência, o id de uma filial de outra
+ * empresa leria ou avançaria a sequência dela (docs/multiempresa/homologacao.md).
+ */
+async function assertOwnBranch(ctx: Ctx, branchId: string) {
+  const b = branchId ? await ctx.store.get("branches", branchId) : null;
+  assert(b && b.companyId === ctx.companyId, "Filial não encontrada nesta empresa.");
+}
+
 export async function numberingStatus(ctx: Ctx, branchId: string, cfg: Doc | null) {
+  await assertOwnBranch(ctx, branchId);
   const nfeSeries = String(cfg?.nfeSeries ?? 1);
   const nfceSeries = String(cfg?.nfceSeries ?? 1);
   const terminals = await listAll(ctx.store, "terminals", { filters: [["eq", "branchId", branchId]] });
@@ -89,6 +100,7 @@ export async function numberingStatus(ctx: Ctx, branchId: string, cfg: Doc | nul
 /** Ajusta o próximo número (somente para frente — nunca reutiliza números já atribuídos). */
 export async function setNextNumber(ctx: Ctx, branchId: string, model: "nfe" | "nfce" | "nfse", series: string, next: number) {
   requireAction(ctx, "fiscal.configure");
+  await assertOwnBranch(ctx, branchId);
   assert(Number.isInteger(next) && next >= 1 && next <= 999999999, "Número inválido.");
   const key = model === "nfse" ? `rps:${branchId}` : numberKey(ctx.companyId, branchId, model, series);
   const id = detId("counter", key);

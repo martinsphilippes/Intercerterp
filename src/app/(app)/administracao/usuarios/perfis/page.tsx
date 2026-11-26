@@ -10,7 +10,7 @@ import { can, canDo } from "@/lib/permissions";
 import type { SearchParams } from "@/lib/list";
 import { queryRoles } from "../queries";
 import { UserTabs } from "../user-tabs";
-import { companyUsers } from "@/domain/users";
+import { listedCompanyUsers } from "@/domain/users";
 
 export const metadata = { title: "Perfis e permissões" };
 
@@ -20,7 +20,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const s = await requireSession("admin");
   const params = await searchParams;
   const rows = await queryRoles(s.ctx);
-  const usersTotal = (await companyUsers(s.ctx.store, s.ctx.companyId)).length;
+  const usersTotal = (await listedCompanyUsers(s.ctx)).filter((u) => !u.loginDisabled).length;
   const manage = can(s.user, "admin", "create") && canDo(s.user, "admin.users");
   const columns: Column<Row>[] = [
     { key: "name", label: "Perfil", fixed: true, cell: (r) => <span>{r.name}{r.system && <Badge className="ml-2">Sistema</Badge>}{r.active === false && <Badge tone="warn" className="ml-2">Inativo</Badge>}</span> },

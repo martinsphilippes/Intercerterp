@@ -151,6 +151,9 @@ export async function createNode(ctx: Ctx, input: CreateNodeInput): Promise<{ no
     related: [`company:${company.id}`, ...(parent ? [`cert_network_node:${parent.id}`] : [])],
   });
   if (parent) await auditNode(ctx, parent, { action: "network.child_added", summary: `Novo parceiro abaixo: ${levelLabels[level]} ${node.name} (${code})`, related: [`cert_network_node:${node.id}`] });
+  // multiempresa: vínculo explícito de rede (nó acima → parceiro)
+  const { syncNodeRelation } = await import("../tenancy/relations");
+  await syncNodeRelation(ctx.store, node, { id: ctx.user.id, name: ctx.user.name });
   return { node, company, invite, linked };
 }
 
@@ -184,7 +187,12 @@ export async function moveNode(ctx: Ctx, nodeId: string, input: { parentNodeId: 
   const oldParent = node.parentNodeId ? nodes.find((n) => n.id === node.parentNodeId) ?? null : null;
   const newPath = newParent ? [...(newParent.path ?? []), newParent.id] : [];
   const oldPrefixLen = (node.path ?? []).length;
+  const previousParentCompanyId = node.parentNodeId ? ((await base.get("cert_network_nodes", node.parentNodeId))?.nodeCompanyId ?? null) : ((await findOne(base, "companies", [["eq", "isPlatform", true]]))?.id ?? null);
   const after = await base.update("cert_network_nodes", node.id, { parentNodeId: newParentId, path: newPath, depth: newPath.length });
+  {
+    const { syncNodeRelation } = await import("../tenancy/relations");
+    await syncNodeRelation(ctx.store, after, { id: ctx.user.id, name: ctx.user.name }, previousParentCompanyId);
+  }
   for (const d of descendantsOf(nodes, node.id)) {
     const rest = (d.path as string[]).slice(oldPrefixLen); // começa no próprio nó movido
     await base.update("cert_network_nodes", d.id, { path: [...newPath, ...rest], depth: newPath.length + rest.length });
@@ -223,6 +231,10 @@ export async function setNodeStatus(ctx: Ctx, nodeId: string, status: NodeStatus
     if (open.length) throw new BusinessError(`Encerre ou mova antes os ${open.length} parceiro(s) abaixo (${open.slice(0, 5).map((n) => n.name).join(", ")}${open.length > 5 ? "…" : ""}).`, "has_children");
   }
   const after = await base.update("cert_network_nodes", node.id, { status, statusReason: why || null, statusAt: nowIso(), statusBy: ctx.user.id, closedAt: status === "closed" ? today() : null });
+  {
+    const { syncNodeRelation } = await import("../tenancy/relations");
+    await syncNodeRelation(ctx.store, after, { id: ctx.user.id, name: ctx.user.name });
+  }
   const verb = status === "active" ? "reativado" : status === "suspended" ? "suspenso" : "encerrado";
   const kids = nodes.filter((n) => n.parentNodeId === node.id && n.status === "active").length;
   await auditNode(ctx, after, { action: `network.node_${status === "active" ? "reactivate" : status === "suspended" ? "suspend" : "close"}`, summary: `${node.name} ${verb}${status === "suspended" && kids ? ` (os ${kids} parceiro(s) abaixo continuam ativos e aparecem sinalizados)` : ""}`, reason: why || null, before: { status: node.status }, after: { status } });

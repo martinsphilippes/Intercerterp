@@ -1,0 +1,35 @@
+{
+  "titulo": "Vinculação que não confirma a identidade (aqui, CNPJ diferente; a resposta é a mesma para empresa inexistente ou código errado)",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/vincular",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e409c",
+      "Idempotency-Key": "zeta-vincular-20261125-001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "contaInterosId": "conta-zeta-0006",
+      "idEmpresa": "38a257a19387152ffb16ee0b59c2a05a",
+      "cnpj": "98.765.432/0001-98",
+      "codigoVinculo": "AAAAA-BBBBB"
+    }
+  },
+  "resposta": {
+    "status": 409,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e409c",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "identidade_nao_confere",
+        "mensagem": "Não foi possível confirmar a identidade da empresa: confira idEmpresa, CNPJ e código de vínculo (o código vale 72 horas e só uma vez)."
+      },
+      "requestId": "req-exemplo-e409c"
+    }
+  }
+}

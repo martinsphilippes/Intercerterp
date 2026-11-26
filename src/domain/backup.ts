@@ -1,3 +1,4 @@
+import { PLATFORM_ONLY } from "@/lib/db/scoped-store";
 import zlib from "node:zlib";
 import { appwriteConfig, configuredBackend, detId, isConflict, listAll, sha256 } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
@@ -31,6 +32,13 @@ const STALE_MINUTES = 30;
 
 /** Metadados do próprio backup não entram na cópia (o artefato não pode conter a si mesmo). */
 const SELF_EXCLUDED = new Set(["backups", "restore_jobs"]);
+/** Segredos de autenticação: fora da cópia de uma empresa (a cópia é baixável pelo administrador dela). */
+const AUTH_SECRETS = ["passwordHash", "totpSecretEnc", "totpPendingEnc", "totpRecoveryHashes", "totpLastStep", "resetTokenHash", "resetExpiresAt", "inviteTokenHash"];
+function withoutAuthSecrets(u: Doc): Doc {
+  const out: Record<string, any> = { ...u };
+  for (const k of AUTH_SECRETS) if (k in out) out[k] = null;
+  return out as Doc;
+}
 
 export interface BackupScope {
   includeFiles: boolean;
@@ -134,11 +142,19 @@ async function collectRows(store: Store, companyId: string, scope: BackupScope):
   for (const c of COLLECTIONS) {
     if (c.ephemeral || SELF_EXCLUDED.has(c.id)) continue;
     let rows: Doc[];
+    if (PLATFORM_ONLY.has(c.id) && !scope.includeGlobal) {
+      // tabelas da plataforma (implantações, vínculos entre empresas, trilha do Interos) nunca vão na cópia de uma empresa
+      out[c.id] = [];
+      continue;
+    }
     if (c.id === "companies") {
       const co = await store.get("companies", companyId);
       rows = co ? [co] : [];
     } else if (c.id === "users") {
-      rows = (await listAll(store, "users")).filter((u) => u.isAdmin || (u.companyIds ?? []).includes(companyId));
+      // multiempresa: só os usuários vinculados à empresa; o administrador da plataforma e os segredos de autenticação
+      // (hash de senha, duas etapas, tokens de convite e recuperação) só entram na cópia da plataforma
+      rows = (await listAll(store, "users")).filter((u) => (u.companyIds ?? []).includes(companyId) || (scope.includeGlobal && u.isAdmin));
+      if (!scope.includeGlobal) rows = rows.map(withoutAuthSecrets);
       users = rows;
     } else if (c.id === "user_prefs") {
       const ids = new Set(users.map((u) => u.id));
@@ -358,7 +374,8 @@ export async function createBackup(ctx: Ctx, opts: { kind: "manual" | "auto"; in
   const existing = await ctx.store.get("backups", id);
   if (existing) return existing;
   const sched = await getSchedule(ctx.store, ctx.companyId);
-  const scope: BackupScope = { includeFiles: opts.includeFiles, includeGlobal: opts.includeGlobal ?? true };
+  // dados globais (outras empresas, chamados públicos, tabelas da plataforma) só na cópia feita pela plataforma
+  const scope: BackupScope = { includeFiles: opts.includeFiles, includeGlobal: (opts.includeGlobal ?? true) && Boolean(ctx.user.isAdmin) };
   let b: Doc;
   try {
     const { nextNumber } = await import("@/lib/core/numbering");

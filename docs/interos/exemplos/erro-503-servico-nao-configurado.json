@@ -1,0 +1,27 @@
+{
+  "titulo": "Ambiente sem credenciais configuradas (ex.: produção antes da liberação)",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/status",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e503"
+    }
+  },
+  "resposta": {
+    "status": 503,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e503",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "servico_nao_configurado",
+        "mensagem": "Interface de serviço sem credenciais configuradas (INTEROS_CREDENCIAIS)."
+      },
+      "requestId": "req-exemplo-e503"
+    }
+  }
+}

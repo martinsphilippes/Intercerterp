@@ -2,8 +2,8 @@
 
 import { headers } from "next/headers";
 import { runAction, fstr, fopt, fbool } from "@/lib/server/action";
-import { createUser, updateUser, setUserStatus, resendInvite, cancelInvite, adminSetPassword, adminResetTwoFactor, type UserInput } from "@/domain/users";
-import { createRole, updateRole, duplicateRole, deleteRole, matrixFromForm } from "@/domain/roles";
+import { createUser, updateUser, setUserStatus, resendInvite, cancelInvite, adminSetPassword, adminResetTwoFactor, revokeUserSessions, adminStartRecovery, type UserInput } from "@/domain/users";
+import { createRole, duplicateRole, matrixFromForm, roleChangeImpact, saveRoleChecked, deleteRoleChecked, type RoleInput } from "@/domain/roles";
 import { BusinessError } from "@/lib/core/errors";
 
 async function requestOrigin() {
@@ -19,6 +19,19 @@ function pctToBps(v: string): number | null {
   return Math.round(n * 100);
 }
 
+/**
+ * Filiais DA EMPRESA EM USO (multiempresa): "all" = todas ([]); "some" = só as marcadas (ao menos uma). Sem o campo
+ * (cadastro do próprio editor ou do administrador da plataforma), vale a lista legada enviada em `branchIds`.
+ */
+function parseCompanyBranches(fd: FormData): string[] | undefined {
+  const mode = fstr(fd, "branchMode");
+  if (!mode) return undefined;
+  if (mode === "all") return [];
+  const ids = fd.getAll("companyBranchIds").map(String).filter(Boolean);
+  if (!ids.length) throw new BusinessError("Marque ao menos uma filial desta empresa ou escolha “Todas as filiais desta empresa”.", "branch_required");
+  return ids;
+}
+
 function parseUser(fd: FormData): UserInput {
   return {
     name: fstr(fd, "name"),
@@ -30,6 +43,8 @@ function parseUser(fd: FormData): UserInput {
     companyIds: fd.getAll("companyIds").map(String),
     branchIds: fd.getAll("branchIds").map(String),
     discountLimitBps: fbool(fd, "ownDiscount") ? pctToBps(fstr(fd, "discountPct")) : null,
+    jobTitle: fd.has("jobTitle") ? fstr(fd, "jobTitle") : undefined,
+    companyBranchIds: parseCompanyBranches(fd),
   };
 }
 
@@ -93,14 +108,48 @@ export async function resetTwoFactorAction(id: string, fd: FormData) {
   });
 }
 
+/** Multiempresa — encerra todas as sessões do usuário (todos os dispositivos; novo login exigido). */
+export async function revokeSessionsAction(id: string, fd: FormData) {
+  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/usuarios/${id}`] }, async (s) => {
+    const r = await revokeUserSessions(s.ctx, id, fopt(fd, "reason"));
+    return { ok: true as const, message: r.ended ? `${r.ended} sessão(ões) encerrada(s). O usuário precisa entrar de novo em todos os dispositivos.` : "Nenhuma sessão aberta; as que existissem deixaram de valer." };
+  });
+}
+
+/** Multiempresa — recuperação de senha iniciada pelo administrador (link de uso único com validade). */
+export async function startRecoveryAction(id: string) {
+  return runAction({ module: "admin", op: "edit", revalidate: [`/administracao/usuarios/${id}`] }, async (s) => {
+    const r = await adminStartRecovery(s.ctx, id, await requestOrigin());
+    return {
+      ok: true as const,
+      data: { recovery: r.recovery },
+      message: r.recovery.delivered ? `Link de recuperação enviado por e-mail (${r.recovery.channel}).` : "Link de recuperação gerado. O e-mail não foi enviado — copie o link exibido.",
+    };
+  });
+}
+
 // ───────────────────────────── perfis
 
+function parseRole(fd: FormData): RoleInput {
+  const { permissions, actions } = matrixFromForm(fd);
+  return { name: fstr(fd, "name"), description: fopt(fd, "description"), permissions, actions, discountLimitBps: pctToBps(fstr(fd, "discountPct")) ?? 0, active: fstr(fd, "active") !== "0", requireTwoFactor: fbool(fd, "requireTwoFactor") };
+}
+
+/** Impacto de salvar um perfil existente: pessoas afetadas (nome, e-mail, situação) e a diferença das permissões. */
+export async function previewRoleImpactAction(fd: FormData) {
+  const id = fstr(fd, "id");
+  return runAction({ module: "admin", op: "edit" }, async (s) => roleChangeImpact(s.ctx, id, parseRole(fd)));
+}
+
+/**
+ * Salva o perfil. Perfil existente usado por pessoas: recusado sem a confirmação explícita do impacto mostrado
+ * (`confirmImpact` = token do impacto) — e nunca deixa a empresa sem administrador ativo.
+ */
 export async function saveRoleAction(fd: FormData) {
   const id = fopt(fd, "id");
   return runAction({ module: "admin", op: id ? "edit" : "create", revalidate: ["/administracao/usuarios/perfis"] }, async (s) => {
-    const { permissions, actions } = matrixFromForm(fd);
-    const input = { name: fstr(fd, "name"), description: fopt(fd, "description"), permissions, actions, discountLimitBps: pctToBps(fstr(fd, "discountPct")) ?? 0, active: fstr(fd, "active") !== "0", requireTwoFactor: fbool(fd, "requireTwoFactor") };
-    const r = id ? await updateRole(s.ctx, id, input, fopt(fd, "reason")) : await createRole(s.ctx, input, { idemKey: fstr(fd, "_idem") || undefined });
+    const input = parseRole(fd);
+    const r = id ? await saveRoleChecked(s.ctx, id, input, { reason: fopt(fd, "reason"), impactToken: fopt(fd, "confirmImpact") }) : await createRole(s.ctx, input, { idemKey: fstr(fd, "_idem") || undefined });
     return { ok: true as const, message: id ? "Perfil atualizado. As permissões valem a partir da próxima ação de cada usuário." : "Perfil criado.", redirect: `/administracao/usuarios/perfis/${r.id}` };
   });
 }
@@ -114,7 +163,7 @@ export async function duplicateRoleAction(id: string, fd: FormData) {
 
 export async function deleteRoleAction(id: string) {
   return runAction({ module: "admin", op: "delete", revalidate: ["/administracao/usuarios/perfis"] }, async (s) => {
-    await deleteRole(s.ctx, id);
+    await deleteRoleChecked(s.ctx, id);
     return { ok: true as const, message: "Perfil excluído.", redirect: "/administracao/usuarios/perfis" };
   });
 }

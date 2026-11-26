@@ -1,0 +1,189 @@
+{
+  "titulo": "Fiscal: documentos, faturamento fiscal, rejeições, cancelamentos e pendências",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/fiscal?de=2026-11-01&ate=2026-11-20",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0010"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0010",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "noPeriodo": {
+        "autorizadas": {
+          "quantidade": 0,
+          "valorCentavos": 0
+        },
+        "simuladas": {
+          "quantidade": 52,
+          "valorCentavos": 737040
+        },
+        "documentosEmitidos": 59,
+        "documentosEmitidosSimulados": 59,
+        "faturamentoFiscal": {
+          "brutoCentavos": 737040,
+          "devolucoesCentavos": 0,
+          "liquidoCentavos": 737040,
+          "documentos": 52
+        },
+        "pendentesEntreEmitidos": {
+          "quantidade": 6,
+          "valorCentavos": 68242
+        },
+        "rejeicoes": 1,
+        "cancelamentos": {
+          "quantidade": 0,
+          "valorCentavos": 0
+        },
+        "porModelo": [
+          {
+            "modelo": "nfce",
+            "autorizadas": {
+              "quantidade": 0,
+              "valorCentavos": 0
+            },
+            "simuladas": {
+              "quantidade": 46,
+              "valorCentavos": 570910
+            },
+            "emitidos": 49,
+            "porSituacao": [
+              {
+                "situacao": "autorizado",
+                "quantidade": 46,
+                "valorCentavos": 570910
+              },
+              {
+                "situacao": "descartado",
+                "quantidade": 1,
+                "valorCentavos": 4490
+              },
+              {
+                "situacao": "na_fila",
+                "quantidade": 2,
+                "valorCentavos": 28512
+              }
+            ],
+            "faturamentoFiscalBrutoCentavos": 570910,
+            "rejeicoes": 0,
+            "cancelamentos": {
+              "quantidade": 0,
+              "valorCentavos": 0
+            }
+          },
+          {
+            "modelo": "nfe",
+            "autorizadas": {
+              "quantidade": 0,
+              "valorCentavos": 0
+            },
+            "simuladas": {
+              "quantidade": 5,
+              "valorCentavos": 94130
+            },
+            "emitidos": 9,
+            "porSituacao": [
+              {
+                "situacao": "autorizado",
+                "quantidade": 5,
+                "valorCentavos": 94130
+              },
+              {
+                "situacao": "pendente",
+                "quantidade": 1,
+                "valorCentavos": 17980
+              },
+              {
+                "situacao": "rascunho",
+                "quantidade": 2,
+                "valorCentavos": 9780
+              },
+              {
+                "situacao": "rejeitado",
+                "quantidade": 1,
+                "valorCentavos": 11970
+              }
+            ],
+            "faturamentoFiscalBrutoCentavos": 94130,
+            "rejeicoes": 1,
+            "cancelamentos": {
+              "quantidade": 0,
+              "valorCentavos": 0
+            }
+          },
+          {
+            "modelo": "nfse",
+            "autorizadas": {
+              "quantidade": 0,
+              "valorCentavos": 0
+            },
+            "simuladas": {
+              "quantidade": 1,
+              "valorCentavos": 72000
+            },
+            "emitidos": 1,
+            "porSituacao": [
+              {
+                "situacao": "autorizado",
+                "quantidade": 1,
+                "valorCentavos": 72000
+              }
+            ],
+            "faturamentoFiscalBrutoCentavos": 72000,
+            "rejeicoes": 0,
+            "cancelamentos": {
+              "quantidade": 0,
+              "valorCentavos": 0
+            }
+          }
+        ]
+      },
+      "posicaoAtual": {
+        "pendencias": {
+          "pendentes": 3,
+          "processando": 2,
+          "rejeitados": 1
+        },
+        "porModelo": [
+          {
+            "modelo": "nfce",
+            "pendentes": 0,
+            "processando": 2,
+            "rejeitados": 0
+          },
+          {
+            "modelo": "nfe",
+            "pendentes": 3,
+            "processando": 0,
+            "rejeitados": 1
+          },
+          {
+            "modelo": "nfse",
+            "pendentes": 0,
+            "processando": 0,
+            "rejeitados": 0
+          }
+        ]
+      }
+    }
+  }
+}

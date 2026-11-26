@@ -1,10 +1,16 @@
 import { detId, findOne, isConflict, listAll } from "@/lib/db";
 import type { Doc } from "@/lib/db/types";
+import { unscoped } from "@/lib/db/scoped-store";
 import { BusinessError, assert } from "@/lib/core/errors";
 import { requireAction, requirePerm, type Ctx } from "@/lib/core/ctx";
 import { audit } from "@/lib/core/audit";
 import { onlyDigits } from "@/lib/core/text";
 import { formatBps } from "@/lib/money";
+
+/** Mensagem de e-mail repetido: nomeia o titular só quando ele é desta empresa (não revela pessoas de outras contratantes). */
+function duplicateEmailMessage(ctx: Ctx, dup: Doc): string {
+  return (dup.companyIds ?? []).includes(ctx.companyId) ? `E-mail já usado por ${dup.name}.` : "E-mail já cadastrado no ERP. Informe outro e-mail.";
+}
 
 /**
  * Vendedores (CAD-05).
@@ -109,8 +115,9 @@ export async function createSeller(ctx: Ctx, input: SellerInput & { idemKey?: st
   if (email) {
     assert(EMAIL_RE.test(email), "E-mail inválido.");
     assert(!isPlaceholderEmail(email), "E-mail inválido.");
-    const dup = await findOne(ctx.store, "users", [["eq", "email", email]]);
-    if (dup) throw new BusinessError(`E-mail já usado por ${dup.name}.`, "duplicate");
+    // e-mail é único na instalação inteira; o nome do titular só aparece se ele for desta empresa (multiempresa)
+    const dup = await findOne(unscoped(ctx.store), "users", [["eq", "email", email]]);
+    if (dup) throw new BusinessError(duplicateEmailMessage(ctx, dup), "duplicate");
   } else {
     email = `vendedor.${id}@${PLACEHOLDER_EMAIL_DOMAIN}`;
   }
@@ -160,8 +167,8 @@ export async function updateSeller(ctx: Ctx, id: string, input: SellerInput): Pr
     const email = input.email?.trim().toLowerCase() || null;
     if (email && email !== u.email) {
       assert(EMAIL_RE.test(email) && !isPlaceholderEmail(email), "E-mail inválido.");
-      const dup = await findOne(ctx.store, "users", [["eq", "email", email]]);
-      if (dup && dup.id !== id) throw new BusinessError(`E-mail já usado por ${dup.name}.`, "duplicate");
+      const dup = await findOne(unscoped(ctx.store), "users", [["eq", "email", email]]);
+      if (dup && dup.id !== id) throw new BusinessError(duplicateEmailMessage(ctx, dup), "duplicate");
       patch.email = email;
     } else if (!email && !isPlaceholderEmail(u.email)) {
       patch.email = `vendedor.${id}@${PLACEHOLDER_EMAIL_DOMAIN}`;

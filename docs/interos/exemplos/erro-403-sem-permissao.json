@@ -1,0 +1,78 @@
+{
+  "titulo": "Credencial sem o escopo exigido (a da Torre tentando criar empresa)",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e403",
+      "Idempotency-Key": "torre-tenta-criar-0001",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "contaInterosId": "conta-alfa-0001",
+      "empresa": {
+        "tipo": "varejo",
+        "razaoSocial": "Alfa Utilidades Domésticas Ltda",
+        "nomeFantasia": "Alfa Utilidades",
+        "cnpj": "24.681.357/0001-40",
+        "inscricaoEstadual": "123.456.789.110",
+        "regimeTributario": "simples",
+        "cnae": "4759-8/99",
+        "email": "financeiro@alfa-utilidades.example",
+        "telefone": "(11) 3333-0001",
+        "endereco": {
+          "cep": "01310-100",
+          "logradouro": "Avenida Paulista",
+          "numero": "1000",
+          "complemento": "Loja 3",
+          "bairro": "Bela Vista",
+          "municipio": "São Paulo",
+          "codigoMunicipioIbge": "3550308",
+          "uf": "SP"
+        }
+      },
+      "unidadeInicial": {
+        "nome": "Alfa — Paulista",
+        "codigo": "01",
+        "telefone": "(11) 3333-0001",
+        "fusoHorario": "America/Sao_Paulo"
+      },
+      "modulos": [
+        "pdv",
+        "vendas",
+        "estoque",
+        "compras",
+        "financeiro",
+        "fiscal",
+        "relatorios"
+      ],
+      "administrador": {
+        "nome": "Marina Alves",
+        "email": "marina.alves@alfa-utilidades.example",
+        "telefone": "(11) 98888-0001"
+      },
+      "entregaConvite": "interos",
+      "contrato": {
+        "referencia": "CT-2026-0042",
+        "plano": "profissional"
+      }
+    }
+  },
+  "resposta": {
+    "status": 403,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e403",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "sem_permissao",
+        "mensagem": "Esta credencial não tem o escopo exigido (provisionamento:escrita)."
+      },
+      "requestId": "req-exemplo-e403"
+    }
+  }
+}

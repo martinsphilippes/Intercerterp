@@ -19,6 +19,7 @@ import { queryBranches } from "../queries";
 import { setCompanyStatusAction } from "../actions";
 import { CompanyUsersForm } from "../forms";
 import { companyView } from "../access";
+import { InterosLinkCard } from "../interos-link";
 import { unscoped } from "@/lib/db/scoped-store";
 import { resolveRoleId } from "@/lib/auth/users";
 
@@ -127,6 +128,15 @@ export default async function Page({ params, searchParams }: { params: Promise<{
             <p className="text-sm">{a.street ? `${a.street}, ${a.number || "s/n"}${a.complement ? ` — ${a.complement}` : ""} · ${a.district ?? ""} · ${a.cityName ?? ""}/${a.uf ?? ""} · CEP ${a.zip ?? "—"}` : "Endereço não informado."}</p>
             {c.notes && <p className="mt-2 text-sm text-slate-600">{c.notes}</p>}
           </Card>
+          {!c.isDemo && (
+            <Card title="Vínculo com o Interos" className="lg:col-span-2">
+              <InterosLinkCard
+                companyId={id}
+                state={{ linked: Boolean(c.interosAccountId), linkedAt: c.interosLinkedAt ?? null, pendingCodeExpiresAt: c.linkCodeHash && c.linkCodeExpiresAt && c.linkCodeExpiresAt > new Date().toISOString() ? c.linkCodeExpiresAt : null, erpId: id, cnpj: c.cnpj ?? null }}
+                canGenerate={edit && canDo(cc.user, "admin.users")}
+              />
+            </Card>
+          )}
           {!fiscal.length && (
             <div className="lg:col-span-2">
               <Notice tone="warn" title="Configuração fiscal pendente">Cadastre emissor, séries e certificado em <Link className="underline" href="/fiscal/configuracoes">Configurações fiscais</Link> antes de emitir documentos por esta empresa.</Notice>

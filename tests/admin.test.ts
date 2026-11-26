@@ -249,11 +249,14 @@ describe("empresas, filiais e terminais", () => {
     expect((await listAll(store, "financial_accounts", { filters: [["eq", "branchId", b.id]] })).length).toBe(1);
     await expect(createBranch(admin, refs.company.id, { code: "03", name: "Dup" })).rejects.toThrow(/código 03/);
     await expect(updateBranch(admin, b.id, { code: "03", name: "Filial — Bairro", defaultWarehouseId: refs.warehouses["matriz-main"].id })).rejects.toThrow(/pertencer à filial/);
-    const { company, branch } = await createCompany(admin, { name: "Nova Loja Ltda", cnpj: "45723174000110", regime: "presumido", address: { uf: "RJ", cityName: "Rio de Janeiro", cityCode: "3304557" } });
+    // multiempresa: o administrador de uma empresa cliente não cria outra empresa (é contratação: Interos ou plataforma)
+    await expect(createCompany(admin, { name: "Nova Loja Ltda", cnpj: "45723174000110" })).rejects.toThrow(/Interos/);
+    const platformAdmin = { ...admin, user: { ...admin.user, isAdmin: true } };
+    const { company, branch } = await createCompany(platformAdmin, { name: "Nova Loja Ltda", cnpj: "45723174000110", regime: "presumido", address: { uf: "RJ", cityName: "Rio de Janeiro", cityCode: "3304557" } });
     expect(company.crt).toBe("3");
     expect(branch.companyId).toBe(company.id);
     expect((await listAll(store, "roles", { filters: [["eq", "companyId", company.id]] })).length).toBe(6);
-    await expect(createCompany(admin, { name: "Outra", cnpj: "45723174000110" })).rejects.toThrow(/CNPJ/);
+    await expect(createCompany(platformAdmin, { name: "Outra", cnpj: "45723174000110" })).rejects.toThrow(/CNPJ/);
   });
 
   it("terminal: série NFC-e única por filial; teste de impressão registra só a abertura; conector sem URL = não verificado; falha real registrada", async () => {

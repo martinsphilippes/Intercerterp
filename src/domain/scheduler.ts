@@ -22,6 +22,11 @@ export async function runScheduled(store: Store) {
   const out: Record<string, unknown> = {};
   const day = today();
   for (const c of companies) {
+    // empresa suspensa pelo contrato: rotinas retidas até a reativação (o histórico fica como está)
+    if (c.status === "suspended") {
+      out[`${c.id}:*`] = { skipped: "empresa suspensa" };
+      continue;
+    }
     for (const [key, fn] of routines) {
       const marker = `routine.${key}.lastRun`;
       const last = await getSetting<string | null>(store, c.id, null, marker, null);

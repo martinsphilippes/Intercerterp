@@ -11,16 +11,18 @@ import { resendInviteAction } from "./actions";
 
 type Invite = { link: string; delivered: boolean; channel: string; message: string | null; expiresAt: string };
 
-export function InviteLinkPanel({ invite }: { invite: Invite }) {
+/** Link de uso único (convite de primeiro acesso ou recuperação de senha iniciada pelo administrador). */
+export function InviteLinkPanel({ invite, kind = "invite" }: { invite: Invite; kind?: "invite" | "recovery" }) {
   const toast = useToast();
   const expires = formatDateTimeSeconds(invite.expiresAt);
+  const what = kind === "recovery" ? "Link de recuperação de senha" : "Convite";
   return (
-    <Notice tone={invite.delivered ? "good" : "warn"} title={invite.delivered ? "Convite enviado por e-mail" : "Convite criado — e-mail NÃO enviado"}>
+    <Notice tone={invite.delivered ? "good" : "warn"} title={invite.delivered ? `${what} enviado por e-mail` : `${what} ${kind === "recovery" ? "gerado" : "criado"} — e-mail NÃO enviado`}>
       {invite.delivered ? (
-        <p>O provedor de e-mail ({invite.channel}) aceitou a mensagem. O link expira em {expires}.</p>
+        <p>O provedor de e-mail ({invite.channel}) aceitou a mensagem. O link {kind === "recovery" ? "vale uma única vez e " : ""}expira em {expires}.</p>
       ) : (
         <p>
-          {invite.message ?? "Canal de e-mail não configurado."} Copie o link abaixo e entregue ao usuário por um canal seguro. Ele é exibido somente agora e expira em {expires}.
+          {invite.message ?? "Canal de e-mail não configurado."} Copie o link abaixo e entregue ao usuário por um canal seguro. Ele é exibido somente agora{kind === "recovery" ? ", vale uma única vez" : ""} e expira em {expires}.
         </p>
       )}
       {!invite.delivered && (

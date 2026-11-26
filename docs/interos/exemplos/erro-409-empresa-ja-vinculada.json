@@ -1,0 +1,35 @@
+{
+  "titulo": "Vincular a outra conta uma empresa que já está vinculada ao Interos",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/vincular",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-e409e",
+      "Idempotency-Key": "zeta-vincular-20261125-002",
+      "Content-Type": "application/json"
+    },
+    "corpo": {
+      "contaInterosId": "conta-zeta-0006",
+      "idEmpresa": "38a257a19387152ffb16ee0b59c2a05a",
+      "cnpj": "13.579.246/0001-01",
+      "codigoVinculo": "AAAAA-BBBBB"
+    }
+  },
+  "resposta": {
+    "status": 409,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e409e",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "empresa_ja_vinculada",
+        "mensagem": "Esta empresa já está vinculada a outra conta do Interos. A troca exige desvincular a conta atual."
+      },
+      "requestId": "req-exemplo-e409e"
+    }
+  }
+}

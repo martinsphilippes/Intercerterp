@@ -1,4 +1,6 @@
 "use server";
+import { PermissionError } from "@/lib/core/errors";
+import { canDo } from "@/lib/permissions";
 
 import { runAction, fbool, fint, fjson, fopt, fstr } from "@/lib/server/action";
 import { requireFeature } from "@/lib/server/features";
@@ -42,6 +44,10 @@ import type { TemplateKey } from "@/domain/ecommerce/templates";
 const BASE = "/comercio-digital";
 const opts = (...paths: string[]) => ({ module: "sales" as const, revalidate: [BASE, ...paths.map((p) => `${BASE}${p}`)] });
 const guard = (s: SessionInfo) => requireFeature(s, "comercioDigital");
+/** A ação exige a mesma operação que a tela que a oferece (inventário multiempresa D3). */
+const requireAnyEcom = (s: SessionInfo, actions: string[]) => {
+  if (!actions.some((a) => canDo(s.user, a as any))) throw new PermissionError();
+};
 const ids = (fd: FormData, key = "productIds") => fd.getAll(key).map(String).filter(Boolean);
 const percentBps = (v: string | null) => (v ? Math.round(Number(v.replace(",", ".")) * 100) : 0);
 
@@ -353,6 +359,7 @@ export async function completeReturnAction(id: string, fd: FormData) {
 export async function retryChargeAction(id: string, _fd: FormData) {
   return runAction(orderPaths(id), async (s) => {
     await guard(s);
+    requireAnyEcom(s, ["ecommerce.orders"]);
     const o = await orderOfCompany(s.ctx, id);
     const after = await retryCharge(s.ctx.store, o);
     return { ok: true as const, message: after.payment?.status === "error" ? `Cobrança ainda não gerada: ${after.payment?.message ?? ""}` : "Cobrança gerada novamente." };
@@ -433,6 +440,7 @@ export async function savePaymentsAction(fd: FormData) {
 export async function simulateEventAction(fd: FormData) {
   return runAction(opts("/pagamentos", "/pedidos", "/monitor", "/banco", "/expedicao"), async (s) => {
     await guard(s);
+    requireAnyEcom(s, ["ecommerce.manage", "ecommerce.finance"]);
     const o = await orderOfCompany(s.ctx, fstr(fd, "orderId"));
     const type = fstr(fd, "type") as "approved" | "pending" | "failed" | "expired";
     if (!["approved", "pending", "failed", "expired"].includes(type)) throw new BusinessError("Evento inválido.");
@@ -448,6 +456,7 @@ export async function simulateEventAction(fd: FormData) {
 export async function simulateCreditsAction(_fd: FormData) {
   return runAction(opts("/banco", "/monitor"), async (s) => {
     await guard(s);
+    requireAnyEcom(s, ["ecommerce.finance"]);
     const n = await simulateCredits(s.ctx);
     return { ok: true as const, message: n ? `${n} crédito(s) simulado(s) no prazo do meio de pagamento.` : "Nenhum crédito previsto até hoje." };
   });

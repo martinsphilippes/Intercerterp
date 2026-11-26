@@ -1,6 +1,7 @@
 import Link from "@/components/ui/link";
 import { Building2, Plus } from "lucide-react";
 import { requireSession } from "@/lib/server/session";
+import { isolationMode } from "@/lib/db/scoped-store";
 import { listAll } from "@/lib/db";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -76,9 +77,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         actions={
           can(s.user, "admin", "create") && (
             <>
-              <LinkButton href="/administracao/empresas/nova">
-                <Building2 className="size-4" /> Nova empresa
-              </LinkButton>
+              {/* multiempresa: empresa nova é contratação (Interos) ou ato da plataforma */}
+              {(s.user.isAdmin || isolationMode() !== "estrito") && (
+                <LinkButton href="/administracao/empresas/nova">
+                  <Building2 className="size-4" /> Nova empresa
+                </LinkButton>
+              )}
               <LinkButton href={`/administracao/empresas/${companyId}/filiais/nova`} variant="primary">
                 <Plus className="size-4" /> Nova filial
               </LinkButton>

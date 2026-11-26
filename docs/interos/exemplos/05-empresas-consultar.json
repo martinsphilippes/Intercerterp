@@ -1,0 +1,118 @@
+{
+  "titulo": "Consultar a empresa e a implantação",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/792018d6437e43897eb2aa4c3db45e9a",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-exemplo-0005"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-0005",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "empresa": {
+        "idEmpresa": "792018d6437e43897eb2aa4c3db45e9a",
+        "contaInterosId": "conta-alfa-0001",
+        "tipo": "varejo",
+        "razaoSocial": "Alfa Utilidades Domésticas Ltda",
+        "nomeFantasia": "Alfa Utilidades",
+        "cnpj": "24681357000140",
+        "situacao": "ativa",
+        "suspensao": null,
+        "historicoSituacao": [],
+        "modulos": [
+          "compras",
+          "estoque",
+          "financeiro",
+          "fiscal",
+          "pdv",
+          "relatorios",
+          "vendas"
+        ],
+        "contrato": {
+          "referencia": "CT-2026-0042",
+          "plano": "profissional"
+        },
+        "implantacao": {
+          "operacao": "criar",
+          "estado": "concluida",
+          "etapas": [
+            {
+              "etapa": "empresa",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:02:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            },
+            {
+              "etapa": "unidade_inicial",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:02:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            },
+            {
+              "etapa": "modulos",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:02:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            },
+            {
+              "etapa": "administrador",
+              "estado": "concluida",
+              "concluidaEm": "2026-11-20T12:02:00.000Z",
+              "erro": null,
+              "tentativas": 2
+            }
+          ],
+          "tentativas": 2,
+          "ultimoErro": null,
+          "iniciadaEm": "2026-11-20T12:02:00.000Z",
+          "concluidaEm": "2026-11-20T12:04:00.000Z"
+        },
+        "unidades": [
+          {
+            "idUnidade": "daf5052cf58b9f23583e75d504e86abb",
+            "codigo": "01",
+            "nome": "Alfa — Paulista",
+            "cnpj": "24681357000140",
+            "situacao": "ativa"
+          }
+        ],
+        "administradores": [
+          {
+            "idUsuario": "c5bbd9d3d2c1bf1d4403a03e5c386f5e",
+            "nome": "Marina Alves",
+            "email": "marina.alves@alfa-utilidades.example",
+            "situacao": "convidado",
+            "convite": {
+              "estado": "pendente",
+              "expiraEm": "2026-11-27T12:02:00.000Z",
+              "enviadoEm": "2026-11-20T12:02:00.000Z",
+              "detalheEntrega": "Link devolvido ao Interos para entrega."
+            },
+            "primeiroAcessoEm": null,
+            "ultimoAcessoEm": null
+          }
+        ],
+        "usuarios": {
+          "ativos": 0,
+          "convidados": 1,
+          "suspensos": 0,
+          "inativos": 0
+        },
+        "ultimaAtividadeEm": null,
+        "vinculadaEm": "2026-11-20T12:02:00.000Z",
+        "atualizadaEm": "2026-11-20T12:04:00.000Z"
+      }
+    }
+  }
+}
