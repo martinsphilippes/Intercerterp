@@ -1,0 +1,27 @@
+{
+  "titulo": "Credencial de provisionamento consultando a Torre",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/resumo?de=2026-11-01&ate=2026-11-20",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-homolog.<segredo>",
+      "X-Request-Id": "req-torre-e403"
+    }
+  },
+  "resposta": {
+    "status": 403,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-e403",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "sem_permissao",
+        "mensagem": "Esta credencial não tem o escopo exigido (torre:resumo)."
+      },
+      "requestId": "req-torre-e403"
+    }
+  }
+}

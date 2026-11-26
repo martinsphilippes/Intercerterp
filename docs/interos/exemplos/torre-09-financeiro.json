@@ -1,0 +1,273 @@
+{
+  "titulo": "Financeiro: recebido e pago no período, posição, aging, contas e DRE",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/financeiro?de=2026-11-01&ate=2026-11-20",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0009"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0009",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "noPeriodo": {
+        "recebido": {
+          "quantidadeBaixas": 6,
+          "valorCentavos": 39897
+        },
+        "pago": {
+          "quantidadeBaixas": 0,
+          "valorCentavos": 0
+        },
+        "dre": {
+          "receitaLiquidaCentavos": 444962,
+          "lucroBrutoCentavos": 220272,
+          "resultadoOperacionalCentavos": -336518,
+          "resultadoCentavos": -263784,
+          "cmvCentavos": -224690,
+          "grupos": [
+            {
+              "grupo": "receita_bruta",
+              "rotulo": "Receita bruta",
+              "valorCentavos": 661752
+            },
+            {
+              "grupo": "deducoes",
+              "rotulo": "(−) Deduções da receita",
+              "valorCentavos": -216790
+            },
+            {
+              "grupo": "cmv",
+              "rotulo": "(−) CMV — custo das mercadorias vendidas",
+              "valorCentavos": -224690
+            },
+            {
+              "grupo": "custo_dos_servicos",
+              "rotulo": "(−) Custo dos serviços — certificados, comissões e custo AC",
+              "valorCentavos": 0
+            },
+            {
+              "grupo": "despesas_operacionais",
+              "rotulo": "(−) Despesas operacionais",
+              "valorCentavos": -518000
+            },
+            {
+              "grupo": "despesas_com_pessoal",
+              "rotulo": "(−) Despesas com pessoal",
+              "valorCentavos": 0
+            },
+            {
+              "grupo": "despesas_administrativas",
+              "rotulo": "(−) Despesas administrativas",
+              "valorCentavos": -38790
+            },
+            {
+              "grupo": "outras_despesas",
+              "rotulo": "(−) Outras despesas",
+              "valorCentavos": 0
+            },
+            {
+              "grupo": "receitas_financeiras",
+              "rotulo": "(+) Receitas financeiras",
+              "valorCentavos": 0
+            },
+            {
+              "grupo": "despesas_financeiras",
+              "rotulo": "(−) Despesas financeiras",
+              "valorCentavos": -456
+            },
+            {
+              "grupo": "outras_receitas",
+              "rotulo": "(+) Outras receitas",
+              "valorCentavos": 73190
+            }
+          ],
+          "foraDoResultado": [
+            {
+              "grupo": "compras_mercadorias",
+              "rotulo": "Compras de mercadorias (grupo CMV — entram no estoque)",
+              "valorCentavos": -166780
+            },
+            {
+              "grupo": "investimentos",
+              "rotulo": "Investimentos",
+              "valorCentavos": 0
+            },
+            {
+              "grupo": "adiantamentos_rede",
+              "rotulo": "Adiantamentos — créditos pré-pagos da rede (o custo entra a cada venda debitada)",
+              "valorCentavos": 0
+            }
+          ],
+          "conferenciaDiferencaCentavos": 0,
+          "itensSemClassificacao": 4
+        }
+      },
+      "posicaoAtual": {
+        "dataReferencia": "2026-11-20",
+        "aReceber": {
+          "emAberto": {
+            "quantidade": 25,
+            "valorCentavos": 484063
+          },
+          "vencido": {
+            "quantidade": 4,
+            "valorCentavos": 263040
+          },
+          "venceHoje": {
+            "quantidade": 4,
+            "valorCentavos": 78780
+          },
+          "proximos7Dias": {
+            "quantidade": 2,
+            "valorCentavos": 24720
+          }
+        },
+        "aPagar": {
+          "emAberto": {
+            "quantidade": 12,
+            "valorCentavos": 945450
+          },
+          "vencido": {
+            "quantidade": 0,
+            "valorCentavos": 0
+          },
+          "venceHoje": {
+            "quantidade": 0,
+            "valorCentavos": 0
+          },
+          "proximos7Dias": {
+            "quantidade": 4,
+            "valorCentavos": 766790
+          },
+          "aAutorizar": {
+            "quantidade": 11,
+            "valorCentavos": 906660
+          }
+        },
+        "saldoContasCentavos": 3611633,
+        "aging": {
+          "aReceber": {
+            "dataReferencia": "2026-11-20",
+            "totalCentavos": 484063,
+            "vencidoCentavos": 263040,
+            "faixas": [
+              {
+                "faixa": "a_vencer",
+                "valorCentavos": 221023,
+                "quantidadeParcelas": 21
+              },
+              {
+                "faixa": "de_1_a_30_dias",
+                "valorCentavos": 263040,
+                "quantidadeParcelas": 4
+              },
+              {
+                "faixa": "de_31_a_60_dias",
+                "valorCentavos": 0,
+                "quantidadeParcelas": 0
+              },
+              {
+                "faixa": "de_61_a_90_dias",
+                "valorCentavos": 0,
+                "quantidadeParcelas": 0
+              },
+              {
+                "faixa": "acima_de_90_dias",
+                "valorCentavos": 0,
+                "quantidadeParcelas": 0
+              }
+            ]
+          },
+          "aPagar": {
+            "dataReferencia": "2026-11-20",
+            "totalCentavos": 945450,
+            "vencidoCentavos": 0,
+            "faixas": [
+              {
+                "faixa": "a_vencer",
+                "valorCentavos": 945450,
+                "quantidadeParcelas": 12
+              },
+              {
+                "faixa": "de_1_a_30_dias",
+                "valorCentavos": 0,
+                "quantidadeParcelas": 0
+              },
+              {
+                "faixa": "de_31_a_60_dias",
+                "valorCentavos": 0,
+                "quantidadeParcelas": 0
+              },
+              {
+                "faixa": "de_61_a_90_dias",
+                "valorCentavos": 0,
+                "quantidadeParcelas": 0
+              },
+              {
+                "faixa": "acima_de_90_dias",
+                "valorCentavos": 0,
+                "quantidadeParcelas": 0
+              }
+            ]
+          }
+        },
+        "contas": [
+          {
+            "idConta": "da541148e4c443845f43471d4b70e94a",
+            "nome": "Banco Intercert — conta da loja (simulação)",
+            "tipo": "banco",
+            "compartilhada": true,
+            "saldoCentavos": 12842
+          },
+          {
+            "idConta": "da98f16ff090ee7edf732a01548e2bfe",
+            "nome": "Banco Itaú — c/c 12345-6",
+            "tipo": "banco",
+            "compartilhada": true,
+            "saldoCentavos": 3069102
+          },
+          {
+            "idConta": "0758551569bece7d79ea497ef6b0e0e3",
+            "nome": "Caixa — Matriz",
+            "tipo": "caixa",
+            "compartilhada": false,
+            "saldoCentavos": 215529
+          },
+          {
+            "idConta": "934750ab78cad13e5cd8cf89bc7af0a7",
+            "nome": "Caixa — Shopping",
+            "tipo": "caixa",
+            "compartilhada": false,
+            "saldoCentavos": 196820
+          },
+          {
+            "idConta": "8338006ef0a86f425ae61e6e72d28baa",
+            "nome": "Conta digital (Pix)",
+            "tipo": "banco",
+            "compartilhada": true,
+            "saldoCentavos": 117340
+          }
+        ]
+      }
+    }
+  }
+}

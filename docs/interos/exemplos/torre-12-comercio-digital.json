@@ -1,0 +1,168 @@
+{
+  "titulo": "Comércio digital: pedidos da loja virtual, banco e monitor",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/comercio-digital?de=2026-11-01&ate=2026-11-20",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0012"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0012",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "lojaCriada": true,
+      "situacaoLoja": "publicada",
+      "noPeriodo": {
+        "pedidosCriados": {
+          "quantidade": 6,
+          "valorCentavos": 108420
+        },
+        "pedidosPagos": {
+          "quantidade": 4,
+          "valorCentavos": 73190,
+          "freteCentavos": 990,
+          "descontosCentavos": 0
+        },
+        "pedidosCancelados": {
+          "quantidade": 1,
+          "valorCentavos": 4490
+        },
+        "porSituacao": [
+          {
+            "situacao": "aguardando_pagamento",
+            "quantidade": 2,
+            "valorCentavos": 35230
+          },
+          {
+            "situacao": "pago",
+            "quantidade": 0,
+            "valorCentavos": 0
+          },
+          {
+            "situacao": "faturado",
+            "quantidade": 1,
+            "valorCentavos": 15980
+          },
+          {
+            "situacao": "pronto_para_retirada",
+            "quantidade": 1,
+            "valorCentavos": 10270
+          },
+          {
+            "situacao": "despachado",
+            "quantidade": 1,
+            "valorCentavos": 33970
+          },
+          {
+            "situacao": "entregue",
+            "quantidade": 1,
+            "valorCentavos": 12970
+          },
+          {
+            "situacao": "cancelado",
+            "quantidade": 1,
+            "valorCentavos": 4490
+          },
+          {
+            "situacao": "devolucao_solicitada",
+            "quantidade": 0,
+            "valorCentavos": 0
+          },
+          {
+            "situacao": "devolvido",
+            "quantidade": 0,
+            "valorCentavos": 0
+          }
+        ]
+      },
+      "posicaoAtual": {
+        "aguardandoPagamento": 2,
+        "aFaturar": 0,
+        "aExpedirOuRetirar": 2,
+        "devolucoesSolicitadas": 0,
+        "porSituacao": [
+          {
+            "situacao": "aguardando_pagamento",
+            "quantidade": 2,
+            "valorCentavos": 35230
+          },
+          {
+            "situacao": "pago",
+            "quantidade": 0,
+            "valorCentavos": 0
+          },
+          {
+            "situacao": "faturado",
+            "quantidade": 1,
+            "valorCentavos": 15980
+          },
+          {
+            "situacao": "pronto_para_retirada",
+            "quantidade": 1,
+            "valorCentavos": 10270
+          },
+          {
+            "situacao": "despachado",
+            "quantidade": 1,
+            "valorCentavos": 33970
+          },
+          {
+            "situacao": "entregue",
+            "quantidade": 1,
+            "valorCentavos": 12970
+          },
+          {
+            "situacao": "cancelado",
+            "quantidade": 1,
+            "valorCentavos": 4490
+          },
+          {
+            "situacao": "devolucao_solicitada",
+            "quantidade": 0,
+            "valorCentavos": 0
+          },
+          {
+            "situacao": "devolvido",
+            "quantidade": 0,
+            "valorCentavos": 0
+          }
+        ],
+        "banco": {
+          "previstoLiquidoCentavos": 58125,
+          "creditadoLiquidoCentavos": 12842,
+          "conciliadoLiquidoCentavos": 12842,
+          "transacoesConciliadas": 1,
+          "brutoCentavos": 73190,
+          "taxasCentavos": 2223,
+          "disponivelCentavos": 12842,
+          "simulado": true
+        },
+        "monitor": {
+          "falhas": 1,
+          "pendentes": 9,
+          "concluidos": 31,
+          "ignorados": 0,
+          "total": 41
+        }
+      }
+    }
+  }
+}

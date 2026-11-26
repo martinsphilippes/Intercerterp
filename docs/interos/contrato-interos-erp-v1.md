@@ -7,7 +7,7 @@
 | Data | 26/11/2026 |
 | Base no código | `src/app/api/interos/v1/**`, `src/lib/service/**`, `src/domain/tenancy/**`, `src/domain/tower/**` |
 | Exemplos | `docs/interos/exemplos/*.json`: respostas reais, conferidas pelo teste `tests/interos-contrato.test.ts` |
-| Catálogo de indicadores | §12 deste documento (detalhe por indicador: `docs/interos/torre-indicadores.md`) |
+| Catálogo de indicadores | §12 deste documento (resumo) e `docs/interos/torre-indicadores.md` (definição campo a campo) |
 
 > **Regra de ouro.** O ERP é a fonte dos dados operacionais e da situação de cada empresa. O Interos contrata,
 > provisiona e acompanha, **sempre por esta interface**: nunca acessa o banco do ERP. Cada empresa contratante
@@ -492,9 +492,125 @@ sequenceDiagram
 
 ## 12. Torre de Controle: consultas analíticas
 
-<!-- TORRE:INICIO -->
-> Seção em consolidação com a implementação da Torre (escopos `torre:*`). Ver `docs/interos/torre-indicadores.md`.
-<!-- TORRE:FIM -->
+A Torre lê os indicadores de uma empresa vinculada para acompanhamento, sem alterar nada. As definições completas,
+campo a campo, estão em `docs/interos/torre-indicadores.md` (versão dos indicadores **`2026-11-v1`**, devolvida em
+`meta.versaoIndicadores`). Este capítulo é o resumo contratual.
+
+**Princípio: a Torre não tem fórmulas próprias.** Cada número sai da mesma função que alimenta a tela do ERP: painel
+do gestor, relatórios gerenciais, curva ABC, estoque, caixa, financeiro, fiscal, compras e comércio digital. A Torre
+só escolhe o recorte (empresa, período, unidades) e traduz para o contrato. Assim, o que o Interos vê é o que o
+cliente vê.
+
+### 12.1 Rotas e escopos
+Base: `GET /api/interos/v1/empresas/{idEmpresa}/torre/<rota>`. Todas são `GET`, sem `Idempotency-Key`. Os escopos são
+exatos, sem hierarquia entre eles: cada rota exige o escopo do nível de detalhe que entrega.
+
+| Rota | Escopo | Período | Paginada | Parâmetros próprios | Exemplo |
+|---|---|---|---|---|---|
+| `resumo` | `torre:resumo` | obrigatório | não | | torre-01 |
+| `vendas/serie` | `torre:resumo` | obrigatório | não | `granularidade` = `dia` (padrão) \| `mes` | torre-02 |
+| `vendas/por-unidade` | `torre:resumo` | obrigatório | não | | torre-03 |
+| `produtos` | `torre:detalhe` | obrigatório | sim | `incluirSemMovimento` = `0` (padrão) \| `1` | torre-04 |
+| `skus` | `torre:detalhe` | obrigatório | sim | `incluirSemMovimento` = `0` (padrão) \| `1` | torre-05 |
+| `transacoes/vendas` | `torre:transacoes` | obrigatório | sim | `situacao` = `concluida` (padrão) \| `cancelada` \| `todas` | torre-06 |
+| `transacoes/devolucoes` | `torre:transacoes` | obrigatório | sim | | torre-07 |
+| `estoque` | `torre:detalhe` | não (posição atual) | sim | | torre-08 |
+| `financeiro` | `torre:resumo` | obrigatório | não | | torre-09 |
+| `fiscal` | `torre:resumo` | obrigatório | não | | torre-10 |
+| `compras` | `torre:resumo` | obrigatório | não | | torre-11 |
+| `comercio-digital` | `torre:resumo` | obrigatório | não | | torre-12 |
+| `adocao` | `torre:resumo` | não | não | | torre-13 |
+
+Só empresas **vinculadas** ao Interos existem para a Torre. Qualquer outra, inclusive inexistente, responde
+`404 nao_encontrado` antes de qualquer validação. A empresa suspensa continua consultável: o acompanhamento não para.
+
+### 12.2 Convenções das consultas
+| Convenção | Regra |
+|---|---|
+| Dinheiro | **centavos de real, inteiros**, com sufixo `Centavos`. Pode ser negativo: devolução maior que a venda do dia, diferença de caixa, saldo negativo de estoque. |
+| Quantidades | **milésimos inteiros**, sufixo `Milesimos` (1 unidade = 1000). Somas misturam unidades de medida diferentes. |
+| Percentuais | **pontos-base inteiros**, sufixo `Bps` (1% = 100). `...PontosBps` é a diferença em pontos (atual − anterior). |
+| Datas de referência | `AAAA-MM-DD`, no **fuso da instalação do ERP** (`America/Sao_Paulo`, devolvido em `meta.fuso`). Não há fuso por empresa nem por unidade nesta versão. |
+| Instantes | ISO 8601 UTC |
+| Situações | Português, minúsculas, `snake_case` (`concluida`, `em_processamento`, `aguardando_pagamento`) |
+| Ausente | `null` quando o indicador não se aplica (ticket sem vendas, margem sem receita) ou quando **não há fonte confiável** (declarado campo a campo) |
+| `meta` | Em toda resposta: `{ idEmpresa, periodo: { de, ate } \| null, unidades: [...] \| null, fuso, geradoEm, versaoIndicadores }` |
+| Blocos operacionais | `noPeriodo` segue `de`/`ate`. `posicaoAtual` é a situação no momento da consulta (`geradoEm`), como nos cartões do painel. |
+
+### 12.3 Parâmetros comuns
+| Parâmetro | Regra |
+|---|---|
+| `de`, `ate` | Obrigatórios nas rotas com período. `AAAA-MM-DD`, inclusivos, `de ≤ ate`, no máximo **400 dias** (o limite das telas de análise). O recorte é [00:00 local de `de`, 00:00 local do dia seguinte a `ate`), com horário de verão. A Torre não adota período padrão: data ausente ou inválida é erro. |
+| `idUnidade` | Opcional: ids de unidade separados por vírgula, ou o parâmetro repetido. Sem ele, vale o consolidado da empresa, incluindo os registros sem unidade (parcelas, baixas, contas compartilhadas, documentos fiscais). Unidade de outra empresa ou inexistente → `422 validacao`. |
+| `limite` | Rotas paginadas: 1 a **500**, padrão 100 |
+| `cursor` | O `proximoCursor` recebido. Só vale para a mesma rota, empresa, período, unidades e filtros; fora disso → `422 validacao` (`campo: "cursor"`). |
+
+A paginação é **por chave**: cada lista tem ordem total, e o cursor guarda o último item entregue. Nenhum item se
+repete nem é pulado. Os totais da consulta inteira (`totais` ou `curva`) vêm iguais em todas as páginas. Parâmetros
+desconhecidos são ignorados. Erros: os de §5 (`401`, `403`, `404`, `422 validacao`, `429`, `500`, `503`). O `422`
+lista todos os problemas de uma vez, nos campos `de`, `ate`, `idUnidade`, `limite`, `cursor`, `granularidade`,
+`situacao` e `incluirSemMovimento`.
+
+### 12.4 Catálogo de indicadores (resumo)
+
+**Base comercial (vendas e devoluções).** É a mesma do painel do gestor, dos relatórios gerenciais, da curva ABC,
+das metas e do CMV do DRE (`loadFacts`/`totalsOf` em `src/domain/reports.ts`).
+
+| Indicador (campo) | Origem no ERP | Fórmula | Situações e data de referência | Cancelamentos, devoluções, descontos e ausentes |
+|---|---|---|---|---|
+| Receita bruta (`receitaBrutaCentavos`) | Itens das vendas (`sale_items.grossTotal`) | Σ preço × quantidade | Vendas `completed`. Data: dia local de `completedAt`. | Venda cancelada não entra e é informada à parte em `canceladas`, pela data de conclusão. Frete e impostos não são receita de produto. |
+| Descontos (`descontosCentavos`) | Itens | Σ desconto do item (inclui promoção) + rateio do desconto global | idem | Vale-crédito e pontos são meio de pagamento, **não** desconto |
+| Acréscimos (`acrescimosCentavos`) | Itens | Σ acréscimo do item + rateio do acréscimo global | idem | |
+| Devoluções (`devolucoesCentavos`) | Itens de devolução | Σ valor devolvido | Devoluções `completed` ou `processing`. Data e unidade do **movimento da devolução**, mesmo que a venda seja de antes do período (um dia pode ter receita negativa). | Devolução cancelada não entra |
+| **Receita líquida** (`receitaLiquidaCentavos`) | `totalsOf` | bruta − descontos + acréscimos − devoluções | idem | É o "Vendas líquidas (faturamento)" do painel. Pedido on-line e NF-e de pedido **não** entram (§12.5). |
+| CMV (`custoMercadoriaVendidaCentavos`) | Custo histórico gravado no item | custo das vendas − custo revertido nas devoluções | idem | Custo ausente vira 0. Por isso produtos e SKUs sem custo registrado devolvem margem `null`. |
+| Lucro bruto e margem bruta (`lucroBrutoCentavos`, `margemBrutaBps`) | `totalsOf` | receita líquida − CMV; margem = lucro × 10000 ÷ receita líquida | idem | Margem `null` com receita ≤ 0. Totais sempre pelas somas, nunca média de margens. |
+| Ticket médio (`ticketMedioCentavos`) | `totalsOf` | receita líquida ÷ vendas distintas | idem | `null` sem vendas. Devolução não reduz a contagem de vendas. |
+| Variação (`variacao.*Bps`) | Período anterior com o mesmo número de dias | (atual − anterior) × 10000 ÷ \|anterior\| | | `null` com anterior 0 ou nulo |
+| Curva ABC (`classeAbc`, `participacaoBps`, `acumuladoBps`) | `abcReport`/`classifyAbc`, limites da empresa (padrão 80%/95%) | Classe pelo acumulado anterior ao item | Mesma curva da tela para o mesmo recorte | Receita ≤ 0: sem classe (`null`) |
+
+**Demais blocos.**
+
+| Bloco | Origem no ERP (tela) | Indicadores principais | Data de referência e regras |
+|---|---|---|---|
+| PDV (`pdv`) | Caixa e o topo do painel | Caixas abertos, fechados e com diferença no período; sobras e faltas; caixas em aberto agora (inclusive de dias anteriores); terminais ativos | Dia local da abertura. Diferença = contado − previsto, só de sessões fechadas. |
+| Estoque (`estoque`) | Saldos de estoque e alertas do painel | Valor em estoque (físico × custo médio), físico, reservado, disponível, em trânsito, abaixo do mínimo, rupturas, zerados, negativos | **Posição atual**, sem período. Saldo negativo gera valor negativo. |
+| Compras (`compras`) | Pedidos de compra e Recebimentos | Pedidos criados (exceto cancelados), recebidos (com no prazo), recebimentos confirmados; aguardando aprovação, a receber, atrasados, em conferência, com divergência, aguardando nota | `createdAt` e `confirmedAt` no fuso do ERP. O valor do pedido inclui frete, despesas, IPI e seguro. Fornecedores não são expostos. |
+| Financeiro (`financeiro`) | Contas a receber e a pagar, painel e Relatórios financeiros | Recebido e pago no período (baixas com encargos); a receber e a pagar em aberto, vencido, vence hoje e nos próximos 7 dias; a autorizar; saldo das contas; aging; DRE gerencial | Baixa pela data da baixa. Vendas à vista em dinheiro ou Pix entram direto em conta e não aparecem como "recebido". O DRE é por competência e **difere da receita comercial** por definição. |
+| Fiscal (`fiscal`) | Resumo fiscal do painel e Relatórios fiscais | Autorizadas (sem simulação) e simuladas; emitidos; faturamento fiscal bruto, devoluções e líquido; pendentes; rejeições; cancelamentos; por modelo (NFC-e, NF-e, NFS-e) | Autorizadas por `authorizedAt`; cancelamentos por `cancelledAt`. Autorizada e cancelada depois sai. O faturamento fiscal inclui frete, seguro e ICMS-ST e **não é** a receita comercial. |
+| Comércio digital (`comercioDigital`) | Central e Pedidos da loja virtual, Banco da loja, Monitor | Pedidos criados, pagos (receita do canal, com frete e bruta das taxas), cancelados, por situação; aguardando pagamento, a faturar, a expedir ou retirar, devoluções solicitadas; banco e monitor | Pedidos pagos por `paidAt`. Fora da receita líquida comercial (`porCanal.comercioDigital.incluidoNaReceitaLiquida: false`). Dados do comprador nunca são expostos. |
+| Adoção (`adocao`) | Auditoria, usuários, operação | Última atividade (auditoria), último acesso (login), usuários por situação, ativos em 7 e 30 dias, última venda, caixa, estoque, fiscal e pedido on-line, terminais, pendências de integração (fiscal, comércio digital, tarefas retidas ou com falha) | Sem período. Cada sinal declara a `fonte`. Sinal sem fonte confiável vem `null` (atividade de terminal, falha de rotina diária). |
+
+### 12.5 Receita comercial, faturamento fiscal e DRE
+São três números diferentes **por definição**. Nenhum deles é "o certo" para todos os usos.
+- **Receita comercial**: `vendas.receitaLiquidaCentavos`. Só PDV e trocas, sem frete.
+- **Faturamento fiscal**: `fiscal.noPeriodo.faturamentoFiscal`. Notas autorizadas por emissão, com frete e ICMS-ST,
+  incluindo pedidos on-line e NF-e de pedido.
+- **DRE**: `financeiro.noPeriodo.dre.receitaLiquidaCentavos`. Competência financeira; vale-crédito e pontos não são
+  receita.
+
+Não há receita omnicanal oficial na v1: `porCanal.pedidoDeVenda` vem `null`, e o comércio digital é informado à parte.
+
+### 12.6 Sincronização da Torre
+- **Não há fechamento comercial.** Cancelar uma venda ou uma NF-e depois a retira do período original. Itens de venda
+  gravados depois por uma tarefa em segundo plano aumentam receita e custo de um período já consultado.
+- Recomendação de consulta:
+  - todo dia, os **últimos 35 dias**;
+  - no dia 5 de cada mês, o mês anterior inteiro (fotografia mensal);
+  - sempre guardar `meta.geradoEm` junto do número.
+- A Torre corta todos os períodos no fuso do ERP. Telas que cortam pelo dia UTC ("Pedidos hoje", "Recebidos no mês")
+  podem divergir para eventos entre 21h e 24h, horário de Brasília.
+- As consultas leem o recorte em memória, como as telas, até 100 mil registros por consulta. `resumo` calcula o
+  período atual e o anterior em todos os blocos e é a consulta mais pesada. Para séries longas, prefira `vendas/serie`
+  e os blocos específicos.
+- Mudança de fórmula, critério ou campo gera uma nova `versaoIndicadores`. Campos novos podem ser acrescentados sem
+  mudar a versão.
+
+### 12.7 Dados pessoais na Torre
+Nenhuma rota devolve nome, CPF/CNPJ, e-mail, telefone ou endereço de cliente, nem o nome de operadores e vendedores.
+Pessoas aparecem só por id (`idCliente`, `idOperador`, `idVendedor`). Nomes de unidades, depósitos, produtos,
+categorias e contas financeiras são dados cadastrais da própria empresa. Os testes da Torre conferem a ausência de
+CPF, CNPJ e nomes de clientes nas respostas.
 
 ## 13. Regras de sincronização
 
@@ -585,7 +701,7 @@ corpo) e `resposta` (status, cabeçalhos, corpo).
 - **Como são gerados:** executando a interface de verdade sobre dados fictícios, com o relógio fixo em 20/11/2026.
   Segredos, tokens de convite e códigos de vínculo aparecem mascarados.
 - **Como são conferidos:** a cada execução da suíte. Para regenerar depois de uma mudança intencional:
-  `GERAR_EXEMPLOS=1 npx vitest run tests/interos-contrato.test.ts`.
+  `GERAR_EXEMPLOS=1 npx vitest run tests/interos-contrato.test.ts tests/interos-contrato-torre.test.ts`.
 
 | Arquivo | Status | Cenário |
 |---|---|---|
@@ -620,7 +736,27 @@ corpo) e `resposta` (status, cabeçalhos, corpo).
 | `erro-429-limite-excedido.json` | 429 | Limite por minuto |
 | `erro-503-servico-nao-configurado.json` | 503 | Ambiente sem credenciais |
 
-<!-- TORRE-EXEMPLOS -->
+**Torre de Controle** (respostas reais sobre a demonstração de varejo vinculada, relógio fixo em 20/11/2026; a
+conferência é pela estrutura, `tests/interos-contrato-torre.test.ts`):
+
+| Arquivo | Status | Cenário |
+|---|---|---|
+| `torre-01-resumo.json` | 200 | Resumo de todos os blocos no período |
+| `torre-02-vendas-serie.json` | 200 | Série diária |
+| `torre-03-vendas-por-unidade.json` | 200 | Por unidade, com o período anterior |
+| `torre-04-produtos.json` | 200 | Ranking de produtos (curva ABC), com cursor |
+| `torre-05-skus.json` | 200 | Ranking de SKUs |
+| `torre-06-transacoes-vendas.json` | 200 | Transações de venda (sem dados pessoais) |
+| `torre-07-transacoes-devolucoes.json` | 200 | Transações de devolução |
+| `torre-08-estoque.json` | 200 | Posição de estoque por SKU e depósito |
+| `torre-09-financeiro.json` | 200 | Financeiro, aging, contas e DRE |
+| `torre-10-fiscal.json` | 200 | Fiscal |
+| `torre-11-compras.json` | 200 | Compras |
+| `torre-12-comercio-digital.json` | 200 | Comércio digital |
+| `torre-13-adocao.json` | 200 | Sinais de adoção |
+| `torre-erro-422-validacao.json` | 422 | Parâmetros inválidos, todos de uma vez |
+| `torre-erro-403-sem-permissao.json` | 403 | Credencial de provisionamento na Torre |
+| `torre-erro-404-nao-encontrado.json` | 404 | Empresa não vinculada |
 
 ## 19. Roteiro de homologação para a equipe do Interos
 

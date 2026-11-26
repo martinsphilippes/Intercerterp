@@ -4,15 +4,116 @@ import { useState } from "react";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field, Input, Textarea, FormGrid, FormSection, Select } from "@/components/ui/form";
 import { Notice } from "@/components/ui/empty";
-import { saveRoleAction } from "../actions";
+import { Dialog } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/badge";
+import type { ActionResult } from "@/lib/server/action";
+import { previewRoleImpactAction, saveRoleAction } from "../actions";
 
 type Mod = { key: string; label: string };
 type Op = { key: string; label: string };
 type Act = { key: string; label: string; module: string };
+type Impact = {
+  roleName: string;
+  affected: Array<{ id: string; name: string; email: string; status: string }>;
+  diff: { before: Record<string, string>; after: Record<string, string> };
+  changes: number;
+  required: boolean;
+  token: string;
+};
+
+/**
+ * Impacto antes de salvar um perfil compartilhado: lista das pessoas afetadas (nome, e-mail, situação) e a diferença das
+ * permissões; salvar só depois da confirmação explícita (o servidor também recusa sem ela).
+ */
+function ImpactDialog({ impact, onAnswer }: { impact: Impact; onAnswer: (ok: boolean) => void }) {
+  const [ack, setAck] = useState(false);
+  const n = impact.affected.length;
+  return (
+    <Dialog
+      open
+      onClose={() => onAnswer(false)}
+      title={`Confirmar alteração do perfil “${impact.roleName}”`}
+      size="xl"
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={() => onAnswer(false)}>
+            Voltar sem salvar
+          </Button>
+          <Button type="button" variant="primary" disabled={!ack} onClick={() => onAnswer(true)}>
+            Confirmar e salvar
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4 text-sm">
+        <p>
+          O perfil é compartilhado: a alteração vale para <b>{n} pessoa{n === 1 ? "" : "s"}</b>, a partir da próxima ação de cada uma.
+        </p>
+        <div className="max-h-64 overflow-y-auto rounded-md border border-line">
+          <table className="table-base w-full text-sm" aria-label="Pessoas afetadas">
+            <thead>
+              <tr><th>Nome</th><th>E-mail</th><th>Situação</th></tr>
+            </thead>
+            <tbody>
+              {impact.affected.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.name}</td>
+                  <td>{p.email}</td>
+                  <td><StatusBadge kind="user" status={p.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <p className="mb-1 font-medium">O que muda ({impact.changes} item{impact.changes === 1 ? "" : "s"})</p>
+          <div className="max-h-64 overflow-y-auto rounded-md border border-line">
+            <table className="table-base w-full text-sm" aria-label="Diferença das permissões">
+              <thead>
+                <tr><th>Item</th><th>Antes</th><th>Depois</th></tr>
+              </thead>
+              <tbody>
+                {Object.keys(impact.diff.after).map((k) => (
+                  <tr key={k}>
+                    <td>{k}</td>
+                    <td className="text-slate-500">{impact.diff.before[k] ?? "—"}</td>
+                    <td className="font-medium">{impact.diff.after[k]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="focus-ring mt-0.5 size-4 shrink-0 accent-brand-700" />
+          <span>Revisei as pessoas afetadas e as mudanças, e quero aplicá-las a todas elas.</span>
+        </label>
+      </div>
+    </Dialog>
+  );
+}
 
 /** Editor da matriz visualizar/criar/editar/excluir por módulo + operações específicas (visão 9). */
 export function RoleForm({ role, modules, ops, actions, na, readOnly, usersCount }: { role?: Record<string, any> | null; modules: Mod[]; ops: Op[]; actions: Act[]; na: Record<string, string[]>; readOnly?: boolean; usersCount?: number }) {
   const r = role ?? {};
+  const [pendingImpact, setPendingImpact] = useState<{ impact: Impact; resolve: (ok: boolean) => void } | null>(null);
+  // perfil existente: antes de salvar, mostra o impacto (pessoas + diferença) e só segue com a confirmação explícita
+  const submit = async (fd: FormData): Promise<ActionResult<any>> => {
+    if (r.id) {
+      fd.delete("confirmImpact");
+      const p = await previewRoleImpactAction(fd);
+      if (!p.ok) return p;
+      const impact = p.data as Impact | undefined;
+      if (impact?.required) {
+        const ok = await new Promise<boolean>((resolve) => setPendingImpact({ impact, resolve }));
+        setPendingImpact(null);
+        if (!ok) return { ok: false, error: "Alteração não salva: o impacto não foi confirmado." };
+        fd.set("confirmImpact", impact.token);
+      }
+    }
+    return saveRoleAction(fd);
+  };
   const initialPerm = () => JSON.parse(JSON.stringify(r.permissions ?? {}));
   const [perm, setPerm] = useState<Record<string, Record<string, boolean>>>(initialPerm);
   const [acts, setActs] = useState<string[]>(r.actions ?? []);
@@ -53,7 +154,9 @@ export function RoleForm({ role, modules, ops, actions, na, readOnly, usersCount
   const grouped = modules.map((m) => ({ ...m, acts: actions.filter((a) => a.module === m.key) })).filter((m) => m.acts.length);
 
   return (
-    <ActionForm key={formKey} action={saveRoleAction} className="space-y-5" onSuccess={() => setDirty(false)}>
+    <>
+    {pendingImpact && <ImpactDialog impact={pendingImpact.impact} onAnswer={pendingImpact.resolve} />}
+    <ActionForm key={formKey} action={submit} className="space-y-5" onSuccess={() => setDirty(false)}>
       {({ pending, error }) => (
         <fieldset disabled={readOnly} className="space-y-5" onChange={() => setDirty(true)}>
           {r.id && <input type="hidden" name="id" value={r.id} />}
@@ -175,5 +278,6 @@ export function RoleForm({ role, modules, ops, actions, na, readOnly, usersCount
         </fieldset>
       )}
     </ActionForm>
+    </>
   );
 }

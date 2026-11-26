@@ -1,0 +1,123 @@
+{
+  "titulo": "Ranking de SKUs (mesma curva da tela Curva ABC), primeira página",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/skus?de=2026-11-01&ate=2026-11-20&limite=2",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0005"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0005",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "itens": [
+        {
+          "idSku": "997000f10c8b660f80bfbce321cefc89",
+          "codigoSku": "TENIS-40",
+          "descricao": "Tênis Casual Couro 40",
+          "idProduto": "d898086b2141a156930053c53b448abb",
+          "nomeProduto": "Tênis Casual Couro",
+          "idCategoria": "45128439853071c4363b127d73fc6fd1",
+          "nomeCategoria": "Calçados",
+          "unidadeMedida": "PAR",
+          "receitaBrutaCentavos": 83970,
+          "descontosCentavos": 800,
+          "acrescimosCentavos": 0,
+          "devolucoesCentavos": 0,
+          "receitaLiquidaCentavos": 83170,
+          "quantidadeVendidaMilesimos": 3000,
+          "quantidadeDevolvidaMilesimos": 0,
+          "quantidadeLiquidaMilesimos": 3000,
+          "quantidadeVendas": 3,
+          "custoRegistrado": true,
+          "custoMercadoriaVendidaCentavos": 35700,
+          "lucroBrutoCentavos": 47470,
+          "margemBrutaBps": 5708,
+          "classeAbc": "A",
+          "posicaoAbc": 1,
+          "participacaoBps": 1437,
+          "acumuladoBps": 1437,
+          "semMovimento": false
+        },
+        {
+          "idSku": "07ea98dbec21d86008d53c66ed04fb35",
+          "codigoSku": "CADERNO",
+          "descricao": "Caderno Universitário 10 matérias",
+          "idProduto": "741c1eb64c873b22b80bc68891bffec6",
+          "nomeProduto": "Caderno Universitário 10 matérias",
+          "idCategoria": "0dc20668455ff1fa96fb5ba1a3487b25",
+          "nomeCategoria": "Papelaria",
+          "unidadeMedida": "UN",
+          "receitaBrutaCentavos": 79680,
+          "descontosCentavos": 398,
+          "acrescimosCentavos": 0,
+          "devolucoesCentavos": 2490,
+          "receitaLiquidaCentavos": 76792,
+          "quantidadeVendidaMilesimos": 32000,
+          "quantidadeDevolvidaMilesimos": 1000,
+          "quantidadeLiquidaMilesimos": 31000,
+          "quantidadeVendas": 16,
+          "custoRegistrado": true,
+          "custoMercadoriaVendidaCentavos": 30690,
+          "lucroBrutoCentavos": 46102,
+          "margemBrutaBps": 6003,
+          "classeAbc": "A",
+          "posicaoAbc": 2,
+          "participacaoBps": 1327,
+          "acumuladoBps": 2764,
+          "semMovimento": false
+        }
+      ],
+      "proximoCursor": "eyJ2IjoxLCJmIjoiZjM4ZGEyYmI2ZTU1NDhhMyIsImsiOls3Njc5MiwzMTAwMCwiQ0FERVJOTyIsIjA3ZWE5OGRiZWMyMWQ4NjAwOGQ1M2M2NmVkMDRmYjM1Il19",
+      "curva": {
+        "criterio": "receita_liquida",
+        "limites": {
+          "classeABps": 8000,
+          "classeBBps": 9500
+        },
+        "receitaLiquidaCentavos": 578672,
+        "receitaNaCurvaCentavos": 578672,
+        "receitaForaDaCurvaCentavos": 0,
+        "classes": {
+          "A": {
+            "quantidade": 10,
+            "receitaLiquidaCentavos": 463852,
+            "participacaoBps": 8016
+          },
+          "B": {
+            "quantidade": 5,
+            "receitaLiquidaCentavos": 95850,
+            "participacaoBps": 1656
+          },
+          "C": {
+            "quantidade": 2,
+            "receitaLiquidaCentavos": 18970,
+            "participacaoBps": 328
+          }
+        },
+        "semClasse": {
+          "comMovimento": 0,
+          "semMovimento": 13
+        }
+      }
+    }
+  }
+}

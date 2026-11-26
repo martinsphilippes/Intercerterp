@@ -1,0 +1,90 @@
+{
+  "titulo": "Sinais de adoção (uso real, usuários e pendências de integração)",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/adocao",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0013"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0013",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": null,
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "ultimaAtividade": {
+        "em": "2026-11-20T18:00:00.000Z",
+        "fonte": "auditoria"
+      },
+      "ultimoAcesso": {
+        "em": null,
+        "fonte": "login"
+      },
+      "usuarios": {
+        "total": 9,
+        "ativos": 8,
+        "convitesPendentes": 1,
+        "convitesExpirados": 0,
+        "suspensos": 0,
+        "inativos": 0,
+        "nuncaAcessaram": 8
+      },
+      "usuariosAtivos": {
+        "ultimos7Dias": 6,
+        "ultimos30Dias": 6,
+        "fonte": "auditoria"
+      },
+      "usuariosComAcesso": {
+        "ultimos7Dias": 0,
+        "ultimos30Dias": 0,
+        "fonte": "login"
+      },
+      "atividadeOperacional": {
+        "ultimaVenda": {
+          "em": "2026-11-20T18:00:00.000Z",
+          "idUnidade": "0f141ddae2733e13500593ac12e10236",
+          "situacao": "concluida"
+        },
+        "ultimaAberturaCaixaEm": "2026-11-20T18:00:00.000Z",
+        "ultimoMovimentoEstoqueEm": "2026-11-20T18:00:00.000Z",
+        "ultimoDocumentoFiscalEm": "2026-11-20T18:00:00.000Z",
+        "ultimoPedidoOnlineEm": "2026-11-20T18:00:00.000Z"
+      },
+      "terminais": {
+        "ativos": 3,
+        "ultimaAtividadeEm": null
+      },
+      "pendenciasIntegracao": {
+        "documentosFiscais": {
+          "pendentes": 3,
+          "processando": 2,
+          "rejeitados": 1
+        },
+        "comercioDigital": {
+          "falhas": 1,
+          "pendentes": 9
+        },
+        "tarefas": {
+          "comFalhaEmNovaTentativa": 0,
+          "esgotadas": 0,
+          "travadas": 0,
+          "retidas": 0
+        },
+        "rotinasComFalha": null
+      }
+    }
+  }
+}

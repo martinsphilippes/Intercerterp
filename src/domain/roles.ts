@@ -8,6 +8,9 @@ import { unscoped } from "@/lib/db/scoped-store";
 import { resolveRoleId } from "@/lib/auth/users";
 import { syncRoleTemplate, templateSyncPlan } from "@/lib/auth/role-sync";
 import { MODULES, PLATFORM_ACTIONS, SPECIAL_ACTIONS, type Crud, type ModuleKey, type PermissionMatrix, type SpecialAction } from "@/lib/permissions";
+import { sha256 } from "@/lib/db";
+import { nowIso } from "@/lib/dates";
+import { maskPermissionsByContract } from "./tenancy/contract";
 
 /**
  * Perfis de acesso (Tela 36 / visão complementar 9 — Perfis e permissões).
@@ -320,4 +323,202 @@ export function roleCoverage(role: Pick<Doc, "permissions" | "actions">) {
   const modules = MODULES.filter((x) => m[x.key]?.view).length;
   const writes = MODULES.filter((x) => m[x.key]?.create || m[x.key]?.edit || m[x.key]?.delete).length;
   return { modules, writes, actions: (role.actions ?? []).length };
+}
+
+// ───────────────────────────── multiempresa: administração feita pelo próprio cliente (docs/multiempresa/administracao.md)
+
+/** Código do erro de negócio quando a operação deixaria a empresa sem administrador ativo. */
+export const LAST_COMPANY_ADMIN = "last_company_admin";
+
+/** O que o administrador da empresa precisa ter no perfil (texto das mensagens). */
+export const ADMIN_ACCESS_HINT = "um perfil com Administração › Editar e “Gerenciar usuários e perfis”";
+
+/** Perfil que administra usuários na empresa: Administração › Editar e “Gerenciar usuários e perfis”, perfil ativo. */
+export function roleAdministersUsers(role: Record<string, any> | null | undefined): boolean {
+  return Boolean(role && role.active !== false && role.permissions?.admin?.edit && (role.actions ?? []).includes("admin.users"));
+}
+
+/** Estado simulado (depois da operação) para conferir os administradores antes de gravar. */
+export interface CompanyAdminOverrides {
+  /** cadastros de usuário como ficariam */
+  users?: Array<Record<string, any>>;
+  /** perfis como ficariam */
+  roles?: Array<Record<string, any>>;
+  /** perfis excluídos */
+  removedRoleIds?: string[];
+}
+
+/**
+ * Administradores DA EMPRESA: usuários ativos, vinculados a ela, cujo perfil efetivo NA empresa administra usuários
+ * (`roleAdministersUsers`). O administrador da plataforma (`isAdmin`) não conta, nem o vendedor sem acesso ao sistema.
+ * Leitura deliberadamente sem escopo (usuários e perfis), só para a conferência.
+ */
+export async function companyAdmins(store: Store, companyId: string, overrides: CompanyAdminOverrides = {}): Promise<Doc[]> {
+  if (!companyId) return [];
+  const base = unscoped(store);
+  const [users, roles] = await Promise.all([listAll(base, "users", { filters: [["contains", "companyIds", companyId]] }), listAll(base, "roles")]);
+  const byId = new Map<string, Record<string, any>>(users.map((u) => [u.id, u]));
+  for (const u of overrides.users ?? []) byId.set(u.id, u);
+  const rolesById = new Map<string, Doc>(roles.map((r) => [r.id, r]));
+  for (const r of overrides.roles ?? []) rolesById.set(r.id, r as Doc);
+  for (const id of overrides.removedRoleIds ?? []) rolesById.delete(id);
+  const all = [...rolesById.values()];
+  return [...byId.values()].filter((u) => {
+    if (u.isAdmin || u.loginDisabled || u.status !== "active" || !(u.companyIds ?? []).includes(companyId)) return false;
+    const rid = resolveRoleId(u, companyId, rolesById, all);
+    return roleAdministersUsers(rid ? rolesById.get(rid) : null);
+  }) as Doc[];
+}
+
+const joinNames = (names: string[]) => (names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}`);
+
+/**
+ * Atribuir um perfil a alguém é conceder o que o perfil dá: quem não é o administrador da plataforma só atribui perfil
+ * cujas permissões e operações ele mesmo tem na empresa — a regra de `assertGrantable`, aplicada ao perfil inteiro.
+ * Operações da plataforma num perfil de empresa comum e módulos fora do contrato não contam (lá não têm efeito).
+ * `describe` monta a mensagem a partir do detalhe ("Fora do seu perfil: …").
+ */
+export async function assertAssignable(ctx: Ctx, role: Record<string, any>, describe?: (detail: string) => string) {
+  if (ctx.user.isAdmin) return;
+  const company = await unscoped(ctx.store).get("companies", ctx.companyId);
+  const actions = normalizeActions((role.actions ?? []).filter((a: string) => company?.isPlatform || !(PLATFORM_ACTIONS as string[]).includes(a)));
+  const permissions = maskPermissionsByContract(normalizeMatrix(role.permissions), company);
+  try {
+    await assertGrantable(ctx, { permissions, actions });
+  } catch (e) {
+    if (!(e instanceof BusinessError) || e.code !== "forbidden") throw e;
+    const i = e.message.indexOf("Fora do seu perfil:");
+    const detail = i >= 0 ? e.message.slice(i) : e.message;
+    throw new BusinessError(
+      describe ? describe(detail) : `Você só pode atribuir perfis com acessos que você mesmo tem nesta empresa: o perfil “${role.name}” vai além do seu. ${detail}`,
+      "forbidden",
+    );
+  }
+}
+
+/** Perfil como ficaria com a edição (sem gravar). */
+function roleAfterEdit(before: Doc, input: RoleInput): Record<string, any> {
+  return {
+    ...before,
+    name: input.name.trim(),
+    description: input.description?.trim() || null,
+    permissions: normalizeMatrix(input.permissions),
+    actions: normalizeActions(input.actions),
+    discountLimitBps: input.discountLimitBps,
+    active: input.active ?? before.active ?? true,
+    ...(input.requireTwoFactor !== undefined ? { requireTwoFactor: Boolean(input.requireTwoFactor) } : {}),
+  };
+}
+
+/**
+ * Último administrador da empresa × perfil: retirar de um perfil Administração › Editar ou “Gerenciar usuários e perfis”,
+ * desativá-lo ou excluí-lo não pode deixar a empresa (que tinha administrador próprio) sem nenhum administrador ativo.
+ * Devolve se o perfil deixa de administrar usuários (para a conferência depois de gravar).
+ */
+async function assertRoleKeepsCompanyAdmins(ctx: Ctx, before: Doc, after: Record<string, any> | null, what: string): Promise<boolean> {
+  if (!roleAdministersUsers(before) || (after && roleAdministersUsers(after))) return false;
+  const companyId = before.companyId as string;
+  const admins = await companyAdmins(ctx.store, companyId);
+  if (!admins.length) return false;
+  const remaining = await companyAdmins(ctx.store, companyId, after ? { roles: [after] } : { removedRoleIds: [before.id] });
+  if (!remaining.length) throw await lastAdminRoleError(ctx, before, admins, what);
+  return true;
+}
+
+/** Mensagem do bloqueio (sem `holders`: a conferência depois de gravar achou a empresa sem administrador). */
+async function lastAdminRoleError(ctx: Ctx, role: Doc, holders: Doc[], what: string): Promise<BusinessError> {
+  const company = await unscoped(ctx.store).get("companies", role.companyId);
+  const companyName = company?.tradeName || company?.name || "a empresa";
+  const who = holders.length
+    ? `${joinNames(holders.map((u) => u.name))} ${holders.length === 1 ? "é o último administrador ativo" : "são os últimos administradores ativos"} de ${companyName} pelo perfil “${role.name}”.`
+    : `${companyName} ficaria sem nenhum administrador ativo (outra alteração feita ao mesmo tempo retirou o último administrador além dos do perfil “${role.name}”).`;
+  return new BusinessError(`Operação bloqueada: ${who} ${what} deixaria a empresa sem administrador. Antes, dê a outro usuário ativo desta empresa ${ADMIN_ACCESS_HINT}.`, LAST_COMPANY_ADMIN);
+}
+
+/** Pessoa afetada pela alteração de um perfil (nome, e-mail e situação). */
+export interface RoleImpactPerson {
+  id: string;
+  name: string;
+  email: string;
+  /** active | invited | invite_expired | suspended | inactive */
+  status: string;
+}
+
+export interface RoleImpact {
+  roleId: string;
+  roleName: string;
+  /** pessoas com este perfil na empresa (o administrador da plataforma não usa perfil) */
+  affected: RoleImpactPerson[];
+  /** diferença legível (antes/depois) — `roleDiff` */
+  diff: { before: Record<string, string>; after: Record<string, string> };
+  changes: number;
+  /** há pessoas no perfil e algo muda: salvar exige a confirmação explícita deste impacto */
+  required: boolean;
+  /** identifica este impacto (pessoas + diferença): a confirmação vale só para ele */
+  token: string;
+}
+
+/**
+ * Impacto de salvar um perfil compartilhado: quem é afetado (todas as pessoas com o perfil, em qualquer situação) e o que
+ * muda. A confirmação é amarrada ao `token`: se as pessoas ou a diferença mudarem, é preciso confirmar de novo.
+ */
+export async function roleChangeImpact(ctx: Ctx, id: string, input: RoleInput): Promise<RoleImpact> {
+  requirePerm(ctx, "admin", "edit");
+  requireAction(ctx, "admin.users");
+  const before = await ctx.store.getOrThrow("roles", id);
+  assert(before.companyId === ctx.companyId, "Perfil de outra empresa.");
+  const diff = roleDiff(before, roleAfterEdit(before, input));
+  const now = nowIso();
+  const affected = (await roleUsers(ctx.store, id))
+    .map((u) => ({ id: u.id as string, name: u.name as string, email: u.email as string, status: u.status === "invited" && u.inviteExpiresAt && u.inviteExpiresAt < now ? "invite_expired" : String(u.status ?? "active") }))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const changes = Object.keys(diff.after).length;
+  const token = sha256(JSON.stringify({ id, people: affected.map((p) => p.id).sort(), after: diff.after, before: diff.before })).slice(0, 32);
+  return { roleId: id, roleName: before.name, affected, diff, changes, required: affected.length > 0 && changes > 0, token };
+}
+
+/**
+ * Salvar perfil existente pela tela (multiempresa): além das regras de `updateRole`, exige a confirmação explícita do
+ * impacto quando o perfil é usado por pessoas (`impactToken` = `roleChangeImpact().token`) e não deixa a empresa sem
+ * administrador ativo (também sob concorrência: conferido de novo depois de gravar e desfeito se for o caso).
+ */
+export async function saveRoleChecked(ctx: Ctx, id: string, input: RoleInput, opts: { reason?: string | null; impactToken?: string | null } = {}) {
+  await guard(ctx, "edit", `alterar perfil "${input.name}"`, id);
+  validate(input);
+  const before = await ctx.store.getOrThrow("roles", id);
+  assert(before.companyId === ctx.companyId, "Perfil de outra empresa.");
+  await assertGrantable(ctx, { permissions: normalizeMatrix(input.permissions), actions: normalizeActions(input.actions) }, before);
+  const after = roleAfterEdit(before, input);
+  const what = after.active === false && before.active !== false ? "Desativar o perfil" : "Retirar deste perfil Administração › Editar ou “Gerenciar usuários e perfis”";
+  const reduces = await assertRoleKeepsCompanyAdmins(ctx, before, after, what);
+  const impact = await roleChangeImpact(ctx, id, input);
+  if (impact.required && opts.impactToken !== impact.token) {
+    const n = impact.affected.length;
+    throw new BusinessError(
+      opts.impactToken
+        ? "As pessoas afetadas ou as permissões mudaram desde a confirmação. Revise o impacto e confirme de novo."
+        : `Confirme o impacto antes de salvar: a alteração vale para ${n} pessoa${n === 1 ? "" : "s"} com o perfil “${before.name}” (${joinNames(impact.affected.slice(0, 5).map((p) => p.name))}${n > 5 ? ` e mais ${n - 5}` : ""}).`,
+      "impact_confirmation",
+    );
+  }
+  const saved = await updateRole(ctx, id, input, opts.reason);
+  if (reduces && (await companyAdmins(ctx.store, before.companyId)).length === 0) {
+    // outra operação ao mesmo tempo levou o último administrador: desfaz esta alteração
+    await ctx.store.update("roles", id, {
+      name: before.name, description: before.description ?? null, permissions: before.permissions ?? {}, actions: before.actions ?? [], discountLimitBps: before.discountLimitBps ?? 0,
+      active: before.active ?? true, requireTwoFactor: Boolean(before.requireTwoFactor),
+    });
+    await audit(ctx, { module: "admin", action: "role.update", entityType: "role", entityId: id, summary: `Alteração do perfil "${before.name}" desfeita: deixaria a empresa sem administrador ativo (operação simultânea)`, result: "failure" });
+    throw await lastAdminRoleError(ctx, before, [], what);
+  }
+  return saved;
+}
+
+/** Excluir perfil pela tela: as regras de `deleteRole` e a proteção do último administrador da empresa. */
+export async function deleteRoleChecked(ctx: Ctx, id: string) {
+  await guard(ctx, "delete", "excluir perfil", id);
+  const role = await ctx.store.getOrThrow("roles", id);
+  assert(role.companyId === ctx.companyId, "Perfil de outra empresa.");
+  await assertRoleKeepsCompanyAdmins(ctx, role, null, "Excluir o perfil");
+  return deleteRole(ctx, id);
 }

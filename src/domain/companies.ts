@@ -386,12 +386,24 @@ export async function setCompanyUsers(ctx: Ctx, companyId: string, userIds: stri
       }
       const roleByCompany = { ...(u.roleByCompany ?? {}) };
       delete roleByCompany[companyId];
-      plan.push({ user: u, patch: { companyIds: (u.companyIds ?? []).filter((x: string) => x !== companyId), branchIds: (u.branchIds ?? []).filter((b: string) => !branchIds.has(b)), roleByCompany }, change: `−${u.name}` });
+      // cargo e filiais por empresa saem junto com o vínculo (nada fica apontando para a empresa desvinculada)
+      const jobTitleByCompany = { ...(u.jobTitleByCompany ?? {}) };
+      delete jobTitleByCompany[companyId];
+      const branchIdsByCompany = { ...(u.branchIdsByCompany ?? {}) };
+      delete branchIdsByCompany[companyId];
+      plan.push({
+        user: u,
+        patch: { companyIds: (u.companyIds ?? []).filter((x: string) => x !== companyId), branchIds: (u.branchIds ?? []).filter((b: string) => !branchIds.has(b)), roleByCompany, jobTitleByCompany, branchIdsByCompany },
+        change: `−${u.name}`,
+      });
     }
   }
   if (blocked.length) {
     throw new BusinessError(`${blocked.join(", ")} ficaria(m) sem empresa vinculada; inative o usuário em vez de desvincular. Nenhum vínculo foi alterado.`, "last_company");
   }
+  // a empresa não fica sem administrador próprio (mesma regra do cadastro de usuários)
+  const { assertCompanyKeepsAdmin } = await import("./users");
+  await assertCompanyKeepsAdmin(c, companyId, plan.filter((p) => p.change.startsWith("−")).map((p) => p.user.id));
   // fase 2: gravação em blocos (limite de 100 operações por transação) e auditoria
   const changes: string[] = [];
   try {

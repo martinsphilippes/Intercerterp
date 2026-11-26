@@ -1,0 +1,145 @@
+{
+  "titulo": "Vendas por unidade, com o período anterior",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/vendas/por-unidade?de=2026-11-01&ate=2026-11-20",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0003"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0003",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-01",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "itens": [
+        {
+          "idUnidade": "0b78439599a73b3d1e0257af350abf8d",
+          "codigo": "02",
+          "nome": "Filial — Shopping Norte",
+          "situacaoUnidade": "ativa",
+          "receitaBrutaCentavos": 236210,
+          "descontosCentavos": 0,
+          "acrescimosCentavos": 0,
+          "receitaAntesDevolucoesCentavos": 236210,
+          "devolucoesCentavos": 0,
+          "receitaLiquidaCentavos": 236210,
+          "custoVendasCentavos": 91420,
+          "custoDevolucoesCentavos": 0,
+          "custoMercadoriaVendidaCentavos": 91420,
+          "lucroBrutoCentavos": 144790,
+          "margemBrutaBps": 6130,
+          "quantidadeVendas": 21,
+          "quantidadeDevolucoes": 0,
+          "ticketMedioCentavos": 11248,
+          "quantidadeVendidaMilesimos": 49000,
+          "quantidadeDevolvidaMilesimos": 0,
+          "quantidadeLiquidaMilesimos": 49000,
+          "periodoAnterior": {
+            "receitaLiquidaCentavos": 0,
+            "quantidadeVendas": 0,
+            "ticketMedioCentavos": null,
+            "margemBrutaBps": null
+          },
+          "variacao": {
+            "receitaLiquidaBps": null,
+            "quantidadeVendasBps": null,
+            "ticketMedioBps": null,
+            "margemBrutaPontosBps": null
+          }
+        },
+        {
+          "idUnidade": "0f141ddae2733e13500593ac12e10236",
+          "codigo": "01",
+          "nome": "Matriz — Centro",
+          "situacaoUnidade": "ativa",
+          "receitaBrutaCentavos": 364610,
+          "descontosCentavos": 1398,
+          "acrescimosCentavos": 0,
+          "receitaAntesDevolucoesCentavos": 363212,
+          "devolucoesCentavos": 20750,
+          "receitaLiquidaCentavos": 342462,
+          "custoVendasCentavos": 140900,
+          "custoDevolucoesCentavos": 7630,
+          "custoMercadoriaVendidaCentavos": 133270,
+          "lucroBrutoCentavos": 209192,
+          "margemBrutaBps": 6108,
+          "quantidadeVendas": 27,
+          "quantidadeDevolucoes": 4,
+          "ticketMedioCentavos": 12684,
+          "quantidadeVendidaMilesimos": 69000,
+          "quantidadeDevolvidaMilesimos": 5000,
+          "quantidadeLiquidaMilesimos": 64000,
+          "periodoAnterior": {
+            "receitaLiquidaCentavos": 0,
+            "quantidadeVendas": 0,
+            "ticketMedioCentavos": null,
+            "margemBrutaBps": null
+          },
+          "variacao": {
+            "receitaLiquidaBps": null,
+            "quantidadeVendasBps": null,
+            "ticketMedioBps": null,
+            "margemBrutaPontosBps": null
+          }
+        }
+      ],
+      "total": {
+        "receitaBrutaCentavos": 600820,
+        "descontosCentavos": 1398,
+        "acrescimosCentavos": 0,
+        "receitaAntesDevolucoesCentavos": 599422,
+        "devolucoesCentavos": 20750,
+        "receitaLiquidaCentavos": 578672,
+        "custoVendasCentavos": 232320,
+        "custoDevolucoesCentavos": 7630,
+        "custoMercadoriaVendidaCentavos": 224690,
+        "lucroBrutoCentavos": 353982,
+        "margemBrutaBps": 6117,
+        "quantidadeVendas": 48,
+        "quantidadeDevolucoes": 4,
+        "ticketMedioCentavos": 12056,
+        "quantidadeVendidaMilesimos": 118000,
+        "quantidadeDevolvidaMilesimos": 5000,
+        "quantidadeLiquidaMilesimos": 113000
+      },
+      "periodoAnterior": {
+        "de": "2026-10-12",
+        "ate": "2026-10-31",
+        "receitaBrutaCentavos": 0,
+        "descontosCentavos": 0,
+        "acrescimosCentavos": 0,
+        "receitaAntesDevolucoesCentavos": 0,
+        "devolucoesCentavos": 0,
+        "receitaLiquidaCentavos": 0,
+        "custoVendasCentavos": 0,
+        "custoDevolucoesCentavos": 0,
+        "custoMercadoriaVendidaCentavos": 0,
+        "lucroBrutoCentavos": 0,
+        "margemBrutaBps": null,
+        "quantidadeVendas": 0,
+        "quantidadeDevolucoes": 0,
+        "ticketMedioCentavos": null,
+        "quantidadeVendidaMilesimos": 0,
+        "quantidadeDevolvidaMilesimos": 0,
+        "quantidadeLiquidaMilesimos": 0
+      }
+    }
+  }
+}

@@ -11,7 +11,7 @@ import { paginate, parseList, type SearchParams } from "@/lib/list";
 import { formatDateTime } from "@/lib/dates";
 import { can, canDo } from "@/lib/permissions";
 import { lookups } from "@/lib/server/lookups";
-import { userStats } from "@/domain/users";
+import { seesPlatformAdmins, userStats } from "@/domain/users";
 import { queryUsers } from "./queries";
 import { UserTabs, Avatar } from "./user-tabs";
 import { listRoles } from "@/domain/roles";
@@ -26,7 +26,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const p = parseList(params, { sort: "name", dir: "asc" });
   const all = await queryUsers(s.ctx, p);
   const { rows, total } = paginate(all, p);
-  const [roles, branches, stats] = await Promise.all([lookups.roles(s.ctx), lookups.branches(s.ctx), userStats(s.ctx.store, s.ctx.companyId)]);
+  const platformAdmins = await seesPlatformAdmins(s.ctx);
+  const [roles, branches, stats] = await Promise.all([lookups.roles(s.ctx), lookups.branches(s.ctx), userStats(s.ctx.store, s.ctx.companyId, { platformAdmins })]);
   const manage = can(s.user, "admin", "create") && canDo(s.user, "admin.users");
   const manageUsers = can(s.user, "admin", "edit") && canDo(s.user, "admin.users");
   const rolesCount = (await listRoles(s.ctx.store, s.ctx.companyId)).length;
@@ -51,8 +52,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         </span>
       ),
     },
-    { key: "roleName", label: "Perfil", sortable: true, cell: (r) => <Badge tone={r.isAdmin ? "brand" : "info"}>{r.isAdmin ? "Administrador" : r.roleName}</Badge> },
-    { key: "branchesLabel", label: "Filiais", cell: (r) => <span className="text-slate-600">{r.branchesLabel}</span> },
+    { key: "jobTitle", label: "Cargo", sortable: true, cell: (r) => (r.jobTitle ? <span className="text-slate-700">{r.jobTitle}</span> : <span className="text-slate-400">—</span>) },
+    { key: "roleName", label: "Perfil", sortable: true, cell: (r) => <Badge tone={r.isAdmin ? "brand" : "info"}>{r.isAdmin ? "Plataforma" : r.roleName}</Badge> },
+    { key: "branchesLabel", label: "Filiais nesta empresa", cell: (r) => <span className="text-slate-600">{r.branchesLabel}</span> },
     { key: "effectiveDiscountBps", label: "Desc. máx.", align: "right", sortable: true, hidden: true, cell: (r) => <span title={`Limite do ${r.discountSource}`}>{(r.effectiveDiscountBps / 100).toLocaleString("pt-BR")}%{r.discountSource === "usuário" && "*"}</span> },
     { key: "lastAccessAt", label: "Acesso", sortable: true, cell: (r) => <span className="flex flex-col items-start gap-0.5"><StatusBadge kind="user" status={r.statusKey} /><span className="text-xs text-slate-500">{accessDetail(r)}</span></span> },
     { key: "firstAccessAt", label: "Primeiro acesso", sortable: true, hidden: true, cell: (r) => formatDateTime(r.firstAccessAt) },
@@ -93,7 +95,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           { type: "select", name: "status", label: "Situação", options: [{ value: "active", label: "Ativo" }, { value: "invited", label: "Convite pendente" }, { value: "invite_expired", label: "Convite expirado" }, { value: "suspended", label: "Suspenso" }, { value: "inactive", label: "Inativo" }] },
           { type: "select", name: "role", label: "Perfil", options: roles },
           { type: "select", name: "branch", label: "Filial", options: branches },
-          { type: "select", name: "admin", label: "Acesso", options: [{ value: "1", label: "Somente administradores" }] },
+          { type: "select", name: "admin", label: "Acesso", options: [{ value: "1", label: "Administradores da empresa" }] },
         ]}
       />
       <DataTable

@@ -1,0 +1,96 @@
+{
+  "titulo": "Transações de venda (uma linha por venda; sem dados pessoais)",
+  "nota": "Cliente, operador e vendedor só por id. Σ valorLiquidoCentavos das concluídas − Σ devoluções = receita líquida do resumo.",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/transacoes/vendas?de=2026-11-20&ate=2026-11-20&limite=2",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-0006"
+    }
+  },
+  "resposta": {
+    "status": 200,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-0006",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "meta": {
+        "idEmpresa": "ad15bb9d40c9e57ec7bd8a42505afc00",
+        "periodo": {
+          "de": "2026-11-20",
+          "ate": "2026-11-20"
+        },
+        "unidades": null,
+        "fuso": "America/Sao_Paulo",
+        "geradoEm": "2026-11-20T18:00:00.000Z",
+        "versaoIndicadores": "2026-11-v1"
+      },
+      "itens": [
+        {
+          "idVenda": "156b12c30c0b9fc98f67505e968dbcd4",
+          "numero": 48,
+          "situacao": "concluida",
+          "origem": "pdv",
+          "canal": "pdv",
+          "idUnidade": "0f141ddae2733e13500593ac12e10236",
+          "idTerminal": "cb5fef50ab825ad79ab22c72dd49a034",
+          "idSessaoCaixa": "cb9036e3662d27cb110b",
+          "idOperador": "66d25de8b21063346a77ed31c9414333",
+          "idVendedor": "d57efc71c48222fe6eeadaeade9edad3",
+          "idCliente": "4a5ed4ab051ead7363858ca1293c0dbc",
+          "situacaoFiscal": "na_fila",
+          "idDocumentoFiscal": "06add57bd333f4401b883fce2ebb723c",
+          "concluidaEm": "2026-11-20T18:00:00.000Z",
+          "data": "2026-11-20",
+          "canceladaEm": null,
+          "quantidadeLinhas": 1,
+          "quantidadeItensVenda": 1,
+          "receitaBrutaCentavos": 19920,
+          "descontosCentavos": 398,
+          "acrescimosCentavos": 0,
+          "valorLiquidoCentavos": 19522,
+          "custoCentavos": 7920,
+          "margemBrutaBps": 5943
+        },
+        {
+          "idVenda": "54aa5773c9dc12fe543341f2348a0dde",
+          "numero": 49,
+          "situacao": "concluida",
+          "origem": "pdv",
+          "canal": "pdv",
+          "idUnidade": "0f141ddae2733e13500593ac12e10236",
+          "idTerminal": "cb5fef50ab825ad79ab22c72dd49a034",
+          "idSessaoCaixa": "cb9036e3662d27cb110b",
+          "idOperador": "66d25de8b21063346a77ed31c9414333",
+          "idVendedor": null,
+          "idCliente": null,
+          "situacaoFiscal": "na_fila",
+          "idDocumentoFiscal": "319718b37a87118f80db3d83c1557ca5",
+          "concluidaEm": "2026-11-20T18:00:00.000Z",
+          "data": "2026-11-20",
+          "canceladaEm": null,
+          "quantidadeLinhas": 1,
+          "quantidadeItensVenda": 1,
+          "receitaBrutaCentavos": 8990,
+          "descontosCentavos": 0,
+          "acrescimosCentavos": 0,
+          "valorLiquidoCentavos": 8990,
+          "custoCentavos": 4080,
+          "margemBrutaBps": 5462
+        }
+      ],
+      "proximoCursor": "eyJ2IjoxLCJmIjoiYzk2M2E1ZjE3N2VkNjA5OCIsImsiOlsiMjAyNi0xMS0yMFQxODowMDowMC4wMDBaIiwiNTRhYTU3NzNjOWRjMTJmZTU0MzM0MWYyMzQ4YTBkZGUiXX0",
+      "totais": {
+        "concluidas": {
+          "quantidade": 7,
+          "valorLiquidoCentavos": 114382
+        },
+        "canceladas": null
+      }
+    }
+  }
+}

@@ -4,9 +4,14 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card, DefinitionList } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/empty";
+import { ActionButton } from "@/components/ui/action-form";
 import { formatDateTime } from "@/lib/dates";
+import { getAuth } from "@/lib/auth/provider";
+import { isQuickAccessUser } from "@/lib/auth/quick-access";
 import { twoFactorState, userRequiresTwoFactor } from "@/domain/two-factor";
+import { openSessions } from "@/domain/users";
 import { TwoFactorPanel } from "./panel";
+import { revokeOtherSessionsAction } from "./actions";
 
 export const metadata = { title: "Segurança da conta" };
 export const dynamic = "force-dynamic";
@@ -17,6 +22,8 @@ export default async function Page() {
   const u = (await getStore().get("users", s.user.id))!;
   const st = twoFactorState(u);
   const required = await userRequiresTwoFactor(getStore(), u);
+  const sessions = getAuth().kind === "local" ? await openSessions(getStore(), u) : null;
+  const quick = isQuickAccessUser(u);
   return (
     <>
       <PageHeader title="Segurança da conta" crumbs={[{ label: "Minha conta" }, { label: "Segurança" }]} description={`${u.name} · ${u.login ? `login ${u.login} · ` : ""}${u.email}`} />
@@ -33,6 +40,22 @@ export default async function Page() {
             />
           )}
           <TwoFactorPanel enabled={st.enabled} required={required} recoveryLeft={st.recoveryLeft} />
+        </Card>
+        <Card title="Sessões" className="lg:col-start-1">
+          <DefinitionList
+            items={[
+              { label: "Sessões abertas (incluindo esta)", value: sessions ? String(sessions.count) : "Gerenciadas pelo serviço de autenticação" },
+              { label: "Encerradas pela última vez", value: u.sessionsValidAfter ? formatDateTime(u.sessionsValidAfter) : "—" },
+            ]}
+          />
+          <p className="mt-3 text-sm text-slate-600">Entrou em outro computador ou celular e não saiu? Encerre as outras sessões: esta continua aberta e os outros dispositivos precisarão entrar de novo.</p>
+          <div className="mt-3">
+            {quick ? (
+              <p className="text-xs text-slate-500">Acesso da demonstração: o mesmo usuário é usado por outros visitantes, então as sessões dele não são encerradas por aqui.</p>
+            ) : (
+              <ActionButton action={revokeOtherSessionsAction} label="Encerrar as outras sessões" confirm="Encerrar todas as outras sessões? Esta continua aberta." disabled={sessions !== null && sessions.count <= 1} />
+            )}
+          </div>
         </Card>
         <Card title="Como funciona">
           <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-600">

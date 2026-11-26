@@ -14,13 +14,15 @@ import { Notice, EmptyState } from "@/components/ui/empty";
 import { formatDateTime } from "@/lib/dates";
 import { formatPhone } from "@/lib/core/text";
 import { can, canDo } from "@/lib/permissions";
-import { inviteState, manageableCompanyIds } from "@/domain/users";
-import { userRoleIn } from "@/lib/auth/users";
+import { inviteState, manageableCompanyIds, openSessions, seesPlatformAdmins } from "@/domain/users";
+import { branchScopeOf, userRoleIn } from "@/lib/auth/users";
+import { getAuth } from "@/lib/auth/provider";
 import { unscoped } from "@/lib/db/scoped-store";
 import { MatrixView } from "../perfis/matrix-view";
-import { setUserStatusAction, cancelInviteAction, resetTwoFactorAction } from "../actions";
+import { setUserStatusAction, cancelInviteAction, resetTwoFactorAction, revokeSessionsAction } from "../actions";
 import { ResendInviteButton } from "../invite-link";
 import { SetPasswordButton } from "../password-dialog";
+import { StartRecoveryButton } from "../recovery-link";
 
 export const metadata = { title: "Usuário" };
 
@@ -29,11 +31,14 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const { id } = await params;
   const { tab = "resumo" } = await searchParams;
   const u = await s.ctx.store.get("users", id);
-  if (!u || !(u.isAdmin || (u.companyIds ?? []).includes(s.ctx.companyId))) notFound();
+  // multiempresa: só usuários vinculados a esta empresa; o administrador da plataforma não aparece para a empresa contratante
+  const platform = await seesPlatformAdmins(s.ctx);
+  if (!u || !(u.isAdmin ? platform : (u.companyIds ?? []).includes(s.ctx.companyId))) notFound();
   // perfil do usuário NESTA empresa (perfil por empresa)
   const role = u.isAdmin ? null : await userRoleIn(s.ctx.store, u, s.ctx.companyId);
-  // nomes de empresas/filiais vinculadas (somente leitura, inclusive de outras empresas)
-  const [companies, branches] = await Promise.all([listAll(unscoped(s.ctx.store), "companies"), listAll(unscoped(s.ctx.store), "branches")]);
+  // nomes das empresas vinculadas a que o editor tem acesso (as demais só são contadas) e filiais DESTA empresa
+  const [companies, branches] = await Promise.all([listAll(unscoped(s.ctx.store), "companies"), listAll(s.ctx.store, "branches", { filters: [["eq", "companyId", s.ctx.companyId]] })]);
+  const reachable = new Set(s.user.isAdmin ? companies.map((c) => c.id) : s.companies.map((c) => c.id));
   // quem não é administrador não gerencia o acesso de um administrador
   const manage = can(s.user, "admin", "edit") && canDo(s.user, "admin.users") && (!u.isAdmin || s.user.isAdmin);
   // senha, situação e convite valem em todas as empresas do usuário: exigem administrar usuários em todas elas
@@ -45,8 +50,18 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   const statusKey = inv === "expired" ? "invite_expired" : u.status;
   const base = `/administracao/usuarios/${id}`;
   const activities = tab === "atividades" ? await listAll(s.ctx.store, "audit_logs", { filters: [["eq", "userId", id], ["eq", "companyId", s.ctx.companyId]], orderBy: [{ field: "occurredAt", dir: "desc" }] }, 50) : [];
-  const companyNames = u.isAdmin ? "Todas (administrador)" : (u.companyIds ?? []).map((c: string) => companies.find((x) => x.id === c)?.tradeName ?? companies.find((x) => x.id === c)?.name ?? c).join(", ");
-  const branchNames = u.isAdmin || !(u.branchIds ?? []).length ? "Todas as filiais das empresas vinculadas" : (u.branchIds ?? []).map((b: string) => branches.find((x) => x.id === b)?.name ?? b).join(", ");
+  const linked: string[] = u.companyIds ?? [];
+  const outside = linked.filter((c) => !reachable.has(c)).length;
+  const companyNames = u.isAdmin
+    ? "Todas (administrador da plataforma)"
+    : [linked.filter((c) => reachable.has(c)).map((c) => companies.find((x) => x.id === c)?.tradeName || companies.find((x) => x.id === c)?.name || c).join(", "), outside ? `+ ${outside} empresa(s) fora do seu acesso` : ""].filter(Boolean).join(" ");
+  // filiais autorizadas NESTA empresa (multiempresa: a atribuição vale por empresa)
+  const scope = branchScopeOf(u, s.ctx.companyId);
+  const scopeHere = scope === null ? null : scope.filter((b) => branches.some((x) => x.id === b));
+  const branchNames = u.isAdmin || scopeHere === null ? "Todas as filiais desta empresa" : scopeHere.length ? scopeHere.map((b: string) => branches.find((x) => x.id === b)?.name ?? b).join(", ") : "Nenhuma filial desta empresa";
+  const jobTitle = ((u.jobTitleByCompany ?? {})[s.ctx.companyId] as string | undefined) ?? null;
+  const sessions = getAuth().kind === "local" ? await openSessions(s.ctx.store, u) : null;
+  const recoveryPending = Boolean(u.resetTokenHash && u.resetExpiresAt && u.resetExpiresAt > new Date().toISOString());
   const discount = u.discountLimitBps ?? (u.isAdmin ? 10000 : (role?.discountLimitBps ?? 0));
   return (
     <>
@@ -87,7 +102,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       {manage && !manageAll && !self && (
         <div className="mb-4">
           <Notice tone="info" title="Gestão parcial deste usuário">
-            {u.name} também acessa empresa(s) em que você não administra usuários. Senha, situação do acesso, convite, e-mail/login e limite de desconto valem em todas elas e só podem ser alterados por um administrador ou por quem administra usuários em todas as empresas dele.
+            {u.name} também acessa empresa(s) em que você não administra usuários. Senha (inclusive o link de recuperação), situação do acesso, convite, e-mail/login e limite de desconto valem em todas elas e só podem ser alterados por um administrador ou por quem administra usuários em todas as empresas dele. Cargo, perfil e filiais desta empresa continuam com você.
           </Notice>
         </div>
       )}
@@ -125,16 +140,48 @@ export default async function Page({ params, searchParams }: { params: Promise<{
           <Card title="Acesso">
             <DefinitionList
               items={[
-                { label: "Perfil nesta empresa", value: u.isAdmin ? "Administrador (acesso total)" : role ? <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/perfis/${role.id}`}>{role.name}</Link> : "Sem perfil nesta empresa" },
+                { label: "Cargo nesta empresa", value: jobTitle ?? "—" },
+                { label: "Perfil nesta empresa", value: u.isAdmin ? "Administrador da plataforma (acesso total)" : role ? <Link className="text-brand-700 hover:underline" href={`/administracao/usuarios/perfis/${role.id}`}>{role.name}</Link> : "Sem perfil nesta empresa" },
                 { label: "Limite de desconto", value: `${(discount / 100).toLocaleString("pt-BR")}% (${u.discountLimitBps != null ? "próprio do usuário" : "do perfil"})` },
                 { label: "Empresas", value: companyNames },
-                { label: "Filiais", value: branchNames },
+                { label: "Filiais nesta empresa", value: branchNames },
                 { label: "Primeiro acesso", value: u.firstAccessAt ? formatDateTime(u.firstAccessAt) : "Ainda não acessou" },
                 { label: "Último acesso", value: u.lastAccessAt ? formatDateTime(u.lastAccessAt) : "Nunca" },
                 { label: "Autenticação em duas etapas", value: u.totpEnabled ? `Ativa desde ${formatDateTime(u.totpEnabledAt)} · ${(u.totpRecoveryHashes ?? []).length} código(s) de recuperação` : role?.requireTwoFactor ? "Exigida pelo perfil — cadastro pendente (pedido no próximo login)" : "Desativada" },
               ]}
             />
           </Card>
+          {u.status === "active" && (
+            <Card title="Senha e sessões" className="lg:col-span-2">
+              <DefinitionList
+                cols={3}
+                items={[
+                  {
+                    label: "Sessões abertas",
+                    value: sessions ? `${sessions.count}${sessions.lastStartedAt ? ` · a mais recente iniciada em ${formatDateTime(sessions.lastStartedAt)}` : ""}` : "Gerenciadas pelo serviço de autenticação",
+                  },
+                  { label: "Sessões encerradas pela última vez", value: u.sessionsValidAfter ? formatDateTime(u.sessionsValidAfter) : "—" },
+                  { label: "Recuperação de senha", value: recoveryPending ? `Link pendente, válido até ${formatDateTime(u.resetExpiresAt)} (uso único)` : "Nenhum link pendente" },
+                ]}
+              />
+              {!self && (manage || manageAll) && (
+                <div className="mt-4 flex flex-wrap items-start gap-2">
+                  {manageAll && <StartRecoveryButton id={id} name={u.name} />}
+                  {manage && (
+                    <ActionButton
+                      action={revokeSessionsAction.bind(null, id)}
+                      label="Encerrar sessões"
+                      confirm={`Encerrar todas as sessões de ${u.name}? A pessoa precisará entrar de novo em todos os dispositivos (a sessão é da pessoa: vale em todas as empresas em que ela trabalha).`}
+                    />
+                  )}
+                </div>
+              )}
+              <p className="mt-3 text-xs text-slate-500">
+                O link de recuperação vai pelo e-mail configurado em Integrações → E-mail; sem canal, ele aparece aqui uma única vez. Ao definir a nova senha, as sessões abertas com a senha anterior são encerradas.
+                {self && " Para as suas próprias sessões, use Minha conta › Segurança."}
+              </p>
+            </Card>
+          )}
           {(u.status === "invited" || u.inviteSentAt) && (
             <Card title="Convite de primeiro acesso" className="lg:col-span-2">
               <DefinitionList

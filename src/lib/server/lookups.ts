@@ -11,6 +11,16 @@ async function opts(ctx: Ctx, collection: string, label: (d: any) => string, ext
   return rows.map((r) => ({ value: r.id, label: label(r) })).sort(byName);
 }
 
+/**
+ * Usuários que os seletores da empresa mostram (multiempresa): só os vinculados à empresa em uso; o administrador da
+ * plataforma (`isAdmin`) só aparece para quem é da plataforma (ele mesmo ou quem trabalha na empresa da plataforma).
+ * `keepId`: o valor já escolhido continua aparecendo.
+ */
+async function companyUserRows(ctx: Ctx, keepId?: string | null) {
+  const platform = ctx.user.isAdmin || Boolean(ctx.companyId && (await ctx.store.get("companies", ctx.companyId))?.isPlatform);
+  return (await listAll(ctx.store, "users")).filter((u) => u.id === keepId || (u.isAdmin ? platform : (u.companyIds ?? []).includes(ctx.companyId)));
+}
+
 export const lookups = {
   branches: (ctx: Ctx) => opts(ctx, "branches", (b) => b.name),
   warehouses: (ctx: Ctx, branchId?: string | null) => opts(ctx, "warehouses", (w) => w.name, branchId ? [["eq", "branchId", branchId]] : []),
@@ -28,11 +38,11 @@ export const lookups = {
   taxGroups: (ctx: Ctx) => opts(ctx, "tax_groups", (c) => c.name),
   terminals: (ctx: Ctx, branchId?: string | null) => opts(ctx, "terminals", (t) => t.name, branchId ? [["eq", "branchId", branchId]] : []),
   roles: (ctx: Ctx) => opts(ctx, "roles", (r) => r.name),
-  users: async (ctx: Ctx) => (await listAll(ctx.store, "users")).filter((u) => u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId)).map((u) => ({ value: u.id, label: u.name })).sort(byName),
+  users: async (ctx: Ctx) => (await companyUserRows(ctx)).map((u) => ({ value: u.id, label: u.name })).sort(byName),
   /** Vendedores selecionáveis (PDV): usuários ativos da empresa e vendedores sem acesso ao sistema (CAD-05) ativos. */
   sellers: async (ctx: Ctx, keepId?: string | null) =>
-    (await listAll(ctx.store, "users"))
-      .filter((u) => (u.isAdmin || (u.companyIds ?? []).includes(ctx.companyId)) && (u.status === "active" || u.status === "invited" || u.id === keepId))
+    (await companyUserRows(ctx, keepId))
+      .filter((u) => u.status === "active" || u.status === "invited" || u.id === keepId)
       .map((u) => ({ value: u.id, label: u.loginDisabled ? `${u.name} (vendedor)` : u.name }))
       .sort(byName),
 };

@@ -255,6 +255,22 @@ async function doRequestRecovery(fd: FormData): Promise<ActionResult> {
   return { ok: true, message: neutral };
 }
 
+/** Senha redefinida pelo link de recuperação: registro na auditoria de cada empresa da pessoa (sem segredo algum). */
+async function auditRecoveryCompleted(userId: string) {
+  const { unscoped } = await import("@/lib/db/scoped-store");
+  const { systemCtx } = await import("@/lib/core/ctx");
+  const { audit } = await import("@/lib/core/audit");
+  const store = getStore();
+  const u = await unscoped(store).get("users", userId);
+  if (!u) return;
+  for (const companyId of new Set<string>(u.companyIds ?? [])) {
+    await audit({ ...systemCtx(store, companyId), user: { ...systemCtx(store, companyId).user, id: u.id, name: u.name } }, {
+      module: "admin", action: "user.recovery_complete", entityType: "user", entityId: u.id,
+      summary: `${u.name} definiu uma nova senha pelo link de recuperação; as sessões abertas com a senha anterior deixaram de valer`,
+    });
+  }
+}
+
 export async function completeRecoveryAction(fd: FormData): Promise<ActionResult> {
   const userId = String(fd.get("userId") ?? "");
   const secret = String(fd.get("secret") ?? "");
@@ -264,6 +280,7 @@ export async function completeRecoveryAction(fd: FormData): Promise<ActionResult
   if (password !== confirm) return { ok: false, error: "As senhas não conferem." };
   try {
     await getAuth().completeRecovery({ userId, secret, password });
+    await auditRecoveryCompleted(userId).catch((e) => console.warn("[recuperacao] auditoria não registrada", (e as Error)?.message));
   } catch (e) {
     // 401 aqui é o próprio link inválido ou expirado; só pausa e falta de resposta são indisponibilidade
     const outage = dbOutageOf(e);

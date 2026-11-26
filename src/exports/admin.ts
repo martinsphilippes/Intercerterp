@@ -17,6 +17,7 @@ defineExport("admin.users", {
     { key: "name", label: "Nome" },
     { key: "email", label: "E-mail" },
     { key: "login", label: "Login" },
+    { key: "jobTitle", label: "Cargo" },
     { key: "roleName", label: "Perfil" },
     { key: "branchesLabel", label: "Filiais" },
     { key: "effectiveDiscountBps", label: "Desconto máximo (%)", type: "bps" },

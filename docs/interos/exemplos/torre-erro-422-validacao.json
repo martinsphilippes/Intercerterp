@@ -1,0 +1,41 @@
+{
+  "titulo": "Parâmetros inválidos (todos de uma vez)",
+  "requisicao": {
+    "metodo": "GET",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/ad15bb9d40c9e57ec7bd8a42505afc00/torre/skus?de=2025-01-01&ate=2026-11-20&idUnidade=99c0ffee00000000000000000000beef&limite=900",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-torre-homolog.<segredo>",
+      "X-Request-Id": "req-torre-e422"
+    }
+  },
+  "resposta": {
+    "status": 422,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-torre-e422",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "validacao",
+        "mensagem": "Há campos inválidos na solicitação.",
+        "campos": [
+          {
+            "campo": "ate",
+            "mensagem": "Período limitado a 400 dias (o informado tem 689 dias)."
+          },
+          {
+            "campo": "limite",
+            "mensagem": "limite deve ser um inteiro de 1 a 500 (padrão 100)."
+          },
+          {
+            "campo": "idUnidade",
+            "mensagem": "Unidade(s) que não pertence(m) a esta empresa: 99c0ffee00000000000000000000beef."
+          }
+        ]
+      },
+      "requestId": "req-torre-e422"
+    }
+  }
+}

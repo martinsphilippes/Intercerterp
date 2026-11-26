@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { Account, AppwriteException, Client, ID, Query, Users } from "node-appwrite";
-import { appwriteConfig, configuredBackend, detId, findOne, getStore, sha256 } from "../db";
+import { appwriteConfig, configuredBackend, detId, findOne, getStore, listAll, sha256 } from "../db";
 import type { Store } from "../db/types";
 
 /**
@@ -95,7 +95,9 @@ class LocalAuth implements AuthProvider {
   async completeRecovery({ userId, secret, password }: { userId: string; secret: string; password: string }) {
     const u = await this.store().get("users", userId);
     if (!u || u.resetTokenHash !== sha256(secret) || !u.resetExpiresAt || u.resetExpiresAt < new Date().toISOString()) throw new Error("invalid_token");
-    await this.store().update("users", u.id, { passwordHash: hashPassword(password), resetTokenHash: null, resetExpiresAt: null });
+    // senha nova: as sessões abertas antes (inclusive as de quem conhecia a senha anterior) deixam de valer
+    await this.store().update("users", u.id, { passwordHash: hashPassword(password), resetTokenHash: null, resetExpiresAt: null, sessionsValidAfter: new Date().toISOString() });
+    for (const s of await listAll(this.store(), "sessions", { filters: [["eq", "userId", u.id]] })) await this.store().delete("sessions", s.id);
   }
 }
 
@@ -185,6 +187,9 @@ class AppwriteAuth implements AuthProvider {
 
   async completeRecovery({ userId, secret, password }: { userId: string; secret: string; password: string }) {
     await new Account(this.admin()).updateRecovery({ userId, secret, password });
+    // senha nova: as sessões abertas antes deixam de valer (a verificação em memória de cada instância expira em 1 min)
+    await new Users(this.admin()).deleteSessions({ userId });
+    for (const [k, v] of this.cache) if (v.authId === userId) this.cache.delete(k);
   }
 }
 
