@@ -11,11 +11,12 @@ import { twoFactorState, userRequiresTwoFactor } from "@/domain/two-factor";
 import { openSessions } from "@/domain/users";
 import { TwoFactorPanel } from "./panel";
 import { revokeOtherSessionsAction } from "./actions";
+import { PasswordForm } from "./password-form";
 
 export const metadata = { title: "Segurança da conta" };
 export const dynamic = "force-dynamic";
 
-/** Minha conta › Segurança (§44): autenticação em duas etapas com aplicativo autenticador (TOTP). */
+/** Minha conta › Segurança (§44): senha, autenticação em duas etapas com aplicativo autenticador (TOTP) e sessões. */
 export default async function Page() {
   const s = await requireSession();
   const u = (await getStore().get("users", s.user.id))!;
@@ -39,6 +40,16 @@ export default async function Page() {
             />
           )}
           <TwoFactorPanel enabled={st.enabled} required={required} recoveryLeft={st.recoveryLeft} />
+        </Card>
+        <Card title="Senha" className="lg:col-start-1">
+          {quick ? (
+            <p className="text-sm text-slate-600">Acesso da demonstração: a senha é a da tela de login e não pode ser trocada.</p>
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-slate-600">Troque a senha quando quiser — e sempre no primeiro acesso com uma senha inicial recebida de outra pessoa. As outras sessões abertas são encerradas; esta continua.</p>
+              <PasswordForm />
+            </>
+          )}
         </Card>
         <Card title="Sessões" className="lg:col-start-1">
           <DefinitionList

@@ -98,6 +98,19 @@ Tudo o que o administrador da empresa faz vale **na empresa em uso** (a escolhid
 - **Pelo próprio usuário**, em Minha conta › Segurança (`revokeOtherSessions`): encerra as **outras** sessões e mantém a atual, identificada pelo cookie da requisição.
 - A página do usuário mostra quantas sessões estão abertas e quando foram encerradas pela última vez.
 
+### 3.7.1 Troca da própria senha
+
+Em Minha conta › Segurança, a própria pessoa troca a senha. Isso vale para qualquer usuário e é necessário no
+primeiro acesso de quem recebeu uma senha inicial de outra pessoa (o administrador geral criado na instalação ou
+usuários criados com "senha inicial").
+- **Conferência:** a senha atual é conferida pelo mesmo caminho do login.
+- **Nova senha:** precisa ter 8 caracteres ou mais e ser diferente da atual.
+- **Sessões:** as **outras** sessões são encerradas; a atual continua.
+- **Tentativas erradas:** cinco senhas atuais erradas em 15 minutos bloqueiam a troca até a janela passar. Isso
+  impede que alguém descubra a senha por tentativa num computador com a sessão aberta.
+- **Acesso rápido:** os usuários da demonstração não trocam a senha, porque ela é a da tela de login.
+- **Auditoria:** registra `user.password_change` e `user.password_change_failed`, sem a senha.
+
 ### 3.8 Dados que valem em todas as empresas da pessoa
 
 Senha (inclusive o link de recuperação), situação, convite, e-mail e login e limite de desconto valem em todas as empresas da pessoa. Por isso, quem não é o administrador da plataforma só os altera se administra usuários em **todas** as empresas dela. Encerrar sessões é a exceção: o administrador de qualquer empresa da pessoa pode encerrá-las, porque é uma proteção (ela só precisa entrar de novo) e a sessão dá acesso também aos dados da empresa dele.

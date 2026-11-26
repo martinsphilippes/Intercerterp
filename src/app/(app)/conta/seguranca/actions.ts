@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { runAction, fstr } from "@/lib/server/action";
 import { SESSION_COOKIE } from "@/lib/server/session";
 import { beginTwoFactorSetup, confirmTwoFactorSetup, disableTwoFactor, regenerateRecoveryCodes } from "@/domain/two-factor";
-import { revokeOtherSessions } from "@/domain/users";
+import { changeOwnPassword, revokeOtherSessions } from "@/domain/users";
 import { formatSecret } from "@/lib/auth/totp";
 
 const PATH = "/conta/seguranca";
@@ -16,6 +16,17 @@ export async function revokeOtherSessionsAction() {
     const current = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
     const r = await revokeOtherSessions(s.ctx, current);
     return { ok: true as const, message: r.ended ? `${r.ended} outra(s) sessão(ões) encerrada(s). Esta continua aberta.` : "Não havia outras sessões abertas." };
+  });
+}
+
+/** A própria pessoa troca a senha (confere a atual); as outras sessões são encerradas e esta continua. */
+export async function changeOwnPasswordAction(fd: FormData) {
+  return runAction({ revalidate: [PATH] }, async (s) => {
+    const next = String(fd.get("password") ?? "");
+    if (next !== String(fd.get("confirm") ?? "")) return { ok: false as const, error: "A confirmação não confere com a nova senha." };
+    const current = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+    const r = await changeOwnPassword(s.ctx, current, String(fd.get("current") ?? ""), next);
+    return { ok: true as const, message: `Senha trocada.${r.ended ? ` ${r.ended} outra(s) sessão(ões) encerrada(s); esta continua aberta.` : ""}` };
   });
 }
 
