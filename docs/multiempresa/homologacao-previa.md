@@ -10,14 +10,14 @@
 
 ## 1. Resultado
 
-**68 verificações, nenhuma falha.** Execução de 2026-11-26 01:52 UTC.
+**68 verificações, nenhuma falha.** Execução de 2026-11-26 02:25 UTC, na publicação final da branch (commit `2685639`).
 
 As duas empresas fictícias foram criadas pelo Interos nesta execução:
 
 | Empresa | idEmpresa | contaInterosId | Módulos |
 |---|---|---|---|
-| A — Aurora Utilidades | `2bfc99daedada8f1a1a1087155fd3c44` | `homolog-a-202611260152` | pdv, vendas, estoque, compras, financeiro, fiscal, relatórios |
-| B — Boreal Papelaria | `2fc1edf400abb54f672e4f8be244fd54` | `homolog-b-202611260152` | pdv, vendas, estoque, financeiro |
+| A — Aurora Utilidades | `c87769bf7702aa1419b00da2316f3d9b` | `homolog-a-202611260225` | pdv, vendas, estoque, compras, financeiro, fiscal, relatórios |
+| B — Boreal Papelaria | `f9c6992ff11fd516b26a3d90727640af` | `homolog-b-202611260225` | pdv, vendas, estoque, financeiro |
 
 A "outra empresa" das tentativas cruzadas é, além da A e da B, a **demonstração**: uma empresa com vendas, produtos,
 clientes, fornecedores, documentos fiscais e arquivos de verdade no banco.
@@ -103,7 +103,8 @@ titular.
 ## 3. O que a primeira execução encontrou (e foi corrigido)
 
 A primeira execução (evidência em `.../homologacao-previa-execucao-1/`) apontou dois problemas reais e dois do
-próprio roteiro.
+próprio roteiro. As execuções seguintes, depois das correções, passaram inteiras: a do commit `dbb6a2c` e a da
+publicação final.
 
 | Achado | Causa | Correção |
 |---|---|---|

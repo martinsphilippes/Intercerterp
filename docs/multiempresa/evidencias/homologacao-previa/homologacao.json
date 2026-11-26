@@ -1,7 +1,7 @@
 {
   "base": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app",
-  "run": "202611260152",
-  "iniciadoEm": "2026-11-26T01:52:22.849Z",
+  "run": "202611260225",
+  "iniciadoEm": "2026-11-26T02:25:42.156Z",
   "etapas": [
     {
       "etapa": "interface de serviço",
@@ -9,11 +9,11 @@
     },
     {
       "etapa": "migração (simular)",
-      "ms": 3004,
+      "ms": 3143,
       "resumo": {
         "ok": true,
         "step": "multiempresa",
-        "runId": "e7a9128eea59ecfe3c216e3666d96828",
+        "runId": "4b813b705aa47d4d818e163413e6cb4d",
         "modo": "simular",
         "isolamento": "estrito",
         "conferencia": {
@@ -47,17 +47,17 @@
           "criados": 0,
           "atualizados": 0
         },
-        "empresas": 13,
-        "ms": 1816
+        "empresas": 15,
+        "ms": 1956
       }
     },
     {
       "etapa": "migração (aplicar)",
-      "ms": 1358,
+      "ms": 1449,
       "resumo": {
         "ok": true,
         "step": "multiempresa",
-        "runId": "98bfe46ca57954bcf575ff37b31331d2",
+        "runId": "16f4d2b63e5bd9becc4e33970a4fbb25",
         "modo": "aplicar",
         "isolamento": "estrito",
         "conferencia": {
@@ -91,14 +91,14 @@
           "criados": 0,
           "atualizados": 0
         },
-        "empresas": 13,
-        "ms": 1166
+        "empresas": 15,
+        "ms": 1256
       }
     },
     {
       "etapa": "provisionamento A",
-      "idEmpresa": "2bfc99daedada8f1a1a1087155fd3c44",
-      "contaInterosId": "homolog-a-202611260152",
+      "idEmpresa": "c87769bf7702aa1419b00da2316f3d9b",
+      "contaInterosId": "homolog-a-202611260225",
       "modulos": [
         "pdv",
         "vendas",
@@ -110,12 +110,12 @@
       ],
       "resposta": {
         "empresa": {
-          "idEmpresa": "2bfc99daedada8f1a1a1087155fd3c44",
-          "contaInterosId": "homolog-a-202611260152",
+          "idEmpresa": "c87769bf7702aa1419b00da2316f3d9b",
+          "contaInterosId": "homolog-a-202611260225",
           "tipo": "varejo",
-          "razaoSocial": "Aurora Utilidades Ltda (homologação 202611260152)",
-          "nomeFantasia": "Aurora Utilidades 202611260152",
-          "cnpj": "63430889000167",
+          "razaoSocial": "Aurora Utilidades Ltda (homologação 202611260225)",
+          "nomeFantasia": "Aurora Utilidades 202611260225",
+          "cnpj": "13486526000175",
           "situacao": "ativa",
           "suspensao": null,
           "historicoSituacao": [],
@@ -129,7 +129,7 @@
             "vendas"
           ],
           "contrato": {
-            "referencia": "HML-202611260152-A",
+            "referencia": "HML-202611260225-A",
             "plano": "homologacao"
           },
           "implantacao": {
@@ -139,56 +139,56 @@
               {
                 "etapa": "empresa",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.202Z",
+                "concluidaEm": "2026-11-26T02:25:52.047Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "unidade_inicial",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.219Z",
+                "concluidaEm": "2026-11-26T02:25:52.079Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "modulos",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.245Z",
+                "concluidaEm": "2026-11-26T02:25:52.132Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "administrador",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.287Z",
+                "concluidaEm": "2026-11-26T02:25:52.202Z",
                 "erro": null,
                 "tentativas": 1
               }
             ],
             "tentativas": 1,
             "ultimoErro": null,
-            "iniciadaEm": "2026-11-26T01:52:30.898Z",
-            "concluidaEm": "2026-11-26T01:52:31.298Z"
+            "iniciadaEm": "2026-11-26T02:25:51.539Z",
+            "concluidaEm": "2026-11-26T02:25:52.217Z"
           },
           "unidades": [
             {
-              "idUnidade": "ce44a7e021140c730335ad83d290115f",
+              "idUnidade": "076342f0293a5f5ace42dcb1e764ab30",
               "codigo": "01",
               "nome": "Aurora Utilidades — Matriz",
-              "cnpj": "63430889000167",
+              "cnpj": "13486526000175",
               "situacao": "ativa"
             }
           ],
           "administradores": [
             {
-              "idUsuario": "fc0b9cb0370d01cb49d24ceac55741d5",
+              "idUsuario": "9e4ff33bce0fbce73acf1d058255c13a",
               "nome": "Admin A (homologação)",
-              "email": "admin.a.202611260152@homologacao.example",
+              "email": "admin.a.202611260225@homologacao.example",
               "situacao": "convidado",
               "convite": {
                 "estado": "pendente",
-                "expiraEm": "2026-12-03T01:52:31.271Z",
-                "enviadoEm": "2026-11-26T01:52:31.276Z",
+                "expiraEm": "2026-12-03T02:25:52.178Z",
+                "enviadoEm": "2026-11-26T02:25:52.185Z",
                 "detalheEntrega": "Link devolvido ao Interos para entrega."
               },
               "primeiroAcessoEm": null,
@@ -202,16 +202,16 @@
             "inativos": 0
           },
           "ultimaAtividadeEm": null,
-          "vinculadaEm": "2026-11-26T01:52:31.180Z",
-          "atualizadaEm": "2026-11-26T01:52:31.225Z"
+          "vinculadaEm": "2026-11-26T02:25:52.014Z",
+          "atualizadaEm": "2026-11-26T02:25:52.090Z"
         },
         "convite": {
-          "idUsuario": "fc0b9cb0370d01cb49d24ceac55741d5",
+          "idUsuario": "9e4ff33bce0fbce73acf1d058255c13a",
           "entrega": "interos",
           "entregue": null,
           "canal": "interos",
           "detalhe": "Link devolvido ao Interos para entrega.",
-          "expiraEm": "2026-12-03T01:52:31.271Z",
+          "expiraEm": "2026-12-03T02:25:52.178Z",
           "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
           "linkRedigido": false
         }
@@ -219,8 +219,8 @@
     },
     {
       "etapa": "provisionamento B",
-      "idEmpresa": "2fc1edf400abb54f672e4f8be244fd54",
-      "contaInterosId": "homolog-b-202611260152",
+      "idEmpresa": "f9c6992ff11fd516b26a3d90727640af",
+      "contaInterosId": "homolog-b-202611260225",
       "modulos": [
         "pdv",
         "vendas",
@@ -229,12 +229,12 @@
       ],
       "resposta": {
         "empresa": {
-          "idEmpresa": "2fc1edf400abb54f672e4f8be244fd54",
-          "contaInterosId": "homolog-b-202611260152",
+          "idEmpresa": "f9c6992ff11fd516b26a3d90727640af",
+          "contaInterosId": "homolog-b-202611260225",
           "tipo": "varejo",
-          "razaoSocial": "Boreal Papelaria Ltda (homologação 202611260152)",
-          "nomeFantasia": "Boreal Papelaria 202611260152",
-          "cnpj": "45526769000186",
+          "razaoSocial": "Boreal Papelaria Ltda (homologação 202611260225)",
+          "nomeFantasia": "Boreal Papelaria 202611260225",
+          "cnpj": "39468540000130",
           "situacao": "ativa",
           "suspensao": null,
           "historicoSituacao": [],
@@ -245,7 +245,7 @@
             "vendas"
           ],
           "contrato": {
-            "referencia": "HML-202611260152-B",
+            "referencia": "HML-202611260225-B",
             "plano": "homologacao"
           },
           "implantacao": {
@@ -255,56 +255,56 @@
               {
                 "etapa": "empresa",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:32.966Z",
+                "concluidaEm": "2026-11-26T02:25:53.762Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "unidade_inicial",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:32.997Z",
+                "concluidaEm": "2026-11-26T02:25:53.793Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "modulos",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:33.042Z",
+                "concluidaEm": "2026-11-26T02:25:53.838Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "administrador",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:33.103Z",
+                "concluidaEm": "2026-11-26T02:25:53.895Z",
                 "erro": null,
                 "tentativas": 1
               }
             ],
             "tentativas": 1,
             "ultimoErro": null,
-            "iniciadaEm": "2026-11-26T01:52:32.495Z",
-            "concluidaEm": "2026-11-26T01:52:33.114Z"
+            "iniciadaEm": "2026-11-26T02:25:53.303Z",
+            "concluidaEm": "2026-11-26T02:25:53.905Z"
           },
           "unidades": [
             {
-              "idUnidade": "fd5971510d4c487f028a22f8e6aa8d59",
+              "idUnidade": "6ce7ddd2513e9e9ebb1c280650a1463c",
               "codigo": "01",
               "nome": "Boreal Papelaria — Matriz",
-              "cnpj": "45526769000186",
+              "cnpj": "39468540000130",
               "situacao": "ativa"
             }
           ],
           "administradores": [
             {
-              "idUsuario": "ffc3451edd6fb12722d494fc3d5e7d39",
+              "idUsuario": "8dc3f4ba1b3923903f39afaa74703bbc",
               "nome": "Admin B (homologação)",
-              "email": "admin.b.202611260152@homologacao.example",
+              "email": "admin.b.202611260225@homologacao.example",
               "situacao": "convidado",
               "convite": {
                 "estado": "pendente",
-                "expiraEm": "2026-12-03T01:52:33.078Z",
-                "enviadoEm": "2026-11-26T01:52:33.084Z",
+                "expiraEm": "2026-12-03T02:25:53.872Z",
+                "enviadoEm": "2026-11-26T02:25:53.877Z",
                 "detalheEntrega": "Link devolvido ao Interos para entrega."
               },
               "primeiroAcessoEm": null,
@@ -318,16 +318,16 @@
             "inativos": 0
           },
           "ultimaAtividadeEm": null,
-          "vinculadaEm": "2026-11-26T01:52:32.939Z",
-          "atualizadaEm": "2026-11-26T01:52:33.007Z"
+          "vinculadaEm": "2026-11-26T02:25:53.734Z",
+          "atualizadaEm": "2026-11-26T02:25:53.803Z"
         },
         "convite": {
-          "idUsuario": "ffc3451edd6fb12722d494fc3d5e7d39",
+          "idUsuario": "8dc3f4ba1b3923903f39afaa74703bbc",
           "entrega": "interos",
           "entregue": null,
           "canal": "interos",
           "detalhe": "Link devolvido ao Interos para entrega.",
-          "expiraEm": "2026-12-03T01:52:33.078Z",
+          "expiraEm": "2026-12-03T02:25:53.872Z",
           "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
           "linkRedigido": false
         }
@@ -364,8 +364,8 @@
             "provisionamento:escrita"
           ]
         },
-        "horarioServidor": "2026-11-26T01:52:23.393Z",
-        "requestId": "homolog-202611260152-211f51"
+        "horarioServidor": "2026-11-26T02:25:43.566Z",
+        "requestId": "homolog-202611260225-7e8de5"
       }
     },
     {
@@ -383,8 +383,8 @@
             "torre:transacoes"
           ]
         },
-        "horarioServidor": "2026-11-26T01:52:23.722Z",
-        "requestId": "homolog-202611260152-697ce4"
+        "horarioServidor": "2026-11-26T02:25:43.947Z",
+        "requestId": "homolog-202611260225-1d87ca"
       }
     },
     {
@@ -410,7 +410,7 @@
           "codigo": "sem_permissao",
           "mensagem": "Esta credencial não tem o escopo exigido (torre:resumo)."
         },
-        "requestId": "homolog-202611260152-e1c44a"
+        "requestId": "homolog-202611260225-ace929"
       }
     },
     {
@@ -426,7 +426,7 @@
       "detalhe": {
         "ok": true,
         "step": "multiempresa",
-        "runId": "e7a9128eea59ecfe3c216e3666d96828",
+        "runId": "4b813b705aa47d4d818e163413e6cb4d",
         "modo": "simular",
         "isolamento": "estrito",
         "conferencia": {
@@ -460,8 +460,8 @@
           "criados": 0,
           "atualizados": 0
         },
-        "empresas": 13,
-        "ms": 1816
+        "empresas": 15,
+        "ms": 1956
       }
     },
     {
@@ -470,7 +470,7 @@
       "detalhe": {
         "ok": true,
         "step": "multiempresa",
-        "runId": "98bfe46ca57954bcf575ff37b31331d2",
+        "runId": "16f4d2b63e5bd9becc4e33970a4fbb25",
         "modo": "aplicar",
         "isolamento": "estrito",
         "conferencia": {
@@ -504,8 +504,8 @@
           "criados": 0,
           "atualizados": 0
         },
-        "empresas": 13,
-        "ms": 1166
+        "empresas": 15,
+        "ms": 1256
       }
     },
     {
@@ -513,12 +513,12 @@
       "ok": true,
       "detalhe": {
         "empresa": {
-          "idEmpresa": "2bfc99daedada8f1a1a1087155fd3c44",
-          "contaInterosId": "homolog-a-202611260152",
+          "idEmpresa": "c87769bf7702aa1419b00da2316f3d9b",
+          "contaInterosId": "homolog-a-202611260225",
           "tipo": "varejo",
-          "razaoSocial": "Aurora Utilidades Ltda (homologação 202611260152)",
-          "nomeFantasia": "Aurora Utilidades 202611260152",
-          "cnpj": "63430889000167",
+          "razaoSocial": "Aurora Utilidades Ltda (homologação 202611260225)",
+          "nomeFantasia": "Aurora Utilidades 202611260225",
+          "cnpj": "13486526000175",
           "situacao": "ativa",
           "suspensao": null,
           "historicoSituacao": [],
@@ -532,7 +532,7 @@
             "vendas"
           ],
           "contrato": {
-            "referencia": "HML-202611260152-A",
+            "referencia": "HML-202611260225-A",
             "plano": "homologacao"
           },
           "implantacao": {
@@ -542,56 +542,56 @@
               {
                 "etapa": "empresa",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.202Z",
+                "concluidaEm": "2026-11-26T02:25:52.047Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "unidade_inicial",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.219Z",
+                "concluidaEm": "2026-11-26T02:25:52.079Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "modulos",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.245Z",
+                "concluidaEm": "2026-11-26T02:25:52.132Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "administrador",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:31.287Z",
+                "concluidaEm": "2026-11-26T02:25:52.202Z",
                 "erro": null,
                 "tentativas": 1
               }
             ],
             "tentativas": 1,
             "ultimoErro": null,
-            "iniciadaEm": "2026-11-26T01:52:30.898Z",
-            "concluidaEm": "2026-11-26T01:52:31.298Z"
+            "iniciadaEm": "2026-11-26T02:25:51.539Z",
+            "concluidaEm": "2026-11-26T02:25:52.217Z"
           },
           "unidades": [
             {
-              "idUnidade": "ce44a7e021140c730335ad83d290115f",
+              "idUnidade": "076342f0293a5f5ace42dcb1e764ab30",
               "codigo": "01",
               "nome": "Aurora Utilidades — Matriz",
-              "cnpj": "63430889000167",
+              "cnpj": "13486526000175",
               "situacao": "ativa"
             }
           ],
           "administradores": [
             {
-              "idUsuario": "fc0b9cb0370d01cb49d24ceac55741d5",
+              "idUsuario": "9e4ff33bce0fbce73acf1d058255c13a",
               "nome": "Admin A (homologação)",
-              "email": "admin.a.202611260152@homologacao.example",
+              "email": "admin.a.202611260225@homologacao.example",
               "situacao": "convidado",
               "convite": {
                 "estado": "pendente",
-                "expiraEm": "2026-12-03T01:52:31.271Z",
-                "enviadoEm": "2026-11-26T01:52:31.276Z",
+                "expiraEm": "2026-12-03T02:25:52.178Z",
+                "enviadoEm": "2026-11-26T02:25:52.185Z",
                 "detalheEntrega": "Link devolvido ao Interos para entrega."
               },
               "primeiroAcessoEm": null,
@@ -605,16 +605,16 @@
             "inativos": 0
           },
           "ultimaAtividadeEm": null,
-          "vinculadaEm": "2026-11-26T01:52:31.180Z",
-          "atualizadaEm": "2026-11-26T01:52:31.225Z"
+          "vinculadaEm": "2026-11-26T02:25:52.014Z",
+          "atualizadaEm": "2026-11-26T02:25:52.090Z"
         },
         "convite": {
-          "idUsuario": "fc0b9cb0370d01cb49d24ceac55741d5",
+          "idUsuario": "9e4ff33bce0fbce73acf1d058255c13a",
           "entrega": "interos",
           "entregue": null,
           "canal": "interos",
           "detalhe": "Link devolvido ao Interos para entrega.",
-          "expiraEm": "2026-12-03T01:52:31.271Z",
+          "expiraEm": "2026-12-03T02:25:52.178Z",
           "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
           "linkRedigido": false
         }
@@ -635,12 +635,12 @@
       "ok": true,
       "detalhe": {
         "empresa": {
-          "idEmpresa": "2fc1edf400abb54f672e4f8be244fd54",
-          "contaInterosId": "homolog-b-202611260152",
+          "idEmpresa": "f9c6992ff11fd516b26a3d90727640af",
+          "contaInterosId": "homolog-b-202611260225",
           "tipo": "varejo",
-          "razaoSocial": "Boreal Papelaria Ltda (homologação 202611260152)",
-          "nomeFantasia": "Boreal Papelaria 202611260152",
-          "cnpj": "45526769000186",
+          "razaoSocial": "Boreal Papelaria Ltda (homologação 202611260225)",
+          "nomeFantasia": "Boreal Papelaria 202611260225",
+          "cnpj": "39468540000130",
           "situacao": "ativa",
           "suspensao": null,
           "historicoSituacao": [],
@@ -651,7 +651,7 @@
             "vendas"
           ],
           "contrato": {
-            "referencia": "HML-202611260152-B",
+            "referencia": "HML-202611260225-B",
             "plano": "homologacao"
           },
           "implantacao": {
@@ -661,56 +661,56 @@
               {
                 "etapa": "empresa",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:32.966Z",
+                "concluidaEm": "2026-11-26T02:25:53.762Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "unidade_inicial",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:32.997Z",
+                "concluidaEm": "2026-11-26T02:25:53.793Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "modulos",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:33.042Z",
+                "concluidaEm": "2026-11-26T02:25:53.838Z",
                 "erro": null,
                 "tentativas": 1
               },
               {
                 "etapa": "administrador",
                 "estado": "concluida",
-                "concluidaEm": "2026-11-26T01:52:33.103Z",
+                "concluidaEm": "2026-11-26T02:25:53.895Z",
                 "erro": null,
                 "tentativas": 1
               }
             ],
             "tentativas": 1,
             "ultimoErro": null,
-            "iniciadaEm": "2026-11-26T01:52:32.495Z",
-            "concluidaEm": "2026-11-26T01:52:33.114Z"
+            "iniciadaEm": "2026-11-26T02:25:53.303Z",
+            "concluidaEm": "2026-11-26T02:25:53.905Z"
           },
           "unidades": [
             {
-              "idUnidade": "fd5971510d4c487f028a22f8e6aa8d59",
+              "idUnidade": "6ce7ddd2513e9e9ebb1c280650a1463c",
               "codigo": "01",
               "nome": "Boreal Papelaria — Matriz",
-              "cnpj": "45526769000186",
+              "cnpj": "39468540000130",
               "situacao": "ativa"
             }
           ],
           "administradores": [
             {
-              "idUsuario": "ffc3451edd6fb12722d494fc3d5e7d39",
+              "idUsuario": "8dc3f4ba1b3923903f39afaa74703bbc",
               "nome": "Admin B (homologação)",
-              "email": "admin.b.202611260152@homologacao.example",
+              "email": "admin.b.202611260225@homologacao.example",
               "situacao": "convidado",
               "convite": {
                 "estado": "pendente",
-                "expiraEm": "2026-12-03T01:52:33.078Z",
-                "enviadoEm": "2026-11-26T01:52:33.084Z",
+                "expiraEm": "2026-12-03T02:25:53.872Z",
+                "enviadoEm": "2026-11-26T02:25:53.877Z",
                 "detalheEntrega": "Link devolvido ao Interos para entrega."
               },
               "primeiroAcessoEm": null,
@@ -724,16 +724,16 @@
             "inativos": 0
           },
           "ultimaAtividadeEm": null,
-          "vinculadaEm": "2026-11-26T01:52:32.939Z",
-          "atualizadaEm": "2026-11-26T01:52:33.007Z"
+          "vinculadaEm": "2026-11-26T02:25:53.734Z",
+          "atualizadaEm": "2026-11-26T02:25:53.803Z"
         },
         "convite": {
-          "idUsuario": "ffc3451edd6fb12722d494fc3d5e7d39",
+          "idUsuario": "8dc3f4ba1b3923903f39afaa74703bbc",
           "entrega": "interos",
           "entregue": null,
           "canal": "interos",
           "detalhe": "Link devolvido ao Interos para entrega.",
-          "expiraEm": "2026-12-03T01:52:33.078Z",
+          "expiraEm": "2026-12-03T02:25:53.872Z",
           "link": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/convite/<token>",
           "linkRedigido": false
         }
@@ -799,14 +799,14 @@
       "nome": "empresa A: cliente próprio cadastrado pela tela",
       "ok": true,
       "detalhe": {
-        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/clientes/16d8d25493515c49f400fc7391888e6c"
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/clientes/9e667a40fd39c043f028bc96efa47f01"
       }
     },
     {
       "nome": "empresa B: cliente próprio cadastrado pela tela",
       "ok": true,
       "detalhe": {
-        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/clientes/2aecb37abc29e10a6a7f0de066d92fb3"
+        "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/clientes/5fd6ffa4899a6db885c3ef00fe4d5fb4"
       }
     },
     {
@@ -1075,11 +1075,11 @@
       "ok": true,
       "detalhe": {
         "codigo": "validacao",
-        "mensagem": "Unidade(s) que não pertence(m) a esta empresa: fd5971510d4c487f028a22f8e6aa8d59.",
+        "mensagem": "Unidade(s) que não pertence(m) a esta empresa: 6ce7ddd2513e9e9ebb1c280650a1463c.",
         "campos": [
           {
             "campo": "idUnidade",
-            "mensagem": "Unidade(s) que não pertence(m) a esta empresa: fd5971510d4c487f028a22f8e6aa8d59."
+            "mensagem": "Unidade(s) que não pertence(m) a esta empresa: 6ce7ddd2513e9e9ebb1c280650a1463c."
           }
         ]
       }
@@ -1110,11 +1110,11 @@
       "ok": true,
       "detalhe": {
         "codigo": "validacao",
-        "mensagem": "Unidade(s) que não pertence(m) a esta empresa: ce44a7e021140c730335ad83d290115f.",
+        "mensagem": "Unidade(s) que não pertence(m) a esta empresa: 076342f0293a5f5ace42dcb1e764ab30.",
         "campos": [
           {
             "campo": "idUnidade",
-            "mensagem": "Unidade(s) que não pertence(m) a esta empresa: ce44a7e021140c730335ad83d290115f."
+            "mensagem": "Unidade(s) que não pertence(m) a esta empresa: 076342f0293a5f5ace42dcb1e764ab30."
           }
         ]
       }
@@ -1123,7 +1123,7 @@
       "nome": "provisionamento: lista só empresas vinculadas (A e B presentes; nenhuma da demonstração)",
       "ok": true,
       "detalhe": {
-        "total": 4
+        "total": 6
       }
     },
     {
@@ -1158,7 +1158,7 @@
       "ok": true,
       "detalhe": {
         "url": "https://intercerterp-git-claude-eager-tesla-oark2w-martinsphilippes.vercel.app/clientes/novo",
-        "trecho": "Boreal Papelaria 202611260152: acesso em somente leitura (contrato suspenso). Consultas e exportações continuam disponíveis; alterações estão bloqueadas."
+        "trecho": "Boreal Papelaria 202611260225: acesso em somente leitura (contrato suspenso). Consultas e exportações continuam disponíveis; alterações estão bloqueadas."
       }
     },
     {
@@ -1190,24 +1190,24 @@
           "modo": "somente_leitura",
           "motivo": "Homologação: somente leitura",
           "referenciaContrato": null,
-          "em": "2026-11-26T01:53:25.194Z",
-          "requestId": "homolog-202611260152-9d218e"
+          "em": "2026-11-26T02:26:44.369Z",
+          "requestId": "homolog-202611260225-511b8c"
         },
         {
           "evento": "suspensao",
           "modo": "bloqueio",
           "motivo": "Homologação: bloqueio",
           "referenciaContrato": null,
-          "em": "2026-11-26T01:53:31.022Z",
-          "requestId": "homolog-202611260152-475022"
+          "em": "2026-11-26T02:26:50.003Z",
+          "requestId": "homolog-202611260225-c5a4e7"
         },
         {
           "evento": "reativacao",
           "modo": null,
           "motivo": "Homologação concluída",
           "referenciaContrato": null,
-          "em": "2026-11-26T01:53:37.867Z",
-          "requestId": "homolog-202611260152-d20bca"
+          "em": "2026-11-26T02:26:56.717Z",
+          "requestId": "homolog-202611260225-da6327"
         }
       ]
     },
@@ -1227,23 +1227,23 @@
       }
     }
   ],
-  "terminadoEm": "2026-11-26T01:53:41.416Z",
+  "terminadoEm": "2026-11-26T02:26:59.226Z",
   "resultado": {
     "verificacoes": 68,
     "falhas": 0
   },
   "empresas": {
     "A": {
-      "idEmpresa": "2bfc99daedada8f1a1a1087155fd3c44",
-      "contaInterosId": "homolog-a-202611260152",
-      "idUnidade": "ce44a7e021140c730335ad83d290115f",
-      "idCliente": "16d8d25493515c49f400fc7391888e6c"
+      "idEmpresa": "c87769bf7702aa1419b00da2316f3d9b",
+      "contaInterosId": "homolog-a-202611260225",
+      "idUnidade": "076342f0293a5f5ace42dcb1e764ab30",
+      "idCliente": "9e667a40fd39c043f028bc96efa47f01"
     },
     "B": {
-      "idEmpresa": "2fc1edf400abb54f672e4f8be244fd54",
-      "contaInterosId": "homolog-b-202611260152",
-      "idUnidade": "fd5971510d4c487f028a22f8e6aa8d59",
-      "idCliente": "2aecb37abc29e10a6a7f0de066d92fb3"
+      "idEmpresa": "f9c6992ff11fd516b26a3d90727640af",
+      "contaInterosId": "homolog-b-202611260225",
+      "idUnidade": "6ce7ddd2513e9e9ebb1c280650a1463c",
+      "idCliente": "5fd6ffa4899a6db885c3ef00fe4d5fb4"
     }
   }
 }

@@ -88,10 +88,10 @@ Na **homologação** (prévia), os passos 1 e 5 foram pulados: a prévia já rod
 
 Base: prévia (branch `claude/eager-tesla-oark2w`, Neon São Paulo), em modo `estrito`, com a demonstração carregada. As
 evidências estão em `docs/multiempresa/evidencias/homologacao-previa-execucao-1/` (primeira aplicação) e
-`.../homologacao-previa/` (segunda, que confirma a idempotência). Os relatórios completos estão em
-`migracao-simular.json` e `migracao-aplicar.json`.
+`.../homologacao-previa/` (a execução mais recente, na publicação final, que confirma a idempotência). Os relatórios
+completos estão em `migracao-simular.json` e `migracao-aplicar.json`.
 
-**Retrato da base:** 132 coleções e 11 empresas na primeira execução; na segunda, 13 (as duas a mais são as empresas fictícias criadas pela primeira homologação).
+**Retrato da base:** 132 coleções e 11 empresas na primeira execução. Na segunda havia 13 e na terceira 15: cada homologação cria duas empresas fictícias.
 
 | Execução | Modo | Tempo | Preenchidos | Revisão | Plataforma | Vínculos | Registros (antes → depois) | Valores de conferência (antes = depois) |
 |---|---|---|---|---|---|---|---|---|
@@ -99,6 +99,7 @@ evidências estão em `docs/multiempresa/evidencias/homologacao-previa-execucao-
 | 1ª | aplicar | 2,2 s | 0 | 0 | marcada agora; equipe de certificação da demonstração movida para ela | **8 vínculos criados** (1 contábil e 7 de rede) | 3.314 → 3.324 (+8 vínculos, +1 perfil da equipe na plataforma, +1 registro de auditoria) | idênticos: `conferencia.ok = true`, sem diferenças |
 | 2ª | simular | 3,0 s | 0 | 0 | já marcada | 1 contábil e 7 de rede ativos, 0 a criar | 3.441 → 3.441 (com as empresas da 1ª homologação) | idênticos |
 | 2ª | aplicar | 1,4 s | 0 | 0 | já marcada | 0 criados e 0 atualizados (idempotente) | 3.441 → 3.441 | idênticos |
+| 3ª (publicação final) | simular e aplicar | 3,1 s e 1,4 s | 0 | 0 | já marcada | 0 criados e 0 atualizados | 3.572 → 3.572 (15 empresas) | idênticos |
 
 **Observações:**
 - **Nada ambíguo:** a demonstração já nasce com empresa em todos os registros, então não houve preenchimento nem

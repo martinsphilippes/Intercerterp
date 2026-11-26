@@ -107,5 +107,20 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
   - 46 exemplos reais conferidos a cada execução da suíte.
 - [x] **Migração verificável** (`docs/multiempresa/migracao.md`): simular e aplicar, retrato antes e depois, fila de
   revisão para o ambíguo, rollback em três níveis.
+- [x] **Homologação** (`docs/multiempresa/homologacao.md` e `homologacao-previa.md`):
+  - **automatizada:** 620 verificações com duas contratantes criadas pelo Interos, passando em memória e no Postgres:
+    - regressão de 10 fluxos por empresa: PDV, venda, devolução, pedido com NF-e, compra, financeiro, fiscal,
+      notificação, cópia de segurança e loja;
+    - matriz de 291 tentativas de acesso cruzado por sentido;
+    - com o isolamento desligado, ela falha.
+  - **na prévia publicada:** 68 de 68 verificações, com migração, convites pela tela, acesso cruzado por telas, APIs,
+    arquivos, exportações, busca, Torre e provisionamento, e suspensão. A varredura abriu 336 páginas sem problema e
+    os 21 acessos rápidos continuam na tela de login.
+  - **achados corrigidos:**
+    - suspensão valendo só depois de até 15 s em outras instâncias;
+    - numeração de RPS aceitando filial de outra empresa;
+    - referências de filial, arquivo e destinatário não conferidas;
+    - assumir a conta de quem tem mais acesso.
+  - **suíte inteira:** 1696 testes em memória e 1690 no Postgres (mais 6 só de memória), build de produção limpo.
 - [ ] **Depende do titular e do Interos:** aceite da homologação, credenciais de produção, decisão sobre
   `ERP_AMBIENTE=producao` e próximas versões do contrato (`docs/pendencias-externas.md`, itens 18–21).
