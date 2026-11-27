@@ -6,7 +6,7 @@ import type { Store } from "@/lib/db/types";
 import { BusinessError } from "@/lib/core/errors";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
 import { CATALOG_VERSION } from "@/lib/modules/catalog";
-import { authenticateInteros, clientReaches, signingSecretsOf, type InterosClient, type InterosScope } from "@/lib/integrations/interos-auth";
+import { authenticateInteros, reachesCompanyId, signingSecretsOf, type InterosClient, type InterosScope } from "@/lib/integrations/interos-auth";
 import { verifySignature } from "@/lib/service/signature";
 
 /** Utilitários das rotas /api/interos/v1 (contrato-interos-erp-v1.md). */
@@ -94,9 +94,13 @@ export function parseChangeSet(body: any) {
   };
 }
 
-/** Empresa da rota: formato válido e alcançada pela credencial (`empresas` em INTEROS_CREDENCIAIS) — senão 403. */
-export function companyIdParam(client: InterosClient, v: string) {
+/** Empresa da rota: formato válido e alcançada pela credencial (lista `empresas`: senão 403; sem lista, ligada ao Interos: senão 404). */
+export async function companyIdParam(store: Store, client: InterosClient, v: string) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(v)) throw new BusinessError("Identificador de empresa inválido.", "invalid_request");
-  if (!clientReaches(client, v)) throw new BusinessError("Esta credencial não pode operar esta empresa.", "company_not_allowed");
+  if (!(await reachesCompanyId(store, client, v)))
+    // sem lista, empresa não vinculada não existe para o Interos: responde igual a uma inexistente (404)
+    throw client.companyIds
+      ? new BusinessError("Esta credencial não pode operar esta empresa.", "company_not_allowed")
+      : new BusinessError("Empresa não encontrada: inexistente ou não vinculada ao Interos.", "company_not_found");
   return v;
 }

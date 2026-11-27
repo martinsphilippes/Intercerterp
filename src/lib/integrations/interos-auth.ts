@@ -1,7 +1,8 @@
+import { listAll } from "@/lib/db";
+import type { Store } from "@/lib/db/types";
 import {
   authenticateService,
   hasScope,
-  reachesCompany,
   serviceConfigured,
   signingSecrets,
   type ServiceClient,
@@ -21,7 +22,7 @@ export const INTEROS_SCOPES: InterosScope[] = ["erp.modules.read", "erp.modules.
 export interface InterosClient {
   id: string;
   scopes: InterosScope[];
-  /** empresas que a credencial alcança (null = todas) */
+  /** lista `empresas` da credencial (null = sem lista: só as empresas ligadas ao Interos) */
   companyIds: string[] | null;
   /** nomes das variáveis com o segredo HMAC das gravações (rotação: mais de um vale ao mesmo tempo) */
   signingSecretEnvs: string[];
@@ -36,9 +37,30 @@ export function signingSecretsOf(c: InterosClient): string[] {
   return signingSecrets({ assinatura: c.signingSecretEnvs });
 }
 
-/** A credencial alcança a empresa? */
-export function clientReaches(c: InterosClient, companyId: string | null | undefined): boolean {
-  return reachesCompany({ empresas: c.companyIds }, companyId);
+/**
+ * A credencial alcança a empresa?
+ * - com `empresas`: só as da lista, vinculadas ao Interos ou não (homologação: as do piloto);
+ * - sem lista: só as empresas ligadas ao Interos (`interosAccountId` preenchido: criadas pelo provisionamento ou
+ *   vinculadas com o código do administrador), a mesma regra do provisionamento e da Torre. Empresa não vinculada não
+ *   existe para o Interos.
+ */
+export function reachesCompanyDoc(c: InterosClient, company: { id?: string | null; interosAccountId?: string | null } | null | undefined): boolean {
+  if (!company?.id) return false;
+  return c.companyIds ? c.companyIds.includes(String(company.id)) : Boolean(company.interosAccountId);
+}
+
+/** A empresa da rota é alcançada? Sem lista, lê só aquela empresa (inexistente = não alcançada). */
+export async function reachesCompanyId(store: Store, c: InterosClient, companyId: string | null | undefined): Promise<boolean> {
+  if (!companyId) return false;
+  if (c.companyIds) return c.companyIds.includes(companyId);
+  return reachesCompanyDoc(c, await store.get("companies", companyId));
+}
+
+/** Filtro por id para as listas que só têm o id da empresa: sem lista, carrega uma vez as empresas ligadas. */
+export async function reachFilter(store: Store, c: InterosClient): Promise<(companyId: string | null | undefined) => boolean> {
+  const ids = c.companyIds ?? (await listAll(store, "companies", { filters: [["notNull", "interosAccountId"]] })).map((x) => String(x.id));
+  const set = new Set(ids);
+  return (companyId) => companyId != null && set.has(companyId);
 }
 
 export type AuthResult = { ok: true; client: InterosClient } | { ok: false; status: 401 | 403 | 503; code: string; message: string };

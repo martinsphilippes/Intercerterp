@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  */
 export function POST(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.modules.write", async ({ store, client, requestId }) => {
-    const companyId = companyIdParam(client, (await params).companyId);
+    const companyId = await companyIdParam(store, client, (await params).companyId);
     // empresa inexistente: 404 company_not_found (antes de registrar a operação) — correção 13
     await companyOrThrow(store, companyId);
     const idem = req.headers.get("idempotency-key")?.trim();

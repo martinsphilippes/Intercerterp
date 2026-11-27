@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /** GET ?from&to — telemetria agregada (sem dados pessoais nem documentos). Padrão: últimos 30 dias. */
 export function GET(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.usage.read", async (r) => {
-    const companyId = companyParam(r.client, (await params).companyId);
+    const companyId = await companyParam(r, (await params).companyId);
     await companyOrThrow(r.store, companyId);
     const u = new URL(req.url);
     const to = u.searchParams.get("to") ?? new Date().toISOString();

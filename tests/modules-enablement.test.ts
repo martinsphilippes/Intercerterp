@@ -337,6 +337,9 @@ describe("API /api/interos/v1 (servidor a servidor)", () => {
       // credencial do piloto: só a empresa B
       { id: "interos-piloto", escopos: ["erp.modules.read", "erp.modules.write"], hash: h(pilotSecret), empresas: [B.id] },
     ]);
+    // a credencial sem lista só alcança empresas ligadas ao Interos (criadas pelo provisionamento ou vinculadas com o código)
+    await store.update("companies", A.id, { interosAccountId: "acc-mod-alfa" });
+    await store.update("companies", B.id, { interosAccountId: "acc-mod-beta" });
     await takeBaseline(store, A.id);
   });
   afterEach(() => {

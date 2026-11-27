@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /** GET — licença aplicada, estado efetivo por unidade, limites, exibição e sincronização. */
 export function GET(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.license.read", async (r) => {
-    const companyId = companyParam(r.client, (await params).companyId);
+    const companyId = await companyParam(r, (await params).companyId);
     // transições vencidas valem na hora: o Interos lê o estado já atualizado
     await applyDueTransitions(r.store, companyId);
     // a consulta do Interos confirma que os dois lados estão em contato (base do sync.stale)
@@ -23,7 +23,7 @@ export function GET(req: Request, { params }: { params: Promise<{ companyId: str
  */
 export function PUT(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.license.write", async (r) => {
-    const companyId = companyParam(r.client, (await params).companyId);
+    const companyId = await companyParam(r, (await params).companyId);
     return signedWrite(req, r, companyId, async (body, eventId) => {
       const actor = (req.headers.get("x-interos-actor") ?? "").trim().slice(0, 200) || r.client.id;
       const res = await applyLicense(r.store, companyId, body, { clientId: r.client.id, eventId, source: "push", actor });
