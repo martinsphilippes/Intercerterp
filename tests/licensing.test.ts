@@ -233,6 +233,11 @@ describe("aplicação do retrato de licença", () => {
     expect(decide(doc, "compras.cotacoes").level).toBe("read");
     const changes = await listAll(store, "module_changes", { filters: [["eq", "companyId", A.id], ["eq", "actorType", "system"]] });
     expect(changes.length).toBe(2);
+    // aviso license.transition: cada mudança com o código comercial (05.02) além da chave interna
+    const transitions = (await listAll(store, "jobs", { filters: [["eq", "type", "interos.event"]] })).filter((j) => j.payload?.event?.type === "license.transition");
+    expect(transitions.length).toBe(2);
+    const allChanges = transitions.flatMap((j) => j.payload.event.data.changes);
+    expect(allChanges).toEqual(expect.arrayContaining([expect.objectContaining({ code: "05.02", module: "compras.cotacoes", action: "disable" }), expect.objectContaining({ code: "18.10", module: "financeiro.conciliacao" })]));
   });
 
   it("vigência vencida sem renovação: carência e depois somente leitura; em modo legacy nada é bloqueado", async () => {
@@ -319,9 +324,29 @@ describe("eventos, assinatura e reconciliação", () => {
     const r2 = await reconcileLicense(store, A.id, (async () => { throw new Error("ECONNREFUSED"); }) as any);
     expect(String(r2.pull)).toMatch(/ECONNREFUSED/);
     expect((await licenseStatus(store, A.id)).appliedVersion).toBe(2);
-    await store.update("company_licenses", (await store.list("company_licenses", { filters: [["eq", "companyId", A.id]] })).items[0].id, { lastSnapshotAt: iso(Date.now() - 5 * day) });
-    const r3 = await reconcileLicense(store, A.id, (async () => new Response(JSON.stringify({ data: newer }), { status: 200 })) as any);
-    expect(r3).toMatchObject({ pull: "up_to_date", stale: true });
+    // sync.stale conta desde a última CONFIRMAÇÃO do Interos (retrato, consulta ou pull que responde), não desde a
+    // última licença nova (o Interos só manda quando algo muda): confirmação há 5 dias e o Interos fora do ar → aviso
+    const licId = (await store.list("company_licenses", { filters: [["eq", "companyId", A.id]] })).items[0].id;
+    await store.update("company_licenses", licId, { lastSnapshotAt: iso(Date.now() - 5 * day), lastConfirmedAt: iso(Date.now() - 5 * day) });
+    const r3 = await reconcileLicense(store, A.id, (async () => { throw new Error("ECONNREFUSED"); }) as any);
+    expect(r3).toMatchObject({ stale: true });
+    // empresa estável: o pull que responde "em dia" confirma — sem aviso, mesmo sem licença nova há 5 dias
+    await store.update("company_licenses", licId, { lastConfirmedAt: iso(Date.now() - 5 * day), staleNotifiedAt: null });
+    const r4 = await reconcileLicense(store, A.id, (async () => new Response(JSON.stringify({ data: newer }), { status: 200 })) as any);
+    expect(r4.pull).toBe("up_to_date");
+    expect(r4.stale).toBeUndefined();
+    // sem a consulta diária configurada, nada vai ao Interos (só o registro local)
+    delete process.env.INTEROS_LICENSE_URL;
+    delete process.env.INTEROS_OUTBOUND_TOKEN;
+    await store.update("company_licenses", licId, { lastConfirmedAt: iso(Date.now() - 5 * day), staleNotifiedAt: null });
+    const r5 = await reconcileLicense(store, A.id);
+    expect(r5).toMatchObject({ pull: "not_configured", stale: "local" });
+    const staleEvents = (await listAll(store, "jobs", { filters: [["eq", "type", "interos.event"]] })).filter((j) => j.payload?.event?.type === "sync.stale");
+    expect(staleEvents.length).toBe(1);
+    // a consulta do Interos também confirma (no máximo uma gravação por hora)
+    const { noteConfirmation } = await import("@/domain/licensing/license");
+    await noteConfirmation(store, A.id);
+    expect(Date.parse((await store.get("company_licenses", licId))!.lastConfirmedAt)).toBeGreaterThan(Date.now() - 60_000);
   });
 });
 

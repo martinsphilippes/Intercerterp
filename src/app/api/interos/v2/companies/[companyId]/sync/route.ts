@@ -1,5 +1,5 @@
 import { applyDueTransitions } from "@/domain/licensing/due";
-import { licenseStatus } from "@/domain/licensing/license";
+import { licenseStatus, noteConfirmation } from "@/domain/licensing/license";
 import { companyParam, handle, ok } from "../../../_lib";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,8 @@ export function GET(req: Request, { params }: { params: Promise<{ companyId: str
     const companyId = companyParam(r.client, (await params).companyId);
     // transições vencidas valem na hora: o Interos lê o estado já atualizado
     await applyDueTransitions(r.store, companyId);
+    // a consulta do Interos confirma que os dois lados estão em contato (base do sync.stale)
+    await noteConfirmation(r.store, companyId);
     const st = await licenseStatus(r.store, companyId);
     return ok({ companyId, appliedVersion: st.appliedVersion, runtime: st.runtime, ...st.sync, nextTransitionAt: st.nextTransitionAt }, { requestId: r.requestId, headers: { ETag: `"${st.appliedVersion}"` } });
   });

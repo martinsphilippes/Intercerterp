@@ -192,6 +192,8 @@ function resolveCodeUnits(code: string): string[] {
 
 const UNIT_CODE_BY_KEY = new Map(UNITS_V2.filter((u) => u.v1Key).map((u) => [u.v1Key!, u.code]));
 const unitByV1KeyCode = (key: string) => UNIT_CODE_BY_KEY.get(key) ?? key;
+/** Mudança com o código comercial v2 (`code`, a referência do contrato) e a chave interna (`module`). */
+const changeWithCode = (c: ModuleChange) => ({ code: UNIT_CODE_BY_KEY.get(c.module) ?? null, module: c.module, action: c.action, ...(c.history ? { history: c.history } : {}) });
 
 // ─── trava por empresa (incremento atômico com limite) ─────────────────────────────────────────────────────────────
 const LOCK_STALE_MS = 2 * 60 * 1000;
@@ -235,13 +237,18 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
   const snapshot = parseSnapshot(raw, companyId);
   const histId = detId("lichist", companyId, snapshot.licenseVersion);
   const prior = await store.get("license_history", histId);
-  if (prior) return { ...(prior.result as ApplyLicenseResult), status: prior.status === "applied" ? "duplicate" : prior.status };
+  if (prior) {
+    // retrato repetido também confirma que o Interos e o ERP estão de acordo (base do sync.stale)
+    await noteConfirmation(store, companyId);
+    return { ...(prior.result as ApplyLicenseResult), status: prior.status === "applied" ? "duplicate" : prior.status };
+  }
   return withLicenseLock(store, companyId, async () => {
     const lic = await store.get("company_licenses", licenseId(companyId));
     const applied = lic?.licenseVersion ?? 0;
     if (snapshot.licenseVersion <= applied) {
       const result: ApplyLicenseResult = { status: "stale", appliedVersion: applied, plan: null, runtimeVersion: null };
       await recordHistory(store, histId, companyId, snapshot, "stale", meta, result);
+      await noteConfirmation(store, companyId);
       return result;
     }
     if (!(await loadCompanyModules(store, companyId))) await takeBaseline(store, companyId, "licença");
@@ -276,7 +283,7 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
     await store.update("company_licenses", licenseId(companyId), {
       licenseVersion: snapshot.licenseVersion, snapshot, commercialStatus: snapshot.commercialStatus, display: snapshot.display ?? lic?.display ?? null,
       limits: snapshot.limits ?? null, effective: plan!.effective, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings, appliedAt: nowIso(), preservedAccess: plan!.preservedAccess,
-      appliedRuntimeVersion: runtimeVersion, nextTransitionAt: plan!.nextTransitionAt, clientId: meta.clientId, lastSnapshotAt: nowIso(), staleNotifiedAt: null,
+      appliedRuntimeVersion: runtimeVersion, nextTransitionAt: plan!.nextTransitionAt, clientId: meta.clientId, lastSnapshotAt: nowIso(), lastConfirmedAt: nowIso(), staleNotifiedAt: null,
     });
     // contrato amplo (provisionamento) passa a ser a tradução da licença: menu, telas, recursos e Torre seguem o retrato
     await syncContractFromLicense(store, companyId, meta.clientId);
@@ -285,6 +292,18 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
     await emitInterosEvent(store, companyId, "license.applied", { licenseVersion: snapshot.licenseVersion, runtimeVersion, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings.map((w) => w.reason) });
     return result;
   });
+}
+
+/**
+ * Confirmação do Interos (retrato recebido, consulta do Interos ou pull bem-sucedido): é dela que o sync.stale conta,
+ * não da última licença NOVA — o Interos só manda licença quando algo muda. Grava no máximo uma vez por hora.
+ */
+export async function noteConfirmation(store: Store, companyId: string, now = new Date()) {
+  const id = licenseId(companyId);
+  const lic = await store.get("company_licenses", id).catch(() => null);
+  if (!lic) return;
+  if (lic.lastConfirmedAt && now.getTime() - Date.parse(lic.lastConfirmedAt) < 3600_000) return;
+  await store.update("company_licenses", id, { lastConfirmedAt: now.toISOString(), staleNotifiedAt: null }).catch(() => undefined);
 }
 
 /**
@@ -332,11 +351,12 @@ export async function maintainLicense(store: Store, companyId: string, now = new
       // transição local: desligar uma unidade leva junto os dependentes (cascata), registrada como "system"
       const r = await applyChanges(store, { companyId, changes: plan.changes, cascade: true }, { actor: "rotina de licença", actorType: "system", reason: `Transição local da licença v${snapshot.licenseVersion} (${plan.companyState})` });
       runtimeVersion = r.version;
-      await emitInterosEvent(store, companyId, "license.transition", { licenseVersion: snapshot.licenseVersion, changes: plan.changes, companyState: plan.companyState });
+      // cada mudança com o código comercial da unidade (07.01) além da chave interna (vendas.pdv)
+      await emitInterosEvent(store, companyId, "license.transition", { licenseVersion: snapshot.licenseVersion, changes: plan.changes.map(changeWithCode), companyState: plan.companyState });
     }
     // transição local registrada no histórico da licença (o Interos acompanha pelo GET .../license/history)
     const transitions = plan.changes.length
-      ? [...(((lic.transitions as unknown[]) ?? []) as unknown[]), { at: now.toISOString(), licenseVersion: snapshot.licenseVersion, companyState: plan.companyState, changes: plan.changes.map((c) => ({ unit: unitByV1KeyCode(c.module), module: c.module, action: c.action })), runtimeVersion }].slice(-100)
+      ? [...(((lic.transitions as unknown[]) ?? []) as unknown[]), { at: now.toISOString(), licenseVersion: snapshot.licenseVersion, companyState: plan.companyState, changes: plan.changes.map(changeWithCode), runtimeVersion }].slice(-100)
       : undefined;
     await store.update("company_licenses", lic.id, { effective: plan.effective, nextTransitionAt: plan.nextTransitionAt, preservedAccess: plan.preservedAccess, ...(transitions ? { transitions } : {}), ...(runtimeVersion ? { appliedRuntimeVersion: runtimeVersion } : {}) });
     return { changes: plan.changes.length, companyState: plan.companyState, nextTransitionAt: plan.nextTransitionAt };

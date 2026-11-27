@@ -8,7 +8,7 @@ import { nowIso } from "@/lib/dates";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
 import { CATALOG_V2_VERSION } from "@/lib/modules/units-v2.generated";
 import { authenticateInteros, clientReaches, signingSecretsOf, type InterosClient, type InterosScope } from "@/lib/integrations/interos-auth";
-import { verifySignature } from "@/domain/licensing/events";
+import { retryDueEventsSoon, verifySignature } from "@/domain/licensing/events";
 
 /** Utilitários das rotas /api/interos/v2 (docs/INTEGRATIONS/INTEROS/contrato-interos-erp-v2.md). */
 export const API_VERSION = "v2";
@@ -35,6 +35,8 @@ export async function handle(req: Request, scope: InterosScope, fn: (r: V2Reques
   const requestId = req.headers.get("x-request-id")?.slice(0, 80) || crypto.randomUUID();
   const auth = authenticateInteros(req.headers.get("authorization"), scope);
   if (!auth.ok) return fail(auth.status, auth.code, auth.message, requestId);
+  // avisos do ERP que falharam: nova tentativa a cada consulta do Interos (fora do tempo da resposta)
+  retryDueEventsSoon();
   try {
     await ensureBootstrap();
     return await fn({ client: auth.client, store: unscoped(getStore()), requestId });

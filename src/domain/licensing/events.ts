@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { after } from "next/server";
 import type { Store } from "@/lib/db/types";
 import { enqueue, registerJob } from "@/lib/core/jobs";
 import { nowIso } from "@/lib/dates";
@@ -20,7 +21,56 @@ import { signBody } from "@/lib/service/signature";
 export async function emitInterosEvent(store: Store, companyId: string, type: InterosEventType, data: Record<string, unknown>, dedupeKey?: string) {
   const at = nowIso();
   const key = dedupeKey ?? `${type}:${companyId}:${at}:${crypto.randomBytes(4).toString("hex")}`;
-  return enqueue(store, { type: "interos.event", companyId, dedupeKey: `interos:${key}`, payload: { event: { type, companyId, at, data } }, maxAttempts: 12 });
+  const job = await enqueue(store, { type: "interos.event", companyId, dedupeKey: `interos:${key}`, payload: { event: { type, companyId, at, data } }, maxAttempts: 12 });
+  deliverSoon(job.id);
+  return job;
+}
+
+const destinationConfigured = () => Boolean(process.env.INTEROS_EVENTS_URL && process.env.INTEROS_OUTBOUND_SECRET);
+
+/**
+ * Entrega NA HORA (pedido do Interos): logo depois de enfileirar, fora do tempo da resposta (`after`), tenta entregar
+ * ESTE aviso. Falhou, ou não há destino configurado: fica na fila — novas tentativas pelo executor oportunista, pelas
+ * consultas do Interos (`retryDueEventsSoon`) e pela rotina diária.
+ */
+function deliverSoon(jobId: string) {
+  if (!destinationConfigured()) return;
+  try {
+    after(async () => {
+      try {
+        const [{ getStore }, { runDueJobs }] = await Promise.all([import("@/lib/db"), import("@/domain/jobs-registry")]);
+        await runDueJobs(getStore(), { jobIds: [jobId], limit: 1, deadlineMs: Date.now() + 20_000 });
+      } catch (e) {
+        console.warn("[interos] entrega imediata do aviso falhou; ele fica na fila", (e as Error)?.message ?? e);
+      }
+    });
+  } catch {
+    // fora de uma requisição (rotina, testes): a fila entrega
+  }
+}
+
+const g = globalThis as unknown as { __interosEventsRetryAt?: number };
+/**
+ * Novas tentativas dos avisos vencidos a cada consulta do Interos (no máximo a cada 30 s por instância), fora do tempo
+ * da resposta: com o Interos consultando a cada 5 minutos, um aviso que falhou não espera a rotina diária.
+ */
+export function retryDueEventsSoon() {
+  if (!destinationConfigured()) return;
+  const now = Date.now();
+  if (g.__interosEventsRetryAt && now - g.__interosEventsRetryAt < 30_000) return;
+  g.__interosEventsRetryAt = now;
+  try {
+    after(async () => {
+      try {
+        const [{ getStore }, { runDueJobs }] = await Promise.all([import("@/lib/db"), import("@/domain/jobs-registry")]);
+        await runDueJobs(getStore(), { types: ["interos.event"], limit: 20, deadlineMs: Date.now() + 20_000 });
+      } catch (e) {
+        console.warn("[interos] nova tentativa dos avisos falhou; eles ficam na fila", (e as Error)?.message ?? e);
+      }
+    });
+  } catch {
+    // fora de uma requisição: nada a fazer
+  }
 }
 
 /** Sem destino configurado, o evento fica NA FILA (nova tentativa a cada 6 h) e aparece em GET /v2/errors (correção 10). */

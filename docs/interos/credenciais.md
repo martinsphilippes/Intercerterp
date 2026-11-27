@@ -122,8 +122,10 @@ A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empr
    - `ERP_INTERCERT_URL`: o endereço da homologação do ERP;
    - `ERP_INTERCERT_TOKEN_LICENCAS`, `ERP_INTERCERT_CREDENCIAL_PROVISIONAMENTO` e `ERP_INTERCERT_CREDENCIAL_TORRE`: os tokens;
    - `ERP_INTERCERT_SEGREDO_ASSINATURA`: o segredo de assinatura.
-3. Cole na Vercel do **ERP** (Preview da branch de homologação) o mesmo segredo de assinatura em
-   `INTEROS_ASSINATURA_HML`.
+3. Cole na Vercel do **ERP** (Preview da branch de homologação):
+   - o mesmo segredo de assinatura em `INTEROS_ASSINATURA_HML`;
+   - o segredo dos avisos do ERP para o Interos em `INTEROS_OUTBOUND_SECRET`. É o valor que o Interos manda pelo cofre
+     de senhas, o mesmo do `ERP_INTERCERT_SEGREDO_EVENTOS` deles. O destino (`INTEROS_EVENTS_URL`) já está configurado.
 4. Acrescente ao `INTEROS_CREDENCIAIS` do ERP as três "entradas" que o gerador imprimiu. São só hashes, não
    segredos.
 5. Publique de novo os dois projetos: a Vercel só aplica variável nova na próxima publicação.

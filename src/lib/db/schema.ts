@@ -1432,6 +1432,9 @@ export const COLLECTIONS: CollectionDef[] = [
       preservedAccess: json,
       // transições locais (fim de teste, agendamentos, vigência): [{ at, licenseVersion, companyState, changes }], últimas 100
       transitions: json,
+      // última CONFIRMAÇÃO do Interos (retrato recebido — novo ou repetido —, consulta do Interos ou pull bem-sucedido):
+      // base do sync.stale (empresa estável não envelhece só porque o Interos não manda licença nova)
+      lastConfirmedAt: dt,
     },
     indexes: [u("u_company", "companyId")],
   },

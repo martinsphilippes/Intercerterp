@@ -138,3 +138,12 @@ nem links de convite, está em `docs/multiempresa/evidencias/homologacao-unifica
 | Administração pelo cliente | Logins e filiais da própria empresa; empresa nova, não |
 | Suspensão | Somente leitura, bloqueio e reativação na hora |
 | Licenças (v2) | Catálogo com a tradução; retrato inválido sem consumir o Event-Id; o mesmo Event-Id corrigido aceito; repetição idêntica devolve a original; outro conteúdo, `409`; sem assinatura, `401`; licença como referência (`origemModulos: "licenca"`, `409 licenca_governa`); Torre pelo contrato (`null` e `409 modulo_nao_contratado`); histórico; LGPD; credencial restrita ao piloto com `403 company_not_allowed` (v2 e v1) e lista filtrada |
+
+## 8. Avisos do ERP para o Interos (pedido de 27/11)
+
+| # | Pedido | Situação |
+|---|---|---|
+| 1 | Configurar os avisos em homologação | `INTEROS_EVENTS_URL=https://interos-two.vercel.app/api/webhooks/erp` configurado na homologação do ERP. Falta `INTEROS_OUTBOUND_SECRET`, que o titular cola na Vercel do ERP com o valor recebido pelo cofre. Sem ele, os avisos ficam na fila e nunca são dados como entregues (correção 10). |
+| 2 | Entregar o aviso na hora | **Feito.** Logo depois de enfileirar, o ERP tenta entregar aquele aviso (`runDueJobs` com o id do job, em `after()`). Se falhar, as novas tentativas vêm a cada consulta do Interos e depois de cada ação de usuário; a rotina diária fica como rede de segurança. Teste: `tests/interos-avisos.test.ts`. |
+| 3 | Rever o `sync.stale` | **Feito.** Conta desde a última confirmação (retrato recebido, novo ou repetido; consulta do Interos; consulta diária que responde). Só é enviado com a consulta diária configurada. Teste: `licensing` ("reconciliação"). |
+| 4 | Código comercial em `license.transition` | **Feito.** Cada item de `changes` traz `code` (por exemplo `07.01`) além de `module`. O histórico de licença (`kind: "transition"`) usa o mesmo formato. Teste: `licensing` ("teste vencido e suspensão programada"). |

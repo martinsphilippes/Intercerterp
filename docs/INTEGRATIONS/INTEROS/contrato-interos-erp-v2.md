@@ -168,22 +168,27 @@ Ativar, desativar, suspender, reativar, programar e atualizar limites são todos
 ### Eventos do ERP para o Interos (saída)
 
 Usa o mecanismo de tarefas duráveis já existente (`jobs`, tipo `interos.event`), com retentativa exponencial e assinatura HMAC no mesmo formato.
-- Cabeçalhos: `X-ERP-Signature: t=<unix>,v1=<hex>` (segredo `INTEROS_OUTBOUND_SECRET`) e `X-ERP-Event-Type`.
-- O corpo traz `eventId`, `type`, `companyId`, `at` e `data`.
+- **Destino.** `INTEROS_EVENTS_URL`. Na homologação, desde 27/11: `https://interos-two.vercel.app/api/webhooks/erp`.
+- **Assinatura.** Segredo `INTEROS_OUTBOUND_SECRET`, o mesmo valor que o Interos guarda em `ERP_INTERCERT_SEGREDO_EVENTOS`, trocado por cofre de senhas.
+- **Cabeçalhos:** `X-ERP-Signature: t=<unix>,v1=<hex>` e `X-ERP-Event-Type`.
+- **Corpo:** `eventId`, `type`, `companyId`, `at` e `data`.
+- **Entrega na hora.** Logo depois de enfileirar, o ERP tenta entregar aquele aviso, fora do tempo da resposta da
+  operação que o gerou. Se falhar, ele fica na fila e é tentado de novo:
+  - a cada consulta do Interos à API v2 (no máximo a cada 30 segundos por instância);
+  - depois de cada ação de usuário no ERP;
+  - na rotina diária, como rede de segurança.
 - Respostas 4xx (exceto 408 e 429) não são repetidas.
-- **Nesta fase não há destino configurado** (`INTEROS_EVENTS_URL`): o Interos acompanha pelo histórico de licença
-  (`GET .../license/history`, a cada 5 minutos), que traz os retratos e as transições locais. Os eventos **ficam na
-  fila**, nunca dados como entregues, e aparecem em `GET /errors` como `event.undelivered`, com
-  `reason: "not_configured"`. Quando o destino for configurado, os guardados são enviados. Depois de 30 dias sem
-  destino, passam a `dead` e continuam listados.
+- **Sem destino ou segredo configurado**, os eventos **ficam na fila**, nunca dados como entregues, e aparecem em
+  `GET /errors` como `event.undelivered`, com `reason: "not_configured"`. Configurado o destino, os guardados são
+  enviados. Depois de 30 dias sem destino, passam a `dead` e continuam listados.
 
 | Evento | Quando |
 |---|---|
-| `license.applied` / `license.rejected` | Depois de cada `PUT` e de cada transição local (teste expirado, agendamento executado) |
-| `license.transition` | Desligamento concluído (`draining` → `disabled`) |
+| `license.applied` / `license.rejected` | Depois de cada `PUT` (ou retrato aplicado pela consulta diária) |
+| `license.transition` | Transição local no instante devido: teste ou carência vencidos, agendamento executado, fim de vigência. Cada item de `data.changes` traz `code` (unidade comercial, por exemplo `07.01`), `module` (chave interna, por exemplo `vendas.pdv`) e `action`. |
 | `upsell.requested` | Usuário clicou em "Solicitar contratação" numa função bloqueada |
 | `limit.reached` | Um limite contratado foi atingido |
-| `sync.stale` | O ERP não recebe o retrato há mais tempo que o limite de contingência |
+| `sync.stale` | Sem **confirmação** do Interos há mais de 3 dias. Contam como confirmação: retrato recebido (novo ou repetido), consulta do Interos à licença, sincronização ou histórico, e consulta diária que responde. Uma empresa estável não fica "atrasada" só porque não recebeu licença nova. **Só é enviado com a consulta diária (`INTEROS_LICENSE_URL`) configurada**; sem ela, fica só o registro local. No máximo um por empresa e dia. |
 
 ## 4. Resiliência e contingência
 
