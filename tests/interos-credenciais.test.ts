@@ -132,6 +132,72 @@ describe("empresas do piloto (`empresas`)", () => {
   });
 });
 
+describe("credencial de licenças sem `empresas` (produção): só as empresas ligadas ao Interos", () => {
+  // como na produção: sem lista, com os escopos de licença e de módulos
+  const LIC_PRD = `interos-licencas-prd.${S("w")}`;
+  const LIC_GAMA = `interos-licencas-gama.${S("g")}`;
+  let gama: string;
+  const auth = (t: string) => ({ headers: { authorization: `Bearer ${t}` } });
+  const licenseOf = async (token: string, companyId: string) => {
+    const r = await (await import("@/app/api/interos/v2/companies/[companyId]/license/route")).GET(new Request("http://erp.test/x", auth(token)), { params: Promise.resolve({ companyId }) });
+    return { status: r.status, body: await r.json() };
+  };
+  const v2List = async (token: string) => (await (await (await import("@/app/api/interos/v2/companies/route")).GET(new Request("http://erp.test/x", auth(token)))).json()).data.map((c: any) => c.companyId).sort();
+  const v1List = async (token: string) => (await (await (await import("@/app/api/interos/v1/companies/route")).GET(new Request("http://erp.test/x", auth(token)))).json()).data.map((c: any) => c.companyId).sort();
+
+  beforeAll(async () => {
+    // empresa que já usa o ERP e ainda não foi vinculada ao Interos
+    gama = (await createCompanyWithDefaults(store, { name: "Gama Sem Vínculo Ltda", cnpj: "60581234000100", key: "cred-gama" })).company.id;
+  });
+  beforeEach(() =>
+    creds([
+      { id: "interos-licencas-prd", escopos: ["erp.license.read", "erp.modules.read", "erp.usage.read"], segredo: S("w") },
+      // credencial com lista (homologação): vale para a lista, vinculada ou não
+      { id: "interos-licencas-gama", escopos: ["erp.license.read"], segredo: S("g"), empresas: [gama] },
+    ]),
+  );
+
+  it("lê e lista só as empresas ligadas; a não vinculada responde 404 como inexistente, na v2 e na v1 de módulos", async () => {
+    expect((await licenseOf(LIC_PRD, alfa)).status).toBe(200);
+    const denied = await licenseOf(LIC_PRD, gama);
+    expect(denied.status).toBe(404);
+    expect(denied.body.error.code).toBe("company_not_found");
+    // mesma resposta de uma empresa que não existe: o Interos não descobre empresas não vinculadas
+    const ghost = await licenseOf(LIC_PRD, "naoexiste");
+    expect([ghost.status, ghost.body.error.code]).toEqual([404, "company_not_found"]);
+    expect(await v2List(LIC_PRD)).toEqual([alfa, beta].sort());
+    expect(await v1List(LIC_PRD)).toEqual([alfa, beta].sort());
+    const mod = await (await import("@/app/api/interos/v1/companies/[companyId]/modules/route")).GET(new Request("http://erp.test/x", auth(LIC_PRD)), { params: Promise.resolve({ companyId: gama }) });
+    expect(mod.status).toBe(404);
+    expect((await mod.json()).error.code).toBe("company_not_found");
+  });
+
+  it("os pedidos de contratação da empresa não vinculada não aparecem para o Interos", async () => {
+    await store.create("upsell_requests", { companyId: gama, userId: "u-gama", code: "05.02", module: "compras.cotacoes", note: "teste", status: "open" });
+    await store.create("upsell_requests", { companyId: alfa, userId: "u-alfa", code: "05.02", module: "compras.cotacoes", note: "teste", status: "open" });
+    const r = await (await import("@/app/api/interos/v2/upsell-requests/route")).GET(new Request("http://erp.test/x", auth(LIC_PRD)));
+    const companies = (await r.json()).data.map((u: any) => u.companyId);
+    expect(companies).toContain(alfa);
+    expect(companies).not.toContain(gama);
+  });
+
+  it("a credencial com lista alcança a empresa da lista mesmo sem vínculo (homologação)", async () => {
+    expect((await licenseOf(LIC_GAMA, gama)).status).toBe(200);
+    expect((await licenseOf(LIC_GAMA, alfa)).status).toBe(403);
+    expect(await v2List(LIC_GAMA)).toEqual([gama]);
+  });
+
+  it("depois de vinculada (criada pelo Interos ou com o código do administrador), passa a ser alcançada", async () => {
+    await store.update("companies", gama, { interosAccountId: "acc-cred-gama" });
+    try {
+      expect((await licenseOf(LIC_PRD, gama)).status).toBe(200);
+      expect(await v2List(LIC_PRD)).toEqual([alfa, beta, gama].sort());
+    } finally {
+      await store.update("companies", gama, { interosAccountId: null });
+    }
+  });
+});
+
 describe("assinatura das gravações e rotação sem parada", () => {
   const put = async (token: string, body: string, headers: Record<string, string>) => {
     const lic = await import("@/app/api/interos/v2/companies/[companyId]/license/route");

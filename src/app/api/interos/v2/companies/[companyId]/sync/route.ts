@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /** GET — estado de sincronização: versão aplicada, último retrato, última consulta (pull) e versão do runtime. */
 export function GET(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.license.read", async (r) => {
-    const companyId = companyParam(r.client, (await params).companyId);
+    const companyId = await companyParam(r, (await params).companyId);
     // transições vencidas valem na hora: o Interos lê o estado já atualizado
     await applyDueTransitions(r.store, companyId);
     // a consulta do Interos confirma que os dois lados estão em contato (base do sync.stale)

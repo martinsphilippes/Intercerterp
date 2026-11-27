@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /** POST — simula o retrato: unidades efetivas, alterações no runtime, pendências, rejeições e próxima transição. */
 export function POST(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.license.read", async (r) => {
-    const companyId = companyParam(r.client, (await params).companyId);
+    const companyId = await companyParam(r, (await params).companyId);
     let body: unknown;
     try {
       body = await req.json();

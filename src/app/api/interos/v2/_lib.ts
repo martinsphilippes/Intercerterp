@@ -7,7 +7,7 @@ import { BusinessError } from "@/lib/core/errors";
 import { nowIso } from "@/lib/dates";
 import { ensureBootstrap } from "@/lib/server/bootstrap";
 import { CATALOG_V2_VERSION } from "@/lib/modules/units-v2.generated";
-import { authenticateInteros, clientReaches, signingSecretsOf, type InterosClient, type InterosScope } from "@/lib/integrations/interos-auth";
+import { authenticateInteros, reachesCompanyId, signingSecretsOf, type InterosClient, type InterosScope } from "@/lib/integrations/interos-auth";
 import { retryDueEventsSoon, verifySignature } from "@/domain/licensing/events";
 
 /** Utilitários das rotas /api/interos/v2 (docs/INTEGRATIONS/INTEROS/contrato-interos-erp-v2.md). */
@@ -47,10 +47,21 @@ export async function handle(req: Request, scope: InterosScope, fn: (r: V2Reques
   }
 }
 
-export function companyParam(client: InterosClient, v: string) {
+/** Empresa da rota: formato válido e alcançada pela credencial (lista `empresas`: senão 403; sem lista, ligada ao Interos: senão 404). */
+export async function companyParam(r: Pick<V2Request, "client" | "store">, v: string) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(v)) throw new BusinessError("Identificador de empresa inválido.", "invalid_request");
-  if (!clientReaches(client, v)) throw new BusinessError("Esta credencial não pode operar esta empresa.", "company_not_allowed");
+  if (!(await reachesCompanyId(r.store, r.client, v))) throw unreachableCompany(r.client);
   return v;
+}
+
+/**
+ * Empresa fora do alcance. Com lista: 403 company_not_allowed. Sem lista: 404 company_not_found — empresa não vinculada
+ * não existe para o Interos e responde igual a uma inexistente (a mesma regra do provisionamento).
+ */
+export function unreachableCompany(client: InterosClient) {
+  return client.companyIds
+    ? new BusinessError("Esta credencial não pode operar esta empresa.", "company_not_allowed")
+    : new BusinessError("Empresa não encontrada: inexistente ou não vinculada ao Interos.", "company_not_found");
 }
 
 /**

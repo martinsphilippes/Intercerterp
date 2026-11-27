@@ -15,7 +15,10 @@ import crypto from "node:crypto";
  * O sistema chamador envia `Authorization: Bearer <id>.<segredo>` nas três APIs.
  *  - Famílias separadas (provisionamento, Torre, licenças): uma credencial com escopos de duas famílias é recusada —
  *    quem consulta indicadores não cria empresas, quem aplica licença não suspende conta.
- *  - `empresas` (opcional): as únicas empresas que a credencial alcança (homologação: só as do piloto). Ausente = todas.
+ *  - `empresas` (opcional): as únicas empresas que a credencial alcança (homologação: só as do piloto). Ausente = sem
+ *    lista, mas cada API continua só com as empresas ligadas ao Interos: o provisionamento cria e vincula (com o código do
+ *    administrador) e não enxerga empresa não vinculada; a Torre e a API de licenças e módulos idem (`reachesCompanyDoc` em
+ *    `src/lib/integrations/interos-auth.ts`).
  *  - `assinatura` (opcional; obrigatória para gravar licença e módulos): NOME da variável com o segredo HMAC das
  *    gravações (`X-Interos-Signature`), ou uma lista de nomes durante a troca do segredo (vale qualquer um deles).
  *  - Rotação sem parada: cadastre a credencial nova (outro id) junto com a antiga, troque no Interos e só então remova

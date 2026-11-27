@@ -388,12 +388,15 @@ describe("API /api/interos/v2", () => {
   const roToken = `interos-ro.${roSecret}`;
   const secret = "z".repeat(48);
   const h = (t: string) => `sha256:${crypto.createHash("sha256").update(t).digest("hex")}`;
-  beforeEach(() => {
+  beforeEach(async () => {
     process.env.INTEROS_SIGN_TEST = secret;
     process.env.INTEROS_CREDENCIAIS = JSON.stringify([
       { id: "interos-v2", escopos: ["erp.license.read", "erp.license.write", "erp.usage.read"], hash: h(tokenSecret), assinatura: "INTEROS_SIGN_TEST" },
       { id: "interos-ro", escopos: ["erp.license.read"], hash: h(roSecret), empresas: ["outra"] },
     ]);
+    // a credencial sem lista só alcança empresas ligadas ao Interos (criadas pelo provisionamento ou vinculadas com o código)
+    await store.update("companies", A.id, { interosAccountId: "acc-lic-alfa" });
+    await store.update("companies", B.id, { interosAccountId: "acc-lic-beta" });
   });
   const req = (body: string, headers: Record<string, string> = {}, t = token) => new Request("http://erp.local/x", { method: "PUT", body, headers: { authorization: `Bearer ${t}`, "content-type": "application/json", ...headers } });
   const params = () => ({ params: Promise.resolve({ companyId: A.id }) });
@@ -497,6 +500,8 @@ describe("API /api/interos/v2", () => {
 
   it("correção 4 (LGPD): a solicitação de contratação chega ao Interos com identificador pseudônimo e perfil, nunca o nome", async () => {
     const C = (await createCompanyWithDefaults(store, { name: "Zeta Ficticia", key: "zeta-lic" })).company;
+    // ligada ao Interos: a credencial sem lista só vê os pedidos das empresas ligadas
+    await store.update("companies", C.id, { interosAccountId: "acc-lic-zeta" });
     await provisionModules(store, C.id, ["cadastros.produtos"], "teste");
     const sys = systemCtx(store, C.id);
     const ctxC = { ...sys, user: { ...sys.user, id: "u-zeta-1", name: "Joana da Silva Pereira", roleName: "Gerente de loja" } };

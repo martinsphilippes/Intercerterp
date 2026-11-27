@@ -43,11 +43,11 @@ O ERP guarda **só o hash SHA-256 do segredo**, numa lista JSON:
 
 | Campo | Obrigatório | Uso |
 |---|---|---|
-| `id` | sim | Primeira parte do token. Aparece na trilha de cada chamada. |
+| `id` | sim | Primeira parte do token. Fica na trilha de toda chamada do provisionamento e da Torre e de toda gravação de licenças e módulos (histórico de licença, operações de módulos e `interos_events`). |
 | `nome` | não | Descrição legível. |
 | `escopos` | sim | Uma família só (§1). |
 | `hash` | sim | `sha256:` + hex do SHA-256 do segredo. |
-| `empresas` | não | As únicas empresas (id ERP) que a credencial alcança (§4). Ausente = todas. |
+| `empresas` | não | As únicas empresas (id ERP) que a credencial alcança, vinculadas ou não (§4). Ausente: só as empresas ligadas ao Interos. Lista vazia (`[]`) invalida a credencial: para ficar sem lista, omita o campo. |
 | `assinatura` | só para gravar licença | **Nome** da variável do ERP com o segredo HMAC (§3). Durante a troca do segredo, uma lista com os dois nomes. |
 | `ativo` | não | `false` desliga a credencial sem apagá-la. |
 
@@ -72,23 +72,31 @@ O ERP guarda **só o hash SHA-256 do segredo**, numa lista JSON:
 O segredo tem 32 caracteres ou mais e fica só nas variáveis do servidor, dos dois lados. O mesmo valor vai na variável
 indicada em `assinatura` (ERP) e em `ERP_INTERCERT_SEGREDO_ASSINATURA` (Interos).
 
-## 4. Restrição por empresa (`empresas`)
+## 4. Alcance por empresa (`empresas`)
 
-Na homologação, a credencial de licenças alcança **só as empresas do piloto**. Cada empresa que o Interos cria na
-homologação precisa entrar na lista, com nova publicação do ERP, antes de receber a licença inicial; até lá, a
-gravação responde `403 company_not_allowed` (visto na homologação de 27/11, `pendencias-integracao.md` §10).
-
-**Na produção, a credencial de licenças do Interos fica sem `empresas`** (decisão de 27/11/2026). O Interos comanda a
-licença de todas as empresas que cria ou vincula, e uma lista obrigaria a publicar o ERP a cada empresa nova. As
-gravações continuam protegidas pela assinatura (§3), e cada chamada fica na trilha com o `id` da credencial.
-
-| API | Empresa fora da lista |
+| Credencial | Alcança |
 |---|---|
-| Licenças v2 | `403 company_not_allowed`. As listas (`/companies`, `/errors`, `/upsell-requests`) só trazem as empresas da credencial. |
-| Módulos v1 (leitura, simulação, aplicação, linha de base, histórico, operações) | `403 company_not_allowed`. A lista `/companies` só traz as empresas da credencial. |
-| Provisionamento e Torre | `403 empresa_nao_permitida`. A lista `/empresas` só traz as empresas da credencial. Uma credencial restrita também não cria nem vincula empresas (`POST /empresas` e `POST /empresas/vincular`). |
+| Com `empresas` (homologação: a de licenças, com as empresas do piloto) | Só as empresas da lista, vinculadas ao Interos ou não |
+| Sem `empresas` (produção: as três) | Só as empresas **ligadas ao Interos** (`interosAccountId` preenchido): as criadas pelo provisionamento e as vinculadas com o código do administrador |
 
-A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empresa recusada (teste automatizado em
+**Decisão de 27/11/2026:** na produção, as três credenciais do Interos ficam sem `empresas`, e a de licenças alcança só
+as empresas ligadas ao Interos, a mesma regra do provisionamento e da Torre.
+- A empresa criada pelo Interos recebe a licença inicial na hora: não há lista para manter nem nova publicação do ERP.
+- Uma empresa que já usa o ERP só passa a existir para o Interos com o código de vínculo do administrador dela
+  (contrato v1, §10). Antes da vinculação, a API de licenças responde como se ela não existisse.
+
+**Na homologação**, a de licenças continua restrita às empresas do piloto. Cada empresa que o Interos cria ou vincula lá
+precisa entrar na lista, com nova publicação do ERP. Por isso a primeira tentativa da licença inicial de uma empresa nova
+sempre falha com `403 company_not_allowed` (o id só existe depois da criação). O Interos envia de novo pelo "Tentar de
+novo" depois que o id entra na lista (homologação de 27/11, `pendencias-integracao.md` §10).
+
+| API | Com lista: empresa fora dela | Sem lista: empresa não vinculada |
+|---|---|---|
+| Licenças v2 | `403 company_not_allowed`. As listas (`/companies`, `/errors`, `/upsell-requests`) só trazem as empresas da lista. | `404 company_not_found`, a mesma resposta de uma empresa inexistente. As listas só trazem as empresas ligadas. |
+| Módulos v1 (leitura, simulação, aplicação, linha de base, histórico, operações) | `403 company_not_allowed`. A lista `/companies` só traz as empresas da lista. | `404 company_not_found`. A lista `/companies` só traz as empresas ligadas. |
+| Provisionamento e Torre | `403 empresa_nao_permitida`. A lista `/empresas` só traz as empresas da lista. Uma credencial restrita também não cria nem vincula empresas (`POST /empresas` e `POST /empresas/vincular`). | `404 nao_encontrado` (contrato v1). Criar e vincular com o código continuam valendo. |
+
+A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empresa recusada (testes em
 `tests/modules-enablement.test.ts` e `tests/interos-credenciais.test.ts`).
 
 ## 5. Rotação sem parada
@@ -139,15 +147,27 @@ A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empr
 5. Publique de novo os dois projetos: a Vercel só aplica variável nova na próxima publicação.
 6. Depois que o Interos confirmar as credenciais novas, retire do registro as anteriores (`interos-equipe-*`).
 
-**Produção**, depois da homologação aprovada: o mesmo passo a passo, com ids `-prd`, a variável
-`INTEROS_ASSINATURA_PRD`, os endereços de produção (`ERP_INTERCERT_AMBIENTE=producao` no Interos) e as variáveis no
-ambiente **Production** do ERP. A credencial de licenças vai **sem `--empresas`** (§4):
-`interos-licencas-prd erp.license.read erp.license.write erp.modules.read erp.usage.read --assinatura=INTEROS_ASSINATURA_PRD`.
+**Passo a passo (produção)**, depois da homologação aprovada, com o mesmo cuidado (cada valor direto na Vercel):
+1. Gere as três credenciais de produção, **todas sem `--empresas`** (§4):
+   - licenças: `node scripts/interos/credencial.mjs interos-licencas-prd erp.license.read erp.license.write erp.modules.read erp.usage.read --assinatura=INTEROS_ASSINATURA_PRD`;
+   - provisionamento: `node scripts/interos/credencial.mjs interos-prov-prd provisionamento:leitura provisionamento:escrita`;
+   - Torre: `node scripts/interos/credencial.mjs interos-torre-prd torre:resumo torre:detalhe torre:transacoes`.
+2. Na Vercel do **Interos** (ambiente **Production**):
+   - `ERP_INTERCERT_URL`: o endereço de produção do ERP;
+   - `ERP_INTERCERT_AMBIENTE=producao`;
+   - os três tokens e o segredo de assinatura, nas mesmas variáveis da homologação;
+   - um segredo de avisos **novo** em `ERP_INTERCERT_SEGREDO_EVENTOS`.
+3. Na Vercel do **ERP** (ambiente **Production**):
+   - as três entradas em `INTEROS_CREDENCIAIS`;
+   - o segredo de assinatura em `INTEROS_ASSINATURA_PRD`;
+   - o segredo de avisos em `INTEROS_OUTBOUND_SECRET`;
+   - `INTEROS_EVENTS_URL=https://<domínio do Interos>/api/webhooks/erp`.
+4. Publique de novo os dois projetos.
 
 - Cada valor vai **direto para as variáveis da Vercel**, colado por quem tem acesso a elas. Do lado do ERP, isso
   vale para `INTEROS_CREDENCIAIS` (só hashes) e para a variável do segredo de assinatura. Do lado do Interos, para o
   token e o segredo.
 - Nunca por chat, e-mail ou documento.
-- Primeiro os de homologação, restritos às empresas do piloto. Os de produção só depois da homologação aprovada, com a
-  credencial de licenças sem lista de empresas (§4).
+- Primeiro os de homologação (a de licenças restrita às empresas do piloto). Os de produção só depois da homologação
+  aprovada, sem lista (§4).
 - Homologação e produção têm credenciais e segredos **diferentes** (ids com sufixo `-hml` e `-prd`).

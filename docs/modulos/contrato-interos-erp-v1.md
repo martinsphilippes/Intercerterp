@@ -45,6 +45,9 @@ Authorization: Bearer <id>.<segredo>
 - **Empresas permitidas** (`empresas` na credencial): leitura, simulação, aplicação, linha de base, histórico e
   operações de uma empresa fora da lista respondem `403 company_not_allowed`, antes de qualquer leitura ou gravação. A
   lista `GET /companies` só traz as empresas da credencial.
+- **Credencial sem `empresas`**: só as empresas ligadas ao Interos (criadas pelo provisionamento ou vinculadas com o
+  código do administrador). Uma empresa não vinculada responde `404 company_not_found`, igual a uma inexistente, e fica
+  fora de `GET /companies` (`docs/interos/credenciais.md` §4).
 - Credencial com `assinatura`: toda gravação exige `X-Interos-Signature` (mesmo formato da v2).
 - A comparação do token é feita em tempo constante. Respostas: 401 para token ausente ou inválido, 403 para escopo
   insuficiente ou empresa não permitida, 503 para integração não configurada.
@@ -231,7 +234,7 @@ Cancela uma operação `scheduled`. Qualquer outro estado devolve 409 `invalid_s
 | 400 | `invalid_request`, `reason_required`, `actor_required`, `idempotency_key_required`, `idempotency_key_invalid` | Requisição malformada |
 | 401 | `unauthenticated` | Token ausente ou inválido |
 | 403 | `insufficient_scope` | Escopo insuficiente |
-| 404 | `company_not_found`, `operation_not_found` | Empresa ou operação inexistente (ou operação de outro cliente) |
+| 404 | `company_not_found`, `operation_not_found` | Empresa ou operação inexistente, empresa não vinculada ao Interos (credencial sem `empresas`) ou operação de outro cliente |
 | 409 | `version_conflict`, `idempotency_mismatch`, `invalid_state` | Concorrência e idempotência |
 | 422 | `changes_rejected` (com `details.errors[]`), `baseline_required` | Lote inválido |
 | 500 | `internal_error` | Falha inesperada; repita com a mesma `Idempotency-Key` |

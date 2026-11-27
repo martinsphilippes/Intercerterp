@@ -1,4 +1,5 @@
 import { listAll } from "@/lib/db";
+import { reachFilter } from "@/lib/integrations/interos-auth";
 import { handle, ok } from "../_lib";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +8,9 @@ export const dynamic = "force-dynamic";
 export function GET(req: Request) {
   return handle(req, "erp.license.read", async ({ store, client, requestId }) => {
     const since = new URL(req.url).searchParams.get("since") ?? new Date(Date.now() - 7 * 86400000).toISOString();
-    const allowed = (c: string | null | undefined) => !client.companyIds || (c != null && client.companyIds.includes(c));
+    // erro de uma empresa: só se a credencial a alcança; erro sem empresa: só para a credencial sem lista
+    const reaches = await reachFilter(store, client);
+    const allowed = (c: string | null | undefined) => (c == null ? !client.companyIds : reaches(c));
     const [lic, jobs, ops] = await Promise.all([
       listAll(store, "license_history", { filters: [["eq", "status", "rejected"], ["gte", "at", since]] }),
       listAll(store, "jobs", { filters: [["eq", "type", "interos.event"], ["eq", "status", ["dead", "retry"]]] }),

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /** GET /api/interos/v1/companies/{companyId}/modules/history?limit=50 — versões, ator, motivo e operação. */
 export function GET(req: Request, { params }: { params: Promise<{ companyId: string }> }) {
   return handle(req, "erp.modules.read", async ({ store, client, requestId }) => {
-    const companyId = companyIdParam(client, (await params).companyId);
+    const companyId = await companyIdParam(store, client, (await params).companyId);
     await companyOrThrow(store, companyId);
     // transições vencidas valem na hora: o Interos lê o estado já atualizado
     await applyDueTransitions(store, companyId);
