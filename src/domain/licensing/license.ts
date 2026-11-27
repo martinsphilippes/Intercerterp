@@ -6,7 +6,7 @@ import { loadCompanyModules } from "@/lib/modules/access";
 import { MODULE_MAP } from "@/lib/modules/catalog";
 import { applyChanges, companyOrThrow, simulateChanges, VersionConflictError, type ModuleChange, type Simulation } from "../modules/changes";
 import { takeBaseline } from "../modules/baseline";
-import { desiredByUnit, licenseSnapshotSchema, resolveCode, resolveDisplays, unitByCode, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
+import { desiredByUnit, licenseSnapshotSchema, resolveCode, resolveDisplays, unitByCode, unitByV1Key, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
 import { emitInterosEvent } from "./events";
 import { UNITS_V2 } from "@/lib/modules/units-v2.generated";
 
@@ -377,11 +377,14 @@ export async function maintainLicense(store: Store, companyId: string, now = new
 
 /**
  * `displays` AUSENTE no retrato mantém as escolhas por unidade vigentes (Interos sem a fase A, ou de volta a uma versão
- * anterior, não apaga o que foi escolhido); `[]` ou null limpa. O padrão da empresa (`display`) já segue a mesma regra.
+ * anterior, não apaga o que foi escolhido); `[]` ou null limpa. Só as escolhas que valiam seguem: código recusado ou
+ * função incluída (que era só aviso) não voltam a cada retrato. O padrão da empresa (`display`) é diferente: ausente ou
+ * nulo mantém o último enviado.
  */
 function withCurrentDisplays(snapshot: LicenseSnapshot, lic: Doc | null | undefined): LicenseSnapshot {
-  const prev = (lic?.snapshot as LicenseSnapshot | undefined)?.displays;
-  return snapshot.displays === undefined && prev?.length ? { ...snapshot, displays: prev } : snapshot;
+  if (snapshot.displays !== undefined) return snapshot;
+  const kept = ((lic?.snapshot as LicenseSnapshot | undefined)?.displays ?? []).filter((d) => resolveDisplays([d]).byKey.size > 0);
+  return kept.length ? { ...snapshot, displays: kept } : snapshot;
 }
 
 /** Unidade que pode aparecer com cadeado ou "contratar": contratável, disponível e do tipo da empresa. */
@@ -390,6 +393,12 @@ export function contractableFor(kind: string): (moduleKey: string) => boolean {
     const d = MODULE_MAP.get(moduleKey);
     return Boolean(d && d.availability !== "planned" && (d.kinds as readonly string[]).includes(kind) && (d.classification === "commercial" || d.classification === "optional_function"));
   };
+}
+
+/** Unidade que pode ser OFERECIDA ("contratar"): contratável para o tipo da empresa e já vendável (homologada). */
+export function offerableFor(kind: string): (moduleKey: string) => boolean {
+  const contractable = contractableFor(kind);
+  return (moduleKey) => contractable(moduleKey) && unitByV1Key(moduleKey)?.sellable !== false;
 }
 
 /** Padrão sem escolha do Interos: oculto para clientes atuais; oportunidade para empresa criada pelo provisionamento. */
@@ -414,6 +423,20 @@ export async function displayResolver(store: Store, companyId: string): Promise<
   const fallback = lic?.display ? (lic.display as DisplayMode) : defaultDisplayOf(null, await loadCompanyModules(store, companyId));
   const { byKey } = resolveDisplays((lic?.snapshot as LicenseSnapshot | undefined)?.displays);
   return (moduleKey) => byKey.get(moduleKey) ?? fallback;
+}
+
+/**
+ * Exibição que a empresa VÊ: a escolhida (ou o padrão), sem oferecer o que não pode ser contratado agora — "contratar"
+ * vira cadeado na unidade de outro tipo de empresa ou ainda não vendável (depende de homologação). Menu, URL, página
+ * "módulo indisponível" e pedido de contratação usam esta resposta: nunca um botão que o pedido recusaria.
+ */
+export async function shownDisplayResolver(store: Store, companyId: string, kind: string): Promise<(moduleKey: string) => DisplayMode> {
+  const chosen = await displayResolver(store, companyId);
+  const offerable = offerableFor(kind);
+  return (moduleKey) => {
+    const d = chosen(moduleKey);
+    return d === "upsell" && !offerable(moduleKey) ? "locked" : d;
+  };
 }
 
 export async function licenseStatus(store: Store, companyId: string) {

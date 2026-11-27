@@ -11,7 +11,7 @@ import { createCompanyWithDefaults } from "@/domain/setup";
 import { takeBaseline, provisionModules } from "@/domain/modules/baseline";
 import { decide, loadCompanyModules } from "@/lib/modules/access";
 import { companyCap, itemEffective, pathDisplay, resolveCode, resolveDisplays, unitByCode, type DisplayMode, type LicenseSnapshot } from "@/domain/licensing/effective";
-import { applyLicense, displayMode, displayResolver, licenseStatus, maintainLicense, planLicense } from "@/domain/licensing/license";
+import { applyLicense, displayMode, displayResolver, licenseStatus, maintainLicense, offerableFor, planLicense, shownDisplayResolver } from "@/domain/licensing/license";
 import { applyDueTransitions } from "@/domain/licensing/due";
 import { assertWithinLimit, noteFiscalDocumentUsage } from "@/domain/licensing/limits";
 import { reconcileLicense } from "@/domain/licensing/sync";
@@ -464,6 +464,32 @@ describe("exibição por unidade (fase A, 27/11)", () => {
     await applyLicense(store, A.id, snap(A.id, 3, items, { display: "hidden", displays: [] }), meta);
     expect((await displayResolver(store, A.id))(key("05.02"))).toBe("hidden");
     expect((await licenseStatus(store, A.id)).displays).toEqual([]);
+  });
+
+  it("revisão: o que não pode ser oferecido aparece com cadeado (menu, página e pedido usam a mesma regra)", async () => {
+    const C = (await createCompanyWithDefaults(store, { name: "Zeta Ficticia", key: "zeta-lic" })).company;
+    await provisionModules(store, C.id, ["cadastros.produtos"], "teste");
+    expect(await displayMode(store, C.id)).toBe("upsell"); // empresa nova: padrão "contratar"
+    const shown = await shownDisplayResolver(store, C.id, "retail");
+    expect(shown("compras.cotacoes")).toBe("upsell"); // vendável e do tipo: oferece
+    expect(shown("fiscal.nfe")).toBe("locked"); // depende de homologação: cadeado, sem botão
+    expect(shown("ecommerce.banco")).toBe("locked");
+    expect(shown("contabil.carteira")).toBe("locked"); // de escritório contábil: nunca "contratar" no varejo
+    expect([offerableFor("retail")("fiscal.nfe"), offerableFor("retail")("compras.cotacoes"), offerableFor("accounting")("contabil.carteira")]).toEqual([false, true, true]);
+    // escolha explícita "contratar" numa unidade não vendável também vira cadeado
+    await applyLicense(store, A.id, snap(A.id, 1, items, { display: "hidden", displays: [{ code: "04.03", display: "upsell" }] }), meta);
+    expect((await displayResolver(store, A.id))("fiscal.nfse")).toBe("upsell");
+    expect((await shownDisplayResolver(store, A.id, "retail"))("fiscal.nfse")).toBe("locked");
+  });
+
+  it("revisão: escolha recusada ou só de aviso não é repassada aos retratos seguintes (sem repetir o aviso)", async () => {
+    await applyLicense(store, A.id, snap(A.id, 1, items, { displays: [{ code: "05.02", display: "upsell" }, { code: "99.99", display: "hidden" }, { code: "26.01", display: "locked" }] }), meta);
+    const r2 = await applyLicense(store, A.id, snap(A.id, 2, items), meta); // sem `displays`
+    expect(r2.status).toBe("applied");
+    expect(r2.plan!.rejectedItems.filter((i) => i.code === "99.99")).toEqual([]);
+    expect(r2.plan!.warnings.filter((w) => w.reason === "display_not_supported")).toEqual([]);
+    expect((await store.get("company_licenses", detId("license", A.id)))!.snapshot.displays).toEqual([{ code: "05.02", display: "upsell" }]);
+    expect((await displayResolver(store, A.id))(key("05.02"))).toBe("upsell");
   });
 
   it("revisão: 'contratar' recusa unidade já ligada, de outro tipo de empresa ou ainda não vendável", async () => {

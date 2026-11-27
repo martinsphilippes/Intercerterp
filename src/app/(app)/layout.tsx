@@ -8,7 +8,7 @@ import { featureDefaultFor, isFeatureOn } from "@/lib/core/settings";
 import { headers } from "next/headers";
 import { combined, companyModules, pathDecision } from "@/lib/server/modules";
 import { modulesForPath } from "@/lib/modules/surfaces";
-import { contractableFor, displayResolver } from "@/domain/licensing/license";
+import { contractableFor, shownDisplayResolver } from "@/domain/licensing/license";
 import { pathDisplay } from "@/domain/licensing/effective";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -19,7 +19,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const modDoc = await companyModules(s.ctx);
   const kind = s.company.kind ?? "retail";
   const levelOf = (href: string) => combined(modDoc, modulesForPath(href)?.modules ?? [], kind).level;
-  const displayFor = await displayResolver(s.ctx.store, s.ctx.companyId);
+  // o que a empresa vê: "contratar" só no que pode ser oferecido (o resto aparece com cadeado)
+  const displayFor = await shownDisplayResolver(s.ctx.store, s.ctx.companyId, kind);
   // bloqueado/oportunidade só para módulos contratáveis e existentes (nunca para lacunas nem para o que não se aplica ao tipo)
   const contractable = contractableFor(kind);
   // exibição por unidade (fase A): a tela desligada segue a unidade mais visível entre as que a liberam

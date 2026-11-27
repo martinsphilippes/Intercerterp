@@ -7,7 +7,7 @@ import { moduleDef } from "@/lib/modules/catalog";
 import { loadCompanyModules } from "@/lib/modules/access";
 import { unitByV1Key } from "./effective";
 import { emitInterosEvent } from "./events";
-import { contractableFor, displayResolver } from "./license";
+import { offerableFor, shownDisplayResolver } from "./license";
 
 /** Estados em que a unidade já está à disposição da empresa (não há o que contratar). */
 const ON_STATES = new Set(["enabled", "scheduled_off", "draining"]);
@@ -27,10 +27,11 @@ export async function requestUpsell(ctx: Ctx, moduleKey: string, note: string) {
   const base = unscoped(ctx.store);
   const company = await base.get("companies", ctx.companyId);
   const unit = unitByV1Key(moduleKey);
+  const kind = company?.kind ?? "retail";
   // só o que a empresa pode contratar: do tipo dela e vendável (dependente de homologação ainda não é oferecido)
-  if (!def || !contractableFor(company?.kind ?? "retail")(moduleKey) || unit?.sellable === false) throw new BusinessError("Função indisponível para contratação.", "invalid_request");
-  // exibição por unidade (fase A): só a unidade mostrada com "contratar" aceita o pedido
-  if ((await displayResolver(base, ctx.companyId))(moduleKey) !== "upsell") throw new BusinessError("A solicitação de contratação não está disponível para esta função nesta empresa.", "forbidden");
+  if (!def || !offerableFor(kind)(moduleKey)) throw new BusinessError("Função indisponível para contratação.", "invalid_request");
+  // exibição por unidade (fase A): só a unidade mostrada com "contratar" aceita o pedido (a mesma regra do menu)
+  if ((await shownDisplayResolver(base, ctx.companyId, kind))(moduleKey) !== "upsell") throw new BusinessError("A solicitação de contratação não está disponível para esta função nesta empresa.", "forbidden");
   // unidade já ligada (ou em conclusão) não tem o que contratar
   const state = (await loadCompanyModules(base, ctx.companyId))?.modules?.[moduleKey]?.state;
   if (state && ON_STATES.has(state)) throw new BusinessError("Esta função já está disponível para a empresa.", "invalid_request");

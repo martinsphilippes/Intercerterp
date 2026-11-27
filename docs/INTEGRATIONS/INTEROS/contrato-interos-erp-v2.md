@@ -87,8 +87,10 @@ O retrato é versionado por `licenseVersion`, um inteiro que só cresce e é emi
   unidades principais dele, e a escolha da unidade vence a do módulo. Função incluída (ex.: `07.03`), ou alias de
   uma, ainda não tem exibição própria: aviso `display_not_supported`, e vale a da unidade. Código inexistente ou não
   contratável volta em `rejectedItems`, sem recusar o retrato. Mudar só a exibição não liga nem desliga nada no runtime.
-- Campo `displays` **ausente** mantém as escolhas vigentes (Interos sem a fase A, ou de volta a uma versão anterior);
-  `displays: []` (ou `null`) limpa todas, e cada unidade volta ao padrão da empresa.
+- Campo `displays` **ausente** mantém as escolhas vigentes (Interos sem a fase A, ou de volta a uma versão anterior).
+  Só as escolhas que valiam seguem; código recusado ou função incluída não voltam a cada retrato. Para limpar, envie
+  `displays: []` (ou `null`) **explicitamente**: um serializador que omite listas vazias manteria as escolhas. Cada
+  unidade volta então ao padrão da empresa. Já o `display` ausente ou nulo mantém o último padrão enviado.
 
 - `items[].code` é o código estável do catálogo v2 (módulo `NN`, submódulo `NN.SS` ou recurso `NN.SS.RR`).
 - Contratar o módulo (`"07"`) inclui só as unidades com `includedInParent: true` no catálogo (as principais, por
@@ -260,7 +262,9 @@ aplicadas, em código comercial).
 - **`locked`:** o item aparece no menu com cadeado e "(bloqueado)", e leva à página "módulo indisponível", sem oferta.
 - **`upsell`:** o item aparece com cadeado e "(contratar)"; a página mostra a descrição comercial e o botão
   "Solicitar contratação", que dispara o evento `upsell.requested`. O pedido só é aceito para unidade em `upsell`,
-  desligada, do tipo da empresa e já vendável (unidade que depende de homologação ainda não é oferecida).
+  desligada, do tipo da empresa e já vendável. Unidade em `upsell` que não pode ser oferecida (de outro tipo de
+  empresa, ou que ainda depende de homologação, como NF-e, NFC-e, NFS-e e banco digital) aparece com cadeado, sem
+  botão. A mesma regra vale no menu, na página, ao abrir a tela pela URL e no pedido.
 - Tela que mais de uma unidade libera (basta uma ligada) segue a mais visível entre elas.
 - Em todos os casos, **nenhum dado nem operação** fica acessível (o bloqueio de servidor não muda).
 

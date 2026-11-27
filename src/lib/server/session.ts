@@ -131,9 +131,10 @@ async function enforceScreenModule(s: SessionInfo) {
   if (d.level === "none") {
     // mesma escolha do menu (fase A): tela liberada por várias unidades leva à mais visível entre as contratáveis
     const { modulesForPath } = await import("@/lib/modules/surfaces");
-    const { contractableFor, displayResolver } = await import("@/domain/licensing/license");
+    const { contractableFor, shownDisplayResolver } = await import("@/domain/licensing/license");
     const { pathDisplay } = await import("@/domain/licensing/effective");
-    const shown = pathDisplay(modulesForPath(path)?.modules ?? [], await displayResolver(s.ctx.store, s.ctx.companyId), contractableFor(s.company?.kind ?? "retail"));
+    const kind = s.company?.kind ?? "retail";
+    const shown = pathDisplay(modulesForPath(path)?.modules ?? [], await shownDisplayResolver(s.ctx.store, s.ctx.companyId, kind), contractableFor(kind));
     redirect(`/modulo-indisponivel?m=${encodeURIComponent(shown.module ?? d.module)}`);
   }
 }
