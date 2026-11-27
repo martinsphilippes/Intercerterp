@@ -29,12 +29,12 @@ As credenciais seguem o **esquema único** das três APIs do Interos no ERP: `do
 
 | Variável | Uso |
 |---|---|
-| `INTEROS_CREDENCIAIS` | Registro único (só hashes). A credencial de licenças tem escopos `erp.*`, `empresas` (homologação: só o piloto) e `assinatura` (nome da variável com o segredo HMAC). |
+| `INTEROS_CREDENCIAIS` | Registro único (só hashes). A credencial de licenças tem escopos `erp.*`, `empresas` (homologação: só o piloto; produção: sem lista) e `assinatura` (nome da variável com o segredo HMAC). |
 | Variável indicada em `assinatura` (por exemplo, `INTEROS_ASSINATURA_HML`) | Segredo HMAC das escritas, com 32 caracteres ou mais. Sem ele, as escritas v2 respondem 503. |
 | `INTEROS_EVENTS_URL` e `INTEROS_OUTBOUND_SECRET` | Destino e segredo dos eventos do ERP para o Interos. Não usados nesta fase: o Interos consulta o histórico de licença a cada 5 minutos. Sem eles, os eventos ficam na fila como não enviados e aparecem em `GET /errors` (`event.undelivered`). |
 | `INTEROS_LICENSE_URL` (com `{companyId}`) e `INTEROS_OUTBOUND_TOKEN` | Consulta diária do retrato no Interos (pull) |
 
-Gere a credencial com `node scripts/interos/credencial.mjs interos-licencas-hml erp.license.read erp.license.write erp.modules.read erp.usage.read --empresas=<ids> --assinatura=INTEROS_ASSINATURA_HML`.
+Gere a credencial com `node scripts/interos/credencial.mjs interos-licencas-hml erp.license.read erp.license.write erp.modules.read erp.usage.read --empresas=<ids> --assinatura=INTEROS_ASSINATURA_HML`. Na produção, `interos-licencas-prd` com os mesmos escopos, `--assinatura=INTEROS_ASSINATURA_PRD` e sem `--empresas` (`docs/interos/credenciais.md` §4).
 
 ## 1. Papéis
 
