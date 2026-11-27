@@ -10,7 +10,7 @@ import { loyaltyBalance, loyaltyEnabled } from "@/domain/loyalty";
 
 /** Identificação do cliente no PDV (Tela 6): nome, CPF/CNPJ, telefone e e-mail — mesma base do CRM. */
 export async function GET(req: NextRequest) {
-  const s = await requireApiSession();
+  const s = await requireApiSession("json", { modules: ["vendas.pdv"], surface: "api pdv/customers" });
   if (s instanceof NextResponse) return s;
   if (!can(s.user, "pdv") && !can(s.user, "customers")) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   const store = s.ctx.store;

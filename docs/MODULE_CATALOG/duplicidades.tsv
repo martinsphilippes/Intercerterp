@@ -1,0 +1,72 @@
+# Recursos que aparecem em mais de um lugar da taxonomia. Uma única implementação (PROPRIETÁRIO);
+# os demais códigos são ALIAS (mesma capacidade, sem cobrança própria) ou REUSO (outro contexto que usa o recurso do proprietário, cobrado pelo próprio contexto).
+# alias_code	owner_code	relacao	observacao
+07.13	36.04	alias	PIX do PDV usa o mesmo motor de intenções de pagamento (src/domain/payments)
+12.07	36.04	alias	PIX on-line da loja usa o provedor do gateway da loja; mesmo recurso comercial "Pagamento por PIX"
+18.06	36.04	reuso	Cobrança PIX no financeiro reutiliza o recurso de PIX
+19.10	36.04	reuso	PIX dinâmico bancário usa o conector bancário; o QR é o mesmo recurso
+12.08	36.03	alias	Cartão on-line = pagamento por cartão do gateway
+12.06	36.01	alias	Pagamentos on-line = gateway de pagamento
+26.01	01.05	alias	Cadastro de serviços é um só (produtos do tipo serviço)
+47.03	09.04	reuso	Matriz cor x tamanho usa as variações de produto
+09.02	09.04	alias	Grade de tamanhos é dimensão das variações
+09.03	09.04	alias	Grade de cores é dimensão das variações
+08.03	08.02	alias	Troca por tamanho ou cor é a troca de produto com variação
+14.19	15.03	alias	Ficha técnica de alimentos = ficha técnica (composição)
+14.20	15.02	reuso	Ingredientes = matérias-primas
+14.21	15.09	alias	Baixa automática de ingredientes = baixa de componentes na venda
+14.14	09.09	alias	Combos de alimentação = combos de produtos
+37.03	17.13	alias	Aplicativo do entregador é um só
+37.04	14.05	alias	Aplicativo do garçom é um só
+37.07	26.10	alias	Aplicativo do técnico é um só
+37.08	05.18	alias	Portal do fornecedor é um só
+37.09	22.08	alias	Portal do contador é um só
+37.13	10.09	reuso	Aplicativo de inventário reutiliza o inventário
+37.14	17.20	reuso	Aplicativo de separação reutiliza a separação de pedidos
+48.01	02.12	alias	Cadastro de certificados digitais (o do emitente fiscal é o mesmo cadastro)
+48.02	02.12	alias	Validade do certificado acompanha o cadastro
+50.06	01.19	alias	Campos personalizados é um só
+50.15	12.24	alias	Domínio personalizado é um só (loja e catálogo)
+11.18	12.24	alias	Domínio do catálogo = domínio da loja
+20.09	12.23	alias	Recuperação de carrinho é uma só
+10.28	05.08	alias	Sugestão de reposição é uma só
+38.04	05.08	reuso	Automação de reposição usa a sugestão de reposição
+38.12	05.08	reuso	Sugestão de compras por IA usaria a mesma base
+21.06	10.16	reuso	Relatórios de estoque reutilizam histórico e saldos
+34.06	10.05	alias	Transferência entre filiais = transferência entre estoques
+25.13	09.22	alias	Reajuste em massa = cadastro/alteração em massa
+46.10	09.13	alias	Etiquetas de gôndola = etiquetas de produtos
+23.02	09.13	reuso	Impressora de etiquetas é o dispositivo do recurso de etiquetas
+07.07	46.01	alias	Venda por balança usa a integração de balança etiquetadora
+09.06	46.02	alias	Produto vendido por peso = código de peso variável
+23.04	46.01	alias	Balança eletrônica (dispositivo) = integração com balança
+24.15	31.02	reuso	Departamentos (segurança) e departamentos (RH): um cadastro
+24.02	31.03	reuso	Cargos: um cadastro
+05.13	27.09	alias	Contratos de fornecimento = contratos (tipo fornecimento)
+32.11	27.13	alias	Gestão de SLA é uma só
+33.06	27.03	alias	Assinatura eletrônica é uma só
+48.04	27.03	reuso	Assinatura digital (ICP) usa o recurso de assinatura com certificado
+50.13	24.09	alias	Configuração de aprovações = aprovação de operações
+32.07	24.09	reuso	Fluxos de aprovação usam o mesmo motor de aprovação
+50.11	04.25	reuso	Numerações gerais e séries fiscais: mesmo numerador (src/lib/core/numbering.ts)
+50.10	24.24	alias	Configuração de notificações é uma só
+43.12	06.13	alias	Metas individuais = metas comerciais por vendedor
+43.08	06.12	reuso	Comissão por representante reutiliza o motor de comissões
+43.09	06.12	reuso	Comissão por produto reutiliza o motor de comissões
+43.10	06.12	reuso	Comissão por recebimento reutiliza o motor de comissões
+21.12	06.12	reuso	Relatório de comissões vem da apuração de comissões
+10.11	10.10	reuso	Validade é atributo do lote
+46.03	10.10	reuso	Perecíveis usam lotes e validade
+10.29	10.10	reuso	FEFO usa lotes e validade
+16.14	10.26	reuso	Rastreabilidade produtiva usa a rastreabilidade de estoque
+14.29	46.02	reuso	Buffet por peso usa o código de peso variável
+08.06	20.22	reuso	Vale-troca é um voucher de crédito
+08.07	18.23	alias	Crédito para cliente = crédito de clientes
+20.06	20.22	reuso	Vale-presente é um tipo de voucher
+06.25	12.11	reuso	Central omnichannel agrega pedidos de todos os canais
+35.13	12.12	reuso	Sincronização de estoque com marketplaces usa a mesma regra de disponibilidade
+35.12	12.13	reuso	Sincronização de preços com marketplaces usa a mesma resolução de preço
+03.13	03.02	reuso	CT-e recebido usa a importação de XML
+41.14	17.19	reuso	Etiquetas logísticas são parte da expedição
+07.19	18.22	reuso	Fechamento consolidado do PDV alimenta o fechamento financeiro (são distintos: físico x financeiro)
+12.33	08.14	alias	Arrependimento/devolução on-line é a devolução de vendas on-line

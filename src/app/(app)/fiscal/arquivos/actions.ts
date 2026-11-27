@@ -9,7 +9,7 @@ const PATHS = ["/fiscal/arquivos"];
 
 /** Gera o arquivo fiscal do período (guardado em Arquivos, com download e histórico). */
 export async function generateFiscalFileAction(fd: FormData) {
-  return runAction({ module: "fiscal", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "fiscal.sped", action: "generateFiscalFileAction", module: "fiscal", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "arquivosFiscais");
     const raw: Record<string, string> = {};
     for (const k of ["arquivo", "periodo", "filial", "finalidade", "inventario", "saldo", "recibo"]) raw[k] = fstr(fd, k);

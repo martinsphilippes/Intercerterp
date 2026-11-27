@@ -3,7 +3,7 @@ vi.mock("server-only", () => ({}));
 
 import { NextRequest } from "next/server";
 import { freshStore } from "./helpers";
-import { listAll } from "@/lib/db";
+import { detId, listAll } from "@/lib/db";
 import type { Store } from "@/lib/db/types";
 import { systemCtx } from "@/lib/core/ctx";
 import { addDays, monthStart, startOfLocalDay, today } from "@/lib/dates";
@@ -428,6 +428,42 @@ describe("Torre — acesso", () => {
     expect(bad.body.erro.campos.map((c: any) => c.campo).sort()).toEqual(["limite", "situacao"]);
     expect((await get("vendas/serie", { ...P, granularidade: "semana" })).status).toBe(422);
     expect((await get("skus", { ...P, limite: "501" })).status).toBe(422);
+  });
+});
+
+describe("Torre — respeita o contrato (correção 6)", () => {
+  it("módulo não contratado: bloco null no resumo, rota própria 409 modulo_nao_contratado, meta com os contratados", async () => {
+    const before = (await store.get("companies", other.id))!;
+    // contrato do provisionamento sem comércio digital, sem compras e sem fiscal
+    await store.update("companies", other.id, { contract: { modules: ["pdv", "vendas", "estoque", "financeiro"] } });
+    try {
+      const r = await get("resumo", P, { company: other.id });
+      expect(r.status).toBe(200);
+      expect(r.body.meta.modulosContratados).toEqual(["estoque", "financeiro", "pdv", "vendas"]);
+      expect(r.body.comercioDigital).toBeNull();
+      expect(r.body.compras).toBeNull();
+      expect(r.body.fiscal).toBeNull();
+      expect(r.body.vendas).not.toBeNull();
+      expect(r.body.vendas.porCanal.comercioDigital ?? null).toBeNull();
+      expect(r.body.estoque).not.toBeNull();
+      for (const route of ["comercio-digital", "compras", "fiscal"] as RouteName[]) {
+        const x = await get(route, P, { company: other.id });
+        expect(x.status, route).toBe(409);
+        expect(x.body.erro.codigo).toBe("modulo_nao_contratado");
+      }
+      const ad = await get("adocao", {}, { company: other.id });
+      expect(ad.body.atividadeOperacional.ultimoPedidoOnlineEm).toBeNull(); // a loja da outra existe, mas não foi contratada
+      expect(ad.body.pendenciasIntegracao.documentosFiscais).toBeNull();
+      // licença v2 aplicada passa a ser a referência: comércio digital licenciado volta a aparecer
+      await store.create("company_licenses", { companyId: other.id, licenseVersion: 3, snapshot: { items: [{ code: "07.01", state: "active" }, { code: "12.01", state: "suspended" }] }, preservedAccess: [] }, detId("license", other.id));
+      const lic = await get("resumo", P, { company: other.id });
+      expect(lic.body.meta.modulosContratados).toEqual(["comercio_digital", "pdv"]); // suspenso continua contratado
+      expect(lic.body.comercioDigital).not.toBeNull();
+      expect(lic.body.estoque).toBeNull();
+    } finally {
+      await store.update("companies", other.id, { contract: before.contract ?? null });
+      await store.delete("company_licenses", detId("license", other.id)).catch(() => undefined);
+    }
   });
 });
 

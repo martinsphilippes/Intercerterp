@@ -10,7 +10,9 @@ import type { Doc, ListOptions, ListResult, Store, WriteGuard } from "./types";
  * 2. Memória curta entre requisições (15 s, por instância) só para cadastros quase estáticos usados em toda tela.
  *    Empresas e perfis ficam FORA dela (multiempresa): situação da empresa (suspensão, somente leitura), contrato e
  *    permissões decidem o acesso e precisam valer na hora em todas as instâncias — uma suspensão feita pelo Interos
- *    numa instância não pode esperar 15 s para valer nas outras. Dentro da requisição continuam memorizados.
+ *    numa instância não pode esperar 15 s para valer nas outras. Pelo mesmo motivo, módulos e licença
+ *    (`company_modules`, `company_licenses`) também ficam fora: uma revogação vale na hora. Dentro da requisição
+ *    continuam memorizados.
  *
  * Qualquer gravação (create/update/delete/increment/transação) limpa a memória da requisição e as entradas da tabela
  * alterada; os resultados são entregues como cópias, para que um chamador não altere o objeto de outro.

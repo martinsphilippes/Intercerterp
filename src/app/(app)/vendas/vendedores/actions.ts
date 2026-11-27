@@ -23,7 +23,7 @@ function parse(fd: FormData): SellerInput {
 
 export async function saveSellerAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "sales", op: id ? "edit" : "create", revalidate: ["/vendas/vendedores", "/pdv"] }, async (s) => {
+  return runAction({ entitlement: "vendas.comissoes", action: "saveSellerAction", module: "sales", op: id ? "edit" : "create", revalidate: ["/vendas/vendedores", "/pdv"] }, async (s) => {
     const input = parse(fd);
     const doc = id ? await updateSeller(s.ctx, id, input) : await createSeller(s.ctx, { ...input, idemKey: fstr(fd, "_idem") || undefined });
     return { ok: true as const, data: { id: doc.id }, message: id ? "Vendedor atualizado." : "Vendedor cadastrado (sem acesso ao sistema).", redirect: "/vendas/vendedores" };
@@ -31,7 +31,7 @@ export async function saveSellerAction(fd: FormData) {
 }
 
 export async function setSellerActiveAction(id: string, active: boolean, _fd: FormData) {
-  return runAction({ module: "sales", op: "edit", revalidate: ["/vendas/vendedores", "/pdv"] }, async (s) => {
+  return runAction({ entitlement: "vendas.comissoes", action: "setSellerActiveAction", module: "sales", op: "edit", revalidate: ["/vendas/vendedores", "/pdv"] }, async (s) => {
     await setSellerActive(s.ctx, id, active);
     return { ok: true as const, message: active ? "Vendedor reativado." : "Vendedor inativado." };
   });

@@ -3,7 +3,7 @@ import { listAll } from "@/lib/db";
 import type { Doc, Store } from "@/lib/db/types";
 import { systemCtx, type Ctx } from "@/lib/core/ctx";
 import { DEFAULT_TZ, dayRange, diffDays } from "@/lib/dates";
-import { validationError, type FieldIssue } from "@/lib/service/errors";
+import { ServiceError, validationError, type FieldIssue } from "@/lib/service/errors";
 import type { ServiceCall } from "@/lib/service/http";
 import { linkedCompany } from "@/domain/tenancy/provisioning";
 import { MAX_PERIOD_DAYS, type ReportScope } from "@/domain/reports";
@@ -42,6 +42,8 @@ export interface TowerMeta {
   fuso: string;
   geradoEm: string;
   versaoIndicadores: string;
+  /** módulos amplos contratados (null = empresa sem contrato registrado: tudo) */
+  modulosContratados: string[] | null;
 }
 
 export interface TowerPage {
@@ -66,6 +68,8 @@ export interface TowerRequest<E = Record<string, never>> {
   page: TowerPage | null;
   extra: E;
   meta: TowerMeta;
+  /** módulos amplos contratados (null = tudo: empresa sem contrato registrado) */
+  areas: Set<string> | null;
 }
 
 export interface OpenOptions<E> {
@@ -77,6 +81,8 @@ export interface OpenOptions<E> {
   paged?: boolean;
   /** parâmetros próprios da rota (validados junto com os comuns: todos os problemas voltam numa única resposta 422) */
   parse?: (q: URLSearchParams, issues: FieldIssue[]) => E;
+  /** módulos amplos de que a consulta depende (basta um contratado); sem nenhum: 409 modulo_nao_contratado */
+  requires?: string[];
 }
 
 function validIsoDate(v: string): boolean {
@@ -202,9 +208,15 @@ export async function openTower<E = Record<string, never>>(call: ServiceCall, op
   }
   if (issues.length) throw validationError(issues);
   const branchIds = units;
+  // o que a empresa contratou (correção 6): a Torre não mostra dados de módulo não contratado
+  const { contractedAreas } = await import("../tenancy/contracted");
+  const areas = await contractedAreas(call.store, company);
+  if (opts.requires && !opts.requires.some((a) => !areas || areas.has(a)))
+    throw new ServiceError(409, "modulo_nao_contratado", `A empresa não contratou ${opts.requires.map((a) => AREA_LABEL[a] ?? a).join(" nem ")}: a consulta não se aplica.`, { modulos: opts.requires });
   return {
     company,
     companyId,
+    areas,
     ctx,
     store: ctx.store,
     branches,
@@ -220,9 +232,16 @@ export async function openTower<E = Record<string, never>>(call: ServiceCall, op
       fuso: DEFAULT_TZ,
       geradoEm: new Date().toISOString(),
       versaoIndicadores: INDICATORS_VERSION,
+      // módulos amplos contratados (null = empresa sem contrato registrado: tudo)
+      modulosContratados: areas ? [...areas].sort() : null,
     },
   };
 }
+
+const AREA_LABEL: Record<string, string> = {
+  pdv: "PDV e caixa", vendas: "Vendas", estoque: "Estoque", compras: "Compras", financeiro: "Financeiro", fiscal: "Fiscal",
+  relatorios: "Relatórios", comercio_digital: "Comércio digital", gestao_contabil: "Gestão contábil", rede_certificacao: "Rede de certificação",
+};
 
 /** Recorte da base comercial (`loadFacts`): empresa, filiais do filtro (null = todas) e período. */
 export function reportScope(t: TowerRequest<any>): ReportScope {

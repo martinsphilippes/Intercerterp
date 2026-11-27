@@ -30,7 +30,8 @@ interface de serviço usam esse Store.
 | `create` | Injeta `companyId`; recusa `companyId` de outra empresa |
 | `update`/`delete`/`increment` | Condição de dono **dentro do SQL** (`WriteGuard`, `AND "companyId" = $x`), sem leitura extra e sem janela de corrida |
 | Identidades | `users`: visíveis por vínculo (`companyIds` contém a empresa). `companies`: só a própria. Chamados públicos: só para a plataforma. |
-| Tabelas da plataforma | `service_requests`, `tenant_provisionings`, `company_relations`, `tenancy_reviews`, `tenancy_violations` e `migration_runs`: **nenhum** Store restrito lê ou grava nelas |
+| Tabelas da plataforma | `service_requests`, `tenant_provisionings`, `company_relations`, `tenancy_reviews`, `tenancy_violations`, `migration_runs`, `module_operations` e `interos_events`: **nenhum** Store restrito lê ou grava nelas |
+| Contrato da empresa | `company_modules`, `module_changes`, `module_baselines`, `company_licenses` e `license_history`: a empresa **lê** o próprio contrato (menu, telas, limites, histórico), mas **nunca grava**. Só a plataforma, a partir do Interos, altera. |
 
 **Portas explícitas:** `unscoped(store)` existe para fluxos que atravessam empresas de propósito, com a autorização
 conferida antes. Exemplos:

@@ -1042,6 +1042,13 @@ export async function createDocument(ctx: Ctx, input: CreateDocInput) {
   if (status === "queued" && !contingency) await enqueue(ctx.store, { type: "fiscal.transmit", payload: { documentId: doc.id, branchId: input.branchId }, dedupeKey: `fiscal-transmit:${doc.id}:1`, companyId: ctx.companyId });
   if (status === "pending") await raiseFiscalIssue(ctx, doc, statusMessage!);
   await syncOrigin(ctx, doc);
+  // limite contratado de documentos fiscais: decisão do titular — nunca bloqueia a emissão legal, só avisa o Interos
+  try {
+    const { noteFiscalDocumentUsage } = await import("../licensing/limits");
+    await noteFiscalDocumentUsage(ctx.store, ctx.companyId);
+  } catch (e) {
+    console.error("[licença] aviso de limite fiscal não registrado", e);
+  }
   return doc;
 }
 

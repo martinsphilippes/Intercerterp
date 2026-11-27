@@ -17,7 +17,7 @@ function branchCtx(s: SessionInfo, branchId: string) {
 }
 
 export async function createDraftsAction(fd: FormData) {
-  return runAction({ module: "purchases", op: "create", revalidate: ["/compras/reposicao", "/compras/pedidos"] }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "createDraftsAction", module: "purchases", op: "create", revalidate: ["/compras/reposicao", "/compras/pedidos"] }, async (s) => {
     const ctx = branchCtx(s, fstr(fd, "branchId"));
     const lines: DraftLine[] = fjson(fd, "lines", []);
     const orders = await createDraftsFromReplenishment(ctx, lines, { idemKey: fstr(fd, "_idem"), coverageDays: fint(fd, "coverageDays") || undefined });
@@ -27,7 +27,7 @@ export async function createDraftsAction(fd: FormData) {
 
 /** Cria cotação com os itens selecionados e todos os fornecedores vinculados a eles. */
 export async function quotationFromReplenishmentAction(fd: FormData) {
-  return runAction({ module: "purchases", op: "create", revalidate: ["/compras/cotacoes"] }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "quotationFromReplenishmentAction", module: "purchases", op: "create", revalidate: ["/compras/cotacoes"] }, async (s) => {
     const ctx = branchCtx(s, fstr(fd, "branchId"));
     const lines: DraftLine[] = fjson(fd, "lines", []);
     const valid = lines.filter((l) => l.qty > 0);

@@ -32,7 +32,7 @@ function parse(fd: FormData): OrderInput & { revisionReason?: string | null } {
 export async function saveOrderAction(fd: FormData) {
   const id = fopt(fd, "id");
   const intent = fstr(fd, "intent") || "draft";
-  return runAction({ module: "purchases", op: id ? "edit" : "create", revalidate: ["/compras/pedidos"], requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "saveOrderAction", module: "purchases", op: id ? "edit" : "create", revalidate: ["/compras/pedidos"], requireBranch: true }, async (s) => {
     const input = parse(fd);
     if (!input.supplierId) return { ok: false as const, error: "Selecione o fornecedor." };
     if (id) {
@@ -49,21 +49,21 @@ export async function saveOrderAction(fd: FormData) {
 }
 
 export async function submitOrderAction(id: string) {
-  return runAction({ module: "purchases", op: "edit", revalidate: [`/compras/pedidos/${id}`, "/compras/aprovacoes"], requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "submitOrderAction", module: "purchases", op: "edit", revalidate: [`/compras/pedidos/${id}`, "/compras/aprovacoes"], requireBranch: true }, async (s) => {
     const req = await submitForApproval(s.ctx, [id]);
     return { ok: true as const, message: req.status === "approved" ? `Autoaprovado pela política (solicitação nº ${req.number}).` : `Enviado para análise — solicitação nº ${req.number}.` };
   });
 }
 
 export async function cancelOrderAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "cancelOrderAction", module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
     await cancelOrder(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Pedido cancelado." };
   });
 }
 
 export async function closeBalanceAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`] }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "closeBalanceAction", module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`] }, async (s) => {
     await closeOrderBalance(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Saldo pendente encerrado." };
   });
@@ -71,7 +71,7 @@ export async function closeBalanceAction(id: string, fd: FormData) {
 
 export async function registerSentAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "registerSentAction", module: "purchases", op: "edit", requireBranch: true, revalidate: [`/compras/pedidos/${id}`, "/compras/pedidos"] }, async (s) => {
     const method = (fstr(fd, "method") as "manual" | "email") || "manual";
     const o = await registerOrderSent(s.ctx, id, { method, channel: fopt(fd, "channel"), contact: fopt(fd, "contact"), to: fopt(fd, "to"), sentDate: fopt(fd, "sentDate"), notes: fopt(fd, "notes") });
     return { ok: true as const, message: method === "email" ? `Pedido enviado por e-mail para ${o.sentInfo?.to} (${o.sentInfo?.channel}).` : "Envio registrado." };
@@ -80,7 +80,7 @@ export async function registerSentAction(fd: FormData) {
 
 /** Itens com sugestão de reposição cujo fornecedor preferencial é o informado (adicionar ao pedido sem redigitar). */
 export async function suggestionsForSupplierAction(supplierId: string) {
-  return runAction({ module: "purchases", requireBranch: true }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "suggestionsForSupplierAction", module: "purchases", requireBranch: true }, async (s) => {
     const rows = await computeBranchReplenishment(s.ctx.store, s.ctx.companyId, { branchId: s.ctx.branchId!, supplierId });
     return rows
       .filter((r) => r.suggested > 0 && r.supplierId === supplierId)
@@ -90,7 +90,7 @@ export async function suggestionsForSupplierAction(supplierId: string) {
 
 /** Gera cotação com os itens do formulário: fornecedor escolhido + demais fornecedores vinculados aos produtos. */
 export async function quotationFromFormAction(fd: FormData) {
-  return runAction({ module: "purchases", op: "create", requireBranch: true, revalidate: ["/compras/cotacoes"] }, async (s) => {
+  return runAction({ entitlement: "compras.cotacoes", action: "quotationFromFormAction", module: "purchases", op: "create", requireBranch: true, revalidate: ["/compras/cotacoes"] }, async (s) => {
     const items: Array<{ skuId: string; qty: number }> = fjson(fd, "items", []);
     if (!items.length) return { ok: false as const, error: "Inclua produtos antes de gerar a cotação." };
     const supplierId = fopt(fd, "supplierId");
@@ -107,7 +107,7 @@ export async function quotationFromFormAction(fd: FormData) {
 /** §44 — registra/atualiza o pedido como em trânsito (despacho, transportadora, rastreio, previsão de entrega). */
 export async function registerTransitAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "purchases", op: "edit", requireBranch: true, revalidate: ["/compras/pedidos", `/compras/pedidos/${id}`] }, async (s) => {
+  return runAction({ entitlement: "compras.pedidos", action: "registerTransitAction", module: "purchases", op: "edit", requireBranch: true, revalidate: ["/compras/pedidos", `/compras/pedidos/${id}`] }, async (s) => {
     const o = await registerOrderInTransit(s.ctx, id, { shippedDate: fopt(fd, "shippedDate"), carrier: fopt(fd, "carrier"), tracking: fopt(fd, "tracking"), eta: fopt(fd, "eta"), notes: fopt(fd, "notes") });
     return { ok: true as const, message: `Pedido nº ${o.number} em trânsito${o.transitInfo?.eta ? ` — previsão ${String(o.transitInfo.eta).split("-").reverse().join("/")}` : ""}.` };
   });

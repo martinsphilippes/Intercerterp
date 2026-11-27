@@ -39,7 +39,7 @@ function parse(fd: FormData): CustomerInput {
 
 export async function saveCustomerAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "customers", op: id ? "edit" : "create", revalidate: ["/clientes"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.clientes", action: "saveCustomerAction", module: "customers", op: id ? "edit" : "create", revalidate: ["/clientes"] }, async (s) => {
     const input = parse(fd);
     const idem = fstr(fd, "_idem");
     const c = id ? await updateCustomer(s.ctx, id, input) : await createCustomer(s.ctx, input, { idemKey: idem ? `ui:${idem}` : null });
@@ -49,7 +49,7 @@ export async function saveCustomerAction(fd: FormData) {
 
 /** Cadastro rápido (PDV e seletores): poucos campos, mesma identidade do cadastro completo. */
 export async function quickCustomerAction(fd: FormData) {
-  return runAction({ module: "customers", op: "create" }, async (s) => {
+  return runAction({ entitlement: "cadastros.clientes", action: "quickCustomerAction", module: "customers", op: "create" }, async (s) => {
     const personType = (fstr(fd, "personType") as "PF" | "PJ") || "PF";
     const idem = fstr(fd, "_idem");
     const c = await createCustomer(s.ctx, { personType, doc: fopt(fd, "doc"), name: fstr(fd, "name"), mobile: fopt(fd, "mobile"), email: fopt(fd, "email"), status: "active" }, { quick: true, idemKey: idem ? `ui-quick:${idem}` : null });
@@ -58,14 +58,14 @@ export async function quickCustomerAction(fd: FormData) {
 }
 
 export async function setCustomerStatusAction(id: string, status: "active" | "inactive") {
-  return runAction({ module: "customers", op: "edit", revalidate: [`/clientes/${id}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.clientes", action: "setCustomerStatusAction", module: "customers", op: "edit", revalidate: [`/clientes/${id}`] }, async (s) => {
     await setCustomerStatus(s.ctx, id, status);
     return { ok: true as const, message: status === "inactive" ? "Cliente inativado." : "Cliente reativado." };
   });
 }
 
 export async function deleteCustomerAction(id: string) {
-  return runAction({ module: "customers", op: "delete", revalidate: ["/clientes"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.clientes", action: "deleteCustomerAction", module: "customers", op: "delete", revalidate: ["/clientes"] }, async (s) => {
     await deleteCustomer(s.ctx, id);
     return { ok: true as const, message: "Cliente excluído.", redirect: "/clientes" };
   });
@@ -73,7 +73,7 @@ export async function deleteCustomerAction(id: string) {
 
 /** Consulta o documento no próprio cadastro (duplicidade) e, para CNPJ, no serviço externo configurado. */
 export async function checkDocAction(personType: "PF" | "PJ", doc: string, selfId?: string) {
-  return runAction({ module: "customers" }, async (s) => {
+  return runAction({ entitlement: "cadastros.clientes", action: "checkDocAction", module: "customers" }, async (s) => {
     const { normalizeDoc, findCustomerByDoc } = await import("@/domain/customers");
     const d = normalizeDoc(personType, doc);
     if (!d) return { local: null, external: null };
@@ -85,5 +85,5 @@ export async function checkDocAction(personType: "PF" | "PJ", doc: string, selfI
 }
 
 export async function lookupCnpjAction(cnpj: string) {
-  return runAction({ module: "customers" }, async () => ({ result: await lookupCnpj(cnpj) }));
+  return runAction({ entitlement: "cadastros.clientes", action: "lookupCnpjAction", module: "customers" }, async () => ({ result: await lookupCnpj(cnpj) }));
 }

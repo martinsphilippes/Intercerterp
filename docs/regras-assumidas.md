@@ -1189,3 +1189,56 @@ plataforma. Fora dela, não podem ser concedidas e são mascaradas.
 **Credenciais de demonstração só no ambiente de teste** (`ERP_AMBIENTE`). A publicação atual continua em `teste`
 porque o titular decidiu manter o acesso rápido na tela de login até ordem em contrário (§47). Uma produção com
 empresas contratantes reais deve rodar em `producao`, e essa troca depende do titular.
+
+## 51. Habilitação de módulos por empresa contratante e integração com o Interos [Decisão]
+
+- **Três camadas independentes.** A habilitação (contrato, `company_modules`; o ERP é a fonte oficial e o Interos altera), a configuração (`feature.<chave>` e pré-requisitos) e a permissão de perfil. O isolamento continua o mesmo. A interface só mostra um recurso quando habilitação e configuração valem; as regras de domínio seguem só a configuração.
+- **Catálogo único** em `src/lib/modules/catalog.ts` (versão 1.0.0, chaves estáveis). O JSON `docs/modulos/catalogo-modulos-erp-v1.json` é gerado dele, e o teste confere que está em dia.
+- **Toda server action declara o módulo** (`runAction({ entitlement, action })`). Toda tela, rota, exportação, rotina, tarefa, recurso e permissão tem dono no catálogo. Os testes recusam o que não tiver.
+- **Migração aditiva.** Toda empresa existente recebe uma linha de base em modo `legacy` (comportamento anterior). O controle só passa a valer por decisão explícita, em dois passos: `shadow` e depois `enforced`. Passar a `enforced` exige revisar as divergências da linha de base. Empresa nova nasce `enforced` com os módulos selecionados.
+- **Desligamento.** Pode ser `immediate`, `drain` (conclui pendências e desliga sozinho, sem interromper obrigações mesmo depois do prazo) ou `scheduled` (lotes). Nada é apagado, e reativar reaproveita a configuração. Tarefas da fila, avisos do gateway e rotinas que encerram obrigações nunca são bloqueados.
+- **Revogação.** Na hora, na instância que aplicou; em até 15 segundos nas demais (memória curta por empresa).
+- **Restauração de backup** não altera a habilitação.
+- Detalhes em `docs/modulos/README.md`. O contrato da integração está em `docs/modulos/contrato-interos-erp-v1.md`.
+
+## 52. Licenciamento comercial pelo Interos (contrato v2) [Decisão do titular, 26/11/2026]
+
+- O Interos envia o **retrato completo e versionado** da licença: `PUT /api/interos/v2/companies/{id}/license`, assinado com HMAC e protegido por `X-Interos-Event-Id`.
+- **Versão menor ou igual à aplicada:** é ignorada (`stale`). **Mesma versão repetida:** devolve `duplicate`.
+- **Datas resolvidas localmente pela rotina `licenses.maintenance`:** fim de teste, ativação e suspensão programadas, vigência.
+- **Carências:** 7 dias depois do vencimento da vigência (depois, somente leitura) e 7 dias depois do fim do teste (depois, suspenso).
+- **Homologação:** unidade dependente de integração externa ou em desenvolvimento não é ativada para empresa nova (`not_homologated`). Quem já tinha mantém o acesso (`preserved_access`).
+  - Consequência: a Loja virtual depende de NF-e e também aguarda a homologação para vendas novas.
+- **Limites contratados:** usuários, dispositivos e filiais barram só novos cadastros. Documentos fiscais nunca bloqueiam: só geram o evento `limit.reached`.
+- **Exibição do não contratado:** oculto para os clientes atuais e "oportunidade" (Solicitar contratação) para empresas novas. O Interos pode fixar `display`.
+- **Reconciliação:** o ERP consulta o Interos todo dia (`INTEROS_LICENSE_URL`) e o Interos reenvia quando diverge.
+- **Retrato envelhecido:** sem retrato novo há mais de 3 dias, gera o evento `sync.stale`, e a última licença válida continua valendo.
+- **Migração sem bloqueio:** sem retrato, a empresa segue o runtime atual. O controle só passa a bloquear quando o retrato traz `controlMode: "enforced"`.
+- **Cargo, departamento e função** são atributos do usuário. A regra `access.attributeRoles` aplica o perfil quando nenhum é escolhido; o perfil continua sendo o único contêiner de permissões.
+
+## 53. Integração Interos unificada: uma versão, um esquema de credencial, um vocabulário [Decisão, 26/11/2026]
+
+Resposta às pendências do Interos (`docs/interos/pendencias-integracao.md`).
+
+- **Uma versão.** Provisionamento, Torre, módulos (v1) e licenças (v2) no mesmo ERP e endereço (`/api/interos`).
+- **Um esquema de credencial** (`docs/interos/credenciais.md`):
+  - registro único `INTEROS_CREDENCIAIS`, só hashes, e token `Bearer <id>.<segredo>` nas três APIs;
+  - famílias de escopo separadas: uma credencial que misture famílias é recusada inteira;
+  - `empresas` restringe a credencial ao piloto em todas as APIs;
+  - `assinatura` (HMAC) obrigatória para gravar licença;
+  - rotação com o novo e o antigo valendo juntos.
+- **Contrato da empresa no isolamento.** Os registros de módulos e licença (`company_modules`, `module_changes`,
+  `module_baselines`, `company_licenses`, `license_history`) são **só leitura** para a empresa (`CONTRACT_READONLY`):
+  só a plataforma grava. `module_operations` e `interos_events` são da plataforma.
+- **Vocabulário único.** As unidades v2 são a referência. O módulo amplo do provisionamento e a chave v1 são
+  traduções, publicadas no catálogo. Empresa criada pelo provisionamento nasce com a habilitação traduzida (só
+  vendáveis). Com licença aplicada, o contrato amplo é derivado dela e `PUT /modulos` responde `409 licenca_governa`.
+- **Transições na hora.** Teste, carência, agendamento, vigência e operações agendadas valem na primeira requisição
+  depois do instante, inclusive nas listas que o Interos lê a cada 5 minutos. A rotina diária é rede de segurança
+  (rotina de hora em hora depende do plano da Vercel; a aplicação no acesso não depende).
+- **Teto da empresa sobre tudo.** Suspensa, somente leitura ou vigência vencida desligam também as unidades
+  preservadas, que voltam na reativação.
+- **Obrigação declarada.** As devoluções no prazo do CDC (90 dias) seguram o desligamento: função opcional em conclusão
+  continua mesmo com o pai desligado.
+- **LGPD.** O Interos recebe quem pediu uma contratação como identificador pseudônimo e perfil, nunca o nome.
+- **Pendente do titular:** validar as 67 unidades do catálogo v2 para publicar a versão `2.0.0` (sem "proposta").

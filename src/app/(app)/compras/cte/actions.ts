@@ -9,7 +9,7 @@ const PATHS = ["/compras/cte", "/compras/recebimentos", "/financeiro/pagar", "/f
 
 /** Importa o XML do CT-e de frete, vincula aos recebimentos e gera a conta a pagar à transportadora. */
 export async function importCteAction(fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "compras.cte", action: "importCteAction", module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
     await requireFeature(s, "cteEntrada");
     const file = fd.get("xml");
     if (!(file instanceof File) || file.size === 0) return { ok: false as const, error: "Selecione o arquivo XML do CT-e." };

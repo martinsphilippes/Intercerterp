@@ -70,7 +70,7 @@ function parseProduct(fd: FormData): ProductInput {
 }
 
 export async function createProductAction(fd: FormData) {
-  return runAction({ module: "products", op: "create", revalidate: ["/produtos"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "createProductAction", module: "products", op: "create", revalidate: ["/produtos"] }, async (s) => {
     const input = { ...parseProduct(fd), draft: fstr(fd, "status") === "draft" };
     const axes = fjson<Axis[]>(fd, "axes", []);
     const variants = fjson<VariantInput[]>(fd, "variants", []);
@@ -102,7 +102,7 @@ export async function createProductAction(fd: FormData) {
 export async function updateProductAction(fd: FormData) {
   const id = fstr(fd, "id");
   const section = (fstr(fd, "section") as "general" | "fiscal") || "general";
-  return runAction({ module: "products", op: "edit", revalidate: ["/produtos", `/produtos/${id}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "updateProductAction", module: "products", op: "edit", revalidate: ["/produtos", `/produtos/${id}`] }, async (s) => {
     const input = parseProduct(fd);
     const patch: Partial<ProductInput> =
       section === "fiscal"
@@ -114,14 +114,14 @@ export async function updateProductAction(fd: FormData) {
 }
 
 export async function setProductStatusAction(id: string, active: boolean) {
-  return runAction({ module: "products", op: "edit", revalidate: ["/produtos", `/produtos/${id}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "setProductStatusAction", module: "products", op: "edit", revalidate: ["/produtos", `/produtos/${id}`] }, async (s) => {
     await setProductStatus(s.ctx, id, active);
     return { ok: true as const, message: active ? "Produto reativado." : "Produto inativado (histórico preservado)." };
   });
 }
 
 export async function deleteProductAction(id: string) {
-  return runAction({ module: "products", op: "delete", revalidate: ["/produtos"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "deleteProductAction", module: "products", op: "delete", revalidate: ["/produtos"] }, async (s) => {
     await deleteProduct(s.ctx, id);
     return { ok: true as const, message: "Produto excluído.", redirect: "/produtos" };
   });
@@ -129,7 +129,7 @@ export async function deleteProductAction(id: string) {
 
 export async function uploadImageAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${id}`, "/produtos"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "uploadImageAction", module: "products", op: "edit", revalidate: [`/produtos/${id}`, "/produtos"] }, async (s) => {
     const file = fd.get("image");
     if (!(file instanceof File) || file.size === 0) return { ok: false as const, error: "Escolha uma imagem." };
     await setProductImage(s.ctx, id, { name: file.name, mime: file.type, data: Buffer.from(await file.arrayBuffer()) });
@@ -138,7 +138,7 @@ export async function uploadImageAction(fd: FormData) {
 }
 
 export async function removeImageAction(id: string) {
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${id}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "removeImageAction", module: "products", op: "edit", revalidate: [`/produtos/${id}`] }, async (s) => {
     await removeProductImage(s.ctx, id);
     return { ok: true as const, message: "Imagem removida." };
   });
@@ -146,14 +146,14 @@ export async function removeImageAction(id: string) {
 
 export async function saveVariantsAction(fd: FormData) {
   const id = fstr(fd, "productId");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${id}`, "/produtos"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "saveVariantsAction", module: "products", op: "edit", revalidate: [`/produtos/${id}`, "/produtos"] }, async (s) => {
     const r = await saveVariants(s.ctx, id, { axes: fjson<Axis[]>(fd, "axes", []), variants: fjson<VariantInput[]>(fd, "variants", []) });
     return { ok: true as const, message: `Variações salvas: ${r.created} nova(s), ${r.updated} alterada(s)${r.removed ? `, ${r.removed} SKU simples retirado` : ""}.` };
   });
 }
 
 export async function removeVariantAction(productId: string, skuId: string) {
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "removeVariantAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     const r = await removeVariant(s.ctx, skuId);
     return { ok: true as const, message: r.deleted ? "Variação excluída (sem uso)." : "Variação inativada (possui histórico)." };
   });
@@ -161,7 +161,7 @@ export async function removeVariantAction(productId: string, skuId: string) {
 
 export async function saveCostsAction(fd: FormData) {
   const productId = fstr(fd, "productId");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "saveCostsAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     const r = await saveSkuCosts(s.ctx, fstr(fd, "skuId"), {
       costAcquisition: fint(fd, "costAcquisition"),
       additionalCosts: fjson<AdditionalCost[]>(fd, "additionalCosts", []),
@@ -174,7 +174,7 @@ export async function saveCostsAction(fd: FormData) {
 
 export async function savePriceAction(fd: FormData) {
   const productId = fstr(fd, "productId");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`, "/produtos"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "savePriceAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`, "/produtos"] }, async (s) => {
     const skuIds = fd.getAll("skuIds").map(String).filter(Boolean);
     const id = fopt(fd, "id");
     const base = {
@@ -200,7 +200,7 @@ export async function savePriceAction(fd: FormData) {
 }
 
 export async function deletePriceAction(productId: string, priceId: string) {
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "deletePriceAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     await deletePrice(s.ctx, priceId);
     return { ok: true as const, message: "Preço removido (registrado no histórico)." };
   });
@@ -208,7 +208,7 @@ export async function deletePriceAction(productId: string, priceId: string) {
 
 export async function saveStockParamsAction(fd: FormData) {
   const productId = fstr(fd, "productId");
-  return runAction({ revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "saveStockParamsAction", revalidate: [`/produtos/${productId}`] }, async (s) => {
     await saveStockParams(s.ctx, {
       warehouseId: fstr(fd, "warehouseId"),
       skuId: fstr(fd, "skuId"),
@@ -224,7 +224,7 @@ export async function saveStockParamsAction(fd: FormData) {
 
 export async function initialBalanceAction(fd: FormData) {
   const productId = fstr(fd, "productId");
-  return runAction({ revalidate: [`/produtos/${productId}`, "/estoque/movimentos"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "initialBalanceAction", revalidate: [`/produtos/${productId}`, "/estoque/movimentos"] }, async (s) => {
     await postInitialBalance(s.ctx, { warehouseId: fstr(fd, "warehouseId"), skuId: fstr(fd, "skuId"), qty: fint(fd, "qty"), unitCost: optInt(fd, "unitCost") });
     return { ok: true as const, message: "Saldo inicial lançado (movimento identificado)." };
   });
@@ -232,14 +232,14 @@ export async function initialBalanceAction(fd: FormData) {
 
 export async function saveConversionAction(fd: FormData) {
   const productId = fstr(fd, "productId");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "saveConversionAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     await saveUnitConversion(s.ctx, { productId, fromUnit: fstr(fd, "fromUnit"), toUnit: fstr(fd, "toUnit"), factor: fint(fd, "factor") });
     return { ok: true as const, message: "Conversão salva." };
   });
 }
 
 export async function deleteConversionAction(productId: string, id: string) {
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "deleteConversionAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     await deleteUnitConversion(s.ctx, id);
     return { ok: true as const, message: "Conversão removida." };
   });
@@ -247,7 +247,7 @@ export async function deleteConversionAction(productId: string, id: string) {
 
 /** Controle de lote e validade do produto (EST-02; exige o recurso `feature.lotes` para ligar). */
 export async function setLotControlAction(id: string, on: boolean) {
-  return runAction({ module: "products", op: "edit", revalidate: ["/produtos", `/produtos/${id}`, "/estoque/validades"] }, async (s) => {
+  return runAction({ entitlement: "estoque.lotes", action: "setLotControlAction", module: "products", op: "edit", revalidate: ["/produtos", `/produtos/${id}`, "/estoque/validades"] }, async (s) => {
     const { setLotControl } = await import("@/domain/lots");
     await setLotControl(s.ctx, id, on);
     return { ok: true as const, message: on ? "Controle de lote e validade ligado. O saldo atual fica “sem lote” até ser classificado (inventário por lote)." : "Controle de lote e validade desligado." };
@@ -257,7 +257,7 @@ export async function setLotControlAction(id: string, on: boolean) {
 /** Reforma tributária do produto (FIS-19): CST e cClassTrib do IBS/CBS próprios (exige `feature.reformaTributaria`). */
 export async function saveProductReformAction(fd: FormData) {
   const id = fstr(fd, "productId");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${id}`] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "saveProductReformAction", module: "products", op: "edit", revalidate: [`/produtos/${id}`] }, async (s) => {
     const { requireFeature } = await import("@/lib/server/features");
     await requireFeature(s, "reformaTributaria");
     const { saveProductReform } = await import("@/domain/products");
@@ -269,15 +269,15 @@ export async function saveProductReformAction(fd: FormData) {
 // ───────────────────────────── Importação CSV
 
 export async function analyzeCsvAction(text: string) {
-  return runAction({ module: "products", op: "create" }, async () => analyzeCsv(text));
+  return runAction({ entitlement: "cadastros.produtos", action: "analyzeCsvAction", module: "products", op: "create" }, async () => analyzeCsv(text));
 }
 
 export async function previewImportAction(payload: { text: string; mapping: Record<string, string>; mode: ImportMode; matchBy: MatchBy }) {
-  return runAction({ module: "products", op: "create" }, async (s) => previewImport(s.ctx, payload));
+  return runAction({ entitlement: "cadastros.produtos", action: "previewImportAction", module: "products", op: "create" }, async (s) => previewImport(s.ctx, payload));
 }
 
 export async function runImportAction(payload: { fileName: string; text: string; mapping: Record<string, string>; mode: ImportMode; matchBy: MatchBy; idemKey: string }) {
-  return runAction({ module: "products", op: "create", revalidate: ["/produtos", "/produtos/importar"] }, async (s) => {
+  return runAction({ entitlement: "cadastros.produtos", action: "runImportAction", module: "products", op: "create", revalidate: ["/produtos", "/produtos/importar"] }, async (s) => {
     const r = await runImport(s.ctx, payload);
     return { ok: true as const, data: { id: r.id }, message: `Importação nº ${r.number} concluída.`, redirect: `/produtos/importar/${r.id}` };
   });
@@ -286,7 +286,7 @@ export async function runImportAction(payload: { fileName: string; text: string;
 // ───────────────────────────── Componentes (kits e compostos — CAD-12/13)
 
 export async function setCompositionAction(productId: string, composition: string) {
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "produtos.kits", action: "setCompositionAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     const value = composition === "kit" || composition === "composite" ? composition : null;
     await setComposition(s.ctx, productId, value);
     return { ok: true as const, message: value ? `Produto definido como ${COMPOSITION_LABEL[value].toLowerCase()}.` : "Composição removida: o produto volta a ser comum." };
@@ -295,14 +295,14 @@ export async function setCompositionAction(productId: string, composition: strin
 
 export async function saveComponentAction(fd: FormData) {
   const productId = fstr(fd, "productId");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "produtos.kits", action: "saveComponentAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     await saveComponent(s.ctx, { productId, parentSkuId: fopt(fd, "parentSkuId"), componentSkuId: fstr(fd, "componentSkuId"), qty: fint(fd, "qty"), notes: fopt(fd, "notes") });
     return { ok: true as const, message: "Componente salvo." };
   });
 }
 
 export async function removeComponentAction(productId: string, id: string) {
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
+  return runAction({ entitlement: "produtos.kits", action: "removeComponentAction", module: "products", op: "edit", revalidate: [`/produtos/${productId}`] }, async (s) => {
     await removeComponent(s.ctx, id);
     return { ok: true as const, message: "Componente removido." };
   });
@@ -310,7 +310,7 @@ export async function removeComponentAction(productId: string, id: string) {
 
 /** Pesquisa de SKUs que podem ser componentes do produto (exclui serviços, kits e o próprio produto). */
 export async function searchComponentSkusAction(q: string, productId: string) {
-  return runAction({ module: "products" }, async (s) => {
+  return runAction({ entitlement: "produtos.kits", action: "searchComponentSkusAction", module: "products" }, async (s) => {
     const term = q.trim();
     if (term.length < 2) return [];
     const store = s.ctx.store;

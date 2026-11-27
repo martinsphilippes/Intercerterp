@@ -7,7 +7,7 @@ import { PARAMS } from "./catalog";
 export async function saveParametersAction(fd: FormData) {
   const scope = fstr(fd, "scope");
   const branchId = scope && scope !== "company" ? scope : null;
-  return runAction({ module: "admin", op: "edit", revalidate: ["/administracao/parametros"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "saveParametersAction", module: "admin", op: "edit", revalidate: ["/administracao/parametros"] }, async (s) => {
     const values: Record<string, string> = {};
     for (const p of PARAMS) {
       if (!fd.has(`p.${p.key}`) && p.type !== "bool") continue;
@@ -22,7 +22,7 @@ export async function saveParametersAction(fd: FormData) {
 }
 
 export async function saveBackupScheduleAction(fd: FormData) {
-  return runAction({ module: "admin", op: "edit", revalidate: ["/administracao/backups", "/administracao/parametros"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.administracao", action: "saveBackupScheduleAction", module: "admin", op: "edit", revalidate: ["/administracao/backups", "/administracao/parametros"] }, async (s) => {
     const changed = await saveBackupSchedule(s.ctx, {
       enabled: fbool(fd, "enabled"),
       frequency: fstr(fd, "frequency") || "daily",

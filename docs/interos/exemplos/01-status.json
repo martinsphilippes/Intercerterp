@@ -22,10 +22,13 @@
       "cliente": {
         "id": "interos-prov-homolog",
         "nome": "Interos — provisionamento (homologação)",
+        "familia": "provisionamento",
         "escopos": [
           "provisionamento:leitura",
           "provisionamento:escrita"
-        ]
+        ],
+        "empresas": null,
+        "assinaturaExigida": false
       },
       "horarioServidor": "2026-11-20T12:01:00.000Z",
       "requestId": "req-exemplo-0001"

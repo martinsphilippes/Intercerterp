@@ -82,6 +82,8 @@ export const COLLECTIONS: CollectionDef[] = [
       // (status "suspended") com histórico; código de vínculo gerado pelo administrador (só o hash, uso único)
       isPlatform: bool, interosAccountId: s(100), interosLinkedAt: dt, contract: json, suspension: json, suspensionHistory: json,
       statusBeforeSuspension: s(20), linkCodeHash: s(128), linkCodeExpiresAt: dt, linkCodeCreatedBy: id(), linkCodeUsedAt: dt,
+      // hash do código já usado no vínculo: o reenvio do MESMO vínculo pela mesma conta responde 200 (idempotente)
+      linkCodeUsedHash: s(128),
     },
     indexes: [u("u_cnpj", "cnpj"), u("u_interos_account", "interosAccountId")],
   },
@@ -115,6 +117,9 @@ export const COLLECTIONS: CollectionDef[] = [
       // multiempresa: cargo e filiais por empresa (separados do perfil de acesso); sessões emitidas antes deste instante
       // deixam de valer ("encerrar todas as sessões")
       jobTitleByCompany: json, branchIdsByCompany: json, sessionsValidAfter: dt,
+      // atributos organizacionais POR EMPRESA (decisão do titular, 26/11/2026): aplicam o perfil pela regra da empresa;
+      // o perfil segue sendo o único contêiner de permissões
+      departmentByCompany: json, jobFunctionByCompany: json,
     },
     indexes: [u("u_email", "email"), k("i_login", "login"), k("i_auth", "authId")],
   },
@@ -1382,6 +1387,75 @@ export const COLLECTIONS: CollectionDef[] = [
       requestedAt: dt, providerRef: s(120), notes: s(300),
     },
     indexes: [k("i_store", "storeId")],
+  },
+  // ───────────────────────────── Habilitação de módulos por empresa (docs/modulos) — fonte oficial no ERP
+  {
+    id: "company_modules",
+    label: "Módulos habilitados da empresa (estado vigente, versão e modo de controle)",
+    // um registro por empresa (id determinístico); modules = { chave: { state, since, source, history, config, ... } }
+    fields: { companyId: id(true), mode: s(20), version: int, modules: json, baselineAt: dt, updatedBy: s(200) },
+    indexes: [u("u_company", "companyId")],
+  },
+  {
+    id: "module_changes",
+    label: "Histórico de alterações de módulos (uma linha por versão; índice único impede edição concorrente)",
+    fields: {
+      companyId: id(true), version: int, operationId: id(), actor: s(200), actorType: s(20), reason: s(500), changes: json,
+      before: json, after: json, at: dt,
+    },
+    indexes: [u("u_company_version", "companyId", "version"), k("i_operation", "operationId")],
+  },
+  {
+    id: "module_operations",
+    label: "Operações de módulos recebidas (Interos): idempotência, estado e resultado confirmado",
+    fields: {
+      companyId: id(), idempotencyKey: s(200), requestHash: s(80), clientId: s(80), kind: s(30), status: s(20), actor: s(200),
+      reason: s(500), request: json, result: json, error: json, versionBefore: int, versionAfter: int, scheduledFor: dt, finishedAt: dt,
+    },
+    indexes: [u("u_idem", "clientId", "idempotencyKey"), k("i_company", "companyId")],
+  },
+  {
+    id: "module_baselines",
+    label: "Linha de base da migração por empresa (o que estava disponível e em uso) e divergências para revisão",
+    fields: { companyId: id(true), takenAt: dt, kind: s(20), modules: json, usage: json, divergences: json, status: s(20), reviewedBy: s(200), reviewedAt: dt, notes: txt },
+    indexes: [u("u_company", "companyId")],
+  },
+  // ───────────────────────────── Licenciamento comercial (Interos, contrato v2) — retrato versionado por empresa
+  {
+    id: "company_licenses",
+    label: "Licença vigente da empresa (retrato do Interos, versão aplicada, limites, exibição e sincronização)",
+    fields: {
+      companyId: id(true), licenseVersion: int, snapshot: json, commercialStatus: s(30), display: s(20), limits: json, effective: json,
+      rejectedItems: json, warnings: json, appliedAt: dt, appliedRuntimeVersion: int, nextTransitionAt: dt, clientId: s(80),
+      lastSyncAt: dt, lastSyncResult: s(300), lastSnapshotAt: dt, staleNotifiedAt: dt, lock: int, lockedAt: dt,
+      // unidades não vendáveis que a empresa já tinha (direito preservado; o teto da empresa desliga e a reativação devolve)
+      preservedAccess: json,
+      // transições locais (fim de teste, agendamentos, vigência): [{ at, licenseVersion, companyState, changes }], últimas 100
+      transitions: json,
+      // última CONFIRMAÇÃO do Interos (retrato recebido — novo ou repetido —, consulta do Interos ou pull bem-sucedido):
+      // base do sync.stale (empresa estável não envelhece só porque o Interos não manda licença nova)
+      lastConfirmedAt: dt,
+    },
+    indexes: [u("u_company", "companyId")],
+  },
+  {
+    id: "license_history",
+    label: "Histórico de retratos de licença recebidos (um por versão; índice único impede aplicação dupla)",
+    fields: { companyId: id(true), licenseVersion: int, status: s(20), source: s(20), clientId: s(80), eventId: s(200), snapshot: json, result: json, at: dt },
+    indexes: [u("u_company_version", "companyId", "licenseVersion"), k("i_company", "companyId")],
+  },
+  {
+    id: "interos_events",
+    label: "Eventos recebidos do Interos (proteção contra repetição: Event-Id único por cliente, guardado 7 dias)",
+    fields: { clientId: s(80, true), eventId: s(200, true), requestHash: s(80), status: int, response: json, at: dt, companyId: id() },
+    indexes: [u("u_client_event", "clientId", "eventId")],
+  },
+  {
+    id: "upsell_requests",
+    label: "Solicitações de contratação feitas no ERP (encaminhadas ao Interos)",
+    // userName: legado (não é mais gravado — LGPD); ao Interos vão o identificador pseudônimo e o perfil
+    fields: { companyId: id(true), branchId: id(), userId: id(), userName: s(200), requesterRole: s(80), code: s(20), module: s(80), note: s(500), status: s(20), sentAt: dt },
+    indexes: [k("i_company", "companyId")],
   },
   {
     id: "files",

@@ -77,10 +77,18 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
   // multiempresa: Store restrito à empresa (a da plataforma atende os chamados da tela de login); empresa suspensa em
   // "somente leitura" recebe um Store que recusa qualquer gravação
   const scoped = scopeStore(store, company.id, { platform: Boolean(company.isPlatform) });
+  // filiais autorizadas pela licença do Interos (correção 11): fora da lista, a filial opera só em consulta
+  const { branchOutsideLicense } = await import("../../domain/licensing/branches");
+  const branchBlocked = branch && !consolidated ? await branchOutsideLicense(store, company.id, branch.id) : null;
   return {
-    // suspensa em somente leitura: toda gravação é recusada com o motivo; a trilha de auditoria continua registrando
+    // suspensa em somente leitura (ou filial fora da licença): toda gravação é recusada com o motivo; a trilha de
+    // auditoria continua registrando
     ctx: {
-      store: companyReadOnly(company) ? readOnly(scoped, { message: companyBlockMessage(company) ?? undefined, appendOnly: ["audit_logs"] }) : scoped,
+      store: companyReadOnly(company)
+        ? readOnly(scoped, { message: companyBlockMessage(company) ?? undefined, appendOnly: ["audit_logs"] })
+        : branchBlocked
+          ? readOnly(scoped, { message: branchBlocked, appendOnly: ["audit_logs"] })
+          : scoped,
       user, companyId: company.id, branchId: branch?.id ?? null, ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined,
     },
     user,
@@ -104,7 +112,23 @@ export async function requireSession(module?: ModuleKey, op: Crud = "view"): Pro
   if (!s) redirect("/login");
   if (!hasWorkContext(s)) redirect("/selecionar-unidade");
   if (module && !can(s.user, module, op)) redirect("/sem-permissao");
+  await enforceScreenModule(s);
   return s;
+}
+
+/**
+ * Habilitação da tela pelo caminho real (cabeçalho do middleware). Server actions não passam por aqui (o caminho de um
+ * POST de ação é escolhido pelo cliente): runAction confere o módulo declarado em cada ação.
+ */
+async function enforceScreenModule(s: SessionInfo) {
+  const h = await headers();
+  if (h.get("next-action")) return;
+  const path = h.get("x-ic-path");
+  if (!path || path.startsWith("/modulo-indisponivel")) return;
+  const { pathDecision, recordShadow } = await import("./modules");
+  const d = await pathDecision(s.ctx, s.company, path);
+  await recordShadow(s.ctx, d, `tela ${path}`, "read");
+  if (d.level === "none") redirect(`/modulo-indisponivel?m=${encodeURIComponent(d.module)}`);
 }
 
 /**
@@ -113,10 +137,20 @@ export async function requireSession(module?: ModuleKey, op: Crud = "view"): Pro
  * em vez de operar com `branchId` nulo. Devolve a sessão ou a resposta de erro pronta:
  *   const s = await requireApiSession(); if (s instanceof NextResponse) return s;
  */
-export async function requireApiSession(format: "json" | "text" = "json"): Promise<SessionInfo | NextResponse> {
+export async function requireApiSession(
+  format: "json" | "text" = "json",
+  /** módulo(s) do catálogo exigidos pela rota (basta um); level "full" para gravações */
+  opts: { modules?: string[]; level?: "read" | "full"; surface?: string } = {},
+): Promise<SessionInfo | NextResponse> {
   const s = await getSession();
   const fail = (status: number, error: string) => (format === "json" ? NextResponse.json({ error }, { status }) : new NextResponse(error, { status }));
   if (!s) return fail(401, "Não autenticado. Entre novamente.");
   if (!hasWorkContext(s)) return fail(409, "Selecione a empresa e a filial de trabalho (a unidade em uso não está disponível).");
+  if (opts.modules?.length) {
+    const { moduleDecision, recordShadow } = await import("./modules");
+    const d = await moduleDecision(s.ctx, s.company, opts.modules);
+    await recordShadow(s.ctx, d, opts.surface ?? opts.modules.join("|"), opts.level === "full" ? "full" : "read");
+    if (d.level === "none" || (opts.level === "full" && d.level !== "full")) return fail(403, d.reason);
+  }
   return s;
 }

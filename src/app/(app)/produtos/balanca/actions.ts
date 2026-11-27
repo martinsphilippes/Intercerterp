@@ -15,7 +15,7 @@ const optInt = (fd: FormData, k: string): number | null => {
 /** Aba "Balança" do produto: PLU, validade, tara, informação nutricional e envio à balança (CAD-16). */
 export async function saveScaleDataAction(fd: FormData) {
   const id = fstr(fd, "productId");
-  return runAction({ module: "products", op: "edit", revalidate: [`/produtos/${id}`, "/produtos/balanca"] }, async (s) => {
+  return runAction({ entitlement: "produtos.balanca", action: "saveScaleDataAction", module: "products", op: "edit", revalidate: [`/produtos/${id}`, "/produtos/balanca"] }, async (s) => {
     await requireFeature(s, "balanca");
     const nutrition: Record<string, string> = { portion: fstr(fd, "nutrition.portion") };
     for (const f of NUTRITION_FIELDS) nutrition[f.key] = fstr(fd, `nutrition.${f.key}`);
@@ -32,7 +32,7 @@ export async function saveScaleDataAction(fd: FormData) {
 
 /** Produtos › Balança: gera o arquivo de carga e devolve o arquivo para download (/api/files/<id>). */
 export async function generateScaleLoadAction(fd: FormData) {
-  return runAction({ module: "products", op: "edit", revalidate: ["/produtos/balanca"] }, async (s) => {
+  return runAction({ entitlement: "produtos.balanca", action: "generateScaleLoadAction", module: "products", op: "edit", revalidate: ["/produtos/balanca"] }, async (s) => {
     await requireFeature(s, "balanca");
     const r = await generateScaleLoad(s.ctx, { format: fstr(fd, "format") as ScaleFileFormat, priceTableId: fopt(fd, "priceTableId") });
     return {

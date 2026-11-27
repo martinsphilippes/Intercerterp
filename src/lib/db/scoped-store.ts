@@ -15,6 +15,7 @@ import type { Doc, Filter, ListOptions, ListResult, Store, WriteGuard } from "./
  *    da plataforma tem o nome legível (autoria), mas não aparece em listas nem pode ser alterado daqui;
  *  - `companies`: só a própria empresa;
  *  - tabelas da plataforma (`PLATFORM_ONLY`): inacessíveis;
+ *  - contrato da empresa (`CONTRACT_READONLY`, módulos e licença): só leitura do próprio;
  *  - registro sem empresa (`companyId` nulo) só é comum a todas nas tabelas de conteúdo global (`SHARED_GLOBAL`);
  *  - chamados abertos na tela de login (`companyId = "public"`) só para a empresa da plataforma (atendimento Intercert).
  * Operações deliberadamente multiempresa (criar empresa, vínculos explícitos, rotinas da plataforma) usam `unscoped()`.
@@ -34,7 +35,17 @@ const PUBLIC_OK = new Set(["tickets", "ticket_messages"]);
 /** Conteúdo global legítimo (sem empresa): modelos de perfil, artigos de ajuda e o estado do simulador fiscal. */
 export const SHARED_GLOBAL = new Set(["roles", "help_articles", "fiscal_sim_state"]);
 /** Tabelas da plataforma: nenhum Store restrito a uma empresa lê ou grava nelas. */
-export const PLATFORM_ONLY = new Set(["service_requests", "tenant_provisionings", "company_relations", "tenancy_reviews", "tenancy_violations", "migration_runs"]);
+export const PLATFORM_ONLY = new Set([
+  "service_requests", "tenant_provisionings", "company_relations", "tenancy_reviews", "tenancy_violations", "migration_runs",
+  // integração de módulos e licenças: operações recebidas e proteção contra repetição de eventos
+  "module_operations", "interos_events",
+]);
+/**
+ * Contrato da empresa (habilitação de módulos e licença do Interos): a empresa LÊ o próprio contrato (menu, telas,
+ * limites, histórico), mas só a plataforma grava — o administrador de uma empresa nunca altera a própria licença.
+ */
+export const CONTRACT_READONLY = new Set(["company_modules", "module_changes", "module_baselines", "company_licenses", "license_history"]);
+const CONTRACT_MSG = "Contrato da empresa (módulos e licença): alterado só pela plataforma, a partir do Interos.";
 
 export interface ScopeOptions {
   /** empresa da plataforma (Intercert): atende os chamados abertos na tela de login */
@@ -184,6 +195,7 @@ export class ScopedStore implements Store {
     const mode = this.mode;
     if (mode !== "legado") {
       if (PLATFORM_ONLY.has(collection)) throw cross("Tabela da plataforma: não pode ser gravada a partir de uma empresa.");
+      if (CONTRACT_READONLY.has(collection)) throw cross(CONTRACT_MSG);
       if (mode === "estrito" && collection === "companies") throw cross("Empresas novas são criadas pela plataforma (provisionamento), não a partir de outra empresa.");
       if (mode === "estrito" && collection === "users" && !(data.companyIds ?? []).includes(this.companyId)) {
         void recordViolation({ op: "create", collection, scopeCompanyId: this.companyId, recordId: id ?? null });
@@ -243,6 +255,7 @@ export class ScopedStore implements Store {
   async update<T = any>(collection: string, id: string, patch: Partial<T> & Record<string, any>): Promise<Doc<T>> {
     const mode = this.mode;
     if (mode !== "legado" && PLATFORM_ONLY.has(collection)) throw cross("Tabela da plataforma: não pode ser alterada a partir de uma empresa.");
+    if (mode !== "legado" && CONTRACT_READONLY.has(collection)) throw cross(CONTRACT_MSG);
     if (mode !== "legado" && (collection === "users" || collection === "companies")) await this.assertIdentityTarget(collection, id, "update");
     if (hasCompany(collection) && "companyId" in patch) this.assertCompanyValue(collection, patch.companyId, "update", id);
     await this.observeWrite(collection, id, "update");
@@ -258,6 +271,7 @@ export class ScopedStore implements Store {
   async delete(collection: string, id: string): Promise<boolean> {
     const mode = this.mode;
     if (mode !== "legado" && PLATFORM_ONLY.has(collection)) throw cross("Tabela da plataforma: não pode ser alterada a partir de uma empresa.");
+    if (mode !== "legado" && CONTRACT_READONLY.has(collection)) throw cross(CONTRACT_MSG);
     if (mode !== "legado" && (collection === "users" || collection === "companies")) await this.assertIdentityTarget(collection, id, "delete");
     await this.observeWrite(collection, id, "delete");
     const guard = hasCompany(collection) ? this.guard() : undefined;
@@ -269,6 +283,7 @@ export class ScopedStore implements Store {
   async increment(collection: string, id: string, field: string, by: number, bounds?: { min?: number; max?: number }) {
     const mode = this.mode;
     if (mode !== "legado" && PLATFORM_ONLY.has(collection)) throw cross("Tabela da plataforma: não pode ser alterada a partir de uma empresa.");
+    if (mode !== "legado" && CONTRACT_READONLY.has(collection)) throw cross(CONTRACT_MSG);
     if (mode !== "legado" && (collection === "users" || collection === "companies")) await this.assertIdentityTarget(collection, id, "increment");
     await this.observeWrite(collection, id, "increment");
     const guard = hasCompany(collection) ? this.guard() : undefined;

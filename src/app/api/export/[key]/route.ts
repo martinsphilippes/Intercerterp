@@ -5,6 +5,8 @@ import { XLSX_MIME } from "@/lib/xlsx";
 import { can, canDo } from "@/lib/permissions";
 import { audit } from "@/lib/core/audit";
 import "@/exports";
+import { modulesForExport } from "@/lib/modules/surfaces";
+import { moduleDecision, recordShadow } from "@/lib/server/modules";
 
 /**
  * Exporta o recorte filtrado de uma listagem (mesma consulta da tela). CSV por padrão; `formato=xlsx` gera a mesma
@@ -16,6 +18,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
   const { key } = await params;
   const def = getExport(key);
   if (!def) return new NextResponse("Exportação desconhecida", { status: 404 });
+  // habilitação: a exportação segue o módulo da listagem (consulta histórica também exporta)
+  const owners = modulesForExport(key);
+  if (owners.length) {
+    const d = await moduleDecision(s.ctx, s.company, owners);
+    await recordShadow(s.ctx, d, `exportação ${key}`, "read");
+    if (d.level === "none") return new NextResponse(d.reason, { status: 403 });
+  }
   if (!can(s.user, def.module) || !canDo(s.user, "data.export")) return new NextResponse("Sem permissão para exportar", { status: 403 });
   const sp: Record<string, string> = {};
   req.nextUrl.searchParams.forEach((v, k) => (sp[k] = v));

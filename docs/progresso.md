@@ -58,7 +58,7 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] **Demonstração no banco novo e acesso conferido (13/11):** carregada pela rota de instalação em 67 s numa chamada (9 empresas, 23 usuários, 49 vendas, 55 documentos fiscais, 63 arquivos no banco; banco em 24 MB). No endereço de teste da branch: tela de login com os 21 acessos rápidos (computador e celular), entrada pelo acesso rápido, XML baixado do banco e varredura como administrador — 287 páginas, 173 padrões de rota, todas 200, sem erro de console nem de hidratação. Suíte: 955 de 955 em memória, Postgres embutido e PostgreSQL 18.7 de verdade. O rastreador (`scripts/dev/crawl.mjs`) passou a entrar pelo acesso rápido e a sair pelo proxy, para varrer uma publicação.
 - [x] **Acesso rápido fixo na tela de login (13/11):** decisão do titular — os logins de acesso ficam na tela inicial até ele mandar tirar. Registrada no código, nas regras (§47), no README e na variável `SHOW_DEMO_LOGIN` da Vercel. Como a senha está na tela e qualquer visitante entra como Administração, os usuários da lista ficam protegidos enquanto o acesso rápido estiver ligado: não são inativados nem suspensos, não trocam senha, e-mail ou login, não viram administrador geral, não usam autenticação em duas etapas, não recebem link de “Esqueci minha senha” e não são bloqueados por tentativas erradas — nem pelo administrador geral (`tests/quick-access-pin.test.ts`, com contraprova de cada trava).
 - [x] **Publicado em produção (13/11, PR #1, autorizado pelo titular):** endereço oficial no banco novo, em São Paulo. A produção tem banco próprio (a integração do Neon separa a publicação de teste em outra ramificação): começou vazio e a demonstração foi carregada nele em 65 s. Conferido no endereço oficial: 21 acessos rápidos na tela inicial (computador e celular), entrada pelos botões, XML baixado do banco, sete senhas erradas sem travar o botão, varredura — 287 páginas, todas 200, sem erro.
-- [ ] **Depende do titular:** (a) informar o e-mail do administrador geral; (b) ~~autorizar a publicação em produção~~ feito; (c) remover as variáveis `APPWRITE_*` na Vercel e apagar o projeto no console do Appwrite (`docs/pendencias-externas.md`, item 1). Depois: publicar, conferir a produção, renovar o `SETUP_TOKEN`; por fim, retirar o código do Appwrite. Opcional nos planos pagos: conectar o Blob privado.
+- [ ] **Depende do titular:** (a) ~~informar o e-mail do administrador geral~~ feito em 26/11 (conta criada na produção pelo passo `owner`, com troca de senha no primeiro acesso); (b) ~~autorizar a publicação em produção~~ feito; (c) ~~remover as variáveis `APPWRITE_*` na Vercel e apagar o projeto no console do Appwrite~~ feito pelo titular em 26/11 (o código do Appwrite saiu no PR #5). Ainda recomendado: renovar o `SETUP_TOKEN`. Opcional nos planos pagos: conectar o Blob privado.
 - [x] **Appwrite retirado do código (26/11/2026; o titular desligou o serviço):** saíram banco, login, arquivos, e-mail pelo Appwrite Messaging, provisionamento, restauração em “nova base Appwrite”, `npm run appwrite:setup` e a dependência `node-appwrite`; Postgres, memória, login próprio, arquivos (banco/Blob) e e-mail (Resend) sem mudança. As variáveis `APPWRITE_*` que restam na Vercel são ignoradas — falta o titular apagá-las (`docs/pendencias-externas.md`, item 1; §48). Suíte: 1698 de 1698 em memória e 1692 no Postgres (mais 6 só de memória); tsc, lint e build limpos.
 
 ## Pendente (depende de terceiros)
@@ -132,5 +132,62 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
   - **Conferência final:** 21 acessos rápidos, interface do Interos em `503` (sem credenciais até o aceite),
     varredura de 336 páginas e 208 padrões de rota sem problema, nenhum erro de execução.
   - **Credenciais da equipe do Interos** entregues ao titular; valem só na homologação.
+- [x] **Administrador geral (26/11/2026):** conta do e-mail informado pelo titular criada na produção pelo passo
+  `owner` da instalação, com senha inicial entregue ao titular por arquivo. A troca da própria senha no primeiro acesso
+  foi publicada no PR #7 (Minha conta › Segurança).
 - [ ] **Depende do titular e do Interos:** aceite da homologação, credenciais de produção, decisão sobre
   `ERP_AMBIENTE=producao` e próximas versões do contrato (`docs/pendencias-externas.md`, itens 18–21).
+
+
+## Modularização por empresa contratante e integração Interos (26/11)
+
+- [x] Catálogo `catalogo-modulos-erp-v1` (1.0.0): 81 entradas.
+  - 36 módulos comerciais, 31 funções opcionais, 5 componentes técnicos e 6 recursos da plataforma.
+  - 3 lacunas e 60 permissões mapeadas.
+  - Grafo validado, sem ciclos.
+  - Inventário e matriz gerados do código (`npm run modules:inventory`).
+- [x] Regra de acesso aplicada em: telas (pelo caminho real), menu, recursos, 392 server actions, APIs, exportações, rotinas e vitrine pública. Avisos do gateway e fila de tarefas são preservados como obrigações.
+- [x] Desligamento com simulação de impacto, cascata, pendências em andamento, conclusão automática e reativação com configuração preservada.
+- [x] API `/api/interos/v1`:
+  - catálogo, empresas, módulos, simulação, aplicação, histórico, linha de base e operações;
+  - token servidor a servidor com escopos, Idempotency-Key, If-Match e operação agendada.
+- [x] Migração: linha de base em `legacy` (rotina diária, `?step=modules-baseline` ou `npm run modules:baseline`); provisionamento seletivo de empresa nova; Administração › Módulos contratados.
+- [x] Verificação:
+  - 1033/1033 testes (memória), dos quais 50 são novos;
+  - 1033/1033 também na suíte inteira sobre o Postgres;
+  - typecheck, lint e build limpos.
+- [ ] Pendente: tabela de catálogo inicial do titular (não recebida), homologação com Postgres no ambiente de homologação (a local, em memória, foi feita) e credencial `INTEROS_CLIENTS` em produção.
+
+## Modularização integral — Fases 6 a 10 (26/11)
+
+- [x] Decisões do titular registradas: homologação antes da venda, carências de 7 dias, emissão fiscal nunca bloqueada, 67 unidades, oculto/oportunidade, token+HMAC, pull diário + reenvio, perfil por atributos.
+- [x] Licença versionada (`src/domain/licensing`).
+  - Estados, carências e agendamentos locais.
+  - Trava por empresa.
+  - Homologação e preservação de acesso.
+  - Limites.
+  - Eventos assinados.
+  - Reconciliação.
+  - Telemetria.
+  - Solicitação de contratação.
+- [x] API `/api/interos/v2`: catálogo, empresas, licença, simulação, histórico, sync, usage, errors, upsell-requests.
+- [x] Menu bloqueado/oportunidade. Cargo, departamento e função no usuário.
+- [x] Verificação: suíte completa verde em memória; testes de licença, habilitação e catálogo v2 também no Postgres; typecheck e lint limpos.
+- [ ] Pendente:
+  - tela da regra "perfil por cargo";
+  - configurar `INTEROS_*` e homologar com o Interos real;
+  - homologar Focus/SEFAZ e Banco Intercert.
+
+## Integração Interos unificada — pendências do Interos (26/11)
+
+- [x] Uma versão com as quatro APIs (merge da modularização sobre o multiempresa; 12 conflitos resolvidos).
+- [x] Um esquema de credencial: registro único, famílias de escopo, empresas do piloto, assinatura e rotação (`docs/interos/credenciais.md`).
+- [x] v1 de módulos respeita as empresas da credencial (403 `company_not_allowed`, com teste).
+- [x] As 15 correções de comportamento, cada uma com teste de regressão (`docs/interos/pendencias-integracao.md` §2).
+- [x] Vocabulário único: unidades v2 como referência, com a tradução publicada no catálogo; o provisionamento nasce com a habilitação traduzida.
+- [x] Catálogo v2 com `companyKinds` por unidade e dependências "basta um".
+- [x] Homologação com o Interos real (27/11): o Interos criou a empresa e a licença inicial foi aplicada na mesma
+  versão; alteração de módulo aplicada, avisos entregues na hora, Torre pelo mesmo endereço; suíte 1812/1812 e build
+  limpos (`docs/interos/pendencias-integracao.md` §9).
+- [ ] Validação do catálogo v2 pelo titular (versão `2.0.0` sem "proposta").
+- [ ] Publicação na homologação e credenciais restritas às empresas do piloto; produção depois da aprovação.

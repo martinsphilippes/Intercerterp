@@ -7,3 +7,5 @@ import "./accounting";
 import "./sales";
 import "./network";
 import "./ecommerce";
+import "./modules";
+import "./licensing";

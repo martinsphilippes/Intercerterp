@@ -44,7 +44,7 @@ function noFuture(date: string) {
 
 export async function createTitleAction(fd: FormData) {
   const kind = fstr(fd, "kind") === "payable" ? "payable" : "receivable";
-  return runAction({ module: "finance", op: "create", requireBranch: true, revalidate: [base(kind)] }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "createTitleAction", module: "finance", op: "create", requireBranch: true, revalidate: [base(kind)] }, async (s) => {
     const approved = kind === "payable" && fbool(fd, "approved");
     if (approved) requireAction(s.ctx, "finance.approve_payable");
     const installments = fjson<InstallmentInput[]>(fd, "installments", []).map((i) => ({ dueDate: String(i.dueDate), amount: Math.round(Number(i.amount)) }));
@@ -77,7 +77,7 @@ export async function createTitleAction(fd: FormData) {
 }
 
 export async function updateTitleAction(id: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "updateTitleAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     await updateTitle(s.ctx, id, {
       description: fstr(fd, "description"),
       documentNumber: fopt(fd, "documentNumber"),
@@ -91,7 +91,7 @@ export async function updateTitleAction(id: string, fd: FormData) {
 }
 
 export async function updateInstallmentAction(id: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "updateInstallmentAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     await updateInstallment(s.ctx, id, { dueDate: fstr(fd, "dueDate") || undefined, ourNumber: fopt(fd, "ourNumber") }, fopt(fd, "reason"));
     return { ok: true as const, message: "Parcela atualizada." };
   });
@@ -99,7 +99,7 @@ export async function updateInstallmentAction(id: string, fd: FormData) {
 
 /** Baixa (visão 3 recebimento / visão 4 pagamento) com comprovante opcional. */
 export async function settleAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "settleAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.settle");
     const installmentId = fstr(fd, "installmentId");
     const idemKey = `ui:${fstr(fd, "_idem")}`;
@@ -152,7 +152,7 @@ export interface BatchSettleForm {
 
 /** Prévia da baixa em lote: total por parcela e motivo das que não podem ser baixadas (nada é gravado). */
 export async function previewBatchSettleAction(input: BatchSettleForm) {
-  return runAction({ module: "finance", op: "edit" }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "previewBatchSettleAction", module: "finance", op: "edit" }, async (s) => {
     await requireFeature(s, "baixaLote");
     const kind = input.kind === "payable" ? "payable" : "receivable";
     return previewBatchSettlement(s.ctx, { kind, installmentIds: input.installmentIds ?? [], date: String(input.date ?? ""), applyLateCharges: Boolean(input.applyLateCharges) });
@@ -161,7 +161,7 @@ export async function previewBatchSettleAction(input: BatchSettleForm) {
 
 /** Baixa em lote (idempotente pela chave do envio): resultado com as parcelas baixadas e as recusadas com o motivo. */
 export async function settleBatchAction(input: BatchSettleForm & { accountId: string; methodId: string; reference?: string | null; notes?: string | null; idemKey: string }) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "settleBatchAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     await requireFeature(s, "baixaLote");
     assert(input.idemKey, "Chave de idempotência ausente. Recarregue a página.");
     const kind = input.kind === "payable" ? "payable" : "receivable";
@@ -185,7 +185,7 @@ export async function settleBatchAction(input: BatchSettleForm & { accountId: st
 }
 
 export async function reverseSettlementAction(settlementId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "reverseSettlementAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.reverse");
     // recebida no PDV com o caixa ainda aberto: o estorno é feito no PDV (o valor sai da gaveta)
     await assertNotOpenPdvReceipt(s.ctx, settlementId);
@@ -195,7 +195,7 @@ export async function reverseSettlementAction(settlementId: string, fd: FormData
 }
 
 export async function approvePayableAction(titleId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.contas_pagar", action: "approvePayableAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.approve_payable");
     const t = await s.ctx.store.get("titles", titleId);
     assert(t && t.companyId === s.ctx.companyId, "Título de outra empresa.");
@@ -205,7 +205,7 @@ export async function approvePayableAction(titleId: string, fd: FormData) {
 }
 
 export async function revokeApprovalAction(titleId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.contas_pagar", action: "revokeApprovalAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.approve_payable");
     await revokePayableApproval(s.ctx, titleId, fstr(fd, "reason"));
     return { ok: true as const, message: "Autorização revogada." };
@@ -213,7 +213,7 @@ export async function revokeApprovalAction(titleId: string, fd: FormData) {
 }
 
 export async function cancelTitleAction(titleId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "delete", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "cancelTitleAction", module: "finance", op: "delete", revalidate: RV }, async (s) => {
     const t = await s.ctx.store.getOrThrow("titles", titleId);
     assert(t.companyId === s.ctx.companyId, "Título de outra empresa.");
     const reason = fstr(fd, "reason");
@@ -237,7 +237,7 @@ async function undoRenegotiationResult(ctx: Ctx, t: { id: string; number: number
 
 /** Desfaz a renegociação (título gerado sem recebimentos ativos). */
 export async function undoRenegotiationAction(titleId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.contas_receber", action: "undoRenegotiationAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     const t = await s.ctx.store.getOrThrow("titles", titleId);
     assert(t.companyId === s.ctx.companyId, "Título de outra empresa.");
     const reason = fstr(fd, "reason");
@@ -247,7 +247,7 @@ export async function undoRenegotiationAction(titleId: string, fd: FormData) {
 }
 
 export async function uploadAttachmentAction(titleId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: ["financeiro.contas_receber", "financeiro.contas_pagar"], action: "uploadAttachmentAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     const t = await s.ctx.store.getOrThrow("titles", titleId);
     assert(t.companyId === s.ctx.companyId, "Título de outra empresa.");
     const file = await fileFrom(fd, "file");
@@ -262,7 +262,7 @@ export async function uploadAttachmentAction(titleId: string, fd: FormData) {
 
 export async function saveAccountAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros", "/financeiro/fluxo-caixa"] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "saveAccountAction", module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros", "/financeiro/fluxo-caixa"] }, async (s) => {
     const acc = await saveAccount(
       s.ctx,
       id,
@@ -277,14 +277,14 @@ export async function saveAccountAction(fd: FormData) {
 }
 
 export async function changeInitialBalanceAction(accountId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: ["/financeiro/cadastros", `/financeiro/contas/${accountId}`] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "changeInitialBalanceAction", module: "finance", op: "edit", revalidate: ["/financeiro/cadastros", `/financeiro/contas/${accountId}`] }, async (s) => {
     await changeInitialBalance(s.ctx, accountId, { initialBalance: fint(fd, "initialBalance"), initialBalanceDate: fstr(fd, "initialBalanceDate"), reason: fstr(fd, "reason") });
     return { ok: true as const, message: "Saldo inicial alterado; saldos recalculados." };
   });
 }
 
 export async function rebuildBalancesAction(accountId: string) {
-  return runAction({ module: "finance", op: "edit", revalidate: [`/financeiro/contas/${accountId}`] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "rebuildBalancesAction", module: "finance", op: "edit", revalidate: [`/financeiro/contas/${accountId}`] }, async (s) => {
     const acc = await s.ctx.store.getOrThrow("financial_accounts", accountId);
     assert(acc.companyId === s.ctx.companyId, "Conta de outra empresa.");
     const r = await rebuildRunningBalances(s.ctx.store, accountId);
@@ -294,7 +294,7 @@ export async function rebuildBalancesAction(accountId: string) {
 }
 
 export async function createEntryAction(fd: FormData) {
-  return runAction({ module: "finance", op: "create", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.fluxo_caixa", action: "createEntryAction", module: "finance", op: "create", requireBranch: true, revalidate: RV }, async (s) => {
     const direction = fstr(fd, "direction");
     const amount = Math.abs(fint(fd, "amount"));
     const kind = fstr(fd, "kind") === "fee" ? "fee" : "adjustment";
@@ -307,7 +307,7 @@ export async function createEntryAction(fd: FormData) {
 }
 
 export async function reverseEntryAction(entryId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.fluxo_caixa", action: "reverseEntryAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.reverse");
     await reverseEntry(s.ctx, entryId, fstr(fd, "reason"));
     return { ok: true as const, message: "Lançamento estornado." };
@@ -315,7 +315,7 @@ export async function reverseEntryAction(entryId: string, fd: FormData) {
 }
 
 export async function transferAction(fd: FormData) {
-  return runAction({ module: "finance", op: "create", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.fluxo_caixa", action: "transferAction", module: "finance", op: "create", requireBranch: true, revalidate: RV }, async (s) => {
     const date = fstr(fd, "date");
     assert(/^\d{4}-\d{2}-\d{2}$/.test(date) && date <= today(), "Data inválida (não pode ser futura).");
     const from = await s.ctx.store.get("financial_accounts", fstr(fd, "fromAccountId"));
@@ -330,7 +330,7 @@ export async function transferAction(fd: FormData) {
 
 export async function savePaymentMethodAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "savePaymentMethodAction", module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
     await savePaymentMethod(s.ctx, id, {
       name: fstr(fd, "name"), kind: fstr(fd, "kind"), accountId: fopt(fd, "accountId"), feeBps: fint(fd, "feeBps"), settlementDays: fint(fd, "settlementDays"), allowsChange: fbool(fd, "allowsChange"),
       requiresCustomer: fbool(fd, "requiresCustomer"), availablePdv: fbool(fd, "availablePdv"), maxInstallments: fint(fd, "maxInstallments", 1), sortOrder: fint(fd, "sortOrder", 99), active: fbool(fd, "active"),
@@ -343,7 +343,7 @@ export async function savePaymentMethodAction(fd: FormData) {
 
 export async function savePaymentTermAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "savePaymentTermAction", module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
     const term = await savePaymentTerm(s.ctx, id, { name: fstr(fd, "name"), installments: fint(fd, "installments", 1), firstDueDays: fint(fd, "firstDueDays"), intervalDays: fint(fd, "intervalDays", 30), interestBps: fint(fd, "interestBps"), kind: (fstr(fd, "kind") as any) || "both", active: fbool(fd, "active") });
     const notice = paymentTermInterestNotice(term);
     return { ok: true as const, message: notice ? `Condição de parcelamento salva. ${notice}` : "Condição de parcelamento salva." };
@@ -352,7 +352,7 @@ export async function savePaymentTermAction(fd: FormData) {
 
 export async function saveCategoryAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "saveCategoryAction", module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
     await saveFinCategory(s.ctx, id, {
       name: fstr(fd, "name"), type: fstr(fd, "type") as any, parentId: fopt(fd, "parentId"), dreGroup: fopt(fd, "dreGroup"), active: fbool(fd, "active"),
       ...(fd.has("code") ? { code: fopt(fd, "code") } : {}), ...(fd.has("accountingCode") ? { accountingCode: fopt(fd, "accountingCode") } : {}),
@@ -363,21 +363,21 @@ export async function saveCategoryAction(fd: FormData) {
 
 export async function saveCostCenterAction(fd: FormData) {
   const id = fopt(fd, "id");
-  return runAction({ module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "saveCostCenterAction", module: "finance", op: id ? "edit" : "create", revalidate: ["/financeiro/cadastros"] }, async (s) => {
     await saveCostCenter(s.ctx, id, { name: fstr(fd, "name"), code: fopt(fd, "code"), active: fbool(fd, "active"), ...(fd.has("parentId") ? { parentId: fopt(fd, "parentId") } : {}) });
     return { ok: true as const, message: "Centro de custo salvo." };
   });
 }
 
 export async function setActiveAction(collection: "financial_accounts" | "payment_methods" | "payment_terms" | "fin_categories" | "cost_centers", id: string, active: boolean) {
-  return runAction({ module: "finance", op: "edit", revalidate: ["/financeiro/cadastros"] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "setActiveAction", module: "finance", op: "edit", revalidate: ["/financeiro/cadastros"] }, async (s) => {
     await setRecordActive(s.ctx, collection, id, active);
     return { ok: true as const, message: active ? "Reativado." : "Inativado (histórico preservado)." };
   });
 }
 
 export async function saveFinanceParamsAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: ["/financeiro/cadastros"] }, async (s) => {
+  return runAction({ entitlement: "tec.financeiro", action: "saveFinanceParamsAction", module: "finance", op: "edit", revalidate: ["/financeiro/cadastros"] }, async (s) => {
     const fineBps = fint(fd, "fineBps");
     const interestMonthlyBps = fint(fd, "interestMonthlyBps");
     const graceDays = fint(fd, "graceDays");
@@ -410,7 +410,7 @@ function importInput(fd: FormData, file: { name: string; mime: string; data: Buf
 }
 
 export async function previewImportAction(fd: FormData) {
-  return runAction({ module: "finance" }, async (s) => {
+  return runAction({ entitlement: "financeiro.conciliacao", action: "previewImportAction", module: "finance" }, async (s) => {
     const file = await fileFrom(fd, "file");
     assert(file, "Selecione o arquivo do extrato/retorno.");
     assert(fstr(fd, "accountId"), "Selecione a conta financeira.");
@@ -420,7 +420,7 @@ export async function previewImportAction(fd: FormData) {
 }
 
 export async function importAction(fd: FormData) {
-  return runAction({ module: "finance", op: "create", requireBranch: true, revalidate: ["/financeiro/conciliacao"] }, async (s) => {
+  return runAction({ entitlement: "financeiro.conciliacao", action: "importAction", module: "finance", op: "create", requireBranch: true, revalidate: ["/financeiro/conciliacao"] }, async (s) => {
     requireAction(s.ctx, "finance.reconcile");
     const file = await fileFrom(fd, "file");
     assert(file, "Selecione o arquivo do extrato/retorno.");
@@ -434,7 +434,7 @@ export async function importAction(fd: FormData) {
 }
 
 export async function reconcileAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.conciliacao", action: "reconcileAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.reconcile");
     const adjust = fbool(fd, "adjust");
     const rec = await reconcile(s.ctx, {
@@ -450,7 +450,7 @@ export async function reconcileAction(fd: FormData) {
 }
 
 export async function undoReconciliationAction(id: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.conciliacao", action: "undoReconciliationAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.reconcile");
     await undoReconciliation(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Conciliação desfeita. Baixas e lançamentos foram preservados." };
@@ -458,7 +458,7 @@ export async function undoReconciliationAction(id: string, fd: FormData) {
 }
 
 export async function ignoreTxAction(id: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: ["/financeiro/conciliacao"] }, async (s) => {
+  return runAction({ entitlement: "financeiro.conciliacao", action: "ignoreTxAction", module: "finance", op: "edit", requireBranch: true, revalidate: ["/financeiro/conciliacao"] }, async (s) => {
     requireAction(s.ctx, "finance.reconcile");
     await ignoreBankTx(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Linha ignorada." };
@@ -466,7 +466,7 @@ export async function ignoreTxAction(id: string, fd: FormData) {
 }
 
 export async function restoreTxAction(id: string) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: ["/financeiro/conciliacao"] }, async (s) => {
+  return runAction({ entitlement: "financeiro.conciliacao", action: "restoreTxAction", module: "finance", op: "edit", requireBranch: true, revalidate: ["/financeiro/conciliacao"] }, async (s) => {
     requireAction(s.ctx, "finance.reconcile");
     await restoreBankTx(s.ctx, id);
     return { ok: true as const, message: "Linha reativada." };
@@ -474,7 +474,7 @@ export async function restoreTxAction(id: string) {
 }
 
 export async function settleFromTxAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.conciliacao", action: "settleFromTxAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.settle");
     requireAction(s.ctx, "finance.reconcile");
     const methodId = fopt(fd, "methodId");
@@ -499,7 +499,7 @@ async function settleCard(ctx: Ctx, input: { installmentId: string; accountId: s
 }
 
 export async function settleCardAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.cartoes", action: "settleCardAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.settle");
     const date = fstr(fd, "date");
     noFuture(date);
@@ -510,7 +510,7 @@ export async function settleCardAction(fd: FormData) {
 
 /** Liquida em lote os recebíveis previstos até a data (taxa prevista de cada um), na conta escolhida. */
 export async function settleCardsBatchAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.cartoes", action: "settleCardsBatchAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.settle");
     const until = fstr(fd, "until");
     const date = fstr(fd, "date") || today();
@@ -533,7 +533,7 @@ export async function settleCardsBatchAction(fd: FormData) {
 // ───────────────────────────── Renegociação e cobrança
 
 export async function renegotiateAction(titleId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.contas_receber", action: "renegotiateAction", module: "finance", op: "edit", requireBranch: true, revalidate: RV }, async (s) => {
     requireAction(s.ctx, "finance.settle");
     const { renegotiate } = await import("@/domain/finance");
     const t = await renegotiate(s.ctx, {
@@ -550,7 +550,7 @@ export async function renegotiateAction(titleId: string, fd: FormData) {
 }
 
 export async function sendNoticeAction(installmentId: string, fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: RV }, async (s) => {
+  return runAction({ entitlement: "financeiro.contas_receber", action: "sendNoticeAction", module: "finance", op: "edit", revalidate: RV }, async (s) => {
     const { sendCollectionNotice } = await import("@/domain/finance");
     const r = await sendCollectionNotice(s.ctx, installmentId, { to: fopt(fd, "to"), message: fopt(fd, "message") });
     if (!r.delivered) return { ok: false as const, error: `Aviso não enviado: ${r.message ?? r.channel}. Verifique o canal de e-mail em Administração → Integrações.`, code: "not_delivered" };

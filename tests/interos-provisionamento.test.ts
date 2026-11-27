@@ -156,6 +156,30 @@ describe("provisionamento — criar, reenviar e retomar sem duplicar", () => {
     expect((await listAll(store, "users", { filters: [["eq", "email", "maria@alfa.example"]] })).length).toBe(1);
   });
 
+  it("correção 1: reenviar a criação com outra chave devolve a empresa COMO ESTÁ — não volta módulos, unidade nem situação", async () => {
+    // depois da criação, o Interos muda módulos e unidade inicial, e a própria empresa é inativada
+    expect((await call("PUT", `/empresas/${idEmpresa}/modulos`, { key: "k-alfa-c1-mod", params: { idEmpresa }, body: { modulos: ["pdv", "vendas"] } })).status).toBe(200);
+    expect((await call("PUT", `/empresas/${idEmpresa}/unidade-inicial`, { key: "k-alfa-c1-uni", params: { idEmpresa }, body: { nome: "Alfa — Loja Nova" } })).status).toBe(200);
+    await store.update("companies", idEmpresa, { status: "inactive" });
+    const before = await call("GET", `/empresas/${idEmpresa}`, { params: { idEmpresa } });
+    const audits = (await listAll(store, "audit_logs", { filters: [["eq", "companyId", idEmpresa]] })).length;
+
+    const again = await call("POST", "/empresas", { key: "k-alfa-c1-recriar", body: body() });
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ criacao: "ja_existia", convite: null });
+    expect(again.body.aviso).toMatch(/nada foi alterado/);
+    const e = again.body.empresa;
+    expect(e.modulos).toEqual(["pdv", "vendas"]); // não voltou aos 4 módulos do corpo
+    expect(e.unidades[0].nome).toBe("Alfa — Loja Nova"); // não voltou para "Alfa — Paulista"
+    expect(e.situacao).toBe("inativa"); // continua inativa (não foi reativada)
+    expect(before.body.empresa?.situacao ?? before.body.situacao).toBe("inativa");
+    expect(e.implantacao).toEqual((before.body.empresa ?? before.body).implantacao); // nenhuma etapa refeita
+    expect((await listAll(store, "audit_logs", { filters: [["eq", "companyId", idEmpresa]] })).length).toBe(audits);
+    // devolve o estado original para os próximos testes
+    await store.update("companies", idEmpresa, { status: "active" });
+    expect((await call("PUT", `/empresas/${idEmpresa}/modulos`, { key: "k-alfa-c1-mod-volta", params: { idEmpresa }, body: { modulos: ["pdv", "vendas", "estoque", "financeiro"] } })).status).toBe(200);
+  });
+
   it("CNPJ de empresa que já usa o ERP não é criado de novo: orienta a vinculação, sem revelar a empresa", async () => {
     const r = await call("POST", "/empresas", { key: "k-cnpj-dup-01", body: body({ contaInterosId: "acc-outra", empresa: { ...body().empresa, cnpj: existing.cnpj } }) });
     expect(r.status).toBe(409);
@@ -255,13 +279,37 @@ describe("vínculo de empresa existente — identidade confirmada e sem vínculo
     const ok = await call("POST", "/empresas/vincular", { key: "k-beta-vinc-03", body: { ...base, codigoVinculo: code } });
     expect(ok.status).toBe(201);
     expect(ok.body.empresa).toMatchObject({ idEmpresa: existing.id, contaInterosId: "acc-beta-777", modulos: null });
-    // código usado não serve de novo; outra conta não vincula a mesma empresa; a mesma conta não vincula outra
+    // código usado não serve de novo — e, sem código válido, a resposta não revela que a empresa já está vinculada
+    // (correção 15: o código é conferido antes de qualquer outra resposta)
     const reuse = await call("POST", "/empresas/vincular", { key: "k-beta-vinc-04", body: { ...base, contaInterosId: "acc-beta-888", codigoVinculo: code } });
-    expect(reuse.body.erro.codigo).toBe("empresa_ja_vinculada");
+    expect(reuse.body.erro.codigo).toBe("identidade_nao_confere");
+    // e uma empresa vinculada não gera código novo: nenhuma outra conta consegue vincular nem descobrir o vínculo
+    await expect(createInterosLinkCode(ctx)).rejects.toThrow(/já está vinculada/);
     const again = await call("POST", "/empresas/vincular", { key: "k-beta-vinc-05", body: { ...base, codigoVinculo: code } });
-    expect(again.status).toBe(200); // repetição do mesmo vínculo: já está feito
+    expect(again.status).toBe(200); // repetição do mesmo vínculo (mesma conta, mesmo código): já está feito
     // a empresa agora aparece na sincronização
     const list = await call("GET", "/empresas?limite=10");
     expect(list.body.itens.map((e: any) => e.idEmpresa)).toEqual(expect.arrayContaining([existing.id]));
+  });
+});
+
+describe("uma referência de contrato (pendência 4): com licença v2, os módulos seguem a licença", () => {
+  it("licença aplicada deriva o contrato amplo; PUT /modulos passa a responder 409 licenca_governa", async () => {
+    const r = await call("POST", "/empresas", { key: "k-gama-lic-01", body: body({ contaInterosId: "acc-gama-lic", empresa: { ...body().empresa, cnpj: "03.778.130/0001-48", razaoSocial: "Gama Licença Ltda" }, administrador: { nome: "Gil Gama", email: "gil@gama.example" } }) });
+    expect(r.status).toBe(201);
+    const id = r.body.empresa.idEmpresa;
+    expect(r.body.empresa.contrato.origemModulos).toBe("provisionamento");
+    const { applyLicense } = await import("@/domain/licensing/license");
+    const { takeBaseline } = await import("@/domain/modules/baseline");
+    await takeBaseline(store, id);
+    const items = [{ code: "07.01", state: "active" }, { code: "07.02", state: "active" }, { code: "01.04", state: "active" }, { code: "18.02", state: "suspended" }];
+    const applied = await applyLicense(store, id, { licenseVersion: 1, companyId: id, product: "erp-intercert", commercialStatus: "active", items, issuedAt: new Date().toISOString() }, { clientId: "interos-licencas", source: "push" });
+    expect(applied.status).toBe("applied");
+    const view = await call("GET", `/empresas/${id}`, { params: { idEmpresa: id } });
+    expect(view.body.empresa.modulos).toEqual(["financeiro", "pdv"]); // derivado da licença (suspenso continua contratado)
+    expect(view.body.empresa.contrato.origemModulos).toBe("licenca");
+    const put = await call("PUT", `/empresas/${id}/modulos`, { key: "k-gama-lic-02", params: { idEmpresa: id }, body: { modulos: ["pdv", "vendas"] } });
+    expect(put.status).toBe(409);
+    expect(put.body.erro.codigo).toBe("licenca_governa");
   });
 });

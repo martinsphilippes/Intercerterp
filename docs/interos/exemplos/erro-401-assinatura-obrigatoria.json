@@ -1,0 +1,30 @@
+{
+  "titulo": "Credencial com assinatura exigida gravando sem X-Interos-Signature",
+  "requisicao": {
+    "metodo": "POST",
+    "url": "https://erp-homologacao.intercert.example/api/interos/v1/empresas/792018d6437e43897eb2aa4c3db45e9a/reativar",
+    "cabecalhos": {
+      "Authorization": "Bearer interos-prov-assinada.<segredo>",
+      "X-Request-Id": "req-exemplo-e401b",
+      "Idempotency-Key": "alfa-reativar-sem-assinatura-01",
+      "Content-Type": "application/json"
+    },
+    "corpo": {}
+  },
+  "resposta": {
+    "status": 401,
+    "cabecalhos": {
+      "Content-Type": "application/json",
+      "X-Request-Id": "req-exemplo-e401b",
+      "API-Version": "v1",
+      "Cache-Control": "no-store"
+    },
+    "corpo": {
+      "erro": {
+        "codigo": "assinatura_obrigatoria",
+        "mensagem": "Cabeçalho X-Interos-Signature ausente ou malformado (t=<unix>,v1=<hex>)."
+      },
+      "requestId": "req-exemplo-e401b"
+    }
+  }
+}

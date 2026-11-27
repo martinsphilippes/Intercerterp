@@ -5,7 +5,7 @@ import { checkIntent } from "@/domain/payments/intents";
 
 /** Consulta da cobrança Pix no provedor (polling do pagamento). Retorna o estado real informado pelo provedor. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const s = await requireApiSession();
+  const s = await requireApiSession("json", { modules: ["vendas.pdv", "tec.pagamentos"], surface: "api pdv/intents" });
   if (s instanceof NextResponse) return s;
   if (!can(s.user, "pdv")) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   const { id } = await params;

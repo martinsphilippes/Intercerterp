@@ -4,7 +4,7 @@ import { runAction } from "@/lib/server/action";
 import { markNotifications, archiveNotifications, unarchiveNotifications, setNotificationPrefs } from "@/domain/notifications";
 
 export async function markAction(ids: string[], read: boolean) {
-  return runAction({ module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "markAction", module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
     const r = await markNotifications(s.ctx, ids, read);
     return {
       ok: true as const,
@@ -16,7 +16,7 @@ export async function markAction(ids: string[], read: boolean) {
 }
 
 export async function archiveAction(ids: string[]) {
-  return runAction({ module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "archiveAction", module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
     const r = await archiveNotifications(s.ctx, ids);
     if (!r.archived && r.blocked) return { ok: false as const, error: "Pendências abertas não podem ser arquivadas: resolva a ocorrência na origem primeiro." };
     return { ok: true as const, message: `${r.archived} arquivada(s).${r.blocked ? ` ${r.blocked} pendência(s) aberta(s) mantida(s) na caixa de entrada.` : ""}` };
@@ -24,14 +24,14 @@ export async function archiveAction(ids: string[]) {
 }
 
 export async function unarchiveAction(ids: string[]) {
-  return runAction({ module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "unarchiveAction", module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
     const r = await unarchiveNotifications(s.ctx, ids);
     return { ok: true as const, message: `${r.restored} devolvida(s) à caixa de entrada.` };
   });
 }
 
 export async function savePrefsAction(fd: FormData) {
-  return runAction({ module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
+  return runAction({ entitlement: "plataforma.painel", action: "savePrefsAction", module: "dashboard", revalidate: ["/notificacoes"] }, async (s) => {
     const receive = new Set(fd.getAll("receive").map(String));
     const all = fd.getAll("type").map(String);
     const r = await setNotificationPrefs(s.ctx, all.filter((t) => !receive.has(t)));

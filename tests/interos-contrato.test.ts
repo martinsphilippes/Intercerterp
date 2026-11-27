@@ -44,8 +44,13 @@ const PROV_ID = "interos-prov-homolog";
 const TORRE_ID = "interos-torre-homolog";
 const PROV_SECRET = "p".repeat(43);
 const TORRE_SECRET = "t".repeat(43);
-const AUTH = { prov: `Bearer ${PROV_ID}.${PROV_SECRET}`, torre: `Bearer ${TORRE_ID}.${TORRE_SECRET}` } as const;
-const AUTH_SHOWN = { prov: `Bearer ${PROV_ID}.<segredo>`, torre: `Bearer ${TORRE_ID}.<segredo>` } as const;
+// credenciais restrita (piloto) e com assinatura obrigatória: exemplos dos erros do esquema único (docs/interos/credenciais.md)
+const PILOTO_ID = "interos-prov-piloto";
+const PILOTO_SECRET = "Pq".repeat(21) + "x";
+const ASSIN_ID = "interos-prov-assinada";
+const ASSIN_SECRET = "As".repeat(21) + "y";
+const AUTH = { prov: `Bearer ${PROV_ID}.${PROV_SECRET}`, torre: `Bearer ${TORRE_ID}.${TORRE_SECRET}`, piloto: `Bearer ${PILOTO_ID}.${PILOTO_SECRET}`, assinada: `Bearer ${ASSIN_ID}.${ASSIN_SECRET}` } as const;
+const AUTH_SHOWN = { prov: `Bearer ${PROV_ID}.<segredo>`, torre: `Bearer ${TORRE_ID}.<segredo>`, piloto: `Bearer ${PILOTO_ID}.<segredo>`, assinada: `Bearer ${ASSIN_ID}.<segredo>` } as const;
 
 const LINK_CODE_SHOWN = "K7Q2M-XR4TP";
 const TOKEN_SHOWN = "TOKEN_DE_USO_UNICO";
@@ -195,7 +200,10 @@ beforeAll(async () => {
   setServiceCredentials([
     { id: PROV_ID, nome: "Interos — provisionamento (homologação)", escopos: ["provisionamento:leitura", "provisionamento:escrita"], segredo: PROV_SECRET },
     { id: TORRE_ID, nome: "Interos — Torre de Controle (homologação)", escopos: ["torre:resumo", "torre:detalhe", "torre:transacoes"], segredo: TORRE_SECRET },
+    { id: PILOTO_ID, nome: "Interos — provisionamento restrito ao piloto", escopos: ["provisionamento:leitura", "provisionamento:escrita"], segredo: PILOTO_SECRET, empresas: ["empresa-do-piloto-0001"] },
+    { id: ASSIN_ID, nome: "Interos — provisionamento com gravações assinadas", escopos: ["provisionamento:leitura", "provisionamento:escrita"], segredo: ASSIN_SECRET, assinatura: "EXEMPLO_ASSINATURA_INTEROS" },
   ]);
+  process.env.EXEMPLO_ASSINATURA_INTEROS = "e".repeat(40);
   resetServiceRateLimits();
   // empresa que já usa o ERP antes do Interos (vinculação por código) — também evita a demonstração automática da memória
   const { company } = await createCompanyWithDefaults(store, { name: "Beta Moda e Acessórios Ltda", tradeName: "Beta Moda", cnpj: "13579246000101", key: "exemplo-beta-existente" });
@@ -207,6 +215,7 @@ beforeAll(async () => {
 afterAll(() => {
   vi.useRealTimers();
   setServiceCredentials(null);
+  delete process.env.EXEMPLO_ASSINATURA_INTEROS;
 });
 
 describe.skipIf(process.env.TEST_STORE === "postgres")("contrato Interos ↔ ERP v1 — exemplos reais", () => {
@@ -327,6 +336,13 @@ describe.skipIf(process.env.TEST_STORE === "postgres")("contrato Interos ↔ ERP
   it("erros: um exemplo de cada resposta de erro do contrato", async () => {
     await exemplo("erro-401-nao-autenticado", "Credencial ausente ou inválida", { method: "GET", path: "/status", requestId: "req-exemplo-e401", auth: null }, 401);
     await exemplo("erro-403-sem-permissao", "Credencial sem o escopo exigido (a da Torre tentando criar empresa)", { method: "POST", path: "/empresas", requestId: "req-exemplo-e403", auth: "torre", key: "torre-tenta-criar-0001", body: alfa }, 403);
+    await exemplo("erro-403-empresa-nao-permitida", "Credencial restrita às empresas do piloto consultando outra empresa", { method: "GET", path: `/empresas/${idAlfa}`, requestId: "req-exemplo-e403b", auth: "piloto" }, 403);
+    await exemplo(
+      "erro-401-assinatura-obrigatoria",
+      "Credencial com assinatura exigida gravando sem X-Interos-Signature",
+      { method: "POST", path: `/empresas/${idAlfa}/reativar`, requestId: "req-exemplo-e401b", auth: "assinada", key: "alfa-reativar-sem-assinatura-01", body: {} },
+      401,
+    );
     await exemplo("erro-400-idempotencia-obrigatoria", "Alteração sem Idempotency-Key", { method: "POST", path: `/empresas/${idAlfa}/reativar`, requestId: "req-exemplo-e400", body: {} }, 400);
     await exemplo(
       "erro-422-validacao",
@@ -356,12 +372,6 @@ describe.skipIf(process.env.TEST_STORE === "postgres")("contrato Interos ↔ ERP
       "erro-409-identidade-nao-confere",
       "Vinculação que não confirma a identidade (aqui, CNPJ diferente; a resposta é a mesma para empresa inexistente ou código errado)",
       { method: "POST", path: "/empresas/vincular", requestId: "req-exemplo-e409c", key: "zeta-vincular-20261125-001", body: { contaInterosId: "conta-zeta-0006", idEmpresa: idBeta, cnpj: "98.765.432/0001-98", codigoVinculo: "AAAAA-BBBBB" } },
-      409,
-    );
-    await exemplo(
-      "erro-409-empresa-ja-vinculada",
-      "Vincular a outra conta uma empresa que já está vinculada ao Interos",
-      { method: "POST", path: "/empresas/vincular", requestId: "req-exemplo-e409e", key: "zeta-vincular-20261125-002", body: { contaInterosId: "conta-zeta-0006", idEmpresa: idBeta, cnpj: "13.579.246/0001-01", codigoVinculo: "AAAAA-BBBBB" } },
       409,
     );
     await exemplo("erro-404-nao-encontrado", "Empresa inexistente ou não vinculada ao Interos", { method: "GET", path: "/empresas/naoexiste000000000000", requestId: "req-exemplo-e404" }, 404);

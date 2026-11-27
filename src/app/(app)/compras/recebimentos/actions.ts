@@ -25,7 +25,7 @@ async function importOrRedirect(fn: () => Promise<Record<string, any>>) {
 
 /** Importação real do arquivo XML (upload). */
 export async function importXmlAction(fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "compras.recebimento", action: "importXmlAction", module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
     const file = fd.get("xml");
     if (!(file instanceof File) || file.size === 0) return { ok: false as const, error: "Selecione o arquivo XML da NF-e." };
     if (file.size > 5_000_000) return { ok: false as const, error: "Arquivo muito grande (máx. 5 MB)." };
@@ -38,7 +38,7 @@ export async function importXmlAction(fd: FormData) {
 
 /** Chave digitada: só recupera o XML se houver integração capaz; senão orienta o upload do arquivo. */
 export async function fetchByKeyAction(fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "compras.recebimento", action: "fetchByKeyAction", module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
     const key = fstr(fd, "key");
     const r = await fetchXmlByKey(s.ctx, key);
     if (!r.ok) return { ok: false as const, error: r.message, code: "no_integration" };
@@ -47,7 +47,7 @@ export async function fetchByKeyAction(fd: FormData) {
 }
 
 export async function manualReceiptAction(fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "compras.recebimento", action: "manualReceiptAction", module: "purchases", requireBranch: true, revalidate: PATHS }, async (s) => {
     const orderIds = fd.getAll("orderIds").map(String).filter(Boolean);
     if (!fstr(fd, "supplierId")) return { ok: false as const, error: "Selecione o fornecedor." };
     const inv = fstr(fd, "invoicedTotal");
@@ -101,7 +101,7 @@ function parseUpdate(fd: FormData): ReceiptUpdate {
 export async function saveReceiptAction(fd: FormData) {
   const id = fstr(fd, "id");
   const intent = fstr(fd, "intent") || "save";
-  const res = await runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
+  const res = await runAction({ entitlement: "compras.recebimento", action: "saveReceiptAction", module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     await updateReceipt(s.ctx, id, parseUpdate(fd));
     if (intent === "confirm") {
       const r = await confirmReceipt(s.ctx, id);
@@ -117,14 +117,14 @@ export async function saveReceiptAction(fd: FormData) {
 
 /** Retentativa de confirmação interrompida (efeitos idempotentes). */
 export async function resumeConfirmAction(id: string) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
+  return runAction({ entitlement: "compras.recebimento", action: "resumeConfirmAction", module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     const r = await confirmReceipt(s.ctx, id);
     return { ok: true as const, message: `Recebimento nº ${r.number} confirmado.` };
   });
 }
 
 export async function cancelReceiptAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
+  return runAction({ entitlement: "compras.recebimento", action: "cancelReceiptAction", module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PATHS] }, async (s) => {
     await cancelReceipt(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Recebimento cancelado. A chave pode ser importada novamente." };
   });
@@ -133,7 +133,7 @@ export async function cancelReceiptAction(id: string, fd: FormData) {
 /** Cadastro de produtos a partir dos itens do XML sem vínculo (prévia confirmada na conferência). */
 export async function createProductsFromReceiptAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, "/produtos"] }, async (s) => {
+  return runAction({ entitlement: "compras.recebimento", action: "createProductsFromReceiptAction", module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, "/produtos"] }, async (s) => {
     const all = fjson<Array<NewProductRow & { include?: boolean }>>(fd, "rows", []);
     // botão "Cadastrar" de uma linha envia only=<item>; "Cadastrar todos os selecionados" usa as linhas marcadas
     const only = fstr(fd, "only");
@@ -154,7 +154,7 @@ const PI_PATHS = [...PATHS, "/compras/aguardando-nota", "/estoque", "/financeiro
 
 /** Lança a entrada com nota a confirmar (data/hora atual/passada = realizada; futura = prevista). */
 export async function pendingInvoiceEntryAction(fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: PI_PATHS }, async (s) => {
+  return runAction({ entitlement: "compras.nota_a_confirmar", action: "pendingInvoiceEntryAction", module: "purchases", requireBranch: true, revalidate: PI_PATHS }, async (s) => {
     await requireFeature(s, "notaAConfirmar");
     if (!fstr(fd, "supplierId")) return { ok: false as const, error: "Selecione o fornecedor." };
     const local = fstr(fd, "entryAt");
@@ -195,7 +195,7 @@ async function invoiceInput(fd: FormData): Promise<ConfirmInvoiceInput> {
 /** Compara a nota com a entrada (intent=analyze, sem gravar) ou confirma (intent=confirm). */
 export async function invoiceConfirmAction(fd: FormData) {
   const id = fstr(fd, "id");
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PI_PATHS] }, async (s) => {
+  return runAction({ entitlement: "compras.nota_a_confirmar", action: "invoiceConfirmAction", module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PI_PATHS] }, async (s) => {
     const input = await invoiceInput(fd);
     if (fstr(fd, "intent") === "confirm") {
       const r = await confirmPendingInvoice(s.ctx, id, input);
@@ -210,7 +210,7 @@ export async function invoiceConfirmAction(fd: FormData) {
 
 /** Cancela uma entrada PREVISTA ainda não realizada. */
 export async function cancelScheduledAction(id: string, fd: FormData) {
-  return runAction({ module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PI_PATHS] }, async (s) => {
+  return runAction({ entitlement: "compras.nota_a_confirmar", action: "cancelScheduledAction", module: "purchases", requireBranch: true, revalidate: [`/compras/recebimentos/${id}`, ...PI_PATHS] }, async (s) => {
     await cancelScheduledEntry(s.ctx, id, fstr(fd, "reason"));
     return { ok: true as const, message: "Entrada prevista cancelada (nada foi lançado no estoque; a conta a pagar prevista foi cancelada)." };
   });

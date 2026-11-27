@@ -8,7 +8,7 @@ const PATHS = ["/financeiro/exportacao-dominio"];
 
 /** Gera o arquivo de lançamentos do período para a Domínio (guardado em Arquivos, com download). */
 export async function generateDominioAction(fd: FormData) {
-  return runAction({ module: "finance", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "financeiro.exportacao_dominio", action: "generateDominioAction", module: "finance", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "exportacaoDominio");
     const r = await generateDominioFile(s.ctx, { from: fstr(fd, "from"), to: fstr(fd, "to"), branchId: s.ctx.branchId ? null : fstr(fd, "branchId") || null });
     return { ok: true as const, data: r, message: `Arquivo gerado: ${r.lines} lançamento(s)${r.pending ? ` — ${r.pending} sem conta contábil (corrija antes de importar)` : ""}.` };
@@ -17,7 +17,7 @@ export async function generateDominioAction(fd: FormData) {
 
 /** Grava os códigos contábeis (Domínio) das categorias financeiras e contas financeiras. */
 export async function saveAccountingCodesAction(fd: FormData) {
-  return runAction({ module: "finance", op: "edit", revalidate: PATHS }, async (s) => {
+  return runAction({ entitlement: "financeiro.exportacao_dominio", action: "saveAccountingCodesAction", module: "finance", op: "edit", revalidate: PATHS }, async (s) => {
     await requireFeature(s, "exportacaoDominio");
     const categories: Record<string, string> = {};
     const accounts: Record<string, string> = {};

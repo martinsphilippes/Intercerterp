@@ -118,6 +118,8 @@ async function validate(ctx: Ctx, input: TerminalInput, selfId?: string) {
 export async function createTerminal(ctx: Ctx, input: TerminalInput) {
   requirePerm(ctx, "admin", "create");
   const data = await validate(ctx, input);
+  const { assertWithinLimit } = await import("./licensing/limits");
+  await assertWithinLimit(ctx.store, ctx.companyId, "devices");
   const id = detId("terminal", ctx.companyId, data.code);
   try {
     const t = await ctx.store.create("terminals", { companyId: ctx.companyId, createdBy: ctx.user.id, ...data, status: "active" }, id);
@@ -150,6 +152,10 @@ export async function setTerminalStatus(ctx: Ctx, id: string, status: "active" |
   const t = await ctx.store.getOrThrow("terminals", id);
   assert(t.companyId === ctx.companyId, "Terminal de outra empresa.");
   if (status === "inactive") assert(!(await openSession(ctx.store, id)), "Há caixa aberto neste terminal; feche-o antes de inativar.");
+  if (status === "active" && t.status !== "active") {
+    const { assertWithinLimit } = await import("./licensing/limits");
+    await assertWithinLimit(ctx.store, ctx.companyId, "devices");
+  }
   if (status === "active" && t.nfceSeries != null) {
     const clash = (await listAll(ctx.store, "terminals", { filters: [["eq", "branchId", t.branchId], ["eq", "status", "active"]] })).find((x) => x.id !== id && x.nfceSeries === t.nfceSeries);
     assert(!clash, `A série NFC-e ${t.nfceSeries} está em uso pelo terminal ${clash?.name}. Altere a série antes de reativar.`);

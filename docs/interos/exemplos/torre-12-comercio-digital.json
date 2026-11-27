@@ -26,7 +26,8 @@
         "unidades": null,
         "fuso": "America/Sao_Paulo",
         "geradoEm": "2026-11-20T18:00:00.000Z",
-        "versaoIndicadores": "2026-11-v1"
+        "versaoIndicadores": "2026-11-v1",
+        "modulosContratados": null
       },
       "lojaCriada": true,
       "situacaoLoja": "publicada",
