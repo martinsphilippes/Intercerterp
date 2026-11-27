@@ -8,8 +8,7 @@ import { featureDefaultFor, isFeatureOn } from "@/lib/core/settings";
 import { headers } from "next/headers";
 import { combined, companyModules, pathDecision } from "@/lib/server/modules";
 import { modulesForPath } from "@/lib/modules/surfaces";
-import { moduleDef } from "@/lib/modules/catalog";
-import { displayResolver } from "@/domain/licensing/license";
+import { contractableFor, displayResolver } from "@/domain/licensing/license";
 import { pathDisplay } from "@/domain/licensing/effective";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -22,7 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const levelOf = (href: string) => combined(modDoc, modulesForPath(href)?.modules ?? [], kind).level;
   const displayFor = await displayResolver(s.ctx.store, s.ctx.companyId);
   // bloqueado/oportunidade só para módulos contratáveis e existentes (nunca para lacunas nem para o que não se aplica ao tipo)
-  const contractable = (k: string) => { const d = moduleDef(k); return Boolean(d && d.availability !== "planned" && d.kinds.includes(kind) && (d.classification === "commercial" || d.classification === "optional_function")); };
+  const contractable = contractableFor(kind);
   // exibição por unidade (fase A): a tela desligada segue a unidade mais visível entre as que a liberam
   const shownAs = (href: string) => pathDisplay(modulesForPath(href)?.modules ?? [], displayFor, contractable);
   const lockable = (href: string) => shownAs(href).display !== "hidden";

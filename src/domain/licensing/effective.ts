@@ -110,8 +110,10 @@ export function resolveDisplays(displays: LicenseSnapshot["displays"]): { byKey:
       rejected.push({ ...r.issue, message: `Exibição: ${r.issue.message}` });
       continue;
     }
-    if (r.issue?.reason === "included_item") {
-      warnings.push({ code: d.code, reason: "display_not_supported", message: `Exibição de ${d.code}: função dentro da unidade ${r.units[0]} ainda não tem exibição própria; vale a da unidade.` });
+    // função incluída, inclusive pelo alias dela (ex.: 09.02 ≡ função de 01.04): nunca decide pela unidade inteira
+    const target = ALIAS_OF[d.code] ?? d.code;
+    if (r.issue?.reason === "included_item" || INCLUDED_IN[target]) {
+      warnings.push({ code: d.code, reason: "display_not_supported", message: `Exibição de ${d.code}: função dentro da unidade ${INCLUDED_IN[target] ?? r.units[0]} ainda não tem exibição própria; vale a da unidade.` });
       continue;
     }
     const exact = r.issue?.reason !== "module_expanded";

@@ -441,6 +441,41 @@ describe("exibição por unidade (fase A, 27/11)", () => {
     expect((await displayResolver(store, A.id))(key("05.02"))).toBe("hidden");
   });
 
+  it("revisão: alias de função incluída também é só aviso (não muda a exibição da unidade dona)", () => {
+    // 26.01 é alias de 01.05, que vem com a 01.04
+    const r = resolveDisplays([{ code: "26.01", display: "upsell" }]);
+    expect(r.byKey.size).toBe(0);
+    expect(r.warnings).toEqual([expect.objectContaining({ code: "26.01", reason: "display_not_supported" })]);
+    expect(r.rejected).toEqual([]);
+  });
+
+  it("revisão: retrato sem 'displays' mantém as escolhas por unidade; lista vazia limpa", async () => {
+    await applyLicense(store, A.id, snap(A.id, 1, items, { display: "hidden", displays: [{ code: "05.02", display: "upsell" }] }), meta);
+    // retrato de quem ainda não conhece a fase A (sem o campo): as escolhas continuam valendo
+    const r2 = await applyLicense(store, A.id, snap(A.id, 2, items, { display: "hidden" }), meta);
+    expect(r2.status).toBe("applied");
+    expect((await displayResolver(store, A.id))(key("05.02"))).toBe("upsell");
+    expect((await licenseStatus(store, A.id)).displays).toEqual([{ code: "05.02", display: "upsell" }]);
+    expect((await store.get("company_licenses", detId("license", A.id)))!.snapshot.displays).toEqual([{ code: "05.02", display: "upsell" }]);
+    // a rotina diária reaplica o retrato vigente e também mantém
+    await maintainLicense(store, A.id);
+    expect((await displayResolver(store, A.id))(key("05.02"))).toBe("upsell");
+    // lista vazia: limpa de propósito, e a unidade volta ao padrão da empresa
+    await applyLicense(store, A.id, snap(A.id, 3, items, { display: "hidden", displays: [] }), meta);
+    expect((await displayResolver(store, A.id))(key("05.02"))).toBe("hidden");
+    expect((await licenseStatus(store, A.id)).displays).toEqual([]);
+  });
+
+  it("revisão: 'contratar' recusa unidade já ligada, de outro tipo de empresa ou ainda não vendável", async () => {
+    await applyLicense(store, A.id, snap(A.id, 1, items, { display: "upsell" }), meta);
+    await expect(requestUpsell(ctxA(), key("07.01"), "")).rejects.toMatchObject({ code: "invalid_request" }); // já ligada
+    await expect(requestUpsell(ctxA(), "contabil.carteira", "")).rejects.toMatchObject({ code: "invalid_request" }); // só para escritório contábil
+    await expect(requestUpsell(ctxA(), "ecommerce.banco", "")).rejects.toMatchObject({ code: "invalid_request" }); // depende de homologação
+    await expect(requestUpsell(ctxA(), "nao.existe", "")).rejects.toMatchObject({ code: "invalid_request" });
+    // desligada, do tipo da empresa, vendável e em "contratar": aceita
+    expect((await requestUpsell(ctxA(), "compras.cotacoes", "")).duplicate).toBe(false);
+  });
+
   it("valor de exibição inválido recusa o retrato; código inexistente na exibição só volta como recusado", async () => {
     await expect(applyLicense(store, A.id, { ...snap(A.id, 1, items), displays: [{ code: "05.02", display: "sometimes" }] }, meta)).rejects.toMatchObject({ code: "invalid_request" });
     const r = await applyLicense(store, A.id, snap(A.id, 1, items, { displays: [{ code: "99.99", display: "upsell" }] }), meta);

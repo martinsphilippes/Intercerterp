@@ -128,7 +128,14 @@ async function enforceScreenModule(s: SessionInfo) {
   const { pathDecision, recordShadow } = await import("./modules");
   const d = await pathDecision(s.ctx, s.company, path);
   await recordShadow(s.ctx, d, `tela ${path}`, "read");
-  if (d.level === "none") redirect(`/modulo-indisponivel?m=${encodeURIComponent(d.module)}`);
+  if (d.level === "none") {
+    // mesma escolha do menu (fase A): tela liberada por várias unidades leva à mais visível entre as contratáveis
+    const { modulesForPath } = await import("@/lib/modules/surfaces");
+    const { contractableFor, displayResolver } = await import("@/domain/licensing/license");
+    const { pathDisplay } = await import("@/domain/licensing/effective");
+    const shown = pathDisplay(modulesForPath(path)?.modules ?? [], await displayResolver(s.ctx.store, s.ctx.companyId), contractableFor(s.company?.kind ?? "retail"));
+    redirect(`/modulo-indisponivel?m=${encodeURIComponent(shown.module ?? d.module)}`);
+  }
 }
 
 /**
