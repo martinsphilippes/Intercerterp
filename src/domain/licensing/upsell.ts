@@ -6,7 +6,7 @@ import { audit } from "@/lib/core/audit";
 import { moduleDef } from "@/lib/modules/catalog";
 import { unitByV1Key } from "./effective";
 import { emitInterosEvent } from "./events";
-import { displayMode } from "./license";
+import { displayResolver } from "./license";
 
 /**
  * Solicitação de contratação (interface "oportunidade"): visualizar a oferta nunca dá acesso a dados ou operações —
@@ -21,7 +21,8 @@ export function requesterRef(companyId: string, userId: string | null | undefine
 export async function requestUpsell(ctx: Ctx, moduleKey: string, note: string) {
   const def = moduleDef(moduleKey);
   if (!def || (def.classification !== "commercial" && def.classification !== "optional_function") || def.availability === "planned") throw new BusinessError("Função indisponível para contratação.", "invalid_request");
-  if ((await displayMode(unscoped(ctx.store), ctx.companyId)) !== "upsell") throw new BusinessError("A solicitação de contratação não está disponível para esta empresa.", "forbidden");
+  // exibição por unidade (fase A): só a unidade mostrada com "contratar" aceita o pedido
+  if ((await displayResolver(unscoped(ctx.store), ctx.companyId))(moduleKey) !== "upsell") throw new BusinessError("A solicitação de contratação não está disponível para esta função nesta empresa.", "forbidden");
   const unit = unitByV1Key(moduleKey);
   const day = new Date().toISOString().slice(0, 10);
   const id = detId("upsell", ctx.companyId, ctx.user.id, moduleKey, day);

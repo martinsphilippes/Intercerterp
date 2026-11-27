@@ -30,6 +30,12 @@ export const licenseSnapshotSchema = z.object({
   branches: z.object({ mode: z.enum(["all", "list"]), branchIds: z.array(z.string()).max(500).default([]) }).nullish(),
   limits: z.object({ users: z.number().int().min(0).nullish(), devices: z.number().int().min(0).nullish(), branches: z.number().int().min(0).nullish(), fiscalDocumentsPerMonth: z.number().int().min(0).nullish() }).nullish(),
   display: z.enum(DISPLAY_MODES).nullish(),
+  /**
+   * Exibição por unidade quando ela está desligada (fase A, 27/11/2026): vale só para a unidade indicada e, sem ela,
+   * vale o padrão da empresa (`display`). Independe do estado contratado: serve também para unidade nunca contratada
+   * (ex.: mostrar com "contratar"), sem criar item desligado — que encerraria direito preservado.
+   */
+  displays: z.array(z.object({ code: z.string().regex(/^\d\d(\.\d\d){0,2}$/), display: z.enum(DISPLAY_MODES) })).max(500).nullish(),
   controlMode: z.enum(["legacy", "shadow", "enforced"]).nullish(),
   /**
    * Revisão REAL das divergências da linha de base (correção 9): exigida para passar a "enforced" quando há divergência
@@ -55,7 +61,7 @@ export interface ResolvedItem {
 }
 export interface ItemIssue {
   code: string;
-  reason: "unknown_code" | "not_contractable" | "not_homologated" | "dependency_missing" | "kind_not_supported" | "duplicate_entitlement" | "alias_resolved" | "included_item" | "module_expanded" | "preserved_access" | "review_required" | "unknown_branch" | "no_branch_allowed";
+  reason: "unknown_code" | "not_contractable" | "not_homologated" | "dependency_missing" | "kind_not_supported" | "duplicate_entitlement" | "alias_resolved" | "included_item" | "module_expanded" | "preserved_access" | "review_required" | "unknown_branch" | "no_branch_allowed" | "display_not_supported";
   message: string;
 }
 
@@ -83,6 +89,54 @@ export function resolveCode(code: string): { units: string[]; issue?: ItemIssue 
   }
   if (KNOWN_CODES.includes(c)) return { units: [], issue: { code, reason: "not_contractable", message: `${code} não é unidade comercial (CORE, compartilhado, permissão ou recurso futuro).` } };
   return { units: [], issue: { code, reason: "unknown_code", message: `${code} não existe no catálogo v2.` } };
+}
+
+/** Do menos ao mais visível: em empate, a escolha mais visível vence (como o estado mais permissivo dos itens). */
+export const DISPLAY_RANK: Record<DisplayMode, number> = { hidden: 0, locked: 1, upsell: 2 };
+
+/**
+ * Exibição escolhida por unidade (`displays` do retrato), por chave v1. Unidade e alias valem para a própria unidade;
+ * módulo NN vale para as unidades principais dele (como no licenciamento), e a escolha da unidade vence a do módulo.
+ * Função incluída ainda não tem exibição própria (fase B): fica como aviso e vale a da unidade. Código inexistente ou
+ * não contratável volta como item recusado, sem recusar o retrato.
+ */
+export function resolveDisplays(displays: LicenseSnapshot["displays"]): { byKey: Map<string, DisplayMode>; rejected: ItemIssue[]; warnings: ItemIssue[] } {
+  const chosen = new Map<string, { display: DisplayMode; exact: boolean }>();
+  const rejected: ItemIssue[] = [];
+  const warnings: ItemIssue[] = [];
+  for (const d of displays ?? []) {
+    const r = resolveCode(d.code);
+    if (r.issue?.reason === "unknown_code" || r.issue?.reason === "not_contractable") {
+      rejected.push({ ...r.issue, message: `Exibição: ${r.issue.message}` });
+      continue;
+    }
+    if (r.issue?.reason === "included_item") {
+      warnings.push({ code: d.code, reason: "display_not_supported", message: `Exibição de ${d.code}: função dentro da unidade ${r.units[0]} ainda não tem exibição própria; vale a da unidade.` });
+      continue;
+    }
+    const exact = r.issue?.reason !== "module_expanded";
+    for (const u of r.units) {
+      const key = unitByCode(u)?.v1Key;
+      if (!key) continue;
+      const prev = chosen.get(key);
+      if (!prev || (exact && !prev.exact) || (exact === prev.exact && DISPLAY_RANK[d.display] > DISPLAY_RANK[prev.display])) chosen.set(key, { display: d.display, exact });
+    }
+  }
+  return { byKey: new Map([...chosen].map(([k, v]) => [k, v.display])), rejected, warnings };
+}
+
+/**
+ * Exibição de uma tela desligada que qualquer uma de várias unidades libera: a mais visível entre as contratáveis, e a
+ * unidade dela (destino da página "módulo indisponível"). Nenhuma contratável: escondida.
+ */
+export function pathDisplay(keys: readonly string[], displayFor: (key: string) => DisplayMode, contractable: (key: string) => boolean): { display: DisplayMode; module: string | null } {
+  let best: { display: DisplayMode; module: string | null } = { display: "hidden", module: null };
+  for (const k of keys) {
+    if (!contractable(k)) continue;
+    const d = displayFor(k);
+    if (best.module === null || DISPLAY_RANK[d] > DISPLAY_RANK[best.display]) best = { display: d, module: k };
+  }
+  return best;
 }
 
 export interface Effective {

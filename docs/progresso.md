@@ -194,4 +194,7 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
   piloto); homologação com empresas de teste (`docs/interos/pendencias-integracao.md` §10).
 - [x] Credencial de licenças sem lista alcança só as empresas ligadas ao Interos; a não vinculada responde 404, como
   inexistente (correção 16, com teste).
+- [x] Exibição por unidade (fase A, 27/11): `displays` no retrato vence o padrão da empresa só para a unidade; menu,
+  "módulo indisponível" e "Solicitar contratação" seguem a unidade (correção 17, com teste).
+- [ ] Fase B: tirar e esconder funções de dentro das unidades (prioridade marcada pelos validadores na planilha).
 - [ ] Credenciais de produção depois da aprovação, as três sem lista.

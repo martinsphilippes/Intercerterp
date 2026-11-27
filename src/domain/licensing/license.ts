@@ -6,7 +6,7 @@ import { loadCompanyModules } from "@/lib/modules/access";
 import { MODULE_MAP } from "@/lib/modules/catalog";
 import { applyChanges, companyOrThrow, simulateChanges, VersionConflictError, type ModuleChange, type Simulation } from "../modules/changes";
 import { takeBaseline } from "../modules/baseline";
-import { desiredByUnit, licenseSnapshotSchema, resolveCode, unitByCode, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
+import { desiredByUnit, licenseSnapshotSchema, resolveCode, resolveDisplays, unitByCode, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
 import { emitInterosEvent } from "./events";
 import { UNITS_V2 } from "@/lib/modules/units-v2.generated";
 
@@ -29,7 +29,8 @@ export interface LicensePlan {
   changes: ModuleChange[];
   rejectedItems: ItemIssue[];
   warnings: ItemIssue[];
-  effective: Record<string, { unit: string; on: boolean; state: string; notice?: string }>;
+  /** Por chave v1; `display` = como a unidade aparece quando desligada (a escolha dela ou o padrão da empresa). */
+  effective: Record<string, { unit: string; on: boolean; state: string; notice?: string; display?: DisplayMode }>;
   companyState: string;
   companyNotice?: string;
   nextTransitionAt: string | null;
@@ -176,6 +177,12 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
       }
     }
   }
+  // exibição por unidade (fase A): a escolha da unidade ou o padrão da empresa; não liga nem desliga nada
+  const displays = resolveDisplays(snapshot.displays);
+  rejectedItems.push(...displays.rejected);
+  warnings.push(...displays.warnings);
+  const fallback = defaultDisplayOf(snapshot.display ?? lic?.display ?? null, doc);
+  for (const [key, entry] of Object.entries(effective)) entry.display = displays.byKey.get(key) ?? fallback;
   return {
     companyId, licenseVersion: snapshot.licenseVersion, appliedVersion, stale: snapshot.licenseVersion <= appliedVersion, changes, rejectedItems, warnings, effective,
     companyState: cap.state, companyNotice: cap.notice, nextTransitionAt: nextAt, simulation,
@@ -363,21 +370,40 @@ export async function maintainLicense(store: Store, companyId: string, now = new
   });
 }
 
-/** Modo de exibição do que não está contratado (decisão: oculto para clientes atuais; oportunidade nos planos novos). */
+/** Padrão sem escolha do Interos: oculto para clientes atuais; oportunidade para empresa criada pelo provisionamento. */
+function defaultDisplayOf(chosen: string | null | undefined, doc: Awaited<ReturnType<typeof loadCompanyModules>>): DisplayMode {
+  if (chosen) return chosen as DisplayMode;
+  return doc && Object.values(doc.modules ?? {}).some((e) => e.source === "provisioning") ? "upsell" : "hidden";
+}
+
+/** Modo de exibição PADRÃO da empresa para o que está desligado (vale para a unidade sem escolha própria). */
 export async function displayMode(store: Store, companyId: string): Promise<DisplayMode> {
   const lic = await store.get("company_licenses", licenseId(companyId));
   if (lic?.display) return lic.display as DisplayMode;
-  const doc = await loadCompanyModules(store, companyId);
-  return doc && Object.values(doc.modules ?? {}).some((e) => e.source === "provisioning") ? "upsell" : "hidden";
+  return defaultDisplayOf(null, await loadCompanyModules(store, companyId));
+}
+
+/**
+ * Exibição de cada unidade desligada (fase A): a escolhida para ela no retrato vigente (`displays`) ou o padrão da
+ * empresa. Uma leitura só; o resultado responde por chave v1 (menu, página "módulo indisponível", pedido de contratação).
+ */
+export async function displayResolver(store: Store, companyId: string): Promise<(moduleKey: string) => DisplayMode> {
+  const lic = await store.get("company_licenses", licenseId(companyId));
+  const fallback = lic?.display ? (lic.display as DisplayMode) : defaultDisplayOf(null, await loadCompanyModules(store, companyId));
+  const { byKey } = resolveDisplays((lic?.snapshot as LicenseSnapshot | undefined)?.displays);
+  return (moduleKey) => byKey.get(moduleKey) ?? fallback;
 }
 
 export async function licenseStatus(store: Store, companyId: string) {
   const company = await companyOrThrow(store, companyId);
   const lic = await store.get("company_licenses", licenseId(companyId));
   const doc = await loadCompanyModules(store, companyId);
+  // escolhas por unidade aplicadas (código comercial → exibição), como o Interos enviou depois de resolvidas
+  const { byKey } = resolveDisplays((lic?.snapshot as LicenseSnapshot | undefined)?.displays);
+  const displays = UNITS_V2.filter((u) => u.v1Key && byKey.has(u.v1Key)).map((u) => ({ code: u.code, display: byKey.get(u.v1Key!)! }));
   return {
     companyId, companyName: company.tradeName || company.name, appliedVersion: lic?.licenseVersion ?? 0, commercialStatus: lic?.commercialStatus ?? null,
-    display: await displayMode(store, companyId), limits: lic?.limits ?? null, effective: lic?.effective ?? null, rejectedItems: lic?.rejectedItems ?? [],
+    display: lic?.display ? (lic.display as DisplayMode) : defaultDisplayOf(null, doc), displays, limits: lic?.limits ?? null, effective: lic?.effective ?? null, rejectedItems: lic?.rejectedItems ?? [],
     warnings: lic?.warnings ?? [], appliedAt: lic?.appliedAt ?? null, nextTransitionAt: lic?.nextTransitionAt ?? null,
     runtime: { mode: doc?.mode ?? "legacy", version: doc?.version ?? 0 },
     sync: { lastSnapshotAt: lic?.lastSnapshotAt ?? null, lastSyncAt: lic?.lastSyncAt ?? null, lastSyncResult: lic?.lastSyncResult ?? null },

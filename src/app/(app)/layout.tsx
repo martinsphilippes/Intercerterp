@@ -9,7 +9,8 @@ import { headers } from "next/headers";
 import { combined, companyModules, pathDecision } from "@/lib/server/modules";
 import { modulesForPath } from "@/lib/modules/surfaces";
 import { moduleDef } from "@/lib/modules/catalog";
-import { displayMode } from "@/domain/licensing/license";
+import { displayResolver } from "@/domain/licensing/license";
+import { pathDisplay } from "@/domain/licensing/effective";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireSession();
@@ -19,9 +20,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const modDoc = await companyModules(s.ctx);
   const kind = s.company.kind ?? "retail";
   const levelOf = (href: string) => combined(modDoc, modulesForPath(href)?.modules ?? [], kind).level;
-  const display = await displayMode(s.ctx.store, s.ctx.companyId);
+  const displayFor = await displayResolver(s.ctx.store, s.ctx.companyId);
   // bloqueado/oportunidade só para módulos contratáveis e existentes (nunca para lacunas nem para o que não se aplica ao tipo)
-  const lockable = (href: string) => display !== "hidden" && (modulesForPath(href)?.modules ?? []).some((k) => { const d = moduleDef(k); return d && d.availability !== "planned" && d.kinds.includes(kind) && (d.classification === "commercial" || d.classification === "optional_function"); });
+  const contractable = (k: string) => { const d = moduleDef(k); return Boolean(d && d.availability !== "planned" && d.kinds.includes(kind) && (d.classification === "commercial" || d.classification === "optional_function")); };
+  // exibição por unidade (fase A): a tela desligada segue a unidade mais visível entre as que a liberam
+  const shownAs = (href: string) => pathDisplay(modulesForPath(href)?.modules ?? [], displayFor, contractable);
+  const lockable = (href: string) => shownAs(href).display !== "hidden";
   const groups = navFor(s.company.kind)
     .map((g) => ({
       ...g,
@@ -32,7 +36,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         .map((i) => {
           const level = levelOf(i.href);
           if (level === "full") return i;
-          if (level === "none") return { ...i, label: `${i.label} ${display === "upsell" ? "(contratar)" : "(bloqueado)"}`, icon: "Lock", href: `/modulo-indisponivel?m=${encodeURIComponent(combined(modDoc, modulesForPath(i.href)?.modules ?? [], kind).module)}` };
+          if (level === "none") {
+            const shown = shownAs(i.href);
+            return { ...i, label: `${i.label} ${shown.display === "upsell" ? "(contratar)" : "(bloqueado)"}`, icon: "Lock", href: `/modulo-indisponivel?m=${encodeURIComponent(shown.module ?? combined(modDoc, modulesForPath(i.href)?.modules ?? [], kind).module)}` };
+          }
           return { ...i, label: `${i.label} (consulta)` };
         }),
     }))

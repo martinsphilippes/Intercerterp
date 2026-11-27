@@ -10,8 +10,8 @@ import { unscoped } from "@/lib/db/scoped-store";
 import { createCompanyWithDefaults } from "@/domain/setup";
 import { takeBaseline, provisionModules } from "@/domain/modules/baseline";
 import { decide, loadCompanyModules } from "@/lib/modules/access";
-import { companyCap, itemEffective, resolveCode, type LicenseSnapshot } from "@/domain/licensing/effective";
-import { applyLicense, displayMode, licenseStatus, maintainLicense, planLicense } from "@/domain/licensing/license";
+import { companyCap, itemEffective, pathDisplay, resolveCode, resolveDisplays, unitByCode, type DisplayMode, type LicenseSnapshot } from "@/domain/licensing/effective";
+import { applyLicense, displayMode, displayResolver, licenseStatus, maintainLicense, planLicense } from "@/domain/licensing/license";
 import { applyDueTransitions } from "@/domain/licensing/due";
 import { assertWithinLimit, noteFiscalDocumentUsage } from "@/domain/licensing/limits";
 import { reconcileLicense } from "@/domain/licensing/sync";
@@ -371,6 +371,84 @@ describe("telemetria, exibição e oportunidade de contratação", () => {
   });
 });
 
+describe("exibição por unidade (fase A, 27/11)", () => {
+  const key = (code: string) => unitByCode(code)!.v1Key!;
+  // tudo contratado menos 05.02 (Cotações), como no teste de versão: o retrato é aceito e 05.02 fica desligada
+  const items = [...ALL_SELLABLE_RETAIL.filter((c) => c !== "05.02").map((code) => ({ code, state: "active" as const })), { code: "04.01", state: "active" as const }, { code: "04.02", state: "active" as const }];
+  const ctxA = () => ({ ...systemCtx(store, A.id), user: { ...systemCtx(store, A.id).user, id: "u-a", name: "Usuário A" } });
+
+  it("resolveDisplays: a unidade vence o módulo; função dentro da unidade é só aviso; código inválido é recusado", () => {
+    const r = resolveDisplays([
+      { code: "05", display: "locked" },
+      { code: "05.02", display: "upsell" },
+      { code: "07.03", display: "upsell" }, // fechamento de caixa: vem com a 07.02 (função, fase B)
+      { code: "99.99", display: "hidden" },
+      { code: "07.13", display: "upsell" }, // componente compartilhado: não contratável
+    ]);
+    expect(r.byKey.get(key("05.02"))).toBe("upsell");
+    expect(r.byKey.get(key("05.04"))).toBe("locked");
+    expect(r.byKey.has(key("05.19"))).toBe(false); // adicional do módulo: o módulo não decide por ele (como no licenciamento)
+    expect(r.byKey.has(key("07.02"))).toBe(false); // a escolha da função não muda a unidade
+    expect(r.warnings).toEqual([expect.objectContaining({ code: "07.03", reason: "display_not_supported" })]);
+    expect(r.rejected.map((i) => i.reason).sort()).toEqual(["not_contractable", "unknown_code"]);
+    // a mesma unidade escolhida duas vezes: vale a mais visível
+    expect(resolveDisplays([{ code: "05.02", display: "hidden" }, { code: "05.02", display: "locked" }]).byKey.get(key("05.02"))).toBe("locked");
+    expect(resolveDisplays(null).byKey.size).toBe(0);
+  });
+
+  it("pathDisplay: tela que várias unidades liberam segue a mais visível entre as contratáveis", () => {
+    const d = (k: string): DisplayMode => (k === "a" ? "hidden" : k === "b" ? "upsell" : "locked");
+    expect(pathDisplay(["a", "b", "c"], d, () => true)).toEqual({ display: "upsell", module: "b" });
+    expect(pathDisplay(["a", "c"], d, () => true)).toEqual({ display: "locked", module: "c" });
+    expect(pathDisplay(["a"], d, () => true)).toEqual({ display: "hidden", module: "a" });
+    expect(pathDisplay(["b"], d, () => false)).toEqual({ display: "hidden", module: null });
+  });
+
+  it("cada unidade desligada segue a sua escolha; sem escolha, o padrão da empresa; 'contratar' só na unidade em 'contratar'", async () => {
+    const r1 = await applyLicense(store, A.id, snap(A.id, 1, items, { display: "hidden", displays: [{ code: "05.02", display: "upsell" }] }), meta);
+    expect(r1.status).toBe("applied");
+    expect(r1.plan!.effective[key("05.02")]).toMatchObject({ on: false, display: "upsell" });
+    expect(r1.plan!.effective[key("07.01")]).toMatchObject({ on: true, display: "hidden" });
+    const shown = await displayResolver(store, A.id);
+    expect(shown(key("05.02"))).toBe("upsell");
+    expect(shown("ecommerce.loja")).toBe("hidden"); // sem escolha própria: padrão da empresa
+    expect(await displayMode(store, A.id)).toBe("hidden"); // o padrão da empresa não muda
+    const st = await licenseStatus(store, A.id);
+    expect(st.display).toBe("hidden");
+    expect(st.displays).toEqual([{ code: "05.02", display: "upsell" }]);
+    expect((await requestUpsell(ctxA(), "compras.cotacoes", "Queremos cotações")).duplicate).toBe(false);
+    const ev = await listAll(unscoped(store), "jobs", { filters: [["eq", "type", "interos.event"]] });
+    expect(ev.some((j) => j.payload.event.type === "upsell.requested" && j.companyId === A.id && j.payload.event.data?.code === "05.02")).toBe(true);
+  });
+
+  it("mudar só a exibição não liga nem desliga nada; tirar a escolha volta ao padrão e fecha o 'contratar'", async () => {
+    const r1 = await applyLicense(store, A.id, snap(A.id, 1, items, { display: "hidden", displays: [{ code: "05.02", display: "upsell" }] }), meta);
+    const r2 = await applyLicense(store, A.id, snap(A.id, 2, items, { display: "hidden", displays: [] }), meta);
+    expect(r2.status).toBe("applied");
+    expect(r2.plan!.changes).toEqual([]);
+    expect(r2.runtimeVersion).toBe(r1.runtimeVersion);
+    expect((await displayResolver(store, A.id))(key("05.02"))).toBe("hidden");
+    await expect(requestUpsell(ctxA(), "compras.cotacoes", "")).rejects.toMatchObject({ code: "forbidden" });
+    // padrão da empresa em "contratar" com uma unidade escondida: a escolha da unidade vence
+    await applyLicense(store, A.id, snap(A.id, 3, items, { display: "upsell", displays: [{ code: "05.02", display: "hidden" }] }), meta);
+    const shown = await displayResolver(store, A.id);
+    expect(shown(key("05.02"))).toBe("hidden");
+    expect(shown("ecommerce.loja")).toBe("upsell");
+    await expect(requestUpsell(ctxA(), "compras.cotacoes", "")).rejects.toMatchObject({ code: "forbidden" });
+    // a rotina diária reaplica o retrato vigente e mantém a exibição (a unidade ligada mostra o padrão novo da empresa)
+    await maintainLicense(store, A.id);
+    expect((await store.get("company_licenses", detId("license", A.id)))!.effective[key("07.01")]).toMatchObject({ on: true, display: "upsell" });
+    expect((await displayResolver(store, A.id))(key("05.02"))).toBe("hidden");
+  });
+
+  it("valor de exibição inválido recusa o retrato; código inexistente na exibição só volta como recusado", async () => {
+    await expect(applyLicense(store, A.id, { ...snap(A.id, 1, items), displays: [{ code: "05.02", display: "sometimes" }] }, meta)).rejects.toMatchObject({ code: "invalid_request" });
+    const r = await applyLicense(store, A.id, snap(A.id, 1, items, { displays: [{ code: "99.99", display: "upsell" }] }), meta);
+    expect(r.status).toBe("applied");
+    expect(r.plan!.rejectedItems).toEqual([expect.objectContaining({ code: "99.99", reason: "unknown_code" })]);
+  });
+});
+
 describe("perfil por cargo/departamento/função (o perfil segue único contêiner de permissões)", () => {
   it("primeira regra que casa, sem diferenciar caixa e acento", () => {
     const rules = [{ attribute: "department" as const, value: "Financeiro", roleId: "r-fin" }, { attribute: "jobTitle" as const, value: "Operador de Caixa", roleId: "r-cx" }];
@@ -418,6 +496,19 @@ describe("API /api/interos/v2", () => {
     expect(bad.status).toBe(401);
     const st = await GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${token}` } }), params());
     expect(st.headers.get("etag")).toBe('"7"');
+  });
+
+  it("fase A: o PUT assinado leva a exibição por unidade e o GET devolve a escolha e a exibição efetiva", async () => {
+    const { PUT, GET } = await import("@/app/api/interos/v2/companies/[companyId]/license/route");
+    const items = ALL_SELLABLE_RETAIL.filter((c) => c !== "05.02").map((code) => ({ code, state: "active" as const }));
+    const body = JSON.stringify(snap(A.id, 9, items, { display: "locked", displays: [{ code: "05.02", display: "upsell" }] }));
+    const r = await PUT(req(body, { "x-interos-signature": signBody(secret, body), "x-interos-event-id": "evt-faseA-0001" }), params());
+    expect(r.status).toBe(201);
+    const put = (await r.json()).data;
+    expect(put.effective["compras.cotacoes"]).toMatchObject({ on: false, display: "upsell" });
+    expect(put.effective["vendas.pdv"]).toMatchObject({ on: true, display: "locked" });
+    const st = await (await GET(new Request("http://erp.local/x", { headers: { authorization: `Bearer ${token}` } }), params())).json();
+    expect(st.data).toMatchObject({ display: "locked", displays: [{ code: "05.02", display: "upsell" }] });
   });
 
   it("correção 3: transição vencida vale na hora — a leitura do Interos aplica (sem a rotina diária) e o histórico mostra", async () => {
