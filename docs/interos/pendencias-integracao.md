@@ -13,7 +13,7 @@
 | 3 | v1 de módulos respeita `companyIds` | **Feito.** Empresa fora da lista: `403 company_not_allowed` em leitura, simulação, aplicação, linha de base, histórico e operações, antes de qualquer gravação. | `tests/modules-enablement.test.ts` ("credencial restrita às empresas do piloto") |
 | 4 | Um vocabulário de módulos | **Feito.** Ver §4. | `catalogo-modulos-erp-v2.json` → `translations` |
 | 5 | Validar o catálogo v2 | **Pronto para o titular validar.** Ver §5. | `docs/MODULE_CATALOG/` |
-| 6 | Credenciais de homologação e produção | Homologação: depois da publicação desta versão, restritas às empresas do piloto. Produção: depois da homologação aprovada. | §6 |
+| 6 | Credenciais de homologação e produção | Homologação: cadastradas em 27/11, restritas às empresas do piloto, e usadas na homologação com empresas de teste (§10). Produção: depois da homologação aprovada, com a credencial de licenças sem lista de empresas (`credenciais.md` §4). | §6 |
 
 ## 2. Correções de comportamento
 
@@ -107,7 +107,7 @@ Ordem combinada:
 3. Vinculam-se 2 a 3 empresas de teste.
 4. Os 9 cenários são repetidos.
 5. Confere-se junto o histórico de licença.
-6. As credenciais de produção vêm depois da aprovação.
+6. As credenciais de produção vêm depois da aprovação; a de licenças sem lista de empresas.
 
 **Variáveis no Interos (homologação):**
 
@@ -178,3 +178,26 @@ com credenciais descartáveis geradas pelo `scripts/interos/credencial.mjs`: uma
 "Estoque insuficiente — CADERNO: disponível 1, vendido 8" num módulo da demonstração que depende da data. Os arquivos
 da demonstração são os mesmos da `master`; a produção só é afetada se um `demo-update` rodar numa data assim.
 
+## 10. Homologação com empresas de teste (27/11/2026)
+
+O Interos de produção (`ERP_INTERCERT_AMBIENTE=homologacao`) foi ligado à prévia de homologação deste ERP com as
+credenciais `interos-*-hml`. Do lado do Interos, os dados de teste (dois clientes "TESTE HML") foram apagados no fim.
+
+| Cenário | Resultado |
+|---|---|
+| Vincular empresa existente | A empresa A do piloto, achada pelo CNPJ na API de licenças e vinculada |
+| Criar empresa pelo Interos | Empresa `273b6b98…` ("TESTE HML Empresa Nova"), administrador e convite criados. A licença inicial foi recusada (`403 company_not_allowed`): a empresa nova não estava em `empresas` da credencial de licenças. Incluído o id e publicada a prévia, a nova tentativa aplicou (v1) |
+| Convite e pedido de módulo | O administrador ativou o acesso, entrou e pediu Cotações de compra (05.02); o `upsell.requested` chegou na hora e virou tarefa no Interos |
+| Primeira licença pelo Interos | Empresa A: 03.13 com 05.06 por dependência, simulada e aplicada (v2, sobre a v1 do ERP) |
+| "Basta um" | 02.09 e 02.14 barrados no Interos: exigem 04.01 ou 04.02 |
+| Torre e uso | Torre de Controle e uso das duas empresas lidos pelas credenciais da Torre e de licenças |
+| Avisos | `license.applied` das duas empresas entregues e processados |
+
+Não repetidos nesta rodada: dois usuários na mesma empresa, desligar com pendência e aprovação, falha de assinatura e
+teste com data. Passaram na homologação local do Interos (26/11) e nos testes automáticos.
+
+Ficam na homologação do ERP: a empresa `273b6b98…` e o administrador de teste dela (sem vínculo com o Interos; podem ser
+apagados), e a empresa A com 03.13 e 05.06 ligados (licença v2).
+
+**Decisão (27/11):** na produção, a credencial de licenças do Interos fica sem `empresas` (`credenciais.md` §4).
+Restrita, cada empresa criada pelo Interos exigiria incluir o id e publicar o ERP antes da licença inicial.

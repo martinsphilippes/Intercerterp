@@ -190,4 +190,6 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
   versão; alteração de módulo aplicada, avisos entregues na hora, Torre pelo mesmo endereço; suíte 1812/1812 e build
   limpos (`docs/interos/pendencias-integracao.md` §9).
 - [ ] Validação do catálogo v2 pelo titular (versão `2.0.0` sem "proposta").
-- [ ] Publicação na homologação e credenciais restritas às empresas do piloto; produção depois da aprovação.
+- [x] Publicação na homologação e credenciais restritas às empresas do piloto (27/11); homologação com empresas de
+  teste (`docs/interos/pendencias-integracao.md` §10).
+- [ ] Credenciais de produção depois da aprovação, com a de licenças sem lista de empresas.

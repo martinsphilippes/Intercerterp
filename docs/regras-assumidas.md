@@ -1224,7 +1224,8 @@ Resposta às pendências do Interos (`docs/interos/pendencias-integracao.md`).
 - **Um esquema de credencial** (`docs/interos/credenciais.md`):
   - registro único `INTEROS_CREDENCIAIS`, só hashes, e token `Bearer <id>.<segredo>` nas três APIs;
   - famílias de escopo separadas: uma credencial que misture famílias é recusada inteira;
-  - `empresas` restringe a credencial ao piloto em todas as APIs;
+  - `empresas` restringe a credencial a uma lista de empresas em todas as APIs (homologação: o piloto; a de licenças
+    de produção fica sem lista);
   - `assinatura` (HMAC) obrigatória para gravar licença;
   - rotação com o novo e o antigo valendo juntos.
 - **Contrato da empresa no isolamento.** Os registros de módulos e licença (`company_modules`, `module_changes`,
