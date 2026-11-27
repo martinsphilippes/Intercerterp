@@ -42,9 +42,9 @@ Authorization: Bearer <id>.<segredo>
   - `erp.modules.read`: leitura e simulação;
   - `erp.modules.write`: aplicar, gravar a linha de base e cancelar operação agendada. **Legado:** a licença v2 é o
     caminho de gravação do Interos; a credencial de licenças do Interos não leva este escopo.
-- **Empresas permitidas** (`empresas` na credencial): leitura, simulação, aplicação, linha de base, histórico e
-  operações de uma empresa fora da lista respondem `403 company_not_allowed`, antes de qualquer leitura ou gravação. A
-  lista `GET /companies` só traz as empresas da credencial.
+- **Empresas permitidas** (`empresas` na credencial): leitura, simulação, aplicação, linha de base e histórico de uma
+  empresa fora da lista respondem `403 company_not_allowed`, antes de qualquer leitura ou gravação, e uma operação dela
+  responde `404 operation_not_found`. A lista `GET /companies` só traz as empresas da credencial.
 - **Credencial sem `empresas`**: só as empresas ligadas ao Interos (criadas pelo provisionamento ou vinculadas com o
   código do administrador). Uma empresa não vinculada responde `404 company_not_found`, igual a uma inexistente, e fica
   fora de `GET /companies` (`docs/interos/credenciais.md` §4).

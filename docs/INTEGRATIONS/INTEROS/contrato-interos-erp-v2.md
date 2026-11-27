@@ -153,7 +153,7 @@ Ativar, desativar, suspender, reativar, programar e atualizar limites são todos
 - **Ordem.** O `licenseVersion` monotônico garante que um retrato antigo, chegando atrasado, nunca sobrescreve um mais novo.
 - **Concorrência.** Dois `PUT` com a mesma versão: o primeiro aplica e o segundo recebe a mesma resposta (`status: "duplicate"`). Duas versões diferentes ao mesmo tempo: aplica a maior; a menor recebe `200` com `status: "stale"` e a `appliedVersion` vigente. Duas aplicações simultâneas da mesma empresa: a segunda recebe `409 license_busy` e pode repetir.
 - **Event-Id só depois da validação.** Corpo inválido (`400`) não consome o `X-Interos-Event-Id`: corrija e reenvie com o mesmo id. O mesmo evento ainda em processamento responde `409 event_in_progress`.
-- **Isolamento.** A credencial de um cliente Interos pode ser restrita a uma lista de empresas. Uma empresa nunca altera outra, porque o `companyId` vem da rota e é conferido contra o retrato.
+- **Isolamento.** A credencial de um cliente Interos pode ser restrita a uma lista de empresas (fora dela, `403 company_not_allowed`). Sem lista, ela só alcança as empresas ligadas ao Interos: uma não vinculada responde `404 company_not_found`, igual a uma inexistente, e fica fora das listas (`docs/interos/credenciais.md` §4). Uma empresa nunca altera outra, porque o `companyId` vem da rota e é conferido contra o retrato.
 - **Confirmação.** A resposta do `PUT` traz:
   - `status` (`applied`, `rejected`, `stale` ou `duplicate`), `appliedVersion` e `runtimeVersion`;
   - `effective`: o estado por chave v1 (`unit`, `on`, `state`, `notice`);

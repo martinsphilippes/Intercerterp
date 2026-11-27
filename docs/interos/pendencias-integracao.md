@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 1 | Unificar as duas branches | **Feito.** Uma versão com provisionamento, Torre, módulos (v1) e licenças (v2). Empresa criada pelo provisionamento aparece na API de licenças, e o código de vínculo vale para as duas. | merge `da01ada` |
 | 2 | Um prefixo e uma autenticação | **Feito.** Ver §3. | `docs/interos/credenciais.md` |
-| 3 | v1 de módulos respeita `companyIds` | **Feito.** Empresa fora da lista: `403 company_not_allowed` em leitura, simulação, aplicação, linha de base, histórico e operações, antes de qualquer gravação. | `tests/modules-enablement.test.ts` ("credencial restrita às empresas do piloto") |
+| 3 | v1 de módulos respeita `companyIds` | **Feito.** Empresa fora da lista: `403 company_not_allowed` em leitura, simulação, aplicação, linha de base e histórico, antes de qualquer gravação; uma operação dela responde `404 operation_not_found`. | `tests/modules-enablement.test.ts` ("credencial restrita às empresas do piloto") |
 | 4 | Um vocabulário de módulos | **Feito.** Ver §4. | `catalogo-modulos-erp-v2.json` → `translations` |
 | 5 | Validar o catálogo v2 | **Pronto para o titular validar.** Ver §5. | `docs/MODULE_CATALOG/` |
 | 6 | Credenciais de homologação e produção | **Em andamento.** Homologação: cadastradas em 27/11 (a de licenças restrita às empresas do piloto) e usadas na rodada da §10. Produção: depois da homologação aprovada, as três sem lista; a de licenças alcança só as empresas ligadas ao Interos (`credenciais.md` §4). | §6 |
@@ -34,7 +34,7 @@
 | 13 | Baixa | v1: `version_conflict` responde `409` no envelope de erro, com a operação recusada nos detalhes. Aplicação em empresa inexistente: `404 company_not_found`, sem registrar operação. | `modules-enablement` ("catálogo, módulos da empresa…") |
 | 14 | Baixa | Quem cria um escritório contábil recebe o perfil de administrador do escritório (`firm_admin`), com menu. | `admin-access` ("correção 14") |
 | 15 | Baixa | `vincular` confere o código **antes** de qualquer outra resposta. Sem código válido, a resposta é sempre `identidade_nao_confere`. Como empresa vinculada não gera código, não há enumeração. Reenviar o mesmo vínculo devolve `200`. | `interos-provisionamento` ("vínculo de empresa existente") |
-| 16 | Alta | Credencial de licenças sem `empresas` alcança só as empresas ligadas ao Interos (`interosAccountId`), como o provisionamento e a Torre. Empresa não vinculada responde `404 company_not_found`, igual a uma inexistente, e fica fora das listas (`/companies`, `/errors`, `/upsell-requests` e `/v1/companies`). Antes, sem lista, a credencial alcançava todas as empresas do ERP. | `interos-credenciais` ("credencial de licenças sem `empresas`") |
+| 16 | Alta | Credencial de licenças sem `empresas` alcança só as empresas ligadas ao Interos (`interosAccountId`), como o provisionamento e a Torre. Empresa não vinculada responde `404 company_not_found`, igual a uma inexistente, e fica fora das listas (`/companies`, `/errors`, `/upsell-requests` e `/v1/companies`); as listas só aplicam os prazos vencidos das empresas alcançadas. Antes, sem lista, a credencial alcançava todas as empresas do ERP. | `interos-credenciais` ("credencial de licenças sem `empresas`") |
 
 ## 3. Um prefixo e uma autenticação (pendência 2)
 
@@ -188,11 +188,10 @@ mesmo resultado, visto do Interos: `docs/central-de-produtos.md`, seção 12.1, 
 | Cenário | Resultado |
 |---|---|
 | Vincular empresa existente | A empresa A do piloto, achada pelo CNPJ na API de licenças e vinculada |
-| Criar empresa pelo Interos | Empresa `273b6b98…` ("TESTE HML Empresa Nova"), administrador e convite criados. A licença inicial foi recusada (`403 company_not_allowed`): a empresa nova não estava em `empresas` da credencial de licenças. Incluído o id e publicada a prévia, a nova tentativa aplicou a licença versão 1 |
+| Criar empresa pelo Interos | Empresa `273b6b98…` ("TESTE HML Empresa Nova"), administrador e convite criados. A licença inicial foi recusada (`403 company_not_allowed`) antes de qualquer gravação: a empresa nova não estava em `empresas` da credencial de licenças (isolamento conferido). Incluído o id e publicada a prévia, a nova tentativa aplicou a licença versão 1 |
 | Convite e pedido de módulo | O administrador ativou o acesso, entrou e pediu 05.02 Cotação com fornecedores; o `upsell.requested` chegou na hora e virou tarefa no Interos |
 | Primeira licença pelo Interos | Empresa A: 03.13 com 05.06 por dependência, simulada e aplicada (licença versão 2; o ERP estava na 1) |
 | "Basta um" | 02.09 e 02.14 barrados no Interos: exigem 04.01 ou 04.02 |
-| Isolamento | A empresa fora da lista da credencial de licenças foi recusada antes de qualquer gravação |
 | Torre e uso | Torre de Controle e uso das duas empresas lidos pelas credenciais da Torre e de licenças |
 | Avisos | `license.applied` das duas empresas entregues e processados |
 

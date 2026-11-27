@@ -43,11 +43,11 @@ O ERP guarda **só o hash SHA-256 do segredo**, numa lista JSON:
 
 | Campo | Obrigatório | Uso |
 |---|---|---|
-| `id` | sim | Primeira parte do token. Fica na trilha de toda chamada do provisionamento e da Torre e de toda gravação de licenças e módulos (histórico de licença, operações de módulos e `interos_events`). |
+| `id` | sim | Primeira parte do token. Fica na trilha de toda chamada do provisionamento e da Torre, das gravações de licença (histórico de licença e `interos_events`) e das operações de módulos. |
 | `nome` | não | Descrição legível. |
 | `escopos` | sim | Uma família só (§1). |
 | `hash` | sim | `sha256:` + hex do SHA-256 do segredo. |
-| `empresas` | não | As únicas empresas (id ERP) que a credencial alcança, vinculadas ou não (§4). Ausente: só as empresas ligadas ao Interos. Lista vazia (`[]`) invalida a credencial: para ficar sem lista, omita o campo. |
+| `empresas` | não | As únicas empresas (id ERP) que a credencial alcança (§4): na API de licenças e módulos, vinculadas ou não; no provisionamento e na Torre, só as vinculadas. Ausente: só as empresas ligadas ao Interos. Lista vazia (`[]`) invalida a credencial: para ficar sem lista, omita o campo. |
 | `assinatura` | só para gravar licença | **Nome** da variável do ERP com o segredo HMAC (§3). Durante a troca do segredo, uma lista com os dois nomes. |
 | `ativo` | não | `false` desliga a credencial sem apagá-la. |
 
@@ -76,7 +76,7 @@ indicada em `assinatura` (ERP) e em `ERP_INTERCERT_SEGREDO_ASSINATURA` (Interos)
 
 | Credencial | Alcança |
 |---|---|
-| Com `empresas` (homologação: a de licenças, com as empresas do piloto) | Só as empresas da lista, vinculadas ao Interos ou não |
+| Com `empresas` (homologação: a de licenças, com as empresas do piloto) | Só as empresas da lista: na API de licenças e módulos, vinculadas ao Interos ou não; no provisionamento e na Torre, só as vinculadas |
 | Sem `empresas` (produção: as três) | Só as empresas **ligadas ao Interos** (`interosAccountId` preenchido): as criadas pelo provisionamento e as vinculadas com o código do administrador |
 
 **Decisão de 27/11/2026:** na produção, as três credenciais do Interos ficam sem `empresas`, e a de licenças alcança só
@@ -93,10 +93,12 @@ novo" depois que o id entra na lista (homologação de 27/11, `pendencias-integr
 | API | Com lista: empresa fora dela | Sem lista: empresa não vinculada |
 |---|---|---|
 | Licenças v2 | `403 company_not_allowed`. As listas (`/companies`, `/errors`, `/upsell-requests`) só trazem as empresas da lista. | `404 company_not_found`, a mesma resposta de uma empresa inexistente. As listas só trazem as empresas ligadas. |
-| Módulos v1 (leitura, simulação, aplicação, linha de base, histórico, operações) | `403 company_not_allowed`. A lista `/companies` só traz as empresas da lista. | `404 company_not_found`. A lista `/companies` só traz as empresas ligadas. |
+| Módulos v1 (leitura, simulação, aplicação, linha de base, histórico) | `403 company_not_allowed`. A lista `/companies` só traz as empresas da lista. Uma operação dessa empresa responde `404 operation_not_found`. | `404 company_not_found`. A lista `/companies` só traz as empresas ligadas. Uma operação dessa empresa responde `404 operation_not_found`. |
 | Provisionamento e Torre | `403 empresa_nao_permitida`. A lista `/empresas` só traz as empresas da lista. Uma credencial restrita também não cria nem vincula empresas (`POST /empresas` e `POST /empresas/vincular`). | `404 nao_encontrado` (contrato v1). Criar e vincular com o código continuam valendo. |
 
-A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empresa recusada (testes em
+A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empresa recusada. As listas de empresas só
+aplicam os prazos vencidos (teste, agendamentos, encerramentos) das empresas que a credencial alcança; os das outras
+ficam para a rotina do ERP ou para a próxima requisição da própria empresa (testes em
 `tests/modules-enablement.test.ts` e `tests/interos-credenciais.test.ts`).
 
 ## 5. Rotação sem parada
@@ -122,6 +124,7 @@ A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empr
 | Token ausente, malformado, desconhecido ou errado (mesma resposta: não revela se o `id` existe) | `401 nao_autenticado` | `401 unauthenticated` |
 | Escopo de outra família ou insuficiente | `403 sem_permissao` | `403 insufficient_scope` |
 | Empresa fora de `empresas` | `403 empresa_nao_permitida` | `403 company_not_allowed` |
+| Sem `empresas`: empresa não vinculada ao Interos (mesma resposta de uma inexistente) | `404 nao_encontrado` | `404 company_not_found` |
 | Gravação sem assinatura exigida / com assinatura errada | `401 assinatura_obrigatoria` / `assinatura_invalida` | `401 signature_required` / `signature_invalid` |
 
 ## 7. Entrega dos valores

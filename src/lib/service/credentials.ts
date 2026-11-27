@@ -46,7 +46,7 @@ export interface ServiceClient {
   nome: string;
   escopos: ServiceScope[];
   familia: ScopeFamily;
-  /** empresas que a credencial alcança (null = todas) */
+  /** lista `empresas` da credencial (null = sem lista: cada API alcança só as empresas ligadas ao Interos) */
   empresas: string[] | null;
   /** nomes das variáveis com o segredo HMAC das gravações (vazio = sem assinatura) */
   assinatura: string[];
@@ -137,7 +137,7 @@ export function hasScope(client: ServiceClient, scope: ServiceScope): boolean {
   return client.escopos.includes(scope);
 }
 
-/** A credencial alcança esta empresa? (`empresas` ausente = todas) */
+/** A empresa está na lista da credencial? (`empresas` ausente = sem lista; cada API ainda exige a empresa ligada ao Interos) */
 export function reachesCompany(client: Pick<ServiceClient, "empresas">, companyId: string | null | undefined): boolean {
   return !client.empresas || (companyId != null && client.empresas.includes(companyId));
 }

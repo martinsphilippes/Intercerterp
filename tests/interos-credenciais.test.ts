@@ -10,6 +10,11 @@ import { setServiceCredentials } from "@/lib/service/credentials";
 import { resetServiceRateLimits } from "@/lib/service/http";
 import { signBody } from "@/lib/service/signature";
 import { createCompanyWithDefaults } from "@/domain/setup";
+import { listAll } from "@/lib/db";
+import { takeBaseline } from "@/domain/modules/baseline";
+import { applyLicense } from "@/domain/licensing/license";
+import { decide, loadCompanyModules } from "@/lib/modules/access";
+import { UNITS_V2 } from "@/lib/modules/units-v2.generated";
 
 /**
  * Pendência 2 da integração (docs/interos/credenciais.md): UM registro (`INTEROS_CREDENCIAIS`), UM formato de token
@@ -136,6 +141,8 @@ describe("credencial de licenças sem `empresas` (produção): só as empresas l
   // como na produção: sem lista, com os escopos de licença e de módulos
   const LIC_PRD = `interos-licencas-prd.${S("w")}`;
   const LIC_GAMA = `interos-licencas-gama.${S("g")}`;
+  // como a de produção, com escrita e assinatura
+  const LIC_PRD_W = `interos-licencas-prd-w.${S("x")}`;
   let gama: string;
   const auth = (t: string) => ({ headers: { authorization: `Bearer ${t}` } });
   const licenseOf = async (token: string, companyId: string) => {
@@ -154,8 +161,10 @@ describe("credencial de licenças sem `empresas` (produção): só as empresas l
       { id: "interos-licencas-prd", escopos: ["erp.license.read", "erp.modules.read", "erp.usage.read"], segredo: S("w") },
       // credencial com lista (homologação): vale para a lista, vinculada ou não
       { id: "interos-licencas-gama", escopos: ["erp.license.read"], segredo: S("g"), empresas: [gama] },
+      { id: "interos-licencas-prd-w", escopos: ["erp.license.read", "erp.license.write", "erp.modules.read", "erp.modules.write"], segredo: S("x"), assinatura: "TESTE_ASSINATURA_NOVA" },
     ]),
   );
+  const ofGama = async (collection: string) => (await listAll(store, collection, { filters: [["eq", "companyId", gama]] })).length;
 
   it("lê e lista só as empresas ligadas; a não vinculada responde 404 como inexistente, na v2 e na v1 de módulos", async () => {
     expect((await licenseOf(LIC_PRD, alfa)).status).toBe(200);
@@ -185,6 +194,60 @@ describe("credencial de licenças sem `empresas` (produção): só as empresas l
     expect((await licenseOf(LIC_GAMA, gama)).status).toBe(200);
     expect((await licenseOf(LIC_GAMA, alfa)).status).toBe(403);
     expect(await v2List(LIC_GAMA)).toEqual([gama]);
+  });
+
+  it("gravações na empresa não vinculada respondem 404 e não gravam nada (licença assinada e aplicação de módulos)", async () => {
+    const before = { events: await ofGama("interos_events"), history: await ofGama("license_history"), licenses: await ofGama("company_licenses"), ops: await ofGama("module_operations") };
+    const lic = JSON.stringify({ licenseVersion: 1, companyId: gama, product: "erp-intercert", commercialStatus: "active", items: [{ code: "01.02", state: "active" }], issuedAt: new Date().toISOString() });
+    const put = await (await import("@/app/api/interos/v2/companies/[companyId]/license/route")).PUT(
+      new Request("http://erp.test/x", { method: "PUT", body: lic, headers: { authorization: `Bearer ${LIC_PRD_W}`, "content-type": "application/json", "x-interos-signature": signBody(SIGN_NEW, lic), "x-interos-event-id": `evt-gama-${crypto.randomBytes(4).toString("hex")}` } }),
+      { params: Promise.resolve({ companyId: gama }) },
+    );
+    expect([put.status, (await put.json()).error.code]).toEqual([404, "company_not_found"]);
+    const apply = JSON.stringify({ changes: [{ module: "fiscal.sped", action: "disable" }], reason: "teste" });
+    const ap = await (await import("@/app/api/interos/v1/companies/[companyId]/modules/apply/route")).POST(
+      new Request("http://erp.test/x", { method: "POST", body: apply, headers: { authorization: `Bearer ${LIC_PRD_W}`, "content-type": "application/json", "idempotency-key": "k-gama-apply-0001", "x-interos-actor": "teste", "x-interos-signature": signBody(SIGN_NEW, apply) } }),
+      { params: Promise.resolve({ companyId: gama }) },
+    );
+    expect(ap.status).toBe(404);
+    expect({ events: await ofGama("interos_events"), history: await ofGama("license_history"), licenses: await ofGama("company_licenses"), ops: await ofGama("module_operations") }).toEqual(before);
+  });
+
+  it("erros e operações da empresa não vinculada não aparecem para o Interos", async () => {
+    const at = new Date().toISOString();
+    await store.create("license_history", { companyId: gama, licenseVersion: 9, status: "rejected", source: "push", at, result: { plan: { rejectedItems: [] } } });
+    await store.create("license_history", { companyId: alfa, licenseVersion: 9, status: "rejected", source: "push", at, result: { plan: { rejectedItems: [] } } });
+    const errors = (await (await (await import("@/app/api/interos/v2/errors/route")).GET(new Request("http://erp.test/x", auth(LIC_PRD)))).json()).data.map((e: any) => e.companyId);
+    expect(errors).toContain(alfa);
+    expect(errors).not.toContain(gama);
+    const opId = crypto.randomBytes(16).toString("hex");
+    await store.create("module_operations", { clientId: "interos-licencas-prd", companyId: gama, status: "scheduled", scheduledFor: new Date(Date.now() + 86400000).toISOString(), request: {}, actor: "teste" }, opId);
+    const op = await (await import("@/app/api/interos/v1/operations/[operationId]/route")).GET(new Request("http://erp.test/x", auth(LIC_PRD)), { params: Promise.resolve({ operationId: opId }) });
+    expect([op.status, (await op.json()).error.code]).toEqual([404, "operation_not_found"]);
+  });
+
+  it("a lista de empresas não aplica a transição vencida de uma empresa não vinculada", async () => {
+    const day = 86400000;
+    const t0 = Date.now();
+    await takeBaseline(store, gama);
+    // licença gravada antes (por uma credencial com lista, por exemplo), com teste de 05.02 que vence amanhã
+    const units = UNITS_V2.filter((u) => u.sellable && u.v1Key && !/^(contabil|rede|ecommerce)\./.test(u.v1Key)).map((u) => u.code);
+    const items = [...units.filter((c) => c !== "05.02").map((code) => ({ code, state: "active" })), { code: "05.02", state: "trial", until: new Date(t0 + day).toISOString() }];
+    const res = await applyLicense(store, gama, { licenseVersion: 1, companyId: gama, product: "erp-intercert", commercialStatus: "active", controlMode: "enforced", items, issuedAt: new Date(t0).toISOString() } as any, { clientId: "credencial-com-lista", source: "push" });
+    expect(res.status).toBe("applied");
+    expect(decide(await loadCompanyModules(store, gama), "compras.cotacoes").level).toBe("full");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(t0 + 10 * day));
+      for (const route of ["@/app/api/interos/v2/companies/route", "@/app/api/interos/v1/companies/route"]) {
+        const r = await (await import(route)).GET(new Request("http://erp.test/x", auth(LIC_PRD)));
+        expect((await r.json()).data.map((c: any) => c.companyId)).not.toContain(gama);
+      }
+      // o teste vencido de 05.02 fica para a rotina do ERP ou para a próxima requisição da própria empresa
+      expect(decide(await loadCompanyModules(store, gama), "compras.cotacoes").level).toBe("full");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("depois de vinculada (criada pelo Interos ou com o código do administrador), passa a ser alcançada", async () => {
