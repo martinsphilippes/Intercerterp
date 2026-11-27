@@ -5,7 +5,7 @@ import { requireSession } from "@/lib/server/session";
 import { moduleDecision } from "@/lib/server/modules";
 import { moduleDef } from "@/lib/modules/catalog";
 import { unscoped } from "@/lib/db/scoped-store";
-import { displayMode } from "@/domain/licensing/license";
+import { displayResolver } from "@/domain/licensing/license";
 import { UpsellForm } from "./upsell-form";
 
 export const metadata = { title: "Módulo não disponível" };
@@ -16,7 +16,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ m
   const { m } = await searchParams;
   const def = m ? moduleDef(m) : undefined;
   const d = def ? await moduleDecision(s.ctx, s.company, def.key) : null;
-  const display = await displayMode(unscoped(s.ctx.store), s.ctx.companyId);
+  // exibição da própria unidade (fase A): só a unidade em "contratar" oferece a solicitação
+  const display = def ? (await displayResolver(unscoped(s.ctx.store), s.ctx.companyId))(def.key) : "hidden";
   const offer = Boolean(def && display === "upsell" && d?.level === "none" && def.availability !== "planned");
   return (
     <>

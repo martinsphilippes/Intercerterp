@@ -13,7 +13,7 @@
 | 2 | Carência de **7 dias** depois do vencimento da vigência sem renovação; depois, somente leitura. Teste vencido: **7 dias** de carência antes de suspender. | `LICENSE_POLICY`, `companyCap` e `itemEffective` |
 | 3 | Limite de documentos fiscais **nunca bloqueia** a emissão: só avisa e gera o evento `limit.reached` com `blocking: false`. | `noteFiscalDocumentUsage` |
 | 4 | Granularidade: mantidas as **67 unidades comerciais**. | `unidades.tsv` |
-| 5 | Não contratado: **oculto** para os clientes atuais e **oportunidade** ("Solicitar contratação") nos planos novos. O Interos pode fixar `display` no retrato. | `displayMode`, menu e `/modulo-indisponivel` |
+| 5 | Não contratado: **oculto** para os clientes atuais e **oportunidade** ("Solicitar contratação") nos planos novos. O Interos pode fixar `display` no retrato (padrão da empresa) e, desde a fase A (27/11), a exibição de cada unidade em `displays` (§7). | `displayMode`, `displayResolver`, menu e `/modulo-indisponivel` |
 | 6 | Autenticação: **token servidor a servidor** (o ERP guarda só o hash), mais **HMAC por evento** nas escritas, com segredo próprio por cliente. Sem mTLS ou OAuth2 nesta versão. | `interos-auth.ts` e `v2/_lib.ts` (`signedWrite`) |
 | 7 | O ERP **consulta** o Interos diariamente, e o Interos **reenvia** quando a versão diverge (`GET .../sync`). | Rotina `interos.reconcile` (`sync.ts`) |
 | 8 | Cargo, departamento e função são atributos do usuário. Uma regra da empresa aplica o perfil; o perfil continua sendo o único contêiner de permissões. | `roleFromAttributes` e `access.attributeRoles` |
@@ -73,9 +73,20 @@ O retrato é versionado por `licenseVersion`, um inteiro que só cresce e é emi
     { "code": "12", "state": "suspension_scheduled", "effectiveAt": "2027-01-10T00:00:00-03:00", "reason": "inadimplência" },
     { "code": "22.02", "state": "read_only" }
   ],
+  "display": "hidden",
+  "displays": [{ "code": "05.02", "display": "upsell" }, { "code": "18.02", "display": "locked" }],
   "issuedAt": "2026-11-26T15:00:00Z"
 }
 ```
+
+- `display` é o padrão da empresa para o que está desligado (`hidden`, `locked` ou `upsell`). Sem ele, vale o último
+  enviado; sem nenhum, `hidden` para clientes atuais e `upsell` para empresa criada pelo provisionamento.
+- `displays` (fase A, opcional) é a exibição de cada unidade quando ela está desligada, e vence o padrão só para ela.
+  Independe de `items`: serve também para unidade nunca contratada (por exemplo, mostrar com "contratar"), sem item
+  `inactive`, que encerraria direito preservado. Unidade e alias valem para a unidade. Módulo `NN` vale para as
+  unidades principais dele, e a escolha da unidade vence a do módulo. Função incluída (ex.: `07.03`) ainda não tem
+  exibição própria: aviso `display_not_supported`, e vale a da unidade. Código inexistente ou não contratável volta
+  em `rejectedItems`, sem recusar o retrato. Mudar só a exibição não liga nem desliga nada no runtime.
 
 - `items[].code` é o código estável do catálogo v2 (módulo `NN`, submódulo `NN.SS` ou recurso `NN.SS.RR`).
 - Contratar o módulo (`"07"`) inclui só as unidades com `includedInParent: true` no catálogo (as principais, por
@@ -156,9 +167,9 @@ Ativar, desativar, suspender, reativar, programar e atualizar limites são todos
 - **Isolamento.** A credencial de um cliente Interos pode ser restrita a uma lista de empresas (fora dela, `403 company_not_allowed`). Sem lista, ela só alcança as empresas ligadas ao Interos: uma não vinculada responde `404 company_not_found`, igual a uma inexistente, e fica fora das listas (`docs/interos/credenciais.md` §4). Uma empresa nunca altera outra, porque o `companyId` vem da rota e é conferido contra o retrato.
 - **Confirmação.** A resposta do `PUT` traz:
   - `status` (`applied`, `rejected`, `stale` ou `duplicate`), `appliedVersion` e `runtimeVersion`;
-  - `effective`: o estado por chave v1 (`unit`, `on`, `state`, `notice`);
+  - `effective`: o estado por chave v1 (`unit`, `on`, `state`, `notice` e `display`, a exibição dela quando desligada);
   - `rejectedItems`, com motivo `unknown_code`, `not_contractable`, `not_homologated`, `dependency_missing` ou `kind_not_supported`;
-  - `warnings`, com motivo `preserved_access`, `module_expanded`, `alias_resolved`, `included_item`, `duplicate_entitlement`, `review_required`, `unknown_branch` ou `no_branch_allowed`;
+  - `warnings`, com motivo `preserved_access`, `module_expanded`, `alias_resolved`, `included_item`, `duplicate_entitlement`, `review_required`, `unknown_branch`, `no_branch_allowed` ou `display_not_supported`;
   - `nextTransitionAt`.
 - **Pendências antes de desligar.** `POST .../license/simulate` devolve o plano completo. Em `simulation.impacts[]` estão, por unidade desligada:
   - `to` (`disabled`, `draining` ou `scheduled_off`) e `policy`;
@@ -236,12 +247,17 @@ Fonte dos dados: `audit_logs`, contadores e tabelas de documentos, agregados por
 
 ## 7. Interface do ERP
 
-O comportamento é configurado por empresa, por padrão do Interos: `hidden` | `locked` | `upsell`. O padrão sugerido é `hidden` para clientes atuais e `upsell` para novos planos.
+O Interos define o padrão da empresa (`display`: `hidden` | `locked` | `upsell`; sugerido `hidden` para clientes
+atuais e `upsell` para planos novos) e, desde a fase A (27/11/2026), a exibição de cada unidade (`displays`), que
+vence o padrão só para ela. O `GET .../license` devolve os dois: `display` e `displays` (as escolhas por unidade
+aplicadas, em código comercial).
 
-- **`locked` e `upsell`:**
-  - o item aparece no menu com cadeado;
-  - a tela mostra só a descrição comercial e o botão "Solicitar contratação", que dispara o evento `upsell.requested`;
-  - **nenhum dado nem operação** fica acessível (o bloqueio de servidor não muda).
+- **`hidden`:** o item some do menu.
+- **`locked`:** o item aparece no menu com cadeado e "(bloqueado)", e leva à página "módulo indisponível", sem oferta.
+- **`upsell`:** o item aparece com cadeado e "(contratar)"; a página mostra a descrição comercial e o botão
+  "Solicitar contratação", que dispara o evento `upsell.requested`. O pedido só é aceito para unidade em `upsell`.
+- Tela que mais de uma unidade libera (basta uma ligada) segue a mais visível entre elas.
+- Em todos os casos, **nenhum dado nem operação** fica acessível (o bloqueio de servidor não muda).
 
 ## 8. Compatibilidade com a v1
 

@@ -1210,7 +1210,9 @@ empresas contratantes reais deve rodar em `producao`, e essa troca depende do ti
 - **Homologação:** unidade dependente de integração externa ou em desenvolvimento não é ativada para empresa nova (`not_homologated`). Quem já tinha mantém o acesso (`preserved_access`).
   - Consequência: a Loja virtual depende de NF-e e também aguarda a homologação para vendas novas.
 - **Limites contratados:** usuários, dispositivos e filiais barram só novos cadastros. Documentos fiscais nunca bloqueiam: só geram o evento `limit.reached`.
-- **Exibição do não contratado:** oculto para os clientes atuais e "oportunidade" (Solicitar contratação) para empresas novas. O Interos pode fixar `display`.
+- **Exibição do não contratado:** oculto para os clientes atuais e "oportunidade" (Solicitar contratação) para empresas novas. O Interos pode fixar `display` (padrão da empresa).
+  - **Por unidade (fase A, 27/11/2026):** `displays` escolhe a exibição de cada unidade e vence o padrão só para ela. Fica fora de `items` para servir também a unidade nunca contratada, sem criar item `inactive`, que encerraria direito preservado. Tela que mais de uma unidade libera segue a mais visível entre elas. "Solicitar contratação" só vale para unidade em `upsell`. [Decisão]
+  - Função dentro da unidade ainda não tem exibição própria (fase B): vale a da unidade, com aviso `display_not_supported`. [Decisão]
 - **Reconciliação:** o ERP consulta o Interos todo dia (`INTEROS_LICENSE_URL`) e o Interos reenvia quando diverge.
 - **Retrato envelhecido:** sem retrato novo há mais de 3 dias, gera o evento `sync.stale`, e a última licença válida continua valendo.
 - **Migração sem bloqueio:** sem retrato, a empresa segue o runtime atual. O controle só passa a bloquear quando o retrato traz `controlMode: "enforced"`.
