@@ -118,10 +118,12 @@ A recusa acontece **antes** de qualquer leitura ou gravação: nada muda na empr
    - licenças: `interos-licencas-hml erp.license.read erp.license.write erp.modules.read erp.usage.read --empresas=<ids do piloto> --assinatura=INTEROS_ASSINATURA_HML`;
    - provisionamento: `interos-prov-hml provisionamento:leitura provisionamento:escrita`;
    - Torre: `interos-torre-hml torre:resumo torre:detalhe torre:transacoes`.
-2. Cole na Vercel do **Interos** (ambiente Preview):
+2. Cole na Vercel do **Interos** (ambiente **Production**, com `ERP_INTERCERT_AMBIENTE=homologacao`; as prévias do
+   Interos não têm banco):
    - `ERP_INTERCERT_URL`: o endereço da homologação do ERP;
    - `ERP_INTERCERT_TOKEN_LICENCAS`, `ERP_INTERCERT_CREDENCIAL_PROVISIONAMENTO` e `ERP_INTERCERT_CREDENCIAL_TORRE`: os tokens;
-   - `ERP_INTERCERT_SEGREDO_ASSINATURA`: o segredo de assinatura.
+   - `ERP_INTERCERT_SEGREDO_ASSINATURA`: o segredo de assinatura;
+   - `ERP_INTERCERT_SEGREDO_EVENTOS`: o segredo dos avisos (o mesmo valor de `INTEROS_OUTBOUND_SECRET` no ERP).
 3. Cole na Vercel do **ERP** (Preview da branch de homologação):
    - o mesmo segredo de assinatura em `INTEROS_ASSINATURA_HML`;
    - o segredo dos avisos do ERP para o Interos em `INTEROS_OUTBOUND_SECRET`. É o valor que o Interos manda pelo cofre

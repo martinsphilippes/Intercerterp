@@ -118,9 +118,20 @@ Ordem combinada:
 | `ERP_INTERCERT_SEGREDO_ASSINATURA` | segredo HMAC (o mesmo valor fica no ERP, na variável indicada em `assinatura`) |
 | `ERP_INTERCERT_CREDENCIAL_PROVISIONAMENTO` | `interos-prov-hml.<segredo>` |
 | `ERP_INTERCERT_CREDENCIAL_TORRE` | `interos-torre-hml.<segredo>` |
+| `ERP_INTERCERT_AMBIENTE` | `homologacao` |
+| `ERP_INTERCERT_SEGREDO_EVENTOS` | segredo dos avisos do ERP para o Interos (o mesmo valor de `INTEROS_OUTBOUND_SECRET` no ERP) |
 
 Cada valor vai **direto para as variáveis da Vercel**, colado por quem tem acesso a elas. Nunca por chat, e-mail ou
-documento. `INTEROS_EVENTS_URL` não é usado nesta fase: o Interos consulta o histórico de licença a cada 5 minutos.
+documento.
+
+- **No Interos, as variáveis vão no ambiente Production**, com `ERP_INTERCERT_AMBIENTE=homologacao`: as prévias do
+  Interos não têm banco. Vínculos, catálogo e histórico do Interos ficam separados por ambiente, então a troca para a
+  produção do ERP depois não mistura nada.
+- `ERP_INTERCERT_URL_PROVISIONAMENTO` e `ERP_INTERCERT_URL_TORRE` não são mais usadas: as três APIs ficam no mesmo
+  endereço.
+- **Empresa criada depois pelo provisionamento:** com a credencial de licenças restrita (`empresas`), a empresa nova
+  só recebe licença depois de entrar na lista (`403 company_not_allowed` até lá). Na homologação, acrescente o id da
+  empresa criada ao `empresas` da credencial de licenças e publique.
 
 ## 7. Resultado na homologação (prévia publicada, 26/11/2026)
 
@@ -147,3 +158,23 @@ nem links de convite, está em `docs/multiempresa/evidencias/homologacao-unifica
 | 2 | Entregar o aviso na hora | **Feito.** Logo depois de enfileirar, o ERP tenta entregar aquele aviso (`runDueJobs` com o id do job, em `after()`). Se falhar, as novas tentativas vêm a cada consulta do Interos e depois de cada ação de usuário; a rotina diária fica como rede de segurança. Teste: `tests/interos-avisos.test.ts`. |
 | 3 | Rever o `sync.stale` | **Feito.** Conta desde a última confirmação (retrato recebido, novo ou repetido; consulta do Interos; consulta diária que responde). Só é enviado com a consulta diária configurada. Teste: `licensing` ("reconciliação"). |
 | 4 | Código comercial em `license.transition` | **Feito.** Cada item de `changes` traz `code` (por exemplo `07.01`) além de `module`. O histórico de licença (`kind: "transition"`) usa o mesmo formato. Teste: `licensing` ("teste vencido e suspensão programada"). |
+
+## 9. Homologação com o Interos real (27/11/2026)
+
+O Interos (build de produção) foi ligado a esta versão do ERP (build de produção, uma instância, armazenamento local)
+com credenciais descartáveis geradas pelo `scripts/interos/credencial.mjs`: uma por família, **um endereço só**.
+
+| Cenário | Resultado |
+|---|---|
+| Credenciais | `GET /api/interos/v1/status` reconhece cada família; o Interos funciona sem `ERP_INTERCERT_URL_PROVISIONAMENTO` e `ERP_INTERCERT_URL_TORRE` |
+| Catálogo | Importado pelo Interos (67 unidades, 62 vendáveis); a diferença para a versão anterior foi registrada |
+| Criar empresa pelo Interos | Empresa criada e vinculada; **licença inicial aplicada (v1)**. Na homologação com as branches separadas ela ficava aguardando: a API de licenças não conhecia a empresa |
+| Alteração de módulo | 18.10 Conciliação bancária: aplicada pelo ERP (v2) em 0,3 s |
+| Avisos do ERP | Dois `license.applied` entregues **na hora**, sem rodar `/api/jobs`, cada um na primeira tentativa; o Interos conferiu e registrou |
+| Torre de Controle | Pela credencial da Torre, no mesmo endereço; empresa nova "sem movimento" |
+| Suíte do ERP | 1812 de 1812 (memória); typecheck, lint e build de produção limpos |
+
+**Achado fora da integração (já existe na `master`):** a demonstração local (`npm run seed`) parou em 27/11 com
+"Estoque insuficiente — CADERNO: disponível 1, vendido 8" num módulo da demonstração que depende da data. Os arquivos
+da demonstração são os mesmos da `master`; a produção só é afetada se um `demo-update` rodar numa data assim.
+

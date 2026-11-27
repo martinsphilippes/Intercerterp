@@ -186,5 +186,8 @@ Arquivo para retomar a execução do ponto exato em outra sessão.
 - [x] As 15 correções de comportamento, cada uma com teste de regressão (`docs/interos/pendencias-integracao.md` §2).
 - [x] Vocabulário único: unidades v2 como referência, com a tradução publicada no catálogo; o provisionamento nasce com a habilitação traduzida.
 - [x] Catálogo v2 com `companyKinds` por unidade e dependências "basta um".
+- [x] Homologação com o Interos real (27/11): o Interos criou a empresa e a licença inicial foi aplicada na mesma
+  versão; alteração de módulo aplicada, avisos entregues na hora, Torre pelo mesmo endereço; suíte 1812/1812 e build
+  limpos (`docs/interos/pendencias-integracao.md` §9).
 - [ ] Validação do catálogo v2 pelo titular (versão `2.0.0` sem "proposta").
 - [ ] Publicação na homologação e credenciais restritas às empresas do piloto; produção depois da aprovação.
