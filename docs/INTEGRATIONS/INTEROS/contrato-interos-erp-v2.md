@@ -84,9 +84,13 @@ O retrato é versionado por `licenseVersion`, um inteiro que só cresce e é emi
 - `displays` (fase A, opcional) é a exibição de cada unidade quando ela está desligada, e vence o padrão só para ela.
   Independe de `items`: serve também para unidade nunca contratada (por exemplo, mostrar com "contratar"), sem item
   `inactive`, que encerraria direito preservado. Unidade e alias valem para a unidade. Módulo `NN` vale para as
-  unidades principais dele, e a escolha da unidade vence a do módulo. Função incluída (ex.: `07.03`) ainda não tem
-  exibição própria: aviso `display_not_supported`, e vale a da unidade. Código inexistente ou não contratável volta
-  em `rejectedItems`, sem recusar o retrato. Mudar só a exibição não liga nem desliga nada no runtime.
+  unidades principais dele, e a escolha da unidade vence a do módulo. Função incluída (ex.: `07.03`), ou alias de
+  uma, ainda não tem exibição própria: aviso `display_not_supported`, e vale a da unidade. Código inexistente ou não
+  contratável volta em `rejectedItems`, sem recusar o retrato. Mudar só a exibição não liga nem desliga nada no runtime.
+- Campo `displays` **ausente** mantém as escolhas vigentes (Interos sem a fase A, ou de volta a uma versão anterior).
+  Só as escolhas que valiam seguem; código recusado ou função incluída não voltam a cada retrato. Para limpar, envie
+  `displays: []` (ou `null`) **explicitamente**: um serializador que omite listas vazias manteria as escolhas. Cada
+  unidade volta então ao padrão da empresa. Já o `display` ausente ou nulo mantém o último padrão enviado.
 
 - `items[].code` é o código estável do catálogo v2 (módulo `NN`, submódulo `NN.SS` ou recurso `NN.SS.RR`).
 - Contratar o módulo (`"07"`) inclui só as unidades com `includedInParent: true` no catálogo (as principais, por
@@ -167,7 +171,9 @@ Ativar, desativar, suspender, reativar, programar e atualizar limites são todos
 - **Isolamento.** A credencial de um cliente Interos pode ser restrita a uma lista de empresas (fora dela, `403 company_not_allowed`). Sem lista, ela só alcança as empresas ligadas ao Interos: uma não vinculada responde `404 company_not_found`, igual a uma inexistente, e fica fora das listas (`docs/interos/credenciais.md` §4). Uma empresa nunca altera outra, porque o `companyId` vem da rota e é conferido contra o retrato.
 - **Confirmação.** A resposta do `PUT` traz:
   - `status` (`applied`, `rejected`, `stale` ou `duplicate`), `appliedVersion` e `runtimeVersion`;
-  - `effective`: o estado por chave v1 (`unit`, `on`, `state`, `notice` e `display`, a exibição dela quando desligada);
+  - `effective`: o estado por chave v1 (`unit`, `on`, `state`, `notice` e `display`, a exibição dela quando desligada).
+    Só traz as unidades do retrato e as que ele liga ou desliga agora (unidade que já estava desligada e não está no
+    retrato não aparece). A lista completa das escolhas de exibição vem em `displays` do `GET .../license`;
   - `rejectedItems`, com motivo `unknown_code`, `not_contractable`, `not_homologated`, `dependency_missing` ou `kind_not_supported`;
   - `warnings`, com motivo `preserved_access`, `module_expanded`, `alias_resolved`, `included_item`, `duplicate_entitlement`, `review_required`, `unknown_branch`, `no_branch_allowed` ou `display_not_supported`;
   - `nextTransitionAt`.
@@ -255,7 +261,10 @@ aplicadas, em código comercial).
 - **`hidden`:** o item some do menu.
 - **`locked`:** o item aparece no menu com cadeado e "(bloqueado)", e leva à página "módulo indisponível", sem oferta.
 - **`upsell`:** o item aparece com cadeado e "(contratar)"; a página mostra a descrição comercial e o botão
-  "Solicitar contratação", que dispara o evento `upsell.requested`. O pedido só é aceito para unidade em `upsell`.
+  "Solicitar contratação", que dispara o evento `upsell.requested`. O pedido só é aceito para unidade em `upsell`,
+  desligada, do tipo da empresa e já vendável. Unidade em `upsell` que não pode ser oferecida (de outro tipo de
+  empresa, ou que ainda depende de homologação, como NF-e, NFC-e, NFS-e e banco digital) aparece com cadeado, sem
+  botão. A mesma regra vale no menu, na página, ao abrir a tela pela URL e no pedido.
 - Tela que mais de uma unidade libera (basta uma ligada) segue a mais visível entre elas.
 - Em todos os casos, **nenhum dado nem operação** fica acessível (o bloqueio de servidor não muda).
 

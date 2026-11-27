@@ -6,7 +6,7 @@ import { loadCompanyModules } from "@/lib/modules/access";
 import { MODULE_MAP } from "@/lib/modules/catalog";
 import { applyChanges, companyOrThrow, simulateChanges, VersionConflictError, type ModuleChange, type Simulation } from "../modules/changes";
 import { takeBaseline } from "../modules/baseline";
-import { desiredByUnit, licenseSnapshotSchema, resolveCode, resolveDisplays, unitByCode, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
+import { desiredByUnit, licenseSnapshotSchema, resolveCode, resolveDisplays, unitByCode, unitByV1Key, type DisplayMode, type ItemIssue, type LicenseSnapshot } from "./effective";
 import { emitInterosEvent } from "./events";
 import { UNITS_V2 } from "@/lib/modules/units-v2.generated";
 
@@ -178,7 +178,7 @@ export async function planLicense(store: Store, companyId: string, snapshot: Lic
     }
   }
   // exibição por unidade (fase A): a escolha da unidade ou o padrão da empresa; não liga nem desliga nada
-  const displays = resolveDisplays(snapshot.displays);
+  const displays = resolveDisplays(withCurrentDisplays(snapshot, lic).displays);
   rejectedItems.push(...displays.rejected);
   warnings.push(...displays.warnings);
   const fallback = defaultDisplayOf(snapshot.display ?? lic?.display ?? null, doc);
@@ -259,13 +259,15 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
       return result;
     }
     if (!(await loadCompanyModules(store, companyId))) await takeBaseline(store, companyId, "licença");
+    // retrato sem `displays` (Interos sem a fase A, ou de volta a uma versão anterior) mantém as escolhas por unidade
+    const full = withCurrentDisplays(snapshot, lic);
     let plan: LicensePlan | null = null;
     let runtimeVersion: number | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
-      plan = await planLicense(store, companyId, snapshot);
+      plan = await planLicense(store, companyId, full);
       if (!plan.valid) {
         const result: ApplyLicenseResult = { status: "rejected", appliedVersion: applied, plan, runtimeVersion: null };
-        await recordHistory(store, histId, companyId, snapshot, "rejected", meta, result);
+        await recordHistory(store, histId, companyId, full, "rejected", meta, result);
         await emitInterosEvent(store, companyId, "license.rejected", { licenseVersion: snapshot.licenseVersion, rejectedItems: plan.rejectedItems });
         return result;
       }
@@ -288,14 +290,14 @@ export async function applyLicense(store: Store, companyId: string, raw: unknown
       }
     }
     await store.update("company_licenses", licenseId(companyId), {
-      licenseVersion: snapshot.licenseVersion, snapshot, commercialStatus: snapshot.commercialStatus, display: snapshot.display ?? lic?.display ?? null,
+      licenseVersion: snapshot.licenseVersion, snapshot: full, commercialStatus: snapshot.commercialStatus, display: snapshot.display ?? lic?.display ?? null,
       limits: snapshot.limits ?? null, effective: plan!.effective, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings, appliedAt: nowIso(), preservedAccess: plan!.preservedAccess,
       appliedRuntimeVersion: runtimeVersion, nextTransitionAt: plan!.nextTransitionAt, clientId: meta.clientId, lastSnapshotAt: nowIso(), lastConfirmedAt: nowIso(), staleNotifiedAt: null,
     });
     // contrato amplo (provisionamento) passa a ser a tradução da licença: menu, telas, recursos e Torre seguem o retrato
     await syncContractFromLicense(store, companyId, meta.clientId);
     const result: ApplyLicenseResult = { status: "applied", appliedVersion: snapshot.licenseVersion, plan, runtimeVersion };
-    await recordHistory(store, histId, companyId, snapshot, "applied", meta, result);
+    await recordHistory(store, histId, companyId, full, "applied", meta, result);
     await emitInterosEvent(store, companyId, "license.applied", { licenseVersion: snapshot.licenseVersion, runtimeVersion, rejectedItems: plan!.rejectedItems, warnings: plan!.warnings.map((w) => w.reason) });
     return result;
   });
@@ -348,9 +350,12 @@ async function recordHistory(store: Store, id: string, companyId: string, snapsh
  * carência, agendamentos de ativação/suspensão e fim de vigência acontecem sem depender do Interos.
  */
 export async function maintainLicense(store: Store, companyId: string, now = new Date()) {
-  const lic = await store.get("company_licenses", licenseId(companyId));
-  if (!lic?.snapshot || !(lic.licenseVersion > 0)) return { skipped: "no_license" };
+  const first = await store.get("company_licenses", licenseId(companyId));
+  if (!first?.snapshot || !(first.licenseVersion > 0)) return { skipped: "no_license" };
   return withLicenseLock(store, companyId, async () => {
+    // relido DENTRO da trava: um retrato novo aplicado entre a leitura e a trava não pode ser desfeito pelo antigo
+    const lic = await store.get("company_licenses", licenseId(companyId));
+    if (!lic?.snapshot || !(lic.licenseVersion > 0)) return { skipped: "no_license" };
     const snapshot = lic.snapshot as LicenseSnapshot;
     const plan = await planLicense(store, companyId, { ...snapshot, controlMode: null }, now);
     let runtimeVersion: number | null = null;
@@ -368,6 +373,32 @@ export async function maintainLicense(store: Store, companyId: string, now = new
     await store.update("company_licenses", lic.id, { effective: plan.effective, nextTransitionAt: plan.nextTransitionAt, preservedAccess: plan.preservedAccess, ...(transitions ? { transitions } : {}), ...(runtimeVersion ? { appliedRuntimeVersion: runtimeVersion } : {}) });
     return { changes: plan.changes.length, companyState: plan.companyState, nextTransitionAt: plan.nextTransitionAt };
   });
+}
+
+/**
+ * `displays` AUSENTE no retrato mantém as escolhas por unidade vigentes (Interos sem a fase A, ou de volta a uma versão
+ * anterior, não apaga o que foi escolhido); `[]` ou null limpa. Só as escolhas que valiam seguem: código recusado ou
+ * função incluída (que era só aviso) não voltam a cada retrato. O padrão da empresa (`display`) é diferente: ausente ou
+ * nulo mantém o último enviado.
+ */
+function withCurrentDisplays(snapshot: LicenseSnapshot, lic: Doc | null | undefined): LicenseSnapshot {
+  if (snapshot.displays !== undefined) return snapshot;
+  const kept = ((lic?.snapshot as LicenseSnapshot | undefined)?.displays ?? []).filter((d) => resolveDisplays([d]).byKey.size > 0);
+  return kept.length ? { ...snapshot, displays: kept } : snapshot;
+}
+
+/** Unidade que pode aparecer com cadeado ou "contratar": contratável, disponível e do tipo da empresa. */
+export function contractableFor(kind: string): (moduleKey: string) => boolean {
+  return (moduleKey) => {
+    const d = MODULE_MAP.get(moduleKey);
+    return Boolean(d && d.availability !== "planned" && (d.kinds as readonly string[]).includes(kind) && (d.classification === "commercial" || d.classification === "optional_function"));
+  };
+}
+
+/** Unidade que pode ser OFERECIDA ("contratar"): contratável para o tipo da empresa e já vendável (homologada). */
+export function offerableFor(kind: string): (moduleKey: string) => boolean {
+  const contractable = contractableFor(kind);
+  return (moduleKey) => contractable(moduleKey) && unitByV1Key(moduleKey)?.sellable !== false;
 }
 
 /** Padrão sem escolha do Interos: oculto para clientes atuais; oportunidade para empresa criada pelo provisionamento. */
@@ -392,6 +423,20 @@ export async function displayResolver(store: Store, companyId: string): Promise<
   const fallback = lic?.display ? (lic.display as DisplayMode) : defaultDisplayOf(null, await loadCompanyModules(store, companyId));
   const { byKey } = resolveDisplays((lic?.snapshot as LicenseSnapshot | undefined)?.displays);
   return (moduleKey) => byKey.get(moduleKey) ?? fallback;
+}
+
+/**
+ * Exibição que a empresa VÊ: a escolhida (ou o padrão), sem oferecer o que não pode ser contratado agora — "contratar"
+ * vira cadeado na unidade de outro tipo de empresa ou ainda não vendável (depende de homologação). Menu, URL, página
+ * "módulo indisponível" e pedido de contratação usam esta resposta: nunca um botão que o pedido recusaria.
+ */
+export async function shownDisplayResolver(store: Store, companyId: string, kind: string): Promise<(moduleKey: string) => DisplayMode> {
+  const chosen = await displayResolver(store, companyId);
+  const offerable = offerableFor(kind);
+  return (moduleKey) => {
+    const d = chosen(moduleKey);
+    return d === "upsell" && !offerable(moduleKey) ? "locked" : d;
+  };
 }
 
 export async function licenseStatus(store: Store, companyId: string) {
